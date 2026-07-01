@@ -59,6 +59,7 @@ pub(crate) struct App {
 
 pub(crate) struct MarkdownView {
     pub(crate) title: String,
+    pub(crate) path: PathBuf,
     pub(crate) content: String,
     pub(crate) scroll: u16,
 }

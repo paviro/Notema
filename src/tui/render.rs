@@ -92,7 +92,7 @@ fn search_footer_text(app: &App, preview_visible: bool) -> String {
     match app.focus {
         Focus::Preview if app.has_selected_entry_target() => {
             format!(
-                "{query} | left results | up/down/k/j scroll | PgUp/PgDn | Home/End | enter/e edit | v view | d delete | Esc search"
+                "{query} | left results | up/down/k/j scroll | PgUp/PgDn | Home/End | enter/v view | e edit | d delete | Esc search"
             )
         }
         Focus::Preview => format!("{query} | left results | Esc search"),
@@ -104,7 +104,7 @@ fn search_footer_text(app: &App, preview_visible: bool) -> String {
                 "up/down select".to_string(),
             ];
             if app.has_selected_entry_target() {
-                parts.push("enter edit".to_string());
+                parts.push("enter view".to_string());
             }
             if preview_visible && app.has_selected_entry_target() {
                 parts.push("right/tab preview".to_string());
@@ -135,8 +135,8 @@ fn browse_footer_text(app: &App, preview_visible: bool) -> String {
                 parts.push("right/tab preview".to_string());
             }
             if app.has_selected_entry_target() {
-                parts.push("enter/e edit".to_string());
-                parts.push("v view".to_string());
+                parts.push("enter/v view".to_string());
+                parts.push("e edit".to_string());
                 parts.push("d delete".to_string());
             }
             parts.push("n new entry".to_string());
@@ -152,8 +152,8 @@ fn browse_footer_text(app: &App, preview_visible: bool) -> String {
                 "Home/End".to_string(),
             ];
             if app.has_selected_entry_target() {
-                parts.push("enter/e edit".to_string());
-                parts.push("v view".to_string());
+                parts.push("enter/v view".to_string());
+                parts.push("e edit".to_string());
                 parts.push("d delete".to_string());
             }
             parts.push("n new entry".to_string());
@@ -186,7 +186,7 @@ fn draw_markdown_viewer(frame: &mut Frame<'_>, viewer: &mut MarkdownView) {
     );
 
     frame.render_widget(
-        Paragraph::new(" Esc/q close | up/down/k/j scroll | PgUp/PgDn | Home/End"),
+        Paragraph::new(" Esc/q close | e edit | up/down/k/j scroll | PgUp/PgDn | Home/End"),
         root[1],
     );
 }
@@ -516,8 +516,8 @@ mod tests {
 
         let text = footer_text(&app, true);
 
-        assert!(!text.contains("enter/e edit"));
-        assert!(!text.contains("v view"));
+        assert!(!text.contains("enter/v view"));
+        assert!(!text.contains("e edit"));
         assert!(!text.contains("d delete"));
     }
 
@@ -528,8 +528,8 @@ mod tests {
 
         let text = footer_text(&app, true);
 
-        assert!(text.contains("enter/e edit"));
-        assert!(text.contains("v view"));
+        assert!(text.contains("enter/v view"));
+        assert!(text.contains("e edit"));
         assert!(text.contains("d delete"));
     }
 
@@ -544,8 +544,8 @@ mod tests {
 
         let text = footer_text(&app, true);
 
-        assert!(!text.contains("enter/e edit"));
-        assert!(!text.contains("v view"));
+        assert!(!text.contains("enter/v view"));
+        assert!(!text.contains("e edit"));
         assert!(!text.contains("d delete"));
     }
 
@@ -566,9 +566,9 @@ mod tests {
 
         assert!(text.contains("type query"));
         assert!(text.contains("Search all: body"));
-        assert!(text.contains("enter edit"));
-        assert!(!text.contains("enter/e edit"));
-        assert!(!text.contains("v view"));
+        assert!(text.contains("enter view"));
+        assert!(!text.contains("enter/v view"));
+        assert!(!text.contains("e edit"));
         assert!(!text.contains("d delete"));
     }
 

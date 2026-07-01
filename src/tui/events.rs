@@ -22,7 +22,7 @@ pub(crate) fn handle_key(
     app.normalize_focus(preview_visible);
 
     if app.viewer.is_some() {
-        handle_viewer_key(app, key);
+        handle_viewer_key(terminal, app, key)?;
         return Ok(false);
     }
 
@@ -81,9 +81,8 @@ pub(crate) fn handle_key(
         KeyCode::End if app.focus == Focus::Preview => app.preview_scroll = u16::MAX,
         KeyCode::Up => app.move_selection(-1),
         KeyCode::Down => app.move_selection(1),
-        KeyCode::Enter | KeyCode::Char('e') if app.can_act_on_selected_entry() => {
-            edit_selected(terminal, app)?
-        }
+        KeyCode::Enter if app.can_act_on_selected_entry() => view_selected(app)?,
+        KeyCode::Char('e') if app.can_act_on_selected_entry() => edit_selected(terminal, app)?,
         KeyCode::Char('v') if app.can_act_on_selected_entry() => view_selected(app)?,
         KeyCode::Char('n') => create_entry_in_selected_journal(terminal, app)?,
         KeyCode::Char('j') | KeyCode::Char('J') => app.begin_new_journal_input(),
@@ -115,7 +114,7 @@ fn handle_search_key(
         KeyCode::PageDown if app.focus == Focus::Preview => app.page_preview(1),
         KeyCode::Home if app.focus == Focus::Preview => app.preview_scroll = 0,
         KeyCode::End if app.focus == Focus::Preview => app.preview_scroll = u16::MAX,
-        KeyCode::Enter if app.can_act_on_selected_entry() => edit_selected(terminal, app)?,
+        KeyCode::Enter if app.can_act_on_selected_entry() => view_selected(app)?,
         KeyCode::Char('e') if app.focus == Focus::Preview && app.has_selected_entry_target() => {
             edit_selected(terminal, app)?
         }
@@ -150,14 +149,23 @@ fn next_focus(focus: Focus, preview_visible: bool) -> Focus {
     }
 }
 
-fn handle_viewer_key(app: &mut App, key: KeyEvent) {
+fn handle_viewer_key(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    key: KeyEvent,
+) -> AppResult<()> {
     if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
         app.viewer = None;
-        return;
+        return Ok(());
+    }
+
+    if matches!(key.code, KeyCode::Char('e')) {
+        edit_viewer_entry(terminal, app)?;
+        return Ok(());
     }
 
     let Some(viewer) = app.viewer.as_mut() else {
-        return;
+        return Ok(());
     };
 
     match key.code {
@@ -177,6 +185,26 @@ fn handle_viewer_key(app: &mut App, key: KeyEvent) {
         KeyCode::End => viewer.scroll = u16::MAX,
         _ => {}
     }
+
+    Ok(())
+}
+
+fn edit_viewer_entry(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+) -> AppResult<()> {
+    let Some(viewer) = app.viewer.as_ref() else {
+        return Ok(());
+    };
+
+    let path = viewer.path.clone();
+    let editor = app.config.editor.clone();
+    suspend_terminal(terminal, || open_editor(&editor, &path))?;
+    set_updated_at_now(&path)?;
+    refresh_viewer(app)?;
+    app.refresh()?;
+    app.set_status(format!("Edited {}", path.display()));
+    Ok(())
 }
 
 fn handle_new_journal_input(app: &mut App, key: KeyEvent) -> AppResult<()> {
@@ -277,9 +305,22 @@ fn view_selected(app: &mut App) -> AppResult<()> {
     let (_, body) = split_front_matter(&content);
     app.viewer = Some(MarkdownView {
         title: target.title,
+        path: target.path,
         content: body.trim_start().to_string(),
         scroll: 0,
     });
+    Ok(())
+}
+
+fn refresh_viewer(app: &mut App) -> AppResult<()> {
+    let Some(viewer) = app.viewer.as_mut() else {
+        return Ok(());
+    };
+
+    let content = fs::read_to_string(&viewer.path)?;
+    let (_, body) = split_front_matter(&content);
+    viewer.content = body.trim_start().to_string();
+    viewer.scroll = 0;
     Ok(())
 }
 
