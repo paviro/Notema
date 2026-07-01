@@ -10,7 +10,10 @@ use ratatui::{
         ScrollbarState, Wrap,
     },
 };
-use ratatui_markdown::{markdown::MarkdownRenderer, theme::ThemeConfig};
+use ratatui_markdown::{
+    markdown::MarkdownRenderer,
+    theme::{CodeColors, ThemeConfig},
+};
 
 use super::app::{App, Focus, MarkdownView, Mode, preview_is_visible};
 
@@ -220,13 +223,13 @@ fn draw_markdown_panel(
         .title(format!(" {} ", title))
         .borders(Borders::ALL)
         .border_style(if focused {
-            Style::default().fg(Color::Cyan)
+            Style::default().add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         });
     let inner = block.inner(area);
     let width = inner.width.saturating_sub(1).max(1) as usize;
-    let theme = ThemeConfig::default();
+    let theme = markdown_theme();
     let renderer = MarkdownRenderer::new(width);
     let blocks = renderer.parse(content);
     let lines = renderer.render(&blocks, &theme);
@@ -245,12 +248,54 @@ fn draw_markdown_panel(
             .orientation(ScrollbarOrientation::VerticalRight)
             .track_symbol(Some("|"))
             .thumb_symbol("#")
-            .style(Style::default().fg(Color::DarkGray))
-            .thumb_style(Style::default().fg(Color::Cyan));
+            .style(Style::default().add_modifier(Modifier::DIM))
+            .thumb_style(Style::default().add_modifier(Modifier::BOLD));
         frame.render_stateful_widget(scrollbar, area, &mut state);
     }
 
     scroll
+}
+
+fn markdown_theme() -> ThemeConfig {
+    let foreground = Color::Reset;
+    ThemeConfig::builder()
+        .with_text_color(foreground)
+        .with_muted_text_color(foreground)
+        .with_primary_color(foreground)
+        .with_popup_selected_background(foreground)
+        .with_border_color(foreground)
+        .with_focused_border_color(foreground)
+        .with_secondary_color(foreground)
+        .with_info_color(foreground)
+        .with_json_key_color(foreground)
+        .with_json_string_color(foreground)
+        .with_json_number_color(foreground)
+        .with_json_bool_color(foreground)
+        .with_json_null_color(foreground)
+        .with_accent_yellow(foreground)
+        .with_code_colors(reset_code_colors())
+        .build()
+}
+
+fn reset_code_colors() -> CodeColors {
+    CodeColors {
+        comment: Color::Reset,
+        keyword: Color::Reset,
+        string: Color::Reset,
+        string_escape: Color::Reset,
+        number: Color::Reset,
+        constant: Color::Reset,
+        function: Color::Reset,
+        r#type: Color::Reset,
+        variable: Color::Reset,
+        property: Color::Reset,
+        operator: Color::Reset,
+        punctuation: Color::Reset,
+        attribute: Color::Reset,
+        tag: Color::Reset,
+        label: Color::Reset,
+        error: Color::Reset,
+    }
 }
 
 pub(crate) fn viewer_scroll(requested: u16, line_count: usize, height: u16) -> u16 {
@@ -333,9 +378,7 @@ fn entry_list_items(app: &App) -> Vec<ListItem<'static>> {
                 items.push(
                     ListItem::new(Line::from(Span::styled(
                         month,
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().add_modifier(Modifier::BOLD | Modifier::DIM),
                     )))
                     .style(Style::default()),
                 );
@@ -349,7 +392,7 @@ fn entry_list_items(app: &App) -> Vec<ListItem<'static>> {
                 items.push(
                     ListItem::new(Line::from(vec![
                         Span::raw("  "),
-                        Span::styled(day, Style::default().fg(Color::DarkGray)),
+                        Span::styled(day, Style::default().add_modifier(Modifier::DIM)),
                     ]))
                     .style(Style::default()),
                 );
@@ -507,6 +550,18 @@ mod tests {
     #[test]
     fn scrollbar_position_stays_at_start_when_content_fits() {
         assert_eq!(scrollbar_position(0, 4, 8), 0);
+    }
+
+    #[test]
+    fn markdown_theme_uses_terminal_default_foregrounds() {
+        let theme = markdown_theme();
+
+        assert_eq!(theme.text_color, Color::Reset);
+        assert_eq!(theme.muted_text_color, Color::Reset);
+        assert_eq!(theme.primary_color, Color::Reset);
+        assert_eq!(theme.secondary_color, Color::Reset);
+        assert_eq!(theme.accent_yellow, Color::Reset);
+        assert_eq!(theme.code_colors.variable, Color::Reset);
     }
 
     #[test]
