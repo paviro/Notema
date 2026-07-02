@@ -39,6 +39,13 @@ pub fn front_matter_feelings(front_matter: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+pub fn front_matter_mood(front_matter: &str) -> Option<i8> {
+    parse_front_matter(front_matter)
+        .and_then(|metadata| metadata.get("mood").and_then(|v| v.as_i64()))
+        .filter(|&v| v >= -5 && v <= 5)
+        .map(|v| v as i8)
+}
+
 pub fn front_matter_value(front_matter: &str, key: &str) -> Option<String> {
     parse_front_matter(front_matter).and_then(|metadata| {
         metadata
@@ -88,6 +95,23 @@ pub(crate) fn set_tags_in_front_matter(content: &str, tags: &[String]) -> Option
 /// Returns `None` when there is no front matter.
 pub(crate) fn set_feelings_in_front_matter(content: &str, feelings: &[String]) -> Option<String> {
     set_string_list_in_front_matter(content, "feelings", feelings)
+}
+
+/// Set or remove the `mood` field in the YAML front matter.
+/// Returns `None` when there is no front matter.
+pub(crate) fn set_mood_in_front_matter(content: &str, mood: Option<i8>) -> Option<String> {
+    let (front_matter, body) = split_front_matter(content);
+    let front_matter = front_matter?;
+    let mut metadata = parse_front_matter(front_matter)?;
+    match mood {
+        Some(value) => {
+            metadata.insert("mood", Value::from(value));
+        }
+        None => {
+            metadata.remove("mood");
+        }
+    }
+    Some(render_content_with_front_matter(&metadata, body))
 }
 
 fn set_string_list_in_front_matter(content: &str, key: &str, values: &[String]) -> Option<String> {

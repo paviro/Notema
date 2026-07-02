@@ -12,7 +12,8 @@ use crate::{
 use std::{path::PathBuf, time::Duration};
 
 use super::state::{
-    EditFeelingState, EditTagFocus, EditTagState, Overlay, ScrollState, SearchState, StatusBar,
+    EditFeelingState, EditMoodState, EditTagFocus, EditTagState, Overlay, ScrollState, SearchState,
+    StatusBar,
 };
 
 pub(crate) const JOURNAL_LIST_WIDTH: u16 = 18;
@@ -341,6 +342,40 @@ impl App {
     pub(crate) fn edit_feeling_state_mut(&mut self) -> Option<&mut EditFeelingState> {
         match &mut self.overlay {
             Overlay::EditFeelings(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn selected_entry_mood(&self) -> Option<i8> {
+        match self.mode {
+            Mode::Search => self
+                .selected_search_hit()
+                .and_then(|hit| {
+                    self.entries
+                        .iter()
+                        .find(|entry| entry.path == hit.path)
+                        .and_then(|entry| entry.mood)
+                }),
+            Mode::Browse => self.selected_entry().and_then(|entry| entry.mood),
+        }
+    }
+
+    pub(crate) fn begin_edit_mood(&mut self) {
+        let saved = self.selected_entry_mood();
+        let draft = saved.unwrap_or(0);
+        self.overlay = Overlay::EditMood(EditMoodState { saved, draft });
+    }
+
+    pub(crate) fn edit_mood_state(&self) -> Option<&EditMoodState> {
+        match &self.overlay {
+            Overlay::EditMood(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn edit_mood_state_mut(&mut self) -> Option<&mut EditMoodState> {
+        match &mut self.overlay {
+            Overlay::EditMood(state) => Some(state),
             _ => None,
         }
     }

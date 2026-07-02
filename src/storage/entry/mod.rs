@@ -20,6 +20,7 @@ pub struct Entry {
     pub preview: String,
     pub tags: Vec<String>,
     pub feelings: Vec<String>,
+    pub mood: Option<i8>,
     pub content: String,
 }
 

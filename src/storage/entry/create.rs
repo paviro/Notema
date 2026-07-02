@@ -59,7 +59,7 @@ pub fn create_encrypted_entry(
 
 pub fn create_entry_with_body(root: &Path, journal: &str, body: &str) -> AppResult<PathBuf> {
     let now = Local::now();
-    let content = entry_with_body(now, body, &[], &[]);
+    let content = entry_with_body(now, body, &[], &[], None);
     create_entry_file(root, journal, now, &content, WriteTarget::Plain, || {
         nanoid!(ENTRY_ID_LEN)
     })
@@ -71,9 +71,10 @@ pub fn create_entry_with_body_and_feelings(
     body: &str,
     tags: &[String],
     feelings: &[String],
+    mood: Option<i8>,
 ) -> AppResult<PathBuf> {
     let now = Local::now();
-    let content = entry_with_body(now, body, tags, feelings);
+    let content = entry_with_body(now, body, tags, feelings, mood);
     create_entry_file(root, journal, now, &content, WriteTarget::Plain, || {
         nanoid!(ENTRY_ID_LEN)
     })
@@ -86,7 +87,7 @@ pub fn create_encrypted_entry_with_body(
     paths: &crypto::EncryptionPaths,
 ) -> AppResult<PathBuf> {
     let now = Local::now();
-    let content = entry_with_body(now, body, &[], &[]);
+    let content = entry_with_body(now, body, &[], &[], None);
     create_entry_file(
         root,
         journal,
@@ -103,10 +104,11 @@ pub fn create_encrypted_entry_with_body_and_feelings(
     body: &str,
     tags: &[String],
     feelings: &[String],
+    mood: Option<i8>,
     paths: &crypto::EncryptionPaths,
 ) -> AppResult<PathBuf> {
     let now = Local::now();
-    let content = entry_with_body(now, body, tags, feelings);
+    let content = entry_with_body(now, body, tags, feelings, mood);
     create_entry_file(
         root,
         journal,
@@ -117,15 +119,24 @@ pub fn create_encrypted_entry_with_body_and_feelings(
     )
 }
 
-fn entry_with_body(now: DateTime<Local>, body: &str, tags: &[String], feelings: &[String]) -> String {
+fn entry_with_body(
+    now: DateTime<Local>,
+    body: &str,
+    tags: &[String],
+    feelings: &[String],
+    mood: Option<i8>,
+) -> String {
     let mut content = entry_template(now, now);
     if !tags.is_empty() {
-        content =
-            crate::markdown::set_tags_in_front_matter(&content, tags).unwrap_or(content);
+        content = crate::markdown::set_tags_in_front_matter(&content, tags).unwrap_or(content);
     }
     if !feelings.is_empty() {
         content =
             crate::markdown::set_feelings_in_front_matter(&content, feelings).unwrap_or(content);
+    }
+    if mood.is_some() {
+        content =
+            crate::markdown::set_mood_in_front_matter(&content, mood).unwrap_or(content);
     }
     content.push_str(body);
     if !content.ends_with('\n') {

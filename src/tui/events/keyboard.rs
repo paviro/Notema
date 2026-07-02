@@ -11,7 +11,7 @@ use crate::tui::{
 
 use super::actions::{
     create_entry_in_selected_journal, delete_selected, edit_selected, set_feelings_on_entry,
-    set_tags_on_entry, submit_new_journal, view_selected,
+    set_mood_on_entry, set_tags_on_entry, submit_new_journal, view_selected,
 };
 
 pub(crate) fn handle_key(
@@ -58,6 +58,11 @@ pub(crate) fn handle_key(
         return Ok(false);
     }
 
+    if app.edit_mood_state().is_some() {
+        handle_edit_mood_key(app, key)?;
+        return Ok(false);
+    }
+
     if app.mode == Mode::Search {
         handle_search_key(terminal, app, key, entry_view_available)?;
         return Ok(false);
@@ -88,10 +93,47 @@ pub(crate) fn handle_key(
         KeyCode::Char('d') if app.can_act_on_selected_entry() => app.begin_confirm_delete(),
         KeyCode::Char('t') if app.can_act_on_selected_entry() => app.begin_edit_tags(),
         KeyCode::Char('f') if app.can_act_on_selected_entry() => app.begin_edit_feelings(),
+        KeyCode::Char('m') if app.can_act_on_selected_entry() => app.begin_edit_mood(),
         _ => {}
     }
 
     Ok(false)
+}
+
+fn handle_edit_mood_key(app: &mut App, key: KeyEvent) -> AppResult<()> {
+    match key.code {
+        KeyCode::Esc => {
+            app.close_overlay();
+        }
+        KeyCode::Enter => {
+            let mood = app.edit_mood_state().map(|s| s.draft);
+            set_mood_on_entry(app, mood)?;
+            app.close_overlay();
+        }
+        KeyCode::Delete | KeyCode::Backspace => {
+            let mood = app.edit_mood_state().and_then(|s| s.saved);
+            if mood.is_some() {
+                set_mood_on_entry(app, None)?;
+            }
+            app.close_overlay();
+        }
+        KeyCode::Left => {
+            if let Some(state) = app.edit_mood_state_mut()
+                && state.draft > -5
+            {
+                state.draft -= 1;
+            }
+        }
+        KeyCode::Right => {
+            if let Some(state) = app.edit_mood_state_mut()
+                && state.draft < 5
+            {
+                state.draft += 1;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn handle_edit_feelings_key(app: &mut App, key: KeyEvent) -> AppResult<()> {

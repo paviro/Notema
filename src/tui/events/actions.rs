@@ -1,6 +1,6 @@
 use crate::{
     AppResult, crypto,
-    markdown::{entry_has_body, set_feelings_in_front_matter, set_tags_in_front_matter},
+    markdown::{entry_has_body, set_feelings_in_front_matter, set_mood_in_front_matter, set_tags_in_front_matter},
     storage::{
         create_encrypted_entry, create_entry, create_journal, edit_encrypted_entry,
         is_encrypted_entry_file, move_entry_to_trash, open_editor,
@@ -237,6 +237,45 @@ pub(super) fn set_feelings_on_entry(app: &mut App, feelings: &[String]) -> AppRe
     }
 
     app.set_status("Feelings saved");
+    app.refresh()?;
+    Ok(())
+}
+
+pub(super) fn set_mood_on_entry(app: &mut App, mood: Option<i8>) -> AppResult<()> {
+    let Some(target) = app.selected_entry_target() else {
+        return Ok(());
+    };
+
+    if is_encrypted_entry_file(&target.path) {
+        let Some(ref identity) = app.unlocked_identity else {
+            app.set_status("Encryption identity not available");
+            return Ok(());
+        };
+        let content = read_entry_content_with_identity(&target.path, Some(identity))?;
+        let Some(new_content) = set_mood_in_front_matter(&content, mood) else {
+            return Ok(());
+        };
+        let temp_path = std::env::temp_dir().join(format!(
+            ".journal-mood-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::write(&temp_path, &new_content)?;
+        crypto::encrypt_file(&app.encryption_paths, &temp_path, &target.path)?;
+        let _ = fs::remove_file(&temp_path);
+    } else {
+        let content = fs::read_to_string(&target.path)?;
+        let Some(new_content) = set_mood_in_front_matter(&content, mood) else {
+            return Ok(());
+        };
+        fs::write(&target.path, new_content)?;
+        set_updated_at_now(&target.path)?;
+    }
+
+    app.set_status("Mood saved");
     app.refresh()?;
     Ok(())
 }

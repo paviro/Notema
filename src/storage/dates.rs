@@ -46,6 +46,7 @@ mod tests {
             preview: String::new(),
             tags: Vec::new(),
             feelings: Vec::new(),
+            mood: None,
             content: String::new(),
         }
     }

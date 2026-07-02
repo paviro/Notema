@@ -32,7 +32,8 @@ pub(crate) use chrome::{
     centered_rect, footer_text, panel_block, panel_content_inner, selected_style,
 };
 use dialogs::{
-    draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_tags_dialog, draw_new_journal_input,
+    draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_mood_dialog, draw_edit_tags_dialog,
+    draw_new_journal_input,
 };
 use entries::draw_entry_list;
 use journals::draw_journals;
@@ -92,6 +93,10 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
 
     if let Some(state) = app.edit_feeling_state_mut() {
         draw_edit_feelings_dialog(frame, state);
+    }
+
+    if let Some(state) = app.edit_mood_state() {
+        draw_edit_mood_dialog(frame, state);
     }
 }
 
@@ -593,6 +598,7 @@ mod tests {
             preview: "Preview".to_string(),
             tags: Vec::new(),
             feelings: Vec::new(),
+            mood: None,
             content: String::new(),
         };
 
@@ -625,6 +631,7 @@ mod tests {
             preview: "Encryption identity not available".to_string(),
             tags: Vec::new(),
             feelings: Vec::new(),
+            mood: None,
             content: "Encryption identity not available".to_string(),
         };
 
@@ -656,6 +663,7 @@ mod tests {
             preview: String::new(),
             tags: Vec::new(),
             feelings: Vec::new(),
+            mood: None,
             content: String::new(),
         };
 
@@ -676,6 +684,7 @@ mod tests {
             preview: String::new(),
             tags: Vec::new(),
             feelings: Vec::new(),
+            mood: None,
             content: String::new(),
         };
 

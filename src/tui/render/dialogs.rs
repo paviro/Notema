@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::tui::state::{EditFeelingState, EditTagFocus, EditTagState};
+use crate::tui::{render::markdown_panel::MoodBar, state::{EditFeelingState, EditMoodState, EditTagFocus, EditTagState}};
 
 fn centered_rect_with_height(percent_x: u16, height: u16, area: Rect) -> Rect {
     let vertical = Layout::default()
@@ -177,6 +177,56 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
                 height: 1,
             },
         );
+    }
+}
+
+pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState) {
+    let area = centered_rect_with_height(44, 7, frame.area());
+    frame.render_widget(Clear, area);
+
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+
+    let block = Block::default().title(" Edit Mood ").borders(Borders::ALL);
+    frame.render_widget(block, area);
+
+    let right_label = " Blissful";
+
+    // Render non-bar lines
+    for (y_offset, text) in [
+        (0u16, ""),
+        (2u16, ""),
+        (3u16, "decrease (←) | increase (→) | save (enter) | clear (del) | cancel (esc)"),
+    ] {
+        let y = inner.y + y_offset;
+        if y < inner.y + inner.height {
+            frame.render_widget(
+                Paragraph::new(Line::from(text)),
+                Rect { x: inner.x, y, width: inner.width, height: 1 },
+            );
+        }
+    }
+
+    // Render bar line with MoodBar widget
+    let bar_y = inner.y + 1;
+    if bar_y < inner.y + inner.height {
+        let bar_rect = Rect { x: inner.x, y: bar_y, width: inner.width, height: 1 };
+        let right_w = right_label.len() as u16;
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(10), // "Miserable "
+                Constraint::Min(3),
+                Constraint::Length(right_w),
+            ])
+            .split(bar_rect);
+        frame.render_widget(Paragraph::new("Miserable "), chunks[0]);
+        frame.render_widget(MoodBar::new(state.draft), chunks[1]);
+        frame.render_widget(Paragraph::new(right_label), chunks[2]);
     }
 }
 

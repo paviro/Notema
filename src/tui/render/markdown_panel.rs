@@ -1,9 +1,10 @@
 use ratatui::{
     Frame,
+    buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget},
 };
 use ratatui_markdown::{
     markdown::MarkdownRenderer,
@@ -19,6 +20,7 @@ pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &
     if let Some((title, content)) = app.selected_entry_view() {
         let tags = app.selected_entry_tags();
         let feelings = app.selected_entry_feelings();
+        let mood = app.selected_entry_mood();
         app.scroll.entry_view = draw_markdown_panel(
             frame,
             area,
@@ -27,6 +29,7 @@ pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &
             EntryMetadata {
                 tags: &tags,
                 feelings: &feelings,
+                mood,
             },
             app.scroll.entry_view,
             app.focus == Focus::EntryView,
@@ -57,7 +60,7 @@ fn draw_markdown_panel(
     let wc = word_count(content);
     let block = panel_block(title, focused, Some(wc));
     let inner = panel_content_inner(block.inner(area));
-    let metadata_height = metadata_section_height(metadata.tags, metadata.feelings);
+    let metadata_height = metadata_section_height(metadata.tags, metadata.feelings, metadata.mood);
     let show_metadata = metadata_height > 0 && inner.height > metadata_height;
 
     let (content_rect, metadata_rect) = if show_metadata {
@@ -106,10 +109,11 @@ fn draw_markdown_panel(
 struct EntryMetadata<'a> {
     tags: &'a [String],
     feelings: &'a [String],
+    mood: Option<i8>,
 }
 
-fn metadata_section_height(tags: &[String], feelings: &[String]) -> u16 {
-    let rows = (!feelings.is_empty()) as u16 + (!tags.is_empty()) as u16;
+fn metadata_section_height(tags: &[String], feelings: &[String], mood: Option<i8>) -> u16 {
+    let rows = mood.is_some() as u16 + (!feelings.is_empty()) as u16 + (!tags.is_empty()) as u16;
     if rows == 0 { 0 } else { 1 + rows }
 }
 
@@ -121,6 +125,21 @@ fn draw_metadata_section(frame: &mut Frame<'_>, area: Rect, metadata: EntryMetad
     );
 
     let mut y = area.y + 1;
+    if let Some(score) = metadata.mood {
+        let mood_rect = Rect { y, height: 1, ..area };
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(10), // "Miserable "
+                Constraint::Min(4),
+                Constraint::Length(9), // " Blissful"
+            ])
+            .split(mood_rect);
+        frame.render_widget(Paragraph::new("Miserable "), chunks[0]);
+        frame.render_widget(MoodBar::new(score), chunks[1]);
+        frame.render_widget(Paragraph::new(" Blissful"), chunks[2]);
+        y = y.saturating_add(1);
+    }
     if !metadata.feelings.is_empty() {
         let feelings_line = Line::from(vec![
             Span::styled("Feelings: ", Style::default().add_modifier(Modifier::BOLD)),
@@ -150,6 +169,75 @@ fn draw_metadata_section(frame: &mut Frame<'_>, area: Rect, metadata: EntryMetad
                 ..area
             },
         );
+    }
+}
+
+pub(crate) struct MoodBar {
+    score: i8,
+}
+
+impl MoodBar {
+    pub(crate) fn new(score: i8) -> Self {
+        Self { score }
+    }
+}
+
+impl Widget for MoodBar {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let width = area.width as usize;
+        if width < 3 {
+            return;
+        }
+
+        let center = width / 2;
+        let lw = center;
+        let rw = width - center - 1;
+
+        let neg = self.score.min(0).unsigned_abs() as usize;
+        let pos = self.score.max(0) as usize;
+
+        let filled_left = if lw > 0 && neg > 0 {
+            (neg * lw / 5).max(1).min(lw)
+        } else {
+            0
+        };
+        let filled_right = if rw > 0 && pos > 0 {
+            (pos * rw / 5).max(1).min(rw)
+        } else {
+            0
+        };
+
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let dim = Style::default().add_modifier(Modifier::DIM);
+
+        for i in 0..width {
+            let x = area.x + i as u16;
+            let Some(cell) = buf.cell_mut((x, area.y)) else {
+                continue;
+            };
+            if i == center {
+                cell.set_symbol(if self.score == 0 { "┃" } else { "│" });
+                cell.set_style(Style::default());
+            } else if i < center {
+                let dist = center - i;
+                if dist <= filled_left {
+                    cell.set_symbol("━");
+                    cell.set_style(bold);
+                } else {
+                    cell.set_symbol("─");
+                    cell.set_style(dim);
+                }
+            } else {
+                let dist = i - center;
+                if dist <= filled_right {
+                    cell.set_symbol("━");
+                    cell.set_style(bold);
+                } else {
+                    cell.set_symbol("─");
+                    cell.set_style(dim);
+                }
+            }
+        }
     }
 }
 

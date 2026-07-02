@@ -26,6 +26,9 @@ struct Cli {
     #[arg(long, value_name = "LABEL")]
     feeling: Vec<String>,
 
+    #[arg(long, value_name = "SCORE", allow_hyphen_values = true)]
+    mood: Option<i8>,
+
     #[command(subcommand)]
     command: Option<CliCommand>,
 
@@ -57,8 +60,8 @@ pub fn run() -> AppResult<()> {
     if !cli.body.is_empty() || stdin_is_pipe {
         return create_entry_from_command(cli, stdin_is_pipe);
     }
-    if cli.journal.is_some() || !cli.tag.is_empty() || !cli.feeling.is_empty() {
-        return Err("--journal, --tag, and --feeling require entry text or piped stdin".into());
+    if cli.journal.is_some() || !cli.tag.is_empty() || !cli.feeling.is_empty() || cli.mood.is_some() {
+        return Err("--journal, --tag, --feeling, and --mood require entry text or piped stdin".into());
     }
 
     let (config_path, config) = config::load_or_setup_with_path(cli.config.as_deref())?;
@@ -95,6 +98,9 @@ fn validate_no_entry_args(cli: &Cli) -> AppResult<()> {
     }
     if !cli.feeling.is_empty() {
         return Err("command cannot be used with --feeling".into());
+    }
+    if cli.mood.is_some() {
+        return Err("command cannot be used with --mood".into());
     }
     Ok(())
 }
@@ -136,6 +142,14 @@ fn create_entry_from_command(cli: Cli, stdin_is_pipe: bool) -> AppResult<()> {
             .map(str::trim)
             .filter(|f| !f.is_empty()),
     )?;
+    let mood = if let Some(score) = cli.mood {
+        if !(-5..=5).contains(&score) {
+            return Err(format!("--mood must be between -5 and +5, got {score}").into());
+        }
+        Some(score)
+    } else {
+        None
+    };
 
     let body = if body_from_args {
         cli.body.join(" ")
@@ -153,6 +167,7 @@ fn create_entry_from_command(cli: Cli, stdin_is_pipe: bool) -> AppResult<()> {
             &body,
             &tags,
             &feelings,
+            mood,
             &paths,
         )?
     } else {
@@ -162,6 +177,7 @@ fn create_entry_from_command(cli: Cli, stdin_is_pipe: bool) -> AppResult<()> {
             &body,
             &tags,
             &feelings,
+            mood,
         )?
     };
     println!("{}", path.display());

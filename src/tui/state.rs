@@ -134,6 +134,14 @@ pub(crate) struct EditFeelingState {
     pub(crate) scroll: u16,
 }
 
+/// State for the edit-mood overlay.
+pub(crate) struct EditMoodState {
+    /// The mood score currently saved on the entry (None = not set).
+    pub(crate) saved: Option<i8>,
+    /// The score being edited (-5..=5).
+    pub(crate) draft: i8,
+}
+
 /// The single modal overlay that can be active over the browse view. Making
 /// this an enum keeps the modals mutually exclusive by construction.
 #[derive(Default)]
@@ -144,4 +152,5 @@ pub(crate) enum Overlay {
     NewJournal(String),
     EditTags(EditTagState),
     EditFeelings(EditFeelingState),
+    EditMood(EditMoodState),
 }
