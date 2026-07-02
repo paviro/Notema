@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::storage::SearchHit;
 
-use super::app::{MarkdownView, SearchScope};
+use super::app::SearchScope;
 
 const STATUS_DURATION: Duration = Duration::from_secs(3);
 
@@ -104,5 +104,4 @@ pub(crate) enum Overlay {
     None,
     ConfirmDelete,
     NewJournal(String),
-    Viewer(MarkdownView),
 }

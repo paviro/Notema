@@ -6,7 +6,11 @@ mod layout;
 mod markdown_panel;
 mod stats;
 
-use ratatui::{Frame, widgets::Paragraph};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout},
+    widgets::Paragraph,
+};
 
 use super::app::{App, entry_view_is_available};
 #[cfg(test)]
@@ -27,16 +31,25 @@ use dialogs::{draw_confirm_delete, draw_new_journal_input};
 use entries::draw_entry_list;
 use journals::draw_journals;
 pub(crate) use layout::{TuiLayout, tui_layout};
+use markdown_panel::draw_selected_entry_view;
 #[cfg(test)]
 pub(crate) use markdown_panel::markdown_theme;
-use markdown_panel::{draw_markdown_viewer, draw_selected_entry_view};
 use stats::draw_journal_stats;
 #[cfg(test)]
 pub(crate) use stats::{centered_stats_layout, journal_stats};
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
-    if let Some(viewer) = app.viewer_mut() {
-        draw_markdown_viewer(frame, viewer);
+    if app.entry_view_expanded {
+        let area = frame.area();
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .split(area);
+        draw_selected_entry_view(frame, chunks[0], app);
+        frame.render_widget(
+            Paragraph::new(" Esc/q close | e edit | up/down/k/j scroll | PgUp/PgDn | Home/End"),
+            chunks[1],
+        );
         return;
     }
 

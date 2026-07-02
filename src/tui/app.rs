@@ -58,13 +58,7 @@ pub(crate) struct App {
     pub(crate) search: SearchState,
     pub(crate) overlay: Overlay,
     pub(crate) status_bar: StatusBar,
-}
-
-pub(crate) struct MarkdownView {
-    pub(crate) title: String,
-    pub(crate) path: PathBuf,
-    pub(crate) content: String,
-    pub(crate) scroll: u16,
+    pub(crate) entry_view_expanded: bool,
 }
 
 impl App {
@@ -97,6 +91,7 @@ impl App {
             search: SearchState::default(),
             overlay: Overlay::None,
             status_bar: StatusBar::default(),
+            entry_view_expanded: false,
         };
         app.load_entries(entry_paths)?;
         Ok(app)
@@ -267,24 +262,6 @@ impl App {
     pub(crate) fn begin_new_journal_input(&mut self) {
         self.overlay = Overlay::NewJournal(String::new());
         self.clear_status();
-    }
-
-    pub(crate) fn viewer(&self) -> Option<&MarkdownView> {
-        match &self.overlay {
-            Overlay::Viewer(view) => Some(view),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn viewer_mut(&mut self) -> Option<&mut MarkdownView> {
-        match &mut self.overlay {
-            Overlay::Viewer(view) => Some(view),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn open_viewer(&mut self, view: MarkdownView) {
-        self.overlay = Overlay::Viewer(view);
     }
 
     pub(crate) fn new_journal_input(&self) -> Option<&str> {

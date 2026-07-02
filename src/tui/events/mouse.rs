@@ -27,10 +27,10 @@ pub(super) fn handle_mouse_in_area(app: &mut App, mouse: MouseEvent, area: Rect)
     app.normalize_focus(entry_view_is_available(area.width));
     let layout = render::tui_layout(area, app);
 
-    if app.viewer().is_some() {
+    if app.entry_view_expanded {
         match mouse.kind {
-            MouseEventKind::ScrollUp => scroll_viewer(app, -1),
-            MouseEventKind::ScrollDown => scroll_viewer(app, 1),
+            MouseEventKind::ScrollUp => app.scroll_entry_view(-1),
+            MouseEventKind::ScrollDown => app.scroll_entry_view(1),
             _ => {}
         }
         return Ok(());
@@ -126,17 +126,5 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
             app.journals.len(),
             render::panel_inner(area).height,
         );
-    }
-}
-
-fn scroll_viewer(app: &mut App, delta: i16) {
-    let Some(viewer) = app.viewer_mut() else {
-        return;
-    };
-
-    if delta.is_negative() {
-        viewer.scroll = viewer.scroll.saturating_sub(delta.unsigned_abs());
-    } else {
-        viewer.scroll = viewer.scroll.saturating_add(delta as u16);
     }
 }

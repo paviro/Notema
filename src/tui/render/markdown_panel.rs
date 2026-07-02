@@ -1,6 +1,6 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
@@ -10,30 +10,9 @@ use ratatui_markdown::{
 };
 
 use crate::tui::{
-    app::{App, Focus, MarkdownView},
+    app::{App, Focus},
     render::{panel_block, scrollbar_position, viewer_scroll},
 };
-
-pub(crate) fn draw_markdown_viewer(frame: &mut Frame<'_>, viewer: &mut MarkdownView) {
-    let area = frame.area();
-    let root = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
-        .split(area);
-    viewer.scroll = draw_markdown_panel(
-        frame,
-        root[0],
-        &viewer.title,
-        &viewer.content,
-        viewer.scroll,
-        true,
-    );
-
-    frame.render_widget(
-        Paragraph::new(" Enter/Esc/q close | e edit | up/down/k/j scroll | PgUp/PgDn | Home/End"),
-        root[1],
-    );
-}
 
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     if let Some((title, content)) = app.selected_entry_view() {

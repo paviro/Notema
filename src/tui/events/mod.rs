@@ -7,7 +7,7 @@ mod terminal;
 use actions::view_selected;
 pub(crate) use keyboard::handle_key;
 #[cfg(test)]
-use keyboard::{handle_enter, handle_right, move_focus_right, viewer_key_closes};
+use keyboard::{handle_enter, handle_right, move_focus_right};
 pub(crate) use mouse::handle_mouse;
 #[cfg(test)]
 use mouse::handle_mouse_in_area;
@@ -23,7 +23,7 @@ mod tests {
             render,
         },
     };
-    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     use ratatui::layout::Rect;
     use std::fs;
     use tempfile::tempdir;
@@ -96,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn right_on_entry_opens_viewer_when_inline_entry_view_is_hidden() {
+    fn right_on_entry_expands_when_inline_entry_view_is_hidden() {
         let dir = tempdir().unwrap();
         let entry_dir = dir.path().join("work").join("2026-07-01");
         fs::create_dir_all(&entry_dir).unwrap();
@@ -108,12 +108,12 @@ mod tests {
 
         handle_right(&mut app, false).unwrap();
 
-        assert!(app.viewer().is_some());
-        assert_eq!(app.focus, Focus::Entries);
+        assert!(app.entry_view_expanded);
+        assert_eq!(app.focus, Focus::EntryView);
     }
 
     #[test]
-    fn viewer_title_matches_entry_view_timestamp_title() {
+    fn expanded_entry_title_matches_entry_view_timestamp_title() {
         let dir = tempdir().unwrap();
         let entry_dir = dir.path().join("work").join("2026-07-01");
         fs::create_dir_all(&entry_dir).unwrap();
@@ -129,7 +129,8 @@ mod tests {
 
         handle_right(&mut app, false).unwrap();
 
-        assert_eq!(app.viewer().unwrap().title, "2026-07-01 10:23");
+        let (title, _) = app.selected_entry_view().unwrap();
+        assert_eq!(title, "2026-07-01 10:23");
     }
 
     #[test]
@@ -145,14 +146,8 @@ mod tests {
 
         handle_right(&mut app, true).unwrap();
 
-        assert!(app.viewer().is_none());
+        assert!(!app.entry_view_expanded);
         assert_eq!(app.focus, Focus::EntryView);
-    }
-
-    #[test]
-    fn left_closes_viewer_only_when_entry_view_is_unavailable() {
-        assert!(viewer_key_closes(KeyCode::Left, false));
-        assert!(!viewer_key_closes(KeyCode::Left, true));
     }
 
     #[test]
@@ -289,7 +284,7 @@ mod tests {
 
         assert_eq!(app.focus, Focus::Entries);
         assert_eq!(app.selected_entry_index, 0);
-        assert!(app.viewer().is_none());
+        assert!(!app.entry_view_expanded);
     }
 
     #[test]
@@ -313,7 +308,7 @@ mod tests {
 
         assert_eq!(app.focus, Focus::Entries);
         assert_eq!(app.selected_entry_index, 0);
-        assert!(app.viewer().is_none());
+        assert!(!app.entry_view_expanded);
     }
 
     #[test]
@@ -337,7 +332,7 @@ mod tests {
 
         assert_eq!(app.focus, Focus::Entries);
         assert_eq!(app.selected_entry_index, 0);
-        assert!(app.viewer().is_none());
+        assert!(!app.entry_view_expanded);
     }
 
     #[test]
@@ -362,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn viewer_wheel_scrolls_and_clicks_do_not_close() {
+    fn expanded_entry_wheel_scrolls_and_clicks_do_not_close() {
         let mut app = app_with_entries(1);
         view_selected(&mut app).unwrap();
 
@@ -372,7 +367,7 @@ mod tests {
             Rect::new(0, 0, 80, 20),
         )
         .unwrap();
-        assert_eq!(app.viewer().unwrap().scroll, 1);
+        assert_eq!(app.scroll.entry_view, 1);
 
         handle_mouse_in_area(
             &mut app,
@@ -380,6 +375,6 @@ mod tests {
             Rect::new(0, 0, 80, 20),
         )
         .unwrap();
-        assert!(app.viewer().is_some());
+        assert!(app.entry_view_expanded);
     }
 }

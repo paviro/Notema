@@ -9,8 +9,8 @@ use crate::tui::{
 };
 
 use super::actions::{
-    create_entry_in_selected_journal, delete_selected, edit_selected, edit_viewer_entry,
-    submit_new_journal, view_selected,
+    create_entry_in_selected_journal, delete_selected, edit_selected, submit_new_journal,
+    view_selected,
 };
 
 pub(crate) fn handle_key(
@@ -22,8 +22,8 @@ pub(crate) fn handle_key(
     let entry_view_available = entry_view_is_available(width);
     app.normalize_focus(entry_view_available);
 
-    if app.viewer().is_some() {
-        handle_viewer_key(terminal, app, key, entry_view_available)?;
+    if app.entry_view_expanded {
+        handle_expanded_entry_key(terminal, app, key)?;
         return Ok(false);
     }
 
@@ -214,50 +214,28 @@ pub(super) fn handle_enter(app: &mut App, entry_view_available: bool) -> AppResu
     Ok(())
 }
 
-fn handle_viewer_key(
+fn handle_expanded_entry_key(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     key: KeyEvent,
-    entry_view_available: bool,
 ) -> AppResult<()> {
-    if viewer_key_closes(key.code, entry_view_available) {
-        app.close_overlay();
-        return Ok(());
-    }
-
-    if matches!(key.code, KeyCode::Char('e')) {
-        edit_viewer_entry(terminal, app)?;
-        return Ok(());
-    }
-
-    let Some(viewer) = app.viewer_mut() else {
-        return Ok(());
-    };
-
     match key.code {
-        KeyCode::Up | KeyCode::Char('k') => {
-            viewer.scroll = viewer.scroll.saturating_sub(1);
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Left => {
+            app.entry_view_expanded = false;
+            app.focus = Focus::Entries;
         }
-        KeyCode::Down | KeyCode::Char('j') => {
-            viewer.scroll = viewer.scroll.saturating_add(1);
+        KeyCode::Up | KeyCode::Char('k') => app.scroll_entry_view(-1),
+        KeyCode::Down | KeyCode::Char('j') => app.scroll_entry_view(1),
+        KeyCode::PageUp => app.page_entry_view(-1),
+        KeyCode::PageDown => app.page_entry_view(1),
+        KeyCode::Home => app.scroll.entry_view = 0,
+        KeyCode::End => app.scroll.entry_view = u16::MAX,
+        KeyCode::Char('e') if app.has_selected_entry_target() => {
+            edit_selected(terminal, app)?;
         }
-        KeyCode::PageUp => {
-            viewer.scroll = viewer.scroll.saturating_sub(10);
-        }
-        KeyCode::PageDown => {
-            viewer.scroll = viewer.scroll.saturating_add(10);
-        }
-        KeyCode::Home => viewer.scroll = 0,
-        KeyCode::End => viewer.scroll = u16::MAX,
         _ => {}
     }
-
     Ok(())
-}
-
-pub(super) fn viewer_key_closes(key: KeyCode, entry_view_available: bool) -> bool {
-    matches!(key, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q'))
-        || (key == KeyCode::Left && !entry_view_available)
 }
 
 fn handle_new_journal_input(app: &mut App, key: KeyEvent) -> AppResult<()> {

@@ -1,17 +1,15 @@
 use crate::{
     AppResult, crypto,
-    markdown::split_front_matter,
     storage::{
         create_encrypted_entry, create_entry, create_journal, edit_encrypted_entry,
-        is_encrypted_entry_file, move_entry_to_trash, open_editor,
-        read_entry_content_with_identity, set_updated_at_now,
+        is_encrypted_entry_file, move_entry_to_trash, open_editor, set_updated_at_now,
     },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, path::Path};
 
 use super::terminal::suspend_terminal;
-use crate::tui::app::{App, MarkdownView};
+use crate::tui::app::{App, Focus};
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -36,30 +34,6 @@ fn edit_entry_at(terminal: &mut Term, app: &App, path: &Path, editor: &str) -> A
             set_updated_at_now(path)
         }
     })
-}
-
-/// Read an entry's body (decrypting when needed), stripped of front matter.
-fn entry_view_body(app: &App, path: &Path) -> AppResult<String> {
-    let content = read_entry_content_with_identity(path, app.unlocked_identity.as_ref())?;
-    let (_, body) = split_front_matter(&content);
-    Ok(body.trim_start().to_string())
-}
-
-pub(super) fn edit_viewer_entry(terminal: &mut Term, app: &mut App) -> AppResult<()> {
-    let Some(viewer) = app.viewer() else {
-        return Ok(());
-    };
-
-    let path = viewer.path.clone();
-    if !ensure_identity_available(app, is_encrypted_entry_file(&path)) {
-        return Ok(());
-    }
-    let editor = app.config.editor.clone();
-    edit_entry_at(terminal, app, &path, &editor)?;
-    refresh_viewer(app)?;
-    app.refresh()?;
-    app.set_status(format!("Edited {}", path.display()));
-    Ok(())
 }
 
 pub(super) fn submit_new_journal(app: &mut App) -> AppResult<()> {
@@ -144,40 +118,11 @@ pub(super) fn view_selected(app: &mut App) -> AppResult<()> {
     let Some(target) = app.selected_entry_target() else {
         return Ok(());
     };
-
     if !ensure_identity_available(app, is_encrypted_entry_file(&target.path)) {
         return Ok(());
     }
-
-    let title = app
-        .selected_entry_view()
-        .map(|(title, _)| title)
-        .unwrap_or_else(|| target.title.clone());
-    let content = entry_view_body(app, &target.path)?;
-    app.open_viewer(MarkdownView {
-        title,
-        path: target.path,
-        content,
-        scroll: 0,
-    });
-    Ok(())
-}
-
-fn refresh_viewer(app: &mut App) -> AppResult<()> {
-    let Some(path) = app.viewer().map(|viewer| viewer.path.clone()) else {
-        return Ok(());
-    };
-
-    if !ensure_identity_available(app, is_encrypted_entry_file(&path)) {
-        return Ok(());
-    }
-
-    let content = entry_view_body(app, &path)?;
-    let Some(viewer) = app.viewer_mut() else {
-        return Ok(());
-    };
-    viewer.content = content;
-    viewer.scroll = 0;
+    app.entry_view_expanded = true;
+    app.focus = Focus::EntryView;
     Ok(())
 }
 
@@ -233,6 +178,6 @@ mod tests {
         view_selected(&mut app).unwrap();
 
         assert_eq!(app.status(), "Encryption identity not available");
-        assert!(app.viewer().is_none());
+        assert!(!app.entry_view_expanded);
     }
 }
