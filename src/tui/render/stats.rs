@@ -13,7 +13,7 @@ use crate::{
 };
 
 pub(crate) fn draw_journal_stats(frame: &mut Frame<'_>, area: Rect, app: &App) {
-    let panel = panel_block("Journal Stats", false);
+    let panel = panel_block("Journal Stats", false, None);
     let inner = panel.inner(area);
     frame.render_widget(panel, area);
 

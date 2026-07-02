@@ -30,10 +30,17 @@ pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &
             app.focus == Focus::EntryView,
         );
     } else {
-        let empty = Paragraph::new("No entry selected")
-            .block(panel_block("Entry", app.focus == Focus::EntryView));
+        let empty = Paragraph::new("No entry selected").block(panel_block(
+            "Entry",
+            app.focus == Focus::EntryView,
+            None,
+        ));
         frame.render_widget(empty, area);
     }
+}
+
+fn word_count(s: &str) -> usize {
+    s.split_whitespace().count()
 }
 
 fn draw_markdown_panel(
@@ -45,7 +52,8 @@ fn draw_markdown_panel(
     requested_scroll: u16,
     focused: bool,
 ) -> u16 {
-    let block = panel_block(title, focused);
+    let wc = word_count(content);
+    let block = panel_block(title, focused, Some(wc));
     let inner = panel_content_inner(block.inner(area));
     let show_tags = !tags.is_empty() && inner.height > TAGS_SECTION_HEIGHT;
 

@@ -1,6 +1,7 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
+    text::Line,
     widgets::{Block, BorderType, Borders},
 };
 
@@ -86,7 +87,7 @@ pub(crate) fn selected_style(selected: bool) -> Style {
     }
 }
 
-pub(crate) fn panel_block(title: &str, focused: bool) -> Block<'static> {
+pub(crate) fn panel_block(title: &str, focused: bool, word_count: Option<usize>) -> Block<'static> {
     let mut block = Block::default()
         .title(panel_title(title, focused))
         .borders(Borders::ALL);
@@ -95,6 +96,10 @@ pub(crate) fn panel_block(title: &str, focused: bool) -> Block<'static> {
         block = block
             .border_type(BorderType::Thick)
             .border_style(Style::default().add_modifier(Modifier::BOLD));
+    }
+
+    if let Some(count) = word_count {
+        block = block.title_bottom(Line::from(format!(" {count} words ")).right_aligned());
     }
 
     block

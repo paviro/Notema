@@ -16,6 +16,7 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, area: Rect, app: &mut App) 
             Mode::Browse => "Entries",
         },
         focused,
+        None,
     );
     let inner = panel_content_inner(block.inner(area));
     let rows = entry_list_rows(app);

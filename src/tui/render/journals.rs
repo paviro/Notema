@@ -12,7 +12,7 @@ use crate::tui::{
 
 pub(crate) fn draw_journals(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     let focused = app.focus == Focus::Journals;
-    let block = panel_block("Journals", focused);
+    let block = panel_block("Journals", focused, None);
     let inner = panel_content_inner(block.inner(area));
     let viewport_height = inner.height;
     app.scroll.journal = clamp_scroll(app.scroll.journal, app.journals.len(), viewport_height);
