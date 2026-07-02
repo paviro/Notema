@@ -36,7 +36,10 @@ pub use create::{
     create_encrypted_entry_with_body_and_feelings, create_entry, create_entry_with_body,
     create_entry_with_body_and_feelings, entry_template,
 };
-pub use edit::{edit_encrypted_entry, move_entry_to_trash, open_editor, set_updated_at_now};
+pub use edit::{
+    edit_encrypted_entry, move_entry_to_trash, open_editor, open_editor_body_only,
+    set_updated_at_now,
+};
 pub use paths::{entry_path, is_encrypted_entry_file, is_entry_file, is_plain_entry_file};
 pub use read::{
     EntryPath, collect_entry_paths, read_entries, read_entry, read_entry_content_with_identity,

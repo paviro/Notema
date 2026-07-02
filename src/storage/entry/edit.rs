@@ -1,7 +1,7 @@
 use super::paths::ENTRY_ID_LEN;
 use crate::{
     AppResult, crypto,
-    markdown::{entry_has_body, set_front_matter_value},
+    markdown::{entry_has_body, set_front_matter_value, split_front_matter},
 };
 use chrono::Local;
 use nanoid::nanoid;
@@ -25,6 +25,25 @@ pub fn open_editor(editor: &str, path: &Path) -> AppResult<()> {
     Ok(())
 }
 
+pub fn open_editor_body_only(editor: &str, path: &Path) -> AppResult<()> {
+    let content = fs::read_to_string(path)?;
+    let (Some(front_matter), body) = split_front_matter(&content) else {
+        return open_editor(editor, path);
+    };
+    let front_matter = front_matter.to_string();
+    let temp_dir = std::env::temp_dir();
+    let temp_path = unique_temp_path(&temp_dir, "body.md");
+    fs::write(&temp_path, body.trim_start_matches('\n'))?;
+    let result = open_editor(editor, &temp_path);
+    if result.is_ok() {
+        let new_body = fs::read_to_string(&temp_path)?;
+        let new_content = format!("---\n{}\n...\n\n{}", front_matter, new_body.trim_start_matches('\n'));
+        fs::write(path, new_content)?;
+    }
+    let _ = fs::remove_file(&temp_path);
+    result
+}
+
 pub fn set_updated_at_now(path: &Path) -> AppResult<()> {
     let content = fs::read_to_string(path)?;
     let updated = set_front_matter_value(&content, "updated_at", &Local::now().to_rfc3339());
@@ -44,7 +63,7 @@ pub fn edit_encrypted_entry(
     let encrypted = unique_temp_path(&temp_dir, "edit.age");
     let result = (|| {
         crypto::decrypt_file(identity, path, &plaintext)?;
-        open_editor(editor, &plaintext)?;
+        open_editor_body_only(editor, &plaintext)?;
         if remove_if_empty && !entry_has_body(&fs::read_to_string(&plaintext)?) {
             let _ = fs::remove_file(path);
             return Ok(());

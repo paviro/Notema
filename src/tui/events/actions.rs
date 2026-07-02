@@ -3,7 +3,7 @@ use crate::{
     markdown::{entry_has_body, set_feelings_in_front_matter, set_mood_in_front_matter, set_tags_in_front_matter},
     storage::{
         create_encrypted_entry, create_entry, create_journal, edit_encrypted_entry,
-        is_encrypted_entry_file, move_entry_to_trash, open_editor,
+        is_encrypted_entry_file, move_entry_to_trash, open_editor_body_only,
         read_entry_content_with_identity, set_updated_at_now,
     },
 };
@@ -40,7 +40,7 @@ fn edit_entry_at(terminal: &mut Term, app: &App, path: &Path, editor: &str) -> A
             )?;
             Ok(path.exists())
         } else {
-            open_editor(editor, path)?;
+            open_editor_body_only(editor, path)?;
             if !entry_has_body(&fs::read_to_string(path)?) {
                 fs::remove_file(path)?;
                 return Ok(false);

@@ -1,4 +1,4 @@
-use super::edit::{edit_encrypted_entry, open_editor, set_updated_at_now};
+use super::edit::{edit_encrypted_entry, open_editor_body_only, set_updated_at_now};
 use super::paths::{ENTRY_ID_LEN, encrypted_entry_path_with_id, entry_path_with_id};
 use crate::{AppResult, crypto, markdown::entry_has_body};
 use chrono::{DateTime, Local};
@@ -23,7 +23,7 @@ pub fn create_entry(root: &Path, journal: &str, editor: &str) -> AppResult<Optio
     let path = create_entry_file(root, journal, now, &content, WriteTarget::Plain, || {
         nanoid!(ENTRY_ID_LEN)
     })?;
-    open_editor(editor, &path)?;
+    open_editor_body_only(editor, &path)?;
     if !entry_has_body(&fs::read_to_string(&path)?) {
         fs::remove_file(&path)?;
         return Ok(None);
