@@ -225,7 +225,7 @@ fn handle_footer_click(
 
 // ── Dialog hint click routing ─────────────────────────────────────────────────
 
-fn hint_segment_at<'a>(hint: &'a str, origin_x: u16, col: u16) -> Option<&'a str> {
+fn hint_segment_at(hint: &str, origin_x: u16, col: u16) -> Option<&str> {
     if col < origin_x {
         return None;
     }
@@ -249,10 +249,10 @@ fn handle_dialog_hint_click(app: &mut App, mouse: MouseEvent, area: Rect) -> App
         let filtered_len = app.edit_tag_state().map_or(0, |s| s.filtered.len());
         let dialog = render::tags_dialog_area(area, filtered_len);
         let inner = render::panel_inner(dialog);
-        if row == inner.y + inner.height.saturating_sub(1) {
-            if let Some(seg) = hint_segment_at(render::tags_dialog_hint(focus), inner.x, col) {
-                dispatch_tags_hint(app, seg)?;
-            }
+        if row == inner.y + inner.height.saturating_sub(1)
+            && let Some(seg) = hint_segment_at(render::tags_dialog_hint(focus), inner.x, col)
+        {
+            dispatch_tags_hint(app, seg)?;
         }
         return Ok(());
     }
@@ -261,10 +261,10 @@ fn handle_dialog_hint_click(app: &mut App, mouse: MouseEvent, area: Rect) -> App
         let all_len = app.edit_feeling_state().map_or(0, |s| s.all_feelings.len());
         let dialog = render::feelings_dialog_area(area, all_len);
         let inner = render::panel_inner(dialog);
-        if row == inner.y + inner.height.saturating_sub(1) {
-            if let Some(seg) = hint_segment_at(render::FEELINGS_HINT, inner.x, col) {
-                dispatch_feelings_hint(app, seg)?;
-            }
+        if row == inner.y + inner.height.saturating_sub(1)
+            && let Some(seg) = hint_segment_at(render::FEELINGS_HINT, inner.x, col)
+        {
+            dispatch_feelings_hint(app, seg)?;
         }
         return Ok(());
     }
@@ -272,10 +272,10 @@ fn handle_dialog_hint_click(app: &mut App, mouse: MouseEvent, area: Rect) -> App
     if app.edit_mood_state().is_some() {
         let dialog = render::mood_dialog_area(area);
         let inner = render::panel_inner(dialog);
-        if row == inner.y + inner.height.saturating_sub(1) {
-            if let Some(seg) = hint_segment_at(render::MOOD_HINT, inner.x, col) {
-                dispatch_mood_hint(app, seg)?;
-            }
+        if row == inner.y + inner.height.saturating_sub(1)
+            && let Some(seg) = hint_segment_at(render::MOOD_HINT, inner.x, col)
+        {
+            dispatch_mood_hint(app, seg)?;
         }
     }
 
@@ -283,16 +283,15 @@ fn handle_dialog_hint_click(app: &mut App, mouse: MouseEvent, area: Rect) -> App
 }
 
 fn dispatch_tags_hint(app: &mut App, seg: &str) -> AppResult<()> {
-    if seg.starts_with("toggle") {
-        if let Some(state) = app.edit_tag_state_mut() {
-            if let Some(&tag_idx) = state.filtered.get(state.cursor) {
-                let tag = state.all_tags[tag_idx].0.to_lowercase();
-                if let Some(pos) = state.selected.iter().position(|t| t == &tag) {
-                    state.selected.remove(pos);
-                } else {
-                    state.selected.push(tag);
-                }
-            }
+    if seg.starts_with("toggle")
+        && let Some(state) = app.edit_tag_state_mut()
+        && let Some(&tag_idx) = state.filtered.get(state.cursor)
+    {
+        let tag = state.all_tags[tag_idx].0.to_lowercase();
+        if let Some(pos) = state.selected.iter().position(|t| t == &tag) {
+            state.selected.remove(pos);
+        } else {
+            state.selected.push(tag);
         }
     } else if seg.starts_with("input") || seg.starts_with("list") {
         if let Some(state) = app.edit_tag_state_mut() {
@@ -306,7 +305,11 @@ fn dispatch_tags_hint(app: &mut App, seg: &str) -> AppResult<()> {
             let tag = state.input.trim().to_lowercase();
             if !tag.is_empty() && !state.selected.contains(&tag) {
                 state.selected.push(tag.clone());
-                if !state.all_tags.iter().any(|(t, _)| t.eq_ignore_ascii_case(&tag)) {
+                if !state
+                    .all_tags
+                    .iter()
+                    .any(|(t, _)| t.eq_ignore_ascii_case(&tag))
+                {
                     state.all_tags.push((tag, 0));
                 }
             }
@@ -314,7 +317,10 @@ fn dispatch_tags_hint(app: &mut App, seg: &str) -> AppResult<()> {
             state.rebuild_filter();
         }
     } else if seg.starts_with("save") {
-        let tags = app.edit_tag_state().map(|s| s.selected.clone()).unwrap_or_default();
+        let tags = app
+            .edit_tag_state()
+            .map(|s| s.selected.clone())
+            .unwrap_or_default();
         set_tags_on_entry(app, &tags)?;
         app.close_overlay();
     } else {
@@ -348,18 +354,16 @@ fn dispatch_feelings_hint(app: &mut App, seg: &str) -> AppResult<()> {
 }
 
 fn dispatch_mood_hint(app: &mut App, seg: &str) -> AppResult<()> {
-    if seg.starts_with("decrease") {
-        if let Some(state) = app.edit_mood_state_mut() {
-            if state.draft > -5 {
-                state.draft -= 1;
-            }
-        }
-    } else if seg.starts_with("increase") {
-        if let Some(state) = app.edit_mood_state_mut() {
-            if state.draft < 5 {
-                state.draft += 1;
-            }
-        }
+    if seg.starts_with("decrease")
+        && let Some(state) = app.edit_mood_state_mut()
+        && state.draft > -5
+    {
+        state.draft -= 1;
+    } else if seg.starts_with("increase")
+        && let Some(state) = app.edit_mood_state_mut()
+        && state.draft < 5
+    {
+        state.draft += 1;
     } else if seg.starts_with("save") {
         let mood = app.edit_mood_state().map(|s| s.draft);
         set_mood_on_entry(app, mood)?;

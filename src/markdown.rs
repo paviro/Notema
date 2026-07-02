@@ -194,8 +194,7 @@ mod tests {
 
     #[test]
     fn split_front_matter_parses_toml_delimiters() {
-        let (front_matter, body) =
-            split_front_matter("+++\ntitle = \"A\"\n+++\n\n# Body\n");
+        let (front_matter, body) = split_front_matter("+++\ntitle = \"A\"\n+++\n\n# Body\n");
 
         assert_eq!(front_matter, Some("title = \"A\""));
         assert_eq!(body, "\n# Body\n");
@@ -270,8 +269,7 @@ mod tests {
 
     #[test]
     fn set_front_matter_value_preserves_body_exactly() {
-        let content =
-            "+++\ncreated_at = \"old\"\ntags = []\n+++\n\n# Body\n\nTrailing\n";
+        let content = "+++\ncreated_at = \"old\"\ntags = []\n+++\n\n# Body\n\nTrailing\n";
 
         let updated = set_front_matter_value(content, "updated_at", "new");
 

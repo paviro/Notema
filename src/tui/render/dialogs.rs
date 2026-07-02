@@ -28,7 +28,7 @@ pub(crate) fn tags_dialog_hint(focus: EditTagFocus) -> &'static str {
 
 pub(crate) fn tags_dialog_area(frame_area: Rect, filtered_len: usize) -> Rect {
     const FIXED: u16 = 6;
-    let visible = (filtered_len as u16).min(10).max(1);
+    let visible = (filtered_len as u16).clamp(1, 10);
     let h = (FIXED + visible + 2).min(frame_area.height.saturating_sub(2));
     super::centered_rect_fixed_height(40, h, frame_area)
 }
@@ -183,7 +183,10 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
     lines.push(Line::from(tags_dialog_hint(state.focus)));
 
     frame.render_widget(Clear, area);
-    frame.render_widget(Block::default().title(" Edit Tags ").borders(Borders::ALL), area);
+    frame.render_widget(
+        Block::default().title(" Edit Tags ").borders(Borders::ALL),
+        area,
+    );
     render_lines_in_area(frame, lines, inner);
     render_dialog_scrollbar(frame, area, list_lines, max_visible, scroll);
 }
@@ -193,7 +196,10 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
     let inner = super::panel_inner(area);
 
     frame.render_widget(Clear, area);
-    frame.render_widget(Block::default().title(" Edit Mood ").borders(Borders::ALL), area);
+    frame.render_widget(
+        Block::default().title(" Edit Mood ").borders(Borders::ALL),
+        area,
+    );
 
     let right_label = " Blissful";
 
@@ -202,7 +208,12 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
     if spacer_y < inner.y + inner.height {
         frame.render_widget(
             Paragraph::new(Line::from("")),
-            Rect { x: inner.x, y: spacer_y, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: spacer_y,
+                width: inner.width,
+                height: 1,
+            },
         );
     }
 
@@ -210,7 +221,12 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
     let right_w = right_label.len() as u16;
     let bar_y = inner.y + 1;
     if bar_y < inner.y + inner.height {
-        let bar_rect = Rect { x: inner.x, y: bar_y, width: inner.width, height: 1 };
+        let bar_rect = Rect {
+            x: inner.x,
+            y: bar_y,
+            width: inner.width,
+            height: 1,
+        };
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -227,7 +243,12 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
     // Value number centred below the bar
     let value_y = inner.y + 3;
     if value_y < inner.y + inner.height {
-        let value_rect = Rect { x: inner.x, y: value_y, width: inner.width, height: 1 };
+        let value_rect = Rect {
+            x: inner.x,
+            y: value_y,
+            width: inner.width,
+            height: 1,
+        };
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -247,7 +268,12 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
     if hint_y < inner.y + inner.height {
         frame.render_widget(
             Paragraph::new(Line::from(MOOD_HINT)),
-            Rect { x: inner.x, y: hint_y, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: hint_y,
+                width: inner.width,
+                height: 1,
+            },
         );
     }
 }
@@ -301,7 +327,9 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
 
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Block::default().title(" Edit Feelings ").borders(Borders::ALL),
+        Block::default()
+            .title(" Edit Feelings ")
+            .borders(Borders::ALL),
         area,
     );
     render_lines_in_area(frame, lines, inner);
