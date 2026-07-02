@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget},
+    widgets::{Paragraph, ScrollbarState, Widget},
 };
 use ratatui_markdown::{
     markdown::MarkdownRenderer,
@@ -13,7 +13,7 @@ use ratatui_markdown::{
 
 use crate::tui::{
     app::{App, Focus},
-    render::{panel_block, panel_content_inner, scrollbar_position, viewer_scroll},
+    render::{panel_block, panel_content_inner, render_vertical_scrollbar, scrollbar_position, viewer_scroll},
 };
 
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
@@ -93,13 +93,7 @@ fn draw_markdown_panel(
             .content_length(line_count)
             .viewport_content_length(content_rect.height as usize)
             .position(scrollbar_position(scroll, line_count, content_rect.height));
-        let scrollbar = Scrollbar::default()
-            .orientation(ScrollbarOrientation::VerticalRight)
-            .track_symbol(Some("|"))
-            .thumb_symbol("#")
-            .style(Style::default().add_modifier(Modifier::DIM))
-            .thumb_style(Style::default().add_modifier(Modifier::BOLD));
-        frame.render_stateful_widget(scrollbar, area, &mut state);
+        render_vertical_scrollbar(frame, area, &mut state);
     }
 
     scroll

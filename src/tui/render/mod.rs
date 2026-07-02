@@ -29,7 +29,8 @@ pub(crate) use super::scroll::{
 #[cfg(test)]
 pub(crate) use chrome::panel_title;
 pub(crate) use chrome::{
-    centered_rect, footer_text, panel_block, panel_content_inner, selected_style,
+    centered_rect, footer_text, panel_block, panel_content_inner, render_vertical_scrollbar,
+    selected_style,
 };
 use dialogs::{
     draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_mood_dialog, draw_edit_tags_dialog,

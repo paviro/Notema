@@ -1,8 +1,9 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    Frame,
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Modifier, Style},
     text::Line,
-    widgets::{Block, BorderType, Borders},
+    widgets::{Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
 use crate::tui::app::{App, Focus, Mode};
@@ -124,6 +125,21 @@ pub(crate) fn panel_content_inner(area: Rect) -> Rect {
         width: area.width.saturating_sub(pad * 2).max(1),
         ..area
     }
+}
+
+pub(crate) fn render_vertical_scrollbar(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    state: &mut ScrollbarState,
+) {
+    frame.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight),
+        area.inner(Margin {
+            vertical: 1,
+            horizontal: 0,
+        }),
+        state,
+    );
 }
 
 pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {

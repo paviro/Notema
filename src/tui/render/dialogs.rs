@@ -3,10 +3,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, ScrollbarState, Wrap},
 };
 
-use crate::tui::{render::markdown_panel::MoodBar, state::{EditFeelingState, EditMoodState, EditTagFocus, EditTagState}};
+use crate::tui::{
+    render::{markdown_panel::MoodBar, render_vertical_scrollbar, scrollbar_position},
+    state::{EditFeelingState, EditMoodState, EditTagFocus, EditTagState},
+};
 
 fn centered_rect_with_height(percent_x: u16, height: u16, area: Rect) -> Rect {
     let vertical = Layout::default()
@@ -52,10 +55,10 @@ pub(super) fn draw_new_journal_input(frame: &mut Frame<'_>, input: &str) {
 pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagState) {
     let area_height = frame.area().height;
 
-    // Content: header + blank + N tags + scroll/blank + input + help
+    // Content: header + blank + N tags + input + gap + help
     let max_tags_visible = 10u16;
     let visible_tags = (state.filtered.len() as u16).min(max_tags_visible);
-    let inner_height = 6u16 + visible_tags; // header(1) + blank(1) + tags + scroll(1) + input(1) + gap(1) + help(1)
+    let inner_height = 5u16 + visible_tags; // header(1) + blank(1) + tags + input(1) + gap(1) + help(1)
     let dialog_height = (inner_height + 2).min(area_height.saturating_sub(2)); // + borders, cap at terminal
 
     let area = centered_rect_with_height(40, dialog_height, frame.area());
@@ -124,18 +127,6 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
         }
     }
 
-    // Scroll indicator
-    if list_lines > max_visible {
-        let pct = if list_lines == 0 {
-            0
-        } else {
-            scroll as usize * 100 / list_lines as usize
-        };
-        lines.push(Line::from(format!(" --- {pct}% ---")));
-    } else {
-        lines.push(Line::from(""));
-    }
-
     // Input row
     let input_text = format!(
         "{}Search / new tag: {}",
@@ -177,6 +168,14 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
                 height: 1,
             },
         );
+    }
+
+    if list_lines > max_visible {
+        let mut state = ScrollbarState::default()
+            .content_length(list_lines as usize)
+            .viewport_content_length(max_visible as usize)
+            .position(scrollbar_position(scroll, list_lines as usize, max_visible));
+        render_vertical_scrollbar(frame, area, &mut state);
     }
 }
 
@@ -234,7 +233,7 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
     let area_height = frame.area().height;
     let max_feelings_visible = 12u16;
     let visible_feelings = (state.all_feelings.len() as u16).min(max_feelings_visible);
-    let inner_height = 4u16 + visible_feelings;
+    let inner_height = 3u16 + visible_feelings;
     let dialog_height = (inner_height + 2).min(area_height.saturating_sub(2));
 
     let area = centered_rect_with_height(40, dialog_height, frame.area());
@@ -287,17 +286,6 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
         lines.push(Line::from(Span::styled(text, style)));
     }
 
-    if list_lines > max_visible {
-        let pct = if list_lines == 0 {
-            0
-        } else {
-            scroll as usize * 100 / list_lines as usize
-        };
-        lines.push(Line::from(format!(" --- {pct}% ---")));
-    } else {
-        lines.push(Line::from(""));
-    }
-
     lines.push(Line::from(" toggle (space) | save (enter) | cancel (esc)"));
 
     let block = Block::default()
@@ -320,5 +308,13 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
                 height: 1,
             },
         );
+    }
+
+    if list_lines > max_visible {
+        let mut state = ScrollbarState::default()
+            .content_length(list_lines as usize)
+            .viewport_content_length(max_visible as usize)
+            .position(scrollbar_position(scroll, list_lines as usize, max_visible));
+        render_vertical_scrollbar(frame, area, &mut state);
     }
 }
