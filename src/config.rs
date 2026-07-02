@@ -108,10 +108,10 @@ pub fn expand_tilde(path: PathBuf) -> PathBuf {
         return dirs::home_dir().unwrap_or(path);
     }
 
-    if let Some(rest) = text.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = text.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
     }
 
     path
