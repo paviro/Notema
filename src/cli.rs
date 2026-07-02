@@ -20,6 +20,9 @@ struct Cli {
     #[arg(long, value_name = "NAME")]
     journal: Option<String>,
 
+    #[arg(long, value_name = "TAG")]
+    tag: Vec<String>,
+
     #[arg(long, value_name = "LABEL")]
     feeling: Vec<String>,
 
@@ -54,8 +57,8 @@ pub fn run() -> AppResult<()> {
     if !cli.body.is_empty() || stdin_is_pipe {
         return create_entry_from_command(cli, stdin_is_pipe);
     }
-    if cli.journal.is_some() || !cli.feeling.is_empty() {
-        return Err("--journal and --feeling require entry text or piped stdin".into());
+    if cli.journal.is_some() || !cli.tag.is_empty() || !cli.feeling.is_empty() {
+        return Err("--journal, --tag, and --feeling require entry text or piped stdin".into());
     }
 
     let (config_path, config) = config::load_or_setup_with_path(cli.config.as_deref())?;
@@ -87,6 +90,9 @@ fn validate_no_entry_args(cli: &Cli) -> AppResult<()> {
     if cli.journal.is_some() {
         return Err("command cannot be used with --journal".into());
     }
+    if !cli.tag.is_empty() {
+        return Err("command cannot be used with --tag".into());
+    }
     if !cli.feeling.is_empty() {
         return Err("command cannot be used with --feeling".into());
     }
@@ -115,7 +121,21 @@ fn create_entry_from_command(cli: Cli, stdin_is_pipe: bool) -> AppResult<()> {
         .or(config.default_journal.as_deref())
         .ok_or("no journal specified; pass --journal or set one with `journal default <name>`")?;
     validate_existing_journal(&config.journal_root, journal)?;
-    let feelings = feelings::validate_feelings(cli.feeling.iter().map(String::as_str))?;
+    let tags: Vec<String> = cli
+        .tag
+        .iter()
+        .flat_map(|t| t.split(','))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .collect();
+    let feelings = feelings::validate_feelings(
+        cli.feeling
+            .iter()
+            .flat_map(|f| f.split(','))
+            .map(str::trim)
+            .filter(|f| !f.is_empty()),
+    )?;
 
     let body = if body_from_args {
         cli.body.join(" ")
@@ -131,6 +151,7 @@ fn create_entry_from_command(cli: Cli, stdin_is_pipe: bool) -> AppResult<()> {
             &config.journal_root,
             journal,
             &body,
+            &tags,
             &feelings,
             &paths,
         )?
@@ -139,6 +160,7 @@ fn create_entry_from_command(cli: Cli, stdin_is_pipe: bool) -> AppResult<()> {
             &config.journal_root,
             journal,
             &body,
+            &tags,
             &feelings,
         )?
     };
