@@ -1,7 +1,8 @@
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use ratatui_markdown::{
@@ -14,13 +15,17 @@ use crate::tui::{
     render::{panel_block, panel_content_inner, scrollbar_position, viewer_scroll},
 };
 
+pub(crate) const TAGS_SECTION_HEIGHT: u16 = 2;
+
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     if let Some((title, content)) = app.selected_entry_view() {
+        let tags = app.selected_entry_tags();
         app.scroll.entry_view = draw_markdown_panel(
             frame,
             area,
             &title,
             &content,
+            &tags,
             app.scroll.entry_view,
             app.focus == Focus::EntryView,
         );
@@ -36,27 +41,44 @@ fn draw_markdown_panel(
     area: Rect,
     title: &str,
     content: &str,
+    tags: &[String],
     requested_scroll: u16,
     focused: bool,
 ) -> u16 {
     let block = panel_block(title, focused);
     let inner = panel_content_inner(block.inner(area));
-    let width = inner.width.saturating_sub(1).max(1) as usize;
+    let show_tags = !tags.is_empty() && inner.height > TAGS_SECTION_HEIGHT;
+
+    let (content_rect, tags_rect) = if show_tags {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(TAGS_SECTION_HEIGHT)])
+            .split(inner);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (inner, None)
+    };
+
+    let width = content_rect.width.saturating_sub(1).max(1) as usize;
     let theme = markdown_theme();
     let renderer = MarkdownRenderer::new(width);
     let blocks = renderer.parse(content);
     let lines = renderer.render(&blocks, &theme);
     let line_count = lines.len();
-    let scroll = viewer_scroll(requested_scroll, line_count, inner.height);
+    let scroll = viewer_scroll(requested_scroll, line_count, content_rect.height);
 
     frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), inner);
+    frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), content_rect);
 
-    if line_count > inner.height as usize {
+    if let Some(tags_rect) = tags_rect {
+        draw_tags_section(frame, tags_rect, tags);
+    }
+
+    if line_count > content_rect.height as usize {
         let mut state = ScrollbarState::default()
             .content_length(line_count)
-            .viewport_content_length(inner.height as usize)
-            .position(scrollbar_position(scroll, line_count, inner.height));
+            .viewport_content_length(content_rect.height as usize)
+            .position(scrollbar_position(scroll, line_count, content_rect.height));
         let scrollbar = Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)
             .track_symbol(Some("|"))
@@ -67,6 +89,27 @@ fn draw_markdown_panel(
     }
 
     scroll
+}
+
+fn draw_tags_section(frame: &mut Frame<'_>, area: Rect, tags: &[String]) {
+    let sep = "─".repeat(area.width.saturating_sub(1) as usize);
+    frame.render_widget(
+        Paragraph::new(sep).style(Style::default().add_modifier(Modifier::DIM)),
+        Rect { height: 1, ..area },
+    );
+
+    let tags_line = Line::from(vec![
+        Span::styled("Tags: ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(tags.join(" | ")),
+    ]);
+    frame.render_widget(
+        Paragraph::new(tags_line),
+        Rect {
+            y: area.y + 1,
+            height: area.height.saturating_sub(1),
+            ..area
+        },
+    );
 }
 
 pub(crate) fn markdown_theme() -> ThemeConfig {

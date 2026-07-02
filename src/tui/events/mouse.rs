@@ -97,6 +97,13 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
         && render::point_in_rect(area, mouse.column, mouse.row)
         && app.has_selected_entry_target()
     {
+        if let Some(tag) = {
+            let tags = app.selected_entry_tags();
+            render::tag_at_point(area, mouse.column, mouse.row, &tags)
+        } {
+            app.begin_tag_search(&tag);
+            return Ok(());
+        }
         app.focus = Focus::EntryView;
     }
 

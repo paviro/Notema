@@ -20,7 +20,9 @@ pub(crate) use super::entry_rows::{
 pub(crate) use super::entry_rows::{
     ensure_entry_visible, entry_row_metadata, total_entry_row_height,
 };
-pub(crate) use super::hit_test::{entry_index_at, journal_index_at, panel_inner, point_in_rect};
+pub(crate) use super::hit_test::{
+    entry_index_at, journal_index_at, panel_inner, point_in_rect, tag_at_point,
+};
 pub(crate) use super::scroll::{
     clamp_scroll, ensure_index_visible, scroll_offset, scrollbar_position, viewer_scroll,
 };
@@ -33,6 +35,7 @@ use dialogs::{draw_confirm_delete, draw_new_journal_input};
 use entries::draw_entry_list;
 use journals::draw_journals;
 pub(crate) use layout::{TuiLayout, tui_layout};
+pub(crate) use markdown_panel::TAGS_SECTION_HEIGHT;
 use markdown_panel::draw_selected_entry_view;
 #[cfg(test)]
 pub(crate) use markdown_panel::markdown_theme;
@@ -559,6 +562,7 @@ mod tests {
             updated_at: None,
             title: "Title".to_string(),
             preview: "Preview".to_string(),
+            tags: Vec::new(),
             content: String::new(),
         };
 
@@ -589,6 +593,7 @@ mod tests {
             updated_at: None,
             title: "[locked] Encrypted entry".to_string(),
             preview: "Encryption identity not available".to_string(),
+            tags: Vec::new(),
             content: "Encryption identity not available".to_string(),
         };
 
@@ -618,6 +623,7 @@ mod tests {
             updated_at: None,
             title: "Title".to_string(),
             preview: String::new(),
+            tags: Vec::new(),
             content: String::new(),
         };
 
@@ -636,6 +642,7 @@ mod tests {
             updated_at: None,
             title: "Title".to_string(),
             preview: String::new(),
+            tags: Vec::new(),
             content: String::new(),
         };
 

@@ -44,6 +44,7 @@ mod tests {
             updated_at: None,
             title: "Title".to_string(),
             preview: String::new(),
+            tags: Vec::new(),
             content: String::new(),
         }
     }

@@ -18,6 +18,7 @@ pub struct Entry {
     pub updated_at: Option<String>,
     pub title: String,
     pub preview: String,
+    pub tags: Vec<String>,
     pub content: String,
 }
 

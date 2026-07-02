@@ -220,6 +220,24 @@ impl App {
         }
     }
 
+    pub(crate) fn selected_entry_tags(&self) -> Vec<String> {
+        match self.mode {
+            Mode::Search => self
+                .selected_search_hit()
+                .and_then(|hit| {
+                    self.entries
+                        .iter()
+                        .find(|entry| entry.path == hit.path)
+                        .map(|entry| entry.tags.clone())
+                })
+                .unwrap_or_default(),
+            Mode::Browse => self
+                .selected_entry()
+                .map(|entry| entry.tags.clone())
+                .unwrap_or_default(),
+        }
+    }
+
     pub(crate) fn has_selected_entry_target(&self) -> bool {
         self.selected_entry_target().is_some()
     }
@@ -304,6 +322,19 @@ impl App {
         }
     }
 
+    pub(crate) fn begin_tag_search(&mut self, tag: &str) {
+        self.search.scope = self
+            .selected_journal()
+            .map(|journal| SearchScope::CurrentJournal(journal.name.clone()))
+            .unwrap_or(SearchScope::AllJournals);
+        self.mode = Mode::Search;
+        self.focus = Focus::Entries;
+        self.search.query = format!("tags:{tag}");
+        self.search.hits = self.search_results_by_tag(tag);
+        self.selected_entry_index = 0;
+        self.scroll.reset_entry();
+    }
+
     pub(crate) fn begin_search(&mut self) {
         self.search.scope = if self.focus == Focus::Journals {
             SearchScope::AllJournals
@@ -350,11 +381,39 @@ impl App {
     }
 
     fn search_results(&self) -> Vec<SearchHit> {
-        search_loaded_entries(
-            &self.entries,
-            &self.search.query,
-            self.search.scope.filter(),
-        )
+        if let Some(tag) = self.search.query.strip_prefix("tags:") {
+            self.search_results_by_tag(tag.trim())
+        } else {
+            search_loaded_entries(
+                &self.entries,
+                &self.search.query,
+                self.search.scope.filter(),
+            )
+        }
+    }
+
+    fn search_results_by_tag(&self, tag: &str) -> Vec<SearchHit> {
+        let tag_lower = tag.to_lowercase();
+        self.entries
+            .iter()
+            .filter(|entry| {
+                entry.encryption_state != EntryEncryptionState::EncryptedLocked
+                    && entry
+                        .tags
+                        .iter()
+                        .any(|t| t.to_lowercase().contains(&tag_lower))
+            })
+            .filter(|entry| match self.search.scope {
+                SearchScope::AllJournals => true,
+                SearchScope::CurrentJournal(ref journal) => entry.journal == *journal,
+            })
+            .map(|entry| SearchHit {
+                path: entry.path.clone(),
+                journal: entry.journal.clone(),
+                title: entry.title.clone(),
+                preview: entry.preview.clone(),
+            })
+            .collect()
     }
 
     pub(crate) fn scroll_entry_view(&mut self, delta: i16) {

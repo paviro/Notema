@@ -12,6 +12,31 @@ pub fn split_front_matter(content: &str) -> (Option<&str>, &str) {
     (None, content)
 }
 
+pub fn front_matter_tags(front_matter: &str) -> Vec<String> {
+    front_matter
+        .lines()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            let list = trimmed.strip_prefix("tags:")?.trim();
+            if list.is_empty() || list == "[]" {
+                return Some(Vec::new());
+            }
+            let inner = list
+                .strip_prefix('[')
+                .and_then(|s| s.strip_suffix(']'))
+                .unwrap_or(list);
+            let tags: Vec<String> = inner
+                .split(',')
+                .filter_map(|t| {
+                    let t = t.trim().trim_matches('"').trim().to_string();
+                    if t.is_empty() { None } else { Some(t) }
+                })
+                .collect();
+            Some(tags)
+        })
+        .unwrap_or_default()
+}
+
 pub fn front_matter_value(front_matter: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}:");
     front_matter.lines().find_map(|line| {
