@@ -7,6 +7,7 @@ use ratatui::{
 
 use super::{
     app::{App, Focus, Mode},
+    render::selected_style,
     scroll::clamp_scroll,
 };
 
@@ -32,7 +33,8 @@ impl EntryListRow {
 pub(crate) fn entry_list_rows(app: &App) -> Vec<EntryListRow> {
     match app.mode {
         Mode::Search => app
-            .search_hits
+            .search
+            .hits
             .iter()
             .enumerate()
             .map(|(index, hit)| EntryListRow {
@@ -233,12 +235,4 @@ pub(crate) fn selected_entry_row_span(
 
 pub(crate) fn total_entry_row_height(rows: &[EntryRowMeta]) -> usize {
     rows.iter().map(|row| row.height as usize).sum()
-}
-
-fn selected_style(selected: bool) -> Style {
-    if selected {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    }
 }

@@ -154,7 +154,7 @@ fn set_default_journal_persists_to_config() {
     let output = Command::new(journal_bin())
         .arg("--config")
         .arg(&config_path)
-        .arg("--set-default")
+        .arg("default")
         .arg("work")
         .output()
         .unwrap();

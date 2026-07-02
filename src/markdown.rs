@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 pub fn split_front_matter(content: &str) -> (Option<&str>, &str) {
     let Some(rest) = content.strip_prefix("---\n") else {
         return (None, content);
@@ -22,37 +20,6 @@ pub fn front_matter_value(front_matter: &str, key: &str) -> Option<String> {
     })
 }
 
-pub fn first_markdown_heading(body: &str) -> Option<&str> {
-    body.lines().find_map(|line| {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with('#') {
-            return None;
-        }
-
-        let after_hashes = trimmed.trim_start_matches('#');
-        if after_hashes.starts_with(' ') {
-            let title = after_hashes.trim();
-            if !title.is_empty() {
-                return Some(title);
-            }
-        }
-
-        None
-    })
-}
-
-pub fn body_preview(body: &str) -> String {
-    body.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("---"))
-        .map(|line| line.trim_start_matches('#').trim())
-        .find(|line| !line.is_empty())
-        .unwrap_or("")
-        .chars()
-        .take(120)
-        .collect()
-}
-
 pub fn display_title_and_preview(body: &str, timestamp_fallback: &str) -> (String, String) {
     let mut lines = body.lines().filter_map(display_line_text);
     let title = lines
@@ -63,19 +30,6 @@ pub fn display_title_and_preview(body: &str, timestamp_fallback: &str) -> (Strin
     let preview = lines.next().map(truncate_preview).unwrap_or_default();
 
     (title, preview)
-}
-
-pub fn display_title<'a>(body: &'a str, timestamp_fallback: &'a str) -> Cow<'a, str> {
-    if let Some(heading) = first_markdown_heading(body) {
-        return Cow::Borrowed(heading);
-    }
-
-    let preview = body_preview(body);
-    if preview.is_empty() {
-        Cow::Borrowed(timestamp_fallback)
-    } else {
-        Cow::Owned(preview)
-    }
 }
 
 pub(crate) fn set_front_matter_value(content: &str, key: &str, value: &str) -> String {
@@ -142,25 +96,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn heading_becomes_display_title() {
-        assert_eq!(
-            first_markdown_heading("Intro\n\n## Real Title\nBody"),
-            Some("Real Title")
-        );
+    fn display_title_uses_heading_then_next_line_as_preview() {
+        let (title, preview) = display_title_and_preview("## Real Title\nBody text", "timestamp");
+
+        assert_eq!(title, "Real Title");
+        assert_eq!(preview, "Body text");
     }
 
     #[test]
-    fn body_preview_is_title_fallback_when_no_heading_exists() {
-        let title = display_title("A plain first sentence.\nMore text.", "timestamp");
-
-        assert_eq!(title, "A plain first sentence.");
-    }
-
-    #[test]
-    fn empty_body_falls_back_to_creation_timestamp() {
-        let title = display_title("\n\n", "2026-07-01T23:30:00+02:00");
+    fn display_title_falls_back_to_timestamp_when_empty() {
+        let (title, preview) = display_title_and_preview("\n\n", "2026-07-01T23:30:00+02:00");
 
         assert_eq!(title, "2026-07-01T23:30:00+02:00");
+        assert_eq!(preview, "");
     }
 
     #[test]

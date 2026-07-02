@@ -20,14 +20,14 @@ pub(crate) fn handle_mouse(
 }
 
 pub(super) fn handle_mouse_in_area(app: &mut App, mouse: MouseEvent, area: Rect) -> AppResult<()> {
-    if app.new_journal_input.is_some() || app.confirm_delete {
+    if app.new_journal_input().is_some() || app.is_confirming_delete() {
         return Ok(());
     }
 
     app.normalize_focus(entry_view_is_available(area.width));
     let layout = render::tui_layout(area, app);
 
-    if app.viewer.is_some() {
+    if app.viewer().is_some() {
         match mouse.kind {
             MouseEventKind::ScrollUp => scroll_viewer(app, -1),
             MouseEventKind::ScrollDown => scroll_viewer(app, 1),
@@ -60,7 +60,7 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
             area,
             mouse.column,
             mouse.row,
-            app.journal_scroll,
+            app.scroll.journal,
             app.journals.len(),
         ) {
             app.select_journal(index);
@@ -74,7 +74,7 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
         app.focus = Focus::Entries;
         let rows = render::entry_row_metadata(app);
         if let Some(index) =
-            render::entry_index_at(area, mouse.column, mouse.row, app.entry_scroll, &rows)
+            render::entry_index_at(area, mouse.column, mouse.row, app.scroll.entry, &rows)
         {
             app.select_entry_index(index);
             if !layout.entry_view_visible {
@@ -107,8 +107,8 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
         && render::point_in_rect(area, mouse.column, mouse.row)
     {
         let rows = render::entry_row_metadata(app);
-        app.entry_scroll = render::scroll_offset(
-            app.entry_scroll,
+        app.scroll.entry = render::scroll_offset(
+            app.scroll.entry,
             delta,
             render::total_entry_row_height(&rows),
             render::panel_inner(area).height,
@@ -120,8 +120,8 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
         && let Some(area) = layout.journals
         && render::point_in_rect(area, mouse.column, mouse.row)
     {
-        app.journal_scroll = render::scroll_offset(
-            app.journal_scroll,
+        app.scroll.journal = render::scroll_offset(
+            app.scroll.journal,
             delta,
             app.journals.len(),
             render::panel_inner(area).height,
@@ -130,7 +130,7 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
 }
 
 fn scroll_viewer(app: &mut App, delta: i16) {
-    let Some(viewer) = app.viewer.as_mut() else {
+    let Some(viewer) = app.viewer_mut() else {
         return;
     };
 

@@ -8,38 +8,54 @@ use crate::{
     },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::io;
+use std::{io, path::Path};
 
 use super::terminal::suspend_terminal;
 use crate::tui::app::{App, MarkdownView};
 
-pub(super) fn edit_viewer_entry(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> AppResult<()> {
-    let Some(viewer) = app.viewer.as_ref() else {
+type Term = Terminal<CrosstermBackend<io::Stdout>>;
+
+/// Returns `true` if the caller may proceed. When an encryption identity is
+/// required but not unlocked, sets a status message and returns `false`.
+fn ensure_identity_available(app: &mut App, needs_identity: bool) -> bool {
+    if needs_identity && app.unlocked_identity.is_none() {
+        app.set_status("Encryption identity not available");
+        return false;
+    }
+    true
+}
+
+/// Open the entry at `path` in the editor, transparently handling encrypted
+/// entries (decrypt to a temp file, edit, re-encrypt) and plaintext ones.
+fn edit_entry_at(terminal: &mut Term, app: &App, path: &Path, editor: &str) -> AppResult<()> {
+    suspend_terminal(terminal, || {
+        if is_encrypted_entry_file(path) {
+            edit_encrypted_entry(path, editor, &app.encryption_paths, unlocked_identity(app)?)
+        } else {
+            open_editor(editor, path)?;
+            set_updated_at_now(path)
+        }
+    })
+}
+
+/// Read an entry's body (decrypting when needed), stripped of front matter.
+fn entry_view_body(app: &App, path: &Path) -> AppResult<String> {
+    let content = read_entry_content_with_identity(path, app.unlocked_identity.as_ref())?;
+    let (_, body) = split_front_matter(&content);
+    Ok(body.trim_start().to_string())
+}
+
+pub(super) fn edit_viewer_entry(terminal: &mut Term, app: &mut App) -> AppResult<()> {
+    let Some(viewer) = app.viewer() else {
         return Ok(());
     };
 
     let path = viewer.path.clone();
-    if is_encrypted_entry_file(&path) && app.unlocked_identity.is_none() {
-        app.set_status("Encryption identity not available");
+    if !ensure_identity_available(app, is_encrypted_entry_file(&path)) {
         return Ok(());
     }
     let editor = app.config.editor.clone();
-    suspend_terminal(terminal, || {
-        if is_encrypted_entry_file(&path) {
-            edit_encrypted_entry(
-                &path,
-                &editor,
-                &app.encryption_paths,
-                unlocked_identity(app)?,
-            )
-        } else {
-            open_editor(&editor, &path)?;
-            set_updated_at_now(&path)
-        }
-    })?;
+    edit_entry_at(terminal, app, &path, &editor)?;
     refresh_viewer(app)?;
     app.refresh()?;
     app.set_status(format!("Edited {}", path.display()));
@@ -48,14 +64,13 @@ pub(super) fn edit_viewer_entry(
 
 pub(super) fn submit_new_journal(app: &mut App) -> AppResult<()> {
     let value = app
-        .new_journal_input
-        .as_deref()
+        .new_journal_input()
         .unwrap_or_default()
         .trim()
         .to_string();
     if value.is_empty() {
         app.set_status("Nothing added");
-        app.new_journal_input = None;
+        app.close_overlay();
         return Ok(());
     }
 
@@ -63,12 +78,12 @@ pub(super) fn submit_new_journal(app: &mut App) -> AppResult<()> {
     app.refresh()?;
     app.select_journal_by_name(&journal.name);
     app.set_status(format!("Created journal {}", journal.name));
-    app.new_journal_input = None;
+    app.close_overlay();
     Ok(())
 }
 
 pub(super) fn create_entry_in_selected_journal(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut Term,
     app: &mut App,
 ) -> AppResult<()> {
     if app.selected_journal().is_some() {
@@ -79,10 +94,7 @@ pub(super) fn create_entry_in_selected_journal(
     }
 }
 
-fn new_entry(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> AppResult<()> {
+fn new_entry(terminal: &mut Term, app: &mut App) -> AppResult<()> {
     let Some(journal) = app.selected_journal().cloned() else {
         app.set_status("No journal selected");
         return Ok(());
@@ -91,8 +103,7 @@ fn new_entry(
     let root = app.config.journal_root.clone();
     let editor = app.config.editor.clone();
     let journal_name = journal.name;
-    if crypto::should_encrypt(&app.encryption_paths) && app.unlocked_identity.is_none() {
-        app.set_status("Encryption identity not available");
+    if !ensure_identity_available(app, crypto::should_encrypt(&app.encryption_paths)) {
         return Ok(());
     }
     suspend_terminal(terminal, || {
@@ -113,33 +124,17 @@ fn new_entry(
     Ok(())
 }
 
-pub(super) fn edit_selected(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> AppResult<()> {
+pub(super) fn edit_selected(terminal: &mut Term, app: &mut App) -> AppResult<()> {
     let Some(target) = app.selected_entry_target() else {
         return Ok(());
     };
 
-    if is_encrypted_entry_file(&target.path) && app.unlocked_identity.is_none() {
-        app.set_status("Encryption identity not available");
+    if !ensure_identity_available(app, is_encrypted_entry_file(&target.path)) {
         return Ok(());
     }
 
     let editor = app.config.editor.clone();
-    suspend_terminal(terminal, || {
-        if is_encrypted_entry_file(&target.path) {
-            edit_encrypted_entry(
-                &target.path,
-                &editor,
-                &app.encryption_paths,
-                unlocked_identity(app)?,
-            )
-        } else {
-            open_editor(&editor, &target.path)?;
-            set_updated_at_now(&target.path)
-        }
-    })?;
+    edit_entry_at(terminal, app, &target.path, &editor)?;
     app.set_status(format!("Edited {}", target.path.display()));
     app.refresh()?;
     Ok(())
@@ -150,8 +145,7 @@ pub(super) fn view_selected(app: &mut App) -> AppResult<()> {
         return Ok(());
     };
 
-    if is_encrypted_entry_file(&target.path) && app.unlocked_identity.is_none() {
-        app.set_status("Encryption identity not available");
+    if !ensure_identity_available(app, is_encrypted_entry_file(&target.path)) {
         return Ok(());
     }
 
@@ -159,33 +153,30 @@ pub(super) fn view_selected(app: &mut App) -> AppResult<()> {
         .selected_entry_view()
         .map(|(title, _)| title)
         .unwrap_or_else(|| target.title.clone());
-    let content = read_entry_content_with_identity(&target.path, app.unlocked_identity.as_ref())?;
-    let (_, body) = split_front_matter(&content);
-    app.viewer = Some(MarkdownView {
+    let content = entry_view_body(app, &target.path)?;
+    app.open_viewer(MarkdownView {
         title,
         path: target.path,
-        content: body.trim_start().to_string(),
+        content,
         scroll: 0,
     });
     Ok(())
 }
 
 fn refresh_viewer(app: &mut App) -> AppResult<()> {
-    let Some(path) = app.viewer.as_ref().map(|viewer| viewer.path.clone()) else {
+    let Some(path) = app.viewer().map(|viewer| viewer.path.clone()) else {
         return Ok(());
     };
 
-    if is_encrypted_entry_file(&path) && app.unlocked_identity.is_none() {
-        app.set_status("Encryption identity not available");
+    if !ensure_identity_available(app, is_encrypted_entry_file(&path)) {
         return Ok(());
     }
 
-    let content = read_entry_content_with_identity(&path, app.unlocked_identity.as_ref())?;
-    let (_, body) = split_front_matter(&content);
-    let Some(viewer) = app.viewer.as_mut() else {
+    let content = entry_view_body(app, &path)?;
+    let Some(viewer) = app.viewer_mut() else {
         return Ok(());
     };
-    viewer.content = body.trim_start().to_string();
+    viewer.content = content;
     viewer.scroll = 0;
     Ok(())
 }
@@ -241,7 +232,7 @@ mod tests {
 
         view_selected(&mut app).unwrap();
 
-        assert_eq!(app.status, "Encryption identity not available");
-        assert!(app.viewer.is_none());
+        assert_eq!(app.status(), "Encryption identity not available");
+        assert!(app.viewer().is_none());
     }
 }

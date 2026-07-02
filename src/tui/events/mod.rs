@@ -108,7 +108,7 @@ mod tests {
 
         handle_right(&mut app, false).unwrap();
 
-        assert!(app.viewer.is_some());
+        assert!(app.viewer().is_some());
         assert_eq!(app.focus, Focus::Entries);
     }
 
@@ -129,7 +129,7 @@ mod tests {
 
         handle_right(&mut app, false).unwrap();
 
-        assert_eq!(app.viewer.as_ref().unwrap().title, "2026-07-01 10:23");
+        assert_eq!(app.viewer().unwrap().title, "2026-07-01 10:23");
     }
 
     #[test]
@@ -145,7 +145,7 @@ mod tests {
 
         handle_right(&mut app, true).unwrap();
 
-        assert!(app.viewer.is_none());
+        assert!(app.viewer().is_none());
         assert_eq!(app.focus, Focus::EntryView);
     }
 
@@ -160,7 +160,7 @@ mod tests {
         let mut app = app_with_journals(&["alpha", "beta"]);
         app.focus = Focus::Journals;
         app.selected_entry_index = 3;
-        app.entry_view_scroll = 10;
+        app.scroll.entry_view = 10;
         let area = Rect::new(0, 0, 120, 20);
         let layout = render::tui_layout(area, &app);
         let journals = render::panel_inner(layout.journals.unwrap());
@@ -178,7 +178,7 @@ mod tests {
 
         assert_eq!(app.selected_journal, 1);
         assert_eq!(app.selected_entry_index, 0);
-        assert_eq!(app.entry_view_scroll, 0);
+        assert_eq!(app.scroll.entry_view, 0);
         assert_eq!(app.focus, Focus::Journals);
     }
 
@@ -244,7 +244,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(app.selected_journal, 0);
-        assert_eq!(app.journal_scroll, 1);
+        assert_eq!(app.scroll.journal, 1);
         assert_eq!(app.focus, Focus::Entries);
     }
 
@@ -264,7 +264,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(app.selected_entry_index, 0);
-        assert_eq!(app.entry_scroll, 1);
+        assert_eq!(app.scroll.entry, 1);
         assert_eq!(app.focus, Focus::Journals);
     }
 
@@ -289,7 +289,7 @@ mod tests {
 
         assert_eq!(app.focus, Focus::Entries);
         assert_eq!(app.selected_entry_index, 0);
-        assert!(app.viewer.is_none());
+        assert!(app.viewer().is_none());
     }
 
     #[test]
@@ -313,7 +313,7 @@ mod tests {
 
         assert_eq!(app.focus, Focus::Entries);
         assert_eq!(app.selected_entry_index, 0);
-        assert!(app.viewer.is_none());
+        assert!(app.viewer().is_none());
     }
 
     #[test]
@@ -337,7 +337,7 @@ mod tests {
 
         assert_eq!(app.focus, Focus::Entries);
         assert_eq!(app.selected_entry_index, 0);
-        assert!(app.viewer.is_none());
+        assert!(app.viewer().is_none());
     }
 
     #[test]
@@ -355,8 +355,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(app.entry_view_scroll, 1);
-        assert_eq!(app.entry_scroll, 0);
+        assert_eq!(app.scroll.entry_view, 1);
+        assert_eq!(app.scroll.entry, 0);
         assert_eq!(app.selected_entry_index, 0);
         assert_eq!(app.focus, Focus::EntryView);
     }
@@ -372,7 +372,7 @@ mod tests {
             Rect::new(0, 0, 80, 20),
         )
         .unwrap();
-        assert_eq!(app.viewer.as_ref().unwrap().scroll, 1);
+        assert_eq!(app.viewer().unwrap().scroll, 1);
 
         handle_mouse_in_area(
             &mut app,
@@ -380,6 +380,6 @@ mod tests {
             Rect::new(0, 0, 80, 20),
         )
         .unwrap();
-        assert!(app.viewer.is_some());
+        assert!(app.viewer().is_some());
     }
 }

@@ -37,12 +37,12 @@ pub(crate) fn draw_markdown_viewer(frame: &mut Frame<'_>, viewer: &mut MarkdownV
 
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     if let Some((title, content)) = app.selected_entry_view() {
-        app.entry_view_scroll = draw_markdown_panel(
+        app.scroll.entry_view = draw_markdown_panel(
             frame,
             area,
             &title,
             &content,
-            app.entry_view_scroll,
+            app.scroll.entry_view,
             app.focus == Focus::EntryView,
         );
     } else {

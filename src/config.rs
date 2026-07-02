@@ -52,10 +52,6 @@ pub fn save_config(path: &Path, config: &Config) -> AppResult<()> {
     Ok(())
 }
 
-pub fn load_or_setup(path_override: Option<&Path>) -> AppResult<Config> {
-    Ok(load_or_setup_with_path(path_override)?.1)
-}
-
 pub fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult<(PathBuf, Config)> {
     let config_path = config_path(path_override)?;
 

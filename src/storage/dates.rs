@@ -1,18 +1,11 @@
 use chrono::{DateTime, Local, NaiveDate};
-use std::path::Path;
 
-use super::Entry;
+use super::{Entry, entry_date_from_path};
 
 pub(crate) fn parse_entry_timestamp(value: &str) -> Option<DateTime<Local>> {
     DateTime::parse_from_rfc3339(value)
         .ok()
         .map(|timestamp| timestamp.with_timezone(&Local))
-}
-
-pub(crate) fn entry_date_from_path(path: &Path) -> Option<NaiveDate> {
-    let stem = path.file_stem()?.to_str()?;
-    let date = stem.get(..10)?;
-    NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()
 }
 
 pub(crate) fn entry_group_date(entry: &Entry) -> Option<NaiveDate> {

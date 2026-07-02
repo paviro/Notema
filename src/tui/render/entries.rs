@@ -14,12 +14,12 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, area: Rect, app: &mut App) 
     };
     let rows = entry_list_rows(app);
     let viewport_height = panel_inner(area).height;
-    app.entry_scroll = clamp_scroll(
-        app.entry_scroll,
+    app.scroll.entry = clamp_scroll(
+        app.scroll.entry,
         total_entry_row_height(&entry_row_metadata(app)),
         viewport_height,
     );
-    let items = visible_entry_items(&rows, app.entry_scroll, viewport_height);
+    let items = visible_entry_items(&rows, app.scroll.entry, viewport_height);
 
     let list = List::new(items).block(panel_block(title, focused));
     frame.render_widget(list, area);

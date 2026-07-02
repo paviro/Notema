@@ -124,7 +124,7 @@ fn decrypt_file_bytes(identity: &UnlockedIdentity, input: &Path) -> AppResult<Ve
     decrypt_bytes_with_identity(&ciphertext, &identity.identity)
 }
 
-fn encrypt_bytes(paths: &EncryptionPaths, plaintext: &[u8]) -> AppResult<Vec<u8>> {
+pub fn encrypt_bytes(paths: &EncryptionPaths, plaintext: &[u8]) -> AppResult<Vec<u8>> {
     let recipient_text = fs::read_to_string(&paths.recipients_file)?;
     let recipient = first_recipient(&recipient_text)?;
     let recipient = x25519::Recipient::from_str(recipient)?;

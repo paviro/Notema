@@ -1,4 +1,5 @@
 mod chrome;
+mod dialogs;
 mod entries;
 mod journals;
 mod layout;
@@ -7,7 +8,7 @@ mod stats;
 
 use ratatui::{
     Frame,
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph},
 };
 
 use super::app::{App, entry_view_is_available};
@@ -25,6 +26,7 @@ pub(crate) use super::scroll::{
 #[cfg(test)]
 pub(crate) use chrome::panel_title;
 pub(crate) use chrome::{centered_rect, footer_text, panel_block, selected_style};
+use dialogs::{draw_confirm_delete, draw_new_journal_input};
 use entries::draw_entry_list;
 use journals::draw_journals;
 pub(crate) use layout::{TuiLayout, tui_layout};
@@ -36,7 +38,7 @@ use stats::draw_journal_stats;
 pub(crate) use stats::{centered_stats_layout, journal_stats};
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
-    if let Some(viewer) = &mut app.viewer {
+    if let Some(viewer) = app.viewer_mut() {
         draw_markdown_viewer(frame, viewer);
         return;
     }
@@ -60,26 +62,12 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::TOP));
     frame.render_widget(footer, layout.footer);
 
-    if app.confirm_delete {
-        let area = centered_rect(50, 20, frame.area());
-        frame.render_widget(Clear, area);
-        let dialog = Paragraph::new("Move selected file to trash? y/n")
-            .block(
-                Block::default()
-                    .title("Confirm Delete")
-                    .borders(Borders::ALL),
-            )
-            .wrap(Wrap { trim: true });
-        frame.render_widget(dialog, area);
+    if app.is_confirming_delete() {
+        draw_confirm_delete(frame);
     }
 
-    if let Some(input) = &app.new_journal_input {
-        let area = centered_rect(60, 20, frame.area());
-        frame.render_widget(Clear, area);
-        let dialog = Paragraph::new(format!("Name: {input}\n\nEnter saves | Esc cancels"))
-            .block(Block::default().title("New Journal").borders(Borders::ALL))
-            .wrap(Wrap { trim: true });
-        frame.render_widget(dialog, area);
+    if let Some(input) = app.new_journal_input() {
+        draw_new_journal_input(frame, input);
     }
 }
 
@@ -500,8 +488,8 @@ mod tests {
         let mut app = app_with_entry();
         app.mode = Mode::Search;
         app.focus = Focus::Entries;
-        app.search_query = "body".to_string();
-        app.search_hits = vec![crate::storage::SearchHit {
+        app.search.query = "body".to_string();
+        app.search.hits = vec![crate::storage::SearchHit {
             path: app.entries[0].path.clone(),
             journal: "work".to_string(),
             title: "A".to_string(),
@@ -521,7 +509,7 @@ mod tests {
     #[test]
     fn scoped_search_hit_labels_omit_journal_prefix() {
         let mut app = app_with_entry();
-        app.search_scope = crate::tui::app::SearchScope::CurrentJournal("work".to_string());
+        app.search.scope = crate::tui::app::SearchScope::CurrentJournal("work".to_string());
         let hit = crate::storage::SearchHit {
             path: app.entries[0].path.clone(),
             journal: "work".to_string(),

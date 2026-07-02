@@ -22,24 +22,24 @@ pub(crate) fn handle_key(
     let entry_view_available = entry_view_is_available(width);
     app.normalize_focus(entry_view_available);
 
-    if app.viewer.is_some() {
+    if app.viewer().is_some() {
         handle_viewer_key(terminal, app, key, entry_view_available)?;
         return Ok(false);
     }
 
-    if app.new_journal_input.is_some() {
+    if app.new_journal_input().is_some() {
         handle_new_journal_input(app, key)?;
         return Ok(false);
     }
 
-    if app.confirm_delete {
+    if app.is_confirming_delete() {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 delete_selected(app)?;
-                app.confirm_delete = false;
+                app.close_overlay();
                 app.refresh()?;
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => app.confirm_delete = false,
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => app.close_overlay(),
             _ => {}
         }
         return Ok(false);
@@ -50,6 +50,10 @@ pub(crate) fn handle_key(
         return Ok(false);
     }
 
+    if handle_entry_view_scroll(app, key.code) {
+        return Ok(false);
+    }
+
     match key.code {
         KeyCode::Char('q') => return Ok(true),
         KeyCode::Char('r') => app.refresh()?,
@@ -57,27 +61,13 @@ pub(crate) fn handle_key(
         KeyCode::Left => move_focus_left(app),
         KeyCode::Right => handle_right(app, entry_view_available)?,
         KeyCode::Enter => handle_enter(app, entry_view_available)?,
-        KeyCode::Up if app.focus == Focus::EntryView => app.scroll_entry_view(-1),
-        KeyCode::Down if app.focus == Focus::EntryView => app.scroll_entry_view(1),
-        KeyCode::Char('k') if app.focus == Focus::EntryView => app.scroll_entry_view(-1),
-        KeyCode::Char('j') if app.focus == Focus::EntryView => app.scroll_entry_view(1),
-        KeyCode::PageUp if app.focus == Focus::EntryView => app.page_entry_view(-1),
-        KeyCode::PageDown if app.focus == Focus::EntryView => app.page_entry_view(1),
-        KeyCode::Home if app.focus == Focus::EntryView => app.entry_view_scroll = 0,
-        KeyCode::End if app.focus == Focus::EntryView => app.entry_view_scroll = u16::MAX,
-        KeyCode::Up => {
-            app.move_selection(-1);
-            keep_selection_visible(terminal, app)?;
-        }
-        KeyCode::Down => {
-            app.move_selection(1);
-            keep_selection_visible(terminal, app)?;
-        }
+        KeyCode::Up => move_selection_visible(terminal, app, -1)?,
+        KeyCode::Down => move_selection_visible(terminal, app, 1)?,
         KeyCode::Char('e') if app.can_act_on_selected_entry() => edit_selected(terminal, app)?,
         KeyCode::Char('v') if app.can_act_on_selected_entry() => view_selected(app)?,
         KeyCode::Char('n') => create_entry_in_selected_journal(terminal, app)?,
         KeyCode::Char('j') | KeyCode::Char('J') => app.begin_new_journal_input(),
-        KeyCode::Char('d') if app.can_act_on_selected_entry() => app.confirm_delete = true,
+        KeyCode::Char('d') if app.can_act_on_selected_entry() => app.begin_confirm_delete(),
         _ => {}
     }
 
@@ -90,6 +80,10 @@ fn handle_search_key(
     key: KeyEvent,
     entry_view_available: bool,
 ) -> AppResult<()> {
+    if handle_entry_view_scroll(app, key.code) {
+        return Ok(());
+    }
+
     match key.code {
         KeyCode::Esc => app.exit_search(),
         KeyCode::Left if app.focus == Focus::EntryView => app.focus = Focus::Entries,
@@ -103,14 +97,6 @@ fn handle_search_key(
         KeyCode::Right if app.focus == Focus::Entries && entry_view_available => {
             app.focus = Focus::EntryView;
         }
-        KeyCode::Up if app.focus == Focus::EntryView => app.scroll_entry_view(-1),
-        KeyCode::Down if app.focus == Focus::EntryView => app.scroll_entry_view(1),
-        KeyCode::Char('k') if app.focus == Focus::EntryView => app.scroll_entry_view(-1),
-        KeyCode::Char('j') if app.focus == Focus::EntryView => app.scroll_entry_view(1),
-        KeyCode::PageUp if app.focus == Focus::EntryView => app.page_entry_view(-1),
-        KeyCode::PageDown if app.focus == Focus::EntryView => app.page_entry_view(1),
-        KeyCode::Home if app.focus == Focus::EntryView => app.entry_view_scroll = 0,
-        KeyCode::End if app.focus == Focus::EntryView => app.entry_view_scroll = u16::MAX,
         KeyCode::Enter if app.can_act_on_selected_entry() => view_selected(app)?,
         KeyCode::Char('e') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             edit_selected(terminal, app)?
@@ -119,28 +105,48 @@ fn handle_search_key(
             view_selected(app)?
         }
         KeyCode::Char('d') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
-            app.confirm_delete = true
+            app.begin_confirm_delete()
         }
         KeyCode::Backspace if app.focus == Focus::Entries => {
-            app.search_query.pop();
+            app.search.query.pop();
             app.update_search_results();
         }
         KeyCode::Char(ch) if app.focus == Focus::Entries => {
-            app.search_query.push(ch);
+            app.search.query.push(ch);
             app.update_search_results();
         }
-        KeyCode::Up => {
-            app.move_selection(-1);
-            keep_selection_visible(terminal, app)?;
-        }
-        KeyCode::Down => {
-            app.move_selection(1);
-            keep_selection_visible(terminal, app)?;
-        }
+        KeyCode::Up => move_selection_visible(terminal, app, -1)?,
+        KeyCode::Down => move_selection_visible(terminal, app, 1)?,
         _ => {}
     }
 
     Ok(())
+}
+
+/// Handle EntryView scroll keys, returning `true` when the key was consumed.
+fn handle_entry_view_scroll(app: &mut App, key: KeyCode) -> bool {
+    if app.focus != Focus::EntryView {
+        return false;
+    }
+    match key {
+        KeyCode::Up | KeyCode::Char('k') => app.scroll_entry_view(-1),
+        KeyCode::Down | KeyCode::Char('j') => app.scroll_entry_view(1),
+        KeyCode::PageUp => app.page_entry_view(-1),
+        KeyCode::PageDown => app.page_entry_view(1),
+        KeyCode::Home => app.scroll.entry_view = 0,
+        KeyCode::End => app.scroll.entry_view = u16::MAX,
+        _ => return false,
+    }
+    true
+}
+
+fn move_selection_visible(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    delta: isize,
+) -> AppResult<()> {
+    app.move_selection(delta);
+    keep_selection_visible(terminal, app)
 }
 
 fn keep_selection_visible(
@@ -152,7 +158,7 @@ fn keep_selection_visible(
     if app.focus == Focus::Journals && app.mode == Mode::Browse {
         if let Some(area) = layout.journals {
             render::ensure_index_visible(
-                &mut app.journal_scroll,
+                &mut app.scroll.journal,
                 app.selected_journal,
                 app.journals.len(),
                 render::panel_inner(area).height,
@@ -161,7 +167,7 @@ fn keep_selection_visible(
     } else if let Some(area) = layout.entries {
         let rows = render::entry_row_metadata(app);
         render::ensure_entry_visible(
-            &mut app.entry_scroll,
+            &mut app.scroll.entry,
             &rows,
             app.selected_entry_index,
             render::panel_inner(area).height,
@@ -215,7 +221,7 @@ fn handle_viewer_key(
     entry_view_available: bool,
 ) -> AppResult<()> {
     if viewer_key_closes(key.code, entry_view_available) {
-        app.viewer = None;
+        app.close_overlay();
         return Ok(());
     }
 
@@ -224,7 +230,7 @@ fn handle_viewer_key(
         return Ok(());
     }
 
-    let Some(viewer) = app.viewer.as_mut() else {
+    let Some(viewer) = app.viewer_mut() else {
         return Ok(());
     };
 
@@ -257,17 +263,17 @@ pub(super) fn viewer_key_closes(key: KeyCode, entry_view_available: bool) -> boo
 fn handle_new_journal_input(app: &mut App, key: KeyEvent) -> AppResult<()> {
     match key.code {
         KeyCode::Esc => {
-            app.new_journal_input = None;
+            app.close_overlay();
             app.set_status("Cancelled");
         }
         KeyCode::Enter => submit_new_journal(app)?,
         KeyCode::Backspace => {
-            if let Some(input) = app.new_journal_input.as_mut() {
+            if let Some(input) = app.new_journal_input_mut() {
                 input.pop();
             }
         }
         KeyCode::Char(ch) => {
-            if let Some(input) = app.new_journal_input.as_mut() {
+            if let Some(input) = app.new_journal_input_mut() {
                 input.push(ch);
             }
         }

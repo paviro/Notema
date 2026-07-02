@@ -7,8 +7,8 @@ use ratatui::{
 use crate::tui::app::{App, Focus, Mode};
 
 pub(crate) fn footer_text(app: &App, entry_view_visible: bool) -> String {
-    if !app.status.is_empty() {
-        return app.status.clone();
+    if !app.status().is_empty() {
+        return app.status().to_string();
     }
 
     match app.mode {
@@ -18,7 +18,7 @@ pub(crate) fn footer_text(app: &App, entry_view_visible: bool) -> String {
 }
 
 fn search_footer_text(app: &App, entry_view_visible: bool) -> String {
-    let query = format!("Search {}: {}", app.search_scope_label(), app.search_query);
+    let query = format!("Search {}: {}", app.search_scope_label(), app.search.query);
     match app.focus {
         Focus::EntryView if app.has_selected_entry_target() => {
             format!(
@@ -28,7 +28,7 @@ fn search_footer_text(app: &App, entry_view_visible: bool) -> String {
         Focus::EntryView => format!("{query} | left results | Esc search"),
         _ => {
             let mut parts = vec![
-                format!("Search {}: {}", app.search_scope_label(), app.search_query),
+                format!("Search {}: {}", app.search_scope_label(), app.search.query),
                 "type query".to_string(),
                 "backspace".to_string(),
                 "up/down select".to_string(),

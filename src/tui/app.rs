@@ -8,12 +8,10 @@ use crate::{
         entry_timestamp_label, search_loaded_entries,
     },
 };
-use std::{
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, time::Duration};
 
-const STATUS_DURATION: Duration = Duration::from_secs(3);
+use super::state::{Overlay, ScrollState, SearchState, StatusBar};
+
 pub(crate) const JOURNAL_LIST_WIDTH: u16 = 18;
 pub(crate) const ENTRY_LIST_INLINE_WIDTH: u16 = 42;
 pub(crate) const ENTRY_LIST_MIN_WIDTH: u16 = 40;
@@ -52,21 +50,14 @@ pub(crate) struct App {
     pub(crate) unlocked_identity: Option<crypto::UnlockedIdentity>,
     pub(crate) journals: Vec<Journal>,
     pub(crate) entries: Vec<Entry>,
-    pub(crate) search_hits: Vec<SearchHit>,
     pub(crate) selected_journal: usize,
     pub(crate) selected_entry_index: usize,
-    pub(crate) journal_scroll: u16,
-    pub(crate) entry_scroll: u16,
-    pub(crate) entry_view_scroll: u16,
+    pub(crate) scroll: ScrollState,
     pub(crate) focus: Focus,
     pub(crate) mode: Mode,
-    pub(crate) new_journal_input: Option<String>,
-    pub(crate) viewer: Option<MarkdownView>,
-    pub(crate) search_query: String,
-    pub(crate) search_scope: SearchScope,
-    pub(crate) confirm_delete: bool,
-    pub(crate) status: String,
-    status_until: Option<Instant>,
+    pub(crate) search: SearchState,
+    pub(crate) overlay: Overlay,
+    pub(crate) status_bar: StatusBar,
 }
 
 pub(crate) struct MarkdownView {
@@ -98,21 +89,14 @@ impl App {
             unlocked_identity,
             journals: Vec::new(),
             entries: Vec::new(),
-            search_hits: Vec::new(),
             selected_journal: 0,
             selected_entry_index: 0,
-            journal_scroll: 0,
-            entry_scroll: 0,
-            entry_view_scroll: 0,
+            scroll: ScrollState::default(),
             focus: Focus::Journals,
             mode: Mode::Browse,
-            new_journal_input: None,
-            viewer: None,
-            search_query: String::new(),
-            search_scope: SearchScope::AllJournals,
-            confirm_delete: false,
-            status: String::new(),
-            status_until: None,
+            search: SearchState::default(),
+            overlay: Overlay::None,
+            status_bar: StatusBar::default(),
         };
         app.load_entries(entry_paths)?;
         Ok(app)
@@ -129,20 +113,17 @@ impl App {
         self.entries = storage::read_entries(entry_paths, self.unlocked_identity.as_ref())?;
         if self.selected_journal >= self.journals.len() {
             self.selected_journal = self.journals.len().saturating_sub(1);
-            self.journal_scroll = 0;
-            self.entry_scroll = 0;
-            self.entry_view_scroll = 0;
+            self.scroll.reset();
         }
-        if !self.search_query.is_empty() {
-            self.search_hits = self.search_results();
+        if !self.search.query.is_empty() {
+            self.search.hits = self.search_results();
         }
         let previous_entry_index = self.selected_entry_index;
         self.selected_entry_index = self
             .selected_entry_index
             .min(self.current_entry_list_len().saturating_sub(1));
         if self.selected_entry_index != previous_entry_index {
-            self.entry_scroll = 0;
-            self.entry_view_scroll = 0;
+            self.scroll.reset_entry();
         }
         Ok(())
     }
@@ -163,7 +144,7 @@ impl App {
 
     pub(crate) fn current_entry_list_len(&self) -> usize {
         match self.mode {
-            Mode::Search => self.search_hits.len(),
+            Mode::Search => self.search.hits.len(),
             Mode::Browse => self.selected_entries().len(),
         }
     }
@@ -186,10 +167,10 @@ impl App {
         *index = next as usize;
         if self.focus == Focus::Journals {
             self.selected_entry_index = 0;
-            self.entry_scroll = 0;
+            self.scroll.entry = 0;
         }
         if self.selected_entry_index != previous_entry_index {
-            self.entry_view_scroll = 0;
+            self.scroll.entry_view = 0;
         }
     }
 
@@ -201,8 +182,7 @@ impl App {
         if self.selected_journal != index {
             self.selected_journal = index;
             self.selected_entry_index = 0;
-            self.entry_scroll = 0;
-            self.entry_view_scroll = 0;
+            self.scroll.reset_entry();
         }
     }
 
@@ -213,7 +193,7 @@ impl App {
 
         if self.selected_entry_index != index {
             self.selected_entry_index = index;
-            self.entry_view_scroll = 0;
+            self.scroll.entry_view = 0;
         }
     }
 
@@ -223,7 +203,7 @@ impl App {
     }
 
     pub(crate) fn selected_search_hit(&self) -> Option<&SearchHit> {
-        self.search_hits.get(self.selected_entry_index)
+        self.search.hits.get(self.selected_entry_index)
     }
 
     pub(crate) fn selected_entry_target(&self) -> Option<EntryTarget> {
@@ -285,8 +265,52 @@ impl App {
     }
 
     pub(crate) fn begin_new_journal_input(&mut self) {
-        self.new_journal_input = Some(String::new());
+        self.overlay = Overlay::NewJournal(String::new());
         self.clear_status();
+    }
+
+    pub(crate) fn viewer(&self) -> Option<&MarkdownView> {
+        match &self.overlay {
+            Overlay::Viewer(view) => Some(view),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn viewer_mut(&mut self) -> Option<&mut MarkdownView> {
+        match &mut self.overlay {
+            Overlay::Viewer(view) => Some(view),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn open_viewer(&mut self, view: MarkdownView) {
+        self.overlay = Overlay::Viewer(view);
+    }
+
+    pub(crate) fn new_journal_input(&self) -> Option<&str> {
+        match &self.overlay {
+            Overlay::NewJournal(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn new_journal_input_mut(&mut self) -> Option<&mut String> {
+        match &mut self.overlay {
+            Overlay::NewJournal(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_confirming_delete(&self) -> bool {
+        matches!(self.overlay, Overlay::ConfirmDelete)
+    }
+
+    pub(crate) fn begin_confirm_delete(&mut self) {
+        self.overlay = Overlay::ConfirmDelete;
+    }
+
+    pub(crate) fn close_overlay(&mut self) {
+        self.overlay = Overlay::None;
     }
 
     pub(crate) fn select_journal_by_name(&mut self, name: &str) {
@@ -297,15 +321,14 @@ impl App {
         {
             self.selected_journal = index;
             self.selected_entry_index = 0;
-            self.journal_scroll = index.min(u16::MAX as usize) as u16;
-            self.entry_scroll = 0;
-            self.entry_view_scroll = 0;
+            self.scroll.journal = index.min(u16::MAX as usize) as u16;
+            self.scroll.reset_entry();
             self.focus = Focus::Entries;
         }
     }
 
     pub(crate) fn begin_search(&mut self) {
-        self.search_scope = if self.focus == Focus::Journals {
+        self.search.scope = if self.focus == Focus::Journals {
             SearchScope::AllJournals
         } else {
             self.selected_journal()
@@ -314,39 +337,36 @@ impl App {
         };
         self.mode = Mode::Search;
         self.focus = Focus::Entries;
-        self.search_query.clear();
-        self.search_hits.clear();
+        self.search.query.clear();
+        self.search.hits.clear();
         self.selected_entry_index = 0;
-        self.entry_scroll = 0;
-        self.entry_view_scroll = 0;
+        self.scroll.reset_entry();
     }
 
     pub(crate) fn exit_search(&mut self) {
         self.mode = Mode::Browse;
-        self.search_scope = SearchScope::AllJournals;
-        self.search_query.clear();
-        self.search_hits.clear();
+        self.search.scope = SearchScope::AllJournals;
+        self.search.query.clear();
+        self.search.hits.clear();
         self.selected_entry_index = 0;
-        self.entry_scroll = 0;
-        self.entry_view_scroll = 0;
+        self.scroll.reset_entry();
     }
 
     pub(crate) fn update_search_results(&mut self) {
-        self.search_hits = self.search_results();
+        self.search.hits = self.search_results();
         self.selected_entry_index = 0;
-        self.entry_scroll = 0;
-        self.entry_view_scroll = 0;
+        self.scroll.reset_entry();
     }
 
     pub(crate) fn search_scope_label(&self) -> String {
-        match &self.search_scope {
+        match &self.search.scope {
             SearchScope::AllJournals => "all".to_string(),
             SearchScope::CurrentJournal(journal) => journal.clone(),
         }
     }
 
     pub(crate) fn search_hit_label(&self, hit: &SearchHit) -> String {
-        match self.search_scope {
+        match self.search.scope {
             SearchScope::AllJournals => format!("{}/{}", hit.journal, hit.title),
             SearchScope::CurrentJournal(_) => hit.title.clone(),
         }
@@ -355,16 +375,16 @@ impl App {
     fn search_results(&self) -> Vec<SearchHit> {
         search_loaded_entries(
             &self.entries,
-            &self.search_query,
-            self.search_scope.filter(),
+            &self.search.query,
+            self.search.scope.filter(),
         )
     }
 
     pub(crate) fn scroll_entry_view(&mut self, delta: i16) {
         if delta.is_negative() {
-            self.entry_view_scroll = self.entry_view_scroll.saturating_sub(delta.unsigned_abs());
+            self.scroll.entry_view = self.scroll.entry_view.saturating_sub(delta.unsigned_abs());
         } else {
-            self.entry_view_scroll = self.entry_view_scroll.saturating_add(delta as u16);
+            self.scroll.entry_view = self.scroll.entry_view.saturating_add(delta as u16);
         }
     }
 
@@ -373,30 +393,23 @@ impl App {
     }
 
     pub(crate) fn set_status(&mut self, message: impl Into<String>) {
-        self.status = message.into();
-        self.status_until = Some(Instant::now() + STATUS_DURATION);
+        self.status_bar.set(message);
     }
 
     pub(crate) fn clear_status(&mut self) {
-        self.status.clear();
-        self.status_until = None;
+        self.status_bar.clear();
+    }
+
+    pub(crate) fn status(&self) -> &str {
+        self.status_bar.text()
     }
 
     pub(crate) fn status_timeout(&self) -> Option<Duration> {
-        self.status_until
-            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+        self.status_bar.timeout()
     }
 
     pub(crate) fn expire_status(&mut self) -> bool {
-        if self
-            .status_until
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
-            self.clear_status();
-            return true;
-        }
-
-        false
+        self.status_bar.expire()
     }
 }
 
@@ -453,11 +466,11 @@ mod tests {
         let mut app = new_app(config);
         app.select_journal_by_name("work");
         app.focus = Focus::Entries;
-        app.entry_view_scroll = 20;
+        app.scroll.entry_view = 20;
 
         app.move_selection(1);
 
-        assert_eq!(app.entry_view_scroll, 0);
+        assert_eq!(app.scroll.entry_view, 0);
     }
 
     #[test]
@@ -503,7 +516,7 @@ mod tests {
         let mut app = new_app(config);
         app.select_journal_by_name("work");
         app.begin_search();
-        app.search_query = "needle".to_string();
+        app.search.query = "needle".to_string();
         app.update_search_results();
 
         let (title, content) = app.selected_entry_view().unwrap();
@@ -576,7 +589,7 @@ mod tests {
 
         app.begin_search();
 
-        assert_eq!(app.search_scope, SearchScope::AllJournals);
+        assert_eq!(app.search.scope, SearchScope::AllJournals);
     }
 
     #[test]
@@ -591,7 +604,7 @@ mod tests {
         app.begin_search();
 
         assert_eq!(
-            app.search_scope,
+            app.search.scope,
             SearchScope::CurrentJournal("work".to_string())
         );
     }
@@ -618,11 +631,10 @@ mod tests {
     fn expire_status_reports_visible_change_once() {
         let config = Config::new(tempdir().unwrap().path().to_path_buf(), "true");
         let mut app = new_app(config);
-        app.status = "Saved".to_string();
-        app.status_until = Some(Instant::now() - Duration::from_secs(1));
+        app.status_bar.set_expired("Saved");
 
         assert!(app.expire_status());
-        assert!(app.status.is_empty());
+        assert!(app.status().is_empty());
         assert!(!app.expire_status());
     }
 }
