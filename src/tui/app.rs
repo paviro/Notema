@@ -48,6 +48,8 @@ pub(crate) struct App {
     pub(crate) search_hits: Vec<SearchHit>,
     pub(crate) selected_journal: usize,
     pub(crate) selected_entry_index: usize,
+    pub(crate) journal_scroll: u16,
+    pub(crate) entry_scroll: u16,
     pub(crate) preview_scroll: u16,
     pub(crate) focus: Focus,
     pub(crate) mode: Mode,
@@ -76,6 +78,8 @@ impl App {
             search_hits: Vec::new(),
             selected_journal: 0,
             selected_entry_index: 0,
+            journal_scroll: 0,
+            entry_scroll: 0,
             preview_scroll: 0,
             focus: Focus::Journals,
             mode: Mode::Browse,
@@ -97,6 +101,8 @@ impl App {
         self.entries = scan_entries(&self.config.journal_root)?;
         if self.selected_journal >= self.journals.len() {
             self.selected_journal = self.journals.len().saturating_sub(1);
+            self.journal_scroll = 0;
+            self.entry_scroll = 0;
             self.preview_scroll = 0;
         }
         if !self.search_query.is_empty() {
@@ -107,6 +113,7 @@ impl App {
             .selected_entry_index
             .min(self.current_entry_list_len().saturating_sub(1));
         if self.selected_entry_index != previous_entry_index {
+            self.entry_scroll = 0;
             self.preview_scroll = 0;
         }
         Ok(())
@@ -151,8 +158,33 @@ impl App {
         *index = next as usize;
         if self.focus == Focus::Journals {
             self.selected_entry_index = 0;
+            self.entry_scroll = 0;
         }
         if self.selected_entry_index != previous_entry_index {
+            self.preview_scroll = 0;
+        }
+    }
+
+    pub(crate) fn select_journal(&mut self, index: usize) {
+        if index >= self.journals.len() {
+            return;
+        }
+
+        if self.selected_journal != index {
+            self.selected_journal = index;
+            self.selected_entry_index = 0;
+            self.entry_scroll = 0;
+            self.preview_scroll = 0;
+        }
+    }
+
+    pub(crate) fn select_entry_index(&mut self, index: usize) {
+        if index >= self.current_entry_list_len() {
+            return;
+        }
+
+        if self.selected_entry_index != index {
+            self.selected_entry_index = index;
             self.preview_scroll = 0;
         }
     }
@@ -226,6 +258,8 @@ impl App {
         {
             self.selected_journal = index;
             self.selected_entry_index = 0;
+            self.journal_scroll = index.min(u16::MAX as usize) as u16;
+            self.entry_scroll = 0;
             self.preview_scroll = 0;
             self.focus = Focus::Entries;
         }
@@ -244,6 +278,7 @@ impl App {
         self.search_query.clear();
         self.search_hits.clear();
         self.selected_entry_index = 0;
+        self.entry_scroll = 0;
         self.preview_scroll = 0;
     }
 
@@ -253,12 +288,14 @@ impl App {
         self.search_query.clear();
         self.search_hits.clear();
         self.selected_entry_index = 0;
+        self.entry_scroll = 0;
         self.preview_scroll = 0;
     }
 
     pub(crate) fn update_search_results(&mut self) -> AppResult<()> {
         self.search_hits = self.search_results()?;
         self.selected_entry_index = 0;
+        self.entry_scroll = 0;
         self.preview_scroll = 0;
         Ok(())
     }

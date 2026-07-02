@@ -4,14 +4,20 @@ use crate::{
     storage::{create_entry, create_journal, move_entry_to_trash, open_editor, set_updated_at_now},
 };
 use crossterm::{
-    event::{KeyCode, KeyEvent},
+    event::{
+        DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEvent, MouseButton, MouseEvent,
+        MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use std::{fs, io};
 
-use super::app::{App, Focus, MarkdownView, Mode, preview_is_visible};
+use super::{
+    app::{App, Focus, MarkdownView, Mode, preview_is_visible},
+    render,
+};
 
 pub(crate) fn handle_key(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -65,8 +71,14 @@ pub(crate) fn handle_key(
         KeyCode::PageDown if app.focus == Focus::Preview => app.page_preview(1),
         KeyCode::Home if app.focus == Focus::Preview => app.preview_scroll = 0,
         KeyCode::End if app.focus == Focus::Preview => app.preview_scroll = u16::MAX,
-        KeyCode::Up => app.move_selection(-1),
-        KeyCode::Down => app.move_selection(1),
+        KeyCode::Up => {
+            app.move_selection(-1);
+            keep_selection_visible(terminal, app)?;
+        }
+        KeyCode::Down => {
+            app.move_selection(1);
+            keep_selection_visible(terminal, app)?;
+        }
         KeyCode::Char('e') if app.can_act_on_selected_entry() => edit_selected(terminal, app)?,
         KeyCode::Char('v') if app.can_act_on_selected_entry() => view_selected(app)?,
         KeyCode::Char('n') => create_entry_in_selected_journal(terminal, app)?,
@@ -123,12 +135,179 @@ fn handle_search_key(
             app.search_query.push(ch);
             app.update_search_results()?;
         }
-        KeyCode::Up => app.move_selection(-1),
-        KeyCode::Down => app.move_selection(1),
+        KeyCode::Up => {
+            app.move_selection(-1);
+            keep_selection_visible(terminal, app)?;
+        }
+        KeyCode::Down => {
+            app.move_selection(1);
+            keep_selection_visible(terminal, app)?;
+        }
         _ => {}
     }
 
     Ok(())
+}
+
+pub(crate) fn handle_mouse(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    mouse: MouseEvent,
+) -> AppResult<()> {
+    let size = terminal.size()?;
+    let area = Rect::new(0, 0, size.width, size.height);
+    handle_mouse_in_area(app, mouse, area)
+}
+
+fn handle_mouse_in_area(app: &mut App, mouse: MouseEvent, area: Rect) -> AppResult<()> {
+    if app.new_journal_input.is_some() || app.confirm_delete {
+        return Ok(());
+    }
+
+    app.normalize_focus(render::tui_layout(area, app).preview_visible);
+    let layout = render::tui_layout(area, app);
+
+    if app.viewer.is_some() {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => scroll_viewer(app, -1),
+            MouseEventKind::ScrollDown => scroll_viewer(app, 1),
+            _ => {}
+        }
+        return Ok(());
+    }
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => handle_left_click(app, mouse, layout)?,
+        MouseEventKind::ScrollUp => handle_wheel(app, mouse, layout, -1),
+        MouseEventKind::ScrollDown => handle_wheel(app, mouse, layout, 1),
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout) -> AppResult<()> {
+    if app.mode == Mode::Browse {
+        if let Some(area) = layout.journals {
+            if render::point_in_rect(area, mouse.column, mouse.row) {
+                app.focus = if layout.single_panel {
+                    Focus::Entries
+                } else {
+                    Focus::Journals
+                };
+                if let Some(index) = render::journal_index_at(
+                    area,
+                    mouse.column,
+                    mouse.row,
+                    app.journal_scroll,
+                    app.journals.len(),
+                ) {
+                    app.select_journal(index);
+                }
+                return Ok(());
+            }
+        }
+    }
+
+    if let Some(area) = layout.entries {
+        if render::point_in_rect(area, mouse.column, mouse.row) {
+            app.focus = Focus::Entries;
+            let rows = render::entry_row_metadata(app);
+            if let Some(index) =
+                render::entry_index_at(area, mouse.column, mouse.row, app.entry_scroll, &rows)
+            {
+                app.select_entry_index(index);
+                if !layout.preview_visible {
+                    view_selected(app)?;
+                }
+            }
+            return Ok(());
+        }
+    }
+
+    if let Some(area) = layout.preview {
+        if render::point_in_rect(area, mouse.column, mouse.row) && app.has_selected_entry_target() {
+            app.focus = Focus::Preview;
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, delta: i16) {
+    if let Some(area) = layout.preview {
+        if render::point_in_rect(area, mouse.column, mouse.row) {
+            app.focus = Focus::Preview;
+            app.scroll_preview(delta);
+            return;
+        }
+    }
+
+    if let Some(area) = layout.entries {
+        if render::point_in_rect(area, mouse.column, mouse.row) {
+            let rows = render::entry_row_metadata(app);
+            app.entry_scroll = render::scroll_offset(
+                app.entry_scroll,
+                delta,
+                render::total_entry_row_height(&rows),
+                render::panel_inner(area).height,
+            );
+            return;
+        }
+    }
+
+    if app.mode == Mode::Browse {
+        if let Some(area) = layout.journals {
+            if render::point_in_rect(area, mouse.column, mouse.row) {
+                app.journal_scroll = render::scroll_offset(
+                    app.journal_scroll,
+                    delta,
+                    app.journals.len(),
+                    render::panel_inner(area).height,
+                );
+            }
+        }
+    }
+}
+
+fn keep_selection_visible(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+) -> AppResult<()> {
+    let size = terminal.size()?;
+    let layout = render::tui_layout(Rect::new(0, 0, size.width, size.height), app);
+    if app.focus == Focus::Journals && app.mode == Mode::Browse {
+        if let Some(area) = layout.journals {
+            render::ensure_index_visible(
+                &mut app.journal_scroll,
+                app.selected_journal,
+                app.journals.len(),
+                render::panel_inner(area).height,
+            );
+        }
+    } else if let Some(area) = layout.entries {
+        let rows = render::entry_row_metadata(app);
+        render::ensure_entry_visible(
+            &mut app.entry_scroll,
+            &rows,
+            app.selected_entry_index,
+            render::panel_inner(area).height,
+        );
+    }
+
+    Ok(())
+}
+
+fn scroll_viewer(app: &mut App, delta: i16) {
+    let Some(viewer) = app.viewer.as_mut() else {
+        return;
+    };
+
+    if delta.is_negative() {
+        viewer.scroll = viewer.scroll.saturating_sub(delta.unsigned_abs());
+    } else {
+        viewer.scroll = viewer.scroll.saturating_add(delta as u16);
+    }
 }
 
 fn move_focus_left(app: &mut App) {
@@ -364,10 +543,18 @@ fn suspend_terminal<T>(
     action: impl FnOnce() -> AppResult<T>,
 ) -> AppResult<T> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     let result = action();
-    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
     enable_raw_mode()?;
     terminal.clear()?;
     result
@@ -377,8 +564,49 @@ fn suspend_terminal<T>(
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crossterm::event::KeyModifiers;
     use std::fs;
     use tempfile::tempdir;
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::empty(),
+        }
+    }
+
+    fn app_with_journals(names: &[&str]) -> App {
+        let dir = tempdir().unwrap();
+        for name in names {
+            fs::create_dir_all(dir.path().join(name)).unwrap();
+        }
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let app = App::new(config).unwrap();
+        std::mem::forget(dir);
+        app
+    }
+
+    fn app_with_entries(count: usize) -> App {
+        let dir = tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        for index in 0..count {
+            fs::write(
+                entry_dir.join(format!("{index}.md")),
+                format!(
+                    "---\ncreated_at: \"2026-07-01T10:{index:02}:00+02:00\"\n---\n\n# Entry {index}\nPreview {index}\n"
+                ),
+            )
+            .unwrap();
+        }
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = App::new(config).unwrap();
+        app.select_journal_by_name("work");
+        std::mem::forget(dir);
+        app
+    }
 
     #[test]
     fn enter_on_journals_moves_to_entries_like_right_arrow() {
@@ -436,5 +664,233 @@ mod tests {
     fn left_closes_viewer_only_when_preview_panel_is_hidden() {
         assert!(viewer_key_closes(KeyCode::Left, false));
         assert!(!viewer_key_closes(KeyCode::Left, true));
+    }
+
+    #[test]
+    fn wide_journal_click_selects_journal_and_keeps_journal_focus() {
+        let mut app = app_with_journals(&["alpha", "beta"]);
+        app.focus = Focus::Journals;
+        app.selected_entry_index = 3;
+        app.preview_scroll = 10;
+        let area = Rect::new(0, 0, 120, 20);
+        let layout = render::tui_layout(area, &app);
+        let journals = render::panel_inner(layout.journals.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                journals.x,
+                journals.y + 1,
+            ),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.selected_journal, 1);
+        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.preview_scroll, 0);
+        assert_eq!(app.focus, Focus::Journals);
+    }
+
+    #[test]
+    fn compact_journal_click_moves_to_entries() {
+        let mut app = app_with_journals(&["work"]);
+        app.focus = Focus::Journals;
+        let area = Rect::new(0, 0, 57, 20);
+        let layout = render::tui_layout(area, &app);
+        let journals = render::panel_inner(layout.journals.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                journals.x,
+                journals.y,
+            ),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.selected_journal, 0);
+        assert_eq!(app.focus, Focus::Entries);
+    }
+
+    #[test]
+    fn journal_panel_click_without_row_focuses_journals_without_changing_selection() {
+        let mut app = app_with_journals(&["alpha"]);
+        app.focus = Focus::Entries;
+        let area = Rect::new(0, 0, 120, 20);
+        let layout = render::tui_layout(area, &app);
+        let journals = render::panel_inner(layout.journals.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                journals.x,
+                journals.y + 4,
+            ),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.selected_journal, 0);
+        assert_eq!(app.focus, Focus::Journals);
+    }
+
+    #[test]
+    fn wheel_over_journals_scrolls_without_changing_selection() {
+        let mut app = app_with_journals(&["a", "b", "c", "d", "e", "f", "g"]);
+        app.focus = Focus::Entries;
+        let area = Rect::new(0, 0, 120, 8);
+        let layout = render::tui_layout(area, &app);
+        let journals = render::panel_inner(layout.journals.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(MouseEventKind::ScrollDown, journals.x, journals.y),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.selected_journal, 0);
+        assert_eq!(app.journal_scroll, 1);
+        assert_eq!(app.focus, Focus::Entries);
+    }
+
+    #[test]
+    fn wheel_over_entries_scrolls_without_changing_selection() {
+        let mut app = app_with_entries(8);
+        app.focus = Focus::Journals;
+        let area = Rect::new(0, 0, 80, 8);
+        let layout = render::tui_layout(area, &app);
+        let entries = render::panel_inner(layout.entries.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(MouseEventKind::ScrollDown, entries.x, entries.y),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.entry_scroll, 1);
+        assert_eq!(app.focus, Focus::Journals);
+    }
+
+    #[test]
+    fn entry_click_selects_row_and_opens_viewer_when_preview_is_hidden() {
+        let mut app = app_with_entries(2);
+        app.focus = Focus::Entries;
+        let area = Rect::new(0, 0, 80, 12);
+        let layout = render::tui_layout(area, &app);
+        let entries = render::panel_inner(layout.entries.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                entries.x,
+                entries.y + 2,
+            ),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.focus, Focus::Entries);
+        assert_eq!(app.selected_entry_index, 0);
+        assert!(app.viewer.is_some());
+    }
+
+    #[test]
+    fn entry_panel_click_without_entry_row_focuses_entries_without_opening_viewer() {
+        let mut app = app_with_entries(1);
+        app.focus = Focus::Preview;
+        let area = Rect::new(0, 0, 120, 12);
+        let layout = render::tui_layout(area, &app);
+        let entries = render::panel_inner(layout.entries.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                entries.x,
+                entries.y,
+            ),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.focus, Focus::Entries);
+        assert_eq!(app.selected_entry_index, 0);
+        assert!(app.viewer.is_none());
+    }
+
+    #[test]
+    fn entry_panel_empty_space_click_focuses_entries_without_opening_viewer() {
+        let mut app = app_with_entries(1);
+        app.focus = Focus::Preview;
+        let area = Rect::new(0, 0, 120, 12);
+        let layout = render::tui_layout(area, &app);
+        let entries = render::panel_inner(layout.entries.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                entries.x,
+                entries.y + 5,
+            ),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.focus, Focus::Entries);
+        assert_eq!(app.selected_entry_index, 0);
+        assert!(app.viewer.is_none());
+    }
+
+    #[test]
+    fn wheel_over_preview_scrolls_preview_only() {
+        let mut app = app_with_entries(6);
+        app.focus = Focus::Entries;
+        let area = Rect::new(0, 0, 120, 20);
+        let layout = render::tui_layout(area, &app);
+        let preview = render::panel_inner(layout.preview.unwrap());
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(MouseEventKind::ScrollDown, preview.x, preview.y),
+            area,
+        )
+        .unwrap();
+
+        assert_eq!(app.preview_scroll, 1);
+        assert_eq!(app.entry_scroll, 0);
+        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.focus, Focus::Preview);
+    }
+
+    #[test]
+    fn viewer_wheel_scrolls_and_clicks_do_not_close() {
+        let mut app = app_with_entries(1);
+        view_selected(&mut app).unwrap();
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(MouseEventKind::ScrollDown, 1, 1),
+            Rect::new(0, 0, 80, 20),
+        )
+        .unwrap();
+        assert_eq!(app.viewer.as_ref().unwrap().scroll, 1);
+
+        handle_mouse_in_area(
+            &mut app,
+            mouse(MouseEventKind::Down(MouseButton::Left), 1, 1),
+            Rect::new(0, 0, 80, 20),
+        )
+        .unwrap();
+        assert!(app.viewer.is_some());
     }
 }

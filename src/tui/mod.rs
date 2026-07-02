@@ -4,7 +4,7 @@ mod render;
 
 use crate::{AppResult, config::Config};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -16,12 +16,16 @@ use app::App;
 pub fn run(config: Config) -> AppResult<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let result = run_loop(&mut terminal, config);
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     result
 }
@@ -40,13 +44,19 @@ fn run_loop(
             continue;
         }
 
-        if let Event::Key(key) = event::read()? {
-            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                break;
+        match event::read()? {
+            Event::Key(key) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                    break;
+                }
+                if events::handle_key(terminal, &mut app, key)? {
+                    break;
+                }
             }
-            if events::handle_key(terminal, &mut app, key)? {
-                break;
+            Event::Mouse(mouse) => {
+                events::handle_mouse(terminal, &mut app, mouse)?;
             }
+            _ => {}
         }
     }
 

@@ -20,54 +20,48 @@ use super::app::{
     single_panel_is_active,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TuiLayout {
+    pub(crate) content: Rect,
+    pub(crate) footer: Rect,
+    pub(crate) journals: Option<Rect>,
+    pub(crate) entries: Option<Rect>,
+    pub(crate) preview: Option<Rect>,
+    pub(crate) stats: Option<Rect>,
+    pub(crate) preview_visible: bool,
+    pub(crate) single_panel: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EntryRowMeta {
+    pub(crate) entry_index: Option<usize>,
+    pub(crate) height: u16,
+}
+
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if let Some(viewer) = &mut app.viewer {
         draw_markdown_viewer(frame, viewer);
         return;
     }
 
-    let root = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(2)])
-        .split(frame.area());
+    app.normalize_focus(preview_is_visible(frame.area().width));
+    let layout = tui_layout(frame.area(), app);
 
-    let preview_visible = preview_is_visible(root[0].width);
-    let single_panel = single_panel_is_active(root[0].width);
-    app.normalize_focus(preview_visible);
-
-    if single_panel {
-        draw_focused_panel(frame, root[0], app);
-    } else if preview_visible {
-        let body = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(JOURNAL_LIST_WIDTH),
-                Constraint::Length(42),
-                Constraint::Min(ENTRY_LIST_MIN_WIDTH),
-            ])
-            .split(root[0]);
-        draw_journals(frame, body[0], app);
-        draw_entry_list(frame, body[1], app);
-        if app.mode == Mode::Browse && app.focus == Focus::Journals {
-            draw_journal_stats(frame, body[2], app);
-        } else {
-            draw_selected_preview(frame, body[2], app);
-        }
-    } else {
-        let body = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(JOURNAL_LIST_WIDTH),
-                Constraint::Min(ENTRY_LIST_MIN_WIDTH),
-            ])
-            .split(root[0]);
-        draw_journals(frame, body[0], app);
-        draw_entry_list(frame, body[1], app);
+    if let Some(area) = layout.journals {
+        draw_journals(frame, area, app);
+    }
+    if let Some(area) = layout.entries {
+        draw_entry_list(frame, area, app);
+    }
+    if let Some(area) = layout.stats {
+        draw_journal_stats(frame, area, app);
+    } else if let Some(area) = layout.preview {
+        draw_selected_preview(frame, area, app);
     }
 
-    let footer_text = footer_text(app, preview_visible);
+    let footer_text = footer_text(app, layout.preview_visible);
     let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::TOP));
-    frame.render_widget(footer, root[1]);
+    frame.render_widget(footer, layout.footer);
 
     if app.confirm_delete {
         let area = centered_rect(50, 20, frame.area());
@@ -92,12 +86,65 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
 }
 
-fn draw_focused_panel(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &mut App) {
-    match app.focus {
-        Focus::Journals if app.mode == Mode::Browse => draw_journals(frame, area, app),
-        Focus::Preview => draw_selected_preview(frame, area, app),
-        Focus::Journals | Focus::Entries => draw_entry_list(frame, area, app),
+pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
+    let root = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(2)])
+        .split(area);
+    let content = root[0];
+    let footer = root[1];
+    let preview_visible = preview_is_visible(content.width);
+    let single_panel = single_panel_is_active(content.width);
+
+    let mut layout = TuiLayout {
+        content,
+        footer,
+        journals: None,
+        entries: None,
+        preview: None,
+        stats: None,
+        preview_visible,
+        single_panel,
+    };
+
+    if single_panel {
+        match app.focus {
+            Focus::Journals if app.mode == Mode::Browse => layout.journals = Some(content),
+            Focus::Preview => layout.preview = Some(content),
+            Focus::Journals | Focus::Entries => layout.entries = Some(content),
+        }
+        return layout;
     }
+
+    if preview_visible {
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(JOURNAL_LIST_WIDTH),
+                Constraint::Length(42),
+                Constraint::Min(ENTRY_LIST_MIN_WIDTH),
+            ])
+            .split(content);
+        layout.journals = Some(body[0]);
+        layout.entries = Some(body[1]);
+        if app.mode == Mode::Browse && app.focus == Focus::Journals {
+            layout.stats = Some(body[2]);
+        } else {
+            layout.preview = Some(body[2]);
+        }
+    } else {
+        let body = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Length(JOURNAL_LIST_WIDTH),
+                Constraint::Min(ENTRY_LIST_MIN_WIDTH),
+            ])
+            .split(content);
+        layout.journals = Some(body[0]);
+        layout.entries = Some(body[1]);
+    }
+
+    layout
 }
 
 pub(crate) fn footer_text(app: &App, preview_visible: bool) -> String {
@@ -477,14 +524,169 @@ pub(crate) fn scrollbar_position(scroll: u16, line_count: usize, height: u16) ->
         .unwrap_or(0)
 }
 
-fn draw_journals(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &App) {
+pub(crate) fn panel_inner(area: Rect) -> Rect {
+    Rect {
+        x: area.x.saturating_add(1),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    }
+}
+
+pub(crate) fn point_in_rect(area: Rect, x: u16, y: u16) -> bool {
+    x >= area.x
+        && x < area.x.saturating_add(area.width)
+        && y >= area.y
+        && y < area.y.saturating_add(area.height)
+}
+
+pub(crate) fn clamp_scroll(requested: u16, total_height: usize, viewport_height: u16) -> u16 {
+    let max_scroll = total_height
+        .saturating_sub(viewport_height as usize)
+        .min(u16::MAX as usize) as u16;
+    requested.min(max_scroll)
+}
+
+pub(crate) fn scroll_offset(
+    current: u16,
+    delta: i16,
+    total_height: usize,
+    viewport_height: u16,
+) -> u16 {
+    let requested = if delta.is_negative() {
+        current.saturating_sub(delta.unsigned_abs())
+    } else {
+        current.saturating_add(delta as u16)
+    };
+    clamp_scroll(requested, total_height, viewport_height)
+}
+
+pub(crate) fn ensure_index_visible(
+    scroll: &mut u16,
+    index: usize,
+    total_height: usize,
+    viewport_height: u16,
+) {
+    if viewport_height == 0 {
+        *scroll = clamp_scroll(*scroll, total_height, viewport_height);
+        return;
+    }
+
+    if index < *scroll as usize {
+        *scroll = index.min(u16::MAX as usize) as u16;
+    } else {
+        let bottom = (*scroll as usize).saturating_add(viewport_height as usize);
+        if index >= bottom {
+            *scroll = index
+                .saturating_add(1)
+                .saturating_sub(viewport_height as usize)
+                .min(u16::MAX as usize) as u16;
+        }
+    }
+    *scroll = clamp_scroll(*scroll, total_height, viewport_height);
+}
+
+pub(crate) fn ensure_entry_visible(
+    scroll: &mut u16,
+    rows: &[EntryRowMeta],
+    selected_entry_index: usize,
+    viewport_height: u16,
+) {
+    let Some((row_start, row_height)) = selected_entry_row_span(rows, selected_entry_index) else {
+        *scroll = clamp_scroll(*scroll, total_entry_row_height(rows), viewport_height);
+        return;
+    };
+
+    if viewport_height == 0 {
+        *scroll = clamp_scroll(*scroll, total_entry_row_height(rows), viewport_height);
+        return;
+    }
+
+    if row_start < *scroll as usize {
+        *scroll = row_start.min(u16::MAX as usize) as u16;
+    } else {
+        let row_end = row_start.saturating_add(row_height as usize);
+        let viewport_end = (*scroll as usize).saturating_add(viewport_height as usize);
+        if row_end > viewport_end {
+            *scroll = row_end
+                .saturating_sub(viewport_height as usize)
+                .min(u16::MAX as usize) as u16;
+        }
+    }
+    *scroll = clamp_scroll(*scroll, total_entry_row_height(rows), viewport_height);
+}
+
+pub(crate) fn selected_entry_row_span(
+    rows: &[EntryRowMeta],
+    selected_entry_index: usize,
+) -> Option<(usize, u16)> {
+    let mut y = 0usize;
+    for row in rows {
+        if row.entry_index == Some(selected_entry_index) {
+            return Some((y, row.height));
+        }
+        y = y.saturating_add(row.height as usize);
+    }
+    None
+}
+
+pub(crate) fn total_entry_row_height(rows: &[EntryRowMeta]) -> usize {
+    rows.iter().map(|row| row.height as usize).sum()
+}
+
+pub(crate) fn journal_index_at(
+    area: Rect,
+    x: u16,
+    y: u16,
+    scroll: u16,
+    journal_count: usize,
+) -> Option<usize> {
+    let inner = panel_inner(area);
+    if !point_in_rect(inner, x, y) {
+        return None;
+    }
+
+    let index = scroll as usize + y.saturating_sub(inner.y) as usize;
+    (index < journal_count).then_some(index)
+}
+
+pub(crate) fn entry_index_at(
+    area: Rect,
+    x: u16,
+    y: u16,
+    scroll: u16,
+    rows: &[EntryRowMeta],
+) -> Option<usize> {
+    let inner = panel_inner(area);
+    if !point_in_rect(inner, x, y) {
+        return None;
+    }
+
+    let target_y = scroll as usize + y.saturating_sub(inner.y) as usize;
+    let mut row_y = 0usize;
+    for row in rows {
+        let next_y = row_y.saturating_add(row.height as usize);
+        if target_y < next_y {
+            return row.entry_index;
+        }
+        row_y = next_y;
+    }
+    None
+}
+
+fn draw_journals(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &mut App) {
     let focused = app.focus == Focus::Journals;
+    let viewport_height = panel_inner(area).height;
+    app.journal_scroll = clamp_scroll(app.journal_scroll, app.journals.len(), viewport_height);
+    let offset = app.journal_scroll as usize;
     let items: Vec<ListItem> = app
         .journals
         .iter()
         .enumerate()
+        .skip(offset)
+        .take(viewport_height as usize)
         .map(|(index, journal)| {
-            let style = selected_style(index == app.selected_journal && focused);
+            let style = selected_style(index == app.selected_journal);
             ListItem::new(Line::from(Span::raw(&journal.name))).style(style)
         })
         .collect();
@@ -493,38 +695,49 @@ fn draw_journals(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &App) 
     frame.render_widget(list, area);
 }
 
-fn draw_entry_list(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &App) {
+fn draw_entry_list(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &mut App) {
     let focused = app.focus == Focus::Entries;
     let title = match app.mode {
         Mode::Search => "Search",
         Mode::Browse => "Entries",
     };
-
-    let items = match app.mode {
-        Mode::Search => app
-            .search_hits
-            .iter()
-            .enumerate()
-            .map(|(index, hit)| {
-                ListItem::new(vec![
-                    Line::from(app.search_hit_label(hit)),
-                    Line::from(Span::styled(
-                        hit.preview.clone(),
-                        Style::default().add_modifier(Modifier::DIM),
-                    )),
-                ])
-                .style(selected_style(index == app.selected_entry_index && focused))
-            })
-            .collect(),
-        Mode::Browse => entry_list_items(app),
-    };
+    let rows = entry_list_rows(app);
+    let viewport_height = panel_inner(area).height;
+    app.entry_scroll = clamp_scroll(
+        app.entry_scroll,
+        total_entry_row_height(&entry_row_metadata(app)),
+        viewport_height,
+    );
+    let items = visible_entry_items(&rows, app.entry_scroll, viewport_height);
 
     let list = List::new(items).block(panel_block(title, focused));
     frame.render_widget(list, area);
 }
 
-fn entry_list_items(app: &App) -> Vec<ListItem<'static>> {
-    let mut items = Vec::new();
+fn entry_list_rows(app: &App) -> Vec<EntryListRow> {
+    match app.mode {
+        Mode::Search => app
+            .search_hits
+            .iter()
+            .enumerate()
+            .map(|(index, hit)| EntryListRow {
+                entry_index: Some(index),
+                lines: vec![
+                    Line::from(app.search_hit_label(hit)),
+                    Line::from(Span::styled(
+                        hit.preview.clone(),
+                        Style::default().add_modifier(Modifier::DIM),
+                    )),
+                ],
+                selected: entry_selection_is_visible(app) && index == app.selected_entry_index,
+            })
+            .collect(),
+        Mode::Browse => browse_entry_rows(app),
+    }
+}
+
+fn browse_entry_rows(app: &App) -> Vec<EntryListRow> {
+    let mut rows = Vec::new();
     let mut current_month = None;
     let mut current_day = None;
 
@@ -534,13 +747,14 @@ fn entry_list_items(app: &App) -> Vec<ListItem<'static>> {
             current_month = month.clone();
             current_day = None;
             if let Some(month) = month {
-                items.push(
-                    ListItem::new(Line::from(Span::styled(
+                rows.push(EntryListRow {
+                    entry_index: None,
+                    lines: vec![Line::from(Span::styled(
                         month,
                         Style::default().add_modifier(Modifier::BOLD | Modifier::DIM),
-                    )))
-                    .style(Style::default()),
-                );
+                    ))],
+                    selected: false,
+                });
             }
         }
 
@@ -548,19 +762,81 @@ fn entry_list_items(app: &App) -> Vec<ListItem<'static>> {
         if day != current_day {
             current_day = day.clone();
             if let Some(day) = day {
-                items.push(
-                    ListItem::new(Line::from(vec![
+                rows.push(EntryListRow {
+                    entry_index: None,
+                    lines: vec![Line::from(vec![
                         Span::raw("  "),
                         Span::styled(day, Style::default().add_modifier(Modifier::DIM)),
-                    ]))
-                    .style(Style::default()),
-                );
+                    ])],
+                    selected: false,
+                });
             }
         }
 
-        items.push(ListItem::new(entry_list_lines(entry)).style(selected_style(
-            index == app.selected_entry_index && app.focus == Focus::Entries,
-        )));
+        rows.push(EntryListRow {
+            entry_index: Some(index),
+            lines: entry_list_lines(entry),
+            selected: entry_selection_is_visible(app) && index == app.selected_entry_index,
+        });
+    }
+
+    rows
+}
+
+fn entry_selection_is_visible(app: &App) -> bool {
+    app.focus != Focus::Journals
+}
+
+#[derive(Debug, Clone)]
+struct EntryListRow {
+    entry_index: Option<usize>,
+    lines: Vec<Line<'static>>,
+    selected: bool,
+}
+
+impl EntryListRow {
+    fn height(&self) -> u16 {
+        self.lines.len().min(u16::MAX as usize) as u16
+    }
+}
+
+pub(crate) fn entry_row_metadata(app: &App) -> Vec<EntryRowMeta> {
+    entry_list_rows(app)
+        .into_iter()
+        .map(|row| EntryRowMeta {
+            entry_index: row.entry_index,
+            height: row.height(),
+        })
+        .collect()
+}
+
+fn visible_entry_items(
+    rows: &[EntryListRow],
+    scroll: u16,
+    viewport_height: u16,
+) -> Vec<ListItem<'static>> {
+    let mut remaining_skip = scroll;
+    let mut remaining_height = viewport_height;
+    let mut items = Vec::new();
+
+    for row in rows {
+        if remaining_height == 0 {
+            break;
+        }
+
+        let height = row.height();
+        if remaining_skip >= height {
+            remaining_skip -= height;
+            continue;
+        }
+
+        let start = remaining_skip as usize;
+        remaining_skip = 0;
+        let visible_height = height.saturating_sub(start as u16).min(remaining_height);
+        let end = start + visible_height as usize;
+        let lines = row.lines[start..end].to_vec();
+        remaining_height = remaining_height.saturating_sub(visible_height);
+        items.push(ListItem::new(lines).style(selected_style(row.selected)));
     }
 
     items
@@ -723,6 +999,61 @@ mod tests {
             .collect()
     }
 
+    fn render_app(mut app: App, width: u16, height: u16) -> TestBackend {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        terminal.backend().clone()
+    }
+
+    #[test]
+    fn layout_places_hit_targets_in_three_columns() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+
+        let layout = tui_layout(Rect::new(0, 0, 120, 20), &app);
+
+        assert!(!layout.single_panel);
+        assert!(layout.preview_visible);
+        assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 18));
+        assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 42, 18));
+        assert_eq!(layout.preview.unwrap(), Rect::new(60, 0, 60, 18));
+        assert_eq!(layout.footer, Rect::new(0, 18, 120, 2));
+    }
+
+    #[test]
+    fn layout_places_hit_targets_in_two_columns_without_preview() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+
+        let layout = tui_layout(Rect::new(0, 0, 80, 20), &app);
+
+        assert!(!layout.single_panel);
+        assert!(!layout.preview_visible);
+        assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 18));
+        assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 62, 18));
+        assert!(layout.preview.is_none());
+    }
+
+    #[test]
+    fn layout_uses_single_compact_panel_for_active_focus() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Journals;
+
+        let journals = tui_layout(Rect::new(0, 0, 57, 20), &app);
+        assert!(journals.single_panel);
+        assert_eq!(journals.journals.unwrap(), Rect::new(0, 0, 57, 18));
+        assert!(journals.entries.is_none());
+
+        app.focus = Focus::Entries;
+        let entries = tui_layout(Rect::new(0, 0, 57, 20), &app);
+        assert!(entries.single_panel);
+        assert_eq!(entries.entries.unwrap(), Rect::new(0, 0, 57, 18));
+        assert!(entries.journals.is_none());
+    }
+
     #[test]
     fn viewer_scroll_clamps_to_rendered_content_height() {
         assert_eq!(viewer_scroll(100, 20, 8), 12);
@@ -747,6 +1078,56 @@ mod tests {
     #[test]
     fn scrollbar_position_stays_at_start_when_content_fits() {
         assert_eq!(scrollbar_position(0, 4, 8), 0);
+    }
+
+    #[test]
+    fn entry_hit_testing_ignores_headers_and_maps_two_line_entries() {
+        let dir = tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join("a.md"),
+            "---\ncreated_at: \"2026-07-01T10:00:00+02:00\"\n---\n\n# A\nFirst preview\n",
+        )
+        .unwrap();
+        fs::write(
+            entry_dir.join("b.md"),
+            "---\ncreated_at: \"2026-07-01T11:00:00+02:00\"\n---\n\n# B\nSecond preview\n",
+        )
+        .unwrap();
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = App::new(config).unwrap();
+        app.select_journal_by_name("work");
+        let area = Rect::new(0, 0, 40, 10);
+        let rows = entry_row_metadata(&app);
+
+        assert_eq!(
+            rows,
+            vec![
+                EntryRowMeta {
+                    entry_index: None,
+                    height: 1,
+                },
+                EntryRowMeta {
+                    entry_index: None,
+                    height: 1,
+                },
+                EntryRowMeta {
+                    entry_index: Some(0),
+                    height: 2,
+                },
+                EntryRowMeta {
+                    entry_index: Some(1),
+                    height: 2,
+                },
+            ]
+        );
+        assert_eq!(entry_index_at(area, 1, 1, 0, &rows), None);
+        assert_eq!(entry_index_at(area, 1, 2, 0, &rows), None);
+        assert_eq!(entry_index_at(area, 1, 3, 0, &rows), Some(0));
+        assert_eq!(entry_index_at(area, 1, 4, 0, &rows), Some(0));
+        assert_eq!(entry_index_at(area, 1, 5, 0, &rows), Some(1));
+        assert_eq!(entry_index_at(area, 1, 1, 2, &rows), Some(0));
     }
 
     #[test]
@@ -789,6 +1170,54 @@ mod tests {
         assert!(preview_focus.contains(">> Entries"));
         assert!(!preview_focus.contains(" Journals "));
         assert!(!preview_focus.contains("2026-07-01 10:00"));
+    }
+
+    #[test]
+    fn selected_journal_and_entry_remain_reversed_when_preview_is_focused() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Preview;
+
+        let backend = render_app(app, 120, 20);
+        let buffer = backend.buffer();
+
+        assert!(
+            buffer
+                .cell((1, 1))
+                .unwrap()
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+        assert!(
+            buffer
+                .cell((19, 3))
+                .unwrap()
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn selected_entry_is_not_reversed_when_journals_are_focused() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Journals;
+
+        let backend = render_app(app, 120, 20);
+        let buffer = backend.buffer();
+
+        assert!(
+            buffer
+                .cell((1, 1))
+                .unwrap()
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+        assert!(
+            !buffer
+                .cell((19, 3))
+                .unwrap()
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
     }
 
     #[test]
