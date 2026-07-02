@@ -1,6 +1,6 @@
 use super::edit::{edit_encrypted_entry, open_editor, set_updated_at_now};
 use super::paths::{ENTRY_ID_LEN, encrypted_entry_path_with_id, entry_path_with_id};
-use crate::{AppResult, crypto};
+use crate::{AppResult, crypto, markdown::entry_has_body};
 use chrono::{DateTime, Local};
 use nanoid::nanoid;
 use std::{
@@ -17,15 +17,19 @@ pub(crate) enum WriteTarget<'a> {
     Encrypted(&'a crypto::EncryptionPaths),
 }
 
-pub fn create_entry(root: &Path, journal: &str, editor: &str) -> AppResult<PathBuf> {
+pub fn create_entry(root: &Path, journal: &str, editor: &str) -> AppResult<Option<PathBuf>> {
     let now = Local::now();
     let content = entry_template(now, now);
     let path = create_entry_file(root, journal, now, &content, WriteTarget::Plain, || {
         nanoid!(ENTRY_ID_LEN)
     })?;
     open_editor(editor, &path)?;
+    if !entry_has_body(&fs::read_to_string(&path)?) {
+        fs::remove_file(&path)?;
+        return Ok(None);
+    }
     set_updated_at_now(&path)?;
-    Ok(path)
+    Ok(Some(path))
 }
 
 pub fn create_encrypted_entry(
@@ -34,7 +38,7 @@ pub fn create_encrypted_entry(
     editor: &str,
     paths: &crypto::EncryptionPaths,
     identity: &crypto::UnlockedIdentity,
-) -> AppResult<PathBuf> {
+) -> AppResult<Option<PathBuf>> {
     let now = Local::now();
     let content = entry_template(now, now);
     let path = create_entry_file(
@@ -45,8 +49,12 @@ pub fn create_encrypted_entry(
         WriteTarget::Encrypted(paths),
         || nanoid!(ENTRY_ID_LEN),
     )?;
-    edit_encrypted_entry(&path, editor, paths, identity)?;
-    Ok(path)
+    edit_encrypted_entry(&path, editor, paths, identity, true)?;
+    if path.exists() {
+        Ok(Some(path))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn create_entry_with_body(root: &Path, journal: &str, body: &str) -> AppResult<PathBuf> {

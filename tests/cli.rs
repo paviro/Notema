@@ -231,8 +231,9 @@ fn fake_editor_command_edits_entry_files_in_place() {
         .unwrap();
     assert!(chmod.success());
 
-    let entry =
-        journal::storage::create_entry(root.path(), "work", script.to_str().unwrap()).unwrap();
+    let entry = journal::storage::create_entry(root.path(), "work", script.to_str().unwrap())
+        .unwrap()
+        .unwrap();
     let entry_text = fs::read_to_string(entry).unwrap();
     assert!(entry_text.contains("# Edited"));
 }

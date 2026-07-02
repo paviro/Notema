@@ -20,6 +20,11 @@ pub fn front_matter_value(front_matter: &str, key: &str) -> Option<String> {
     })
 }
 
+pub fn entry_has_body(content: &str) -> bool {
+    let (_, body) = split_front_matter(content);
+    !body.trim().is_empty()
+}
+
 pub fn display_title_and_preview(body: &str, timestamp_fallback: &str) -> (String, String) {
     let mut lines = body.lines().filter_map(display_line_text);
     let title = lines

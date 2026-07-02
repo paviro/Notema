@@ -1,5 +1,8 @@
 use super::paths::ENTRY_ID_LEN;
-use crate::{AppResult, crypto, markdown::set_front_matter_value};
+use crate::{
+    AppResult, crypto,
+    markdown::{entry_has_body, set_front_matter_value},
+};
 use chrono::Local;
 use nanoid::nanoid;
 use std::{
@@ -34,6 +37,7 @@ pub fn edit_encrypted_entry(
     editor: &str,
     paths: &crypto::EncryptionPaths,
     identity: &crypto::UnlockedIdentity,
+    remove_if_empty: bool,
 ) -> AppResult<()> {
     let temp_dir = std::env::temp_dir();
     let plaintext = unique_temp_path(&temp_dir, "edit.md");
@@ -41,6 +45,10 @@ pub fn edit_encrypted_entry(
     let result = (|| {
         crypto::decrypt_file(identity, path, &plaintext)?;
         open_editor(editor, &plaintext)?;
+        if remove_if_empty && !entry_has_body(&fs::read_to_string(&plaintext)?) {
+            let _ = fs::remove_file(path);
+            return Ok(());
+        }
         set_updated_at_now(&plaintext)?;
         crypto::encrypt_file(paths, &plaintext, &encrypted)?;
         fs::rename(&encrypted, path)?;

@@ -1,12 +1,13 @@
 use crate::{
     AppResult, crypto,
+    markdown::entry_has_body,
     storage::{
         create_encrypted_entry, create_entry, create_journal, edit_encrypted_entry,
         is_encrypted_entry_file, move_entry_to_trash, open_editor, set_updated_at_now,
     },
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, path::Path};
+use std::{fs, io, path::Path};
 
 use super::terminal::suspend_terminal;
 use crate::tui::app::{App, Focus};
@@ -25,13 +26,26 @@ fn ensure_identity_available(app: &mut App, needs_identity: bool) -> bool {
 
 /// Open the entry at `path` in the editor, transparently handling encrypted
 /// entries (decrypt to a temp file, edit, re-encrypt) and plaintext ones.
-fn edit_entry_at(terminal: &mut Term, app: &App, path: &Path, editor: &str) -> AppResult<()> {
+/// Returns `true` if the entry was kept, `false` if it was deleted for being empty.
+fn edit_entry_at(terminal: &mut Term, app: &App, path: &Path, editor: &str) -> AppResult<bool> {
     suspend_terminal(terminal, || {
         if is_encrypted_entry_file(path) {
-            edit_encrypted_entry(path, editor, &app.encryption_paths, unlocked_identity(app)?)
+            edit_encrypted_entry(
+                path,
+                editor,
+                &app.encryption_paths,
+                unlocked_identity(app)?,
+                true,
+            )?;
+            Ok(path.exists())
         } else {
             open_editor(editor, path)?;
-            set_updated_at_now(path)
+            if !entry_has_body(&fs::read_to_string(path)?) {
+                fs::remove_file(path)?;
+                return Ok(false);
+            }
+            set_updated_at_now(path)?;
+            Ok(true)
         }
     })
 }
@@ -80,7 +94,7 @@ fn new_entry(terminal: &mut Term, app: &mut App) -> AppResult<()> {
     if !ensure_identity_available(app, crypto::should_encrypt(&app.encryption_paths)) {
         return Ok(());
     }
-    suspend_terminal(terminal, || {
+    let created = suspend_terminal(terminal, || {
         if crypto::should_encrypt(&app.encryption_paths) {
             create_encrypted_entry(
                 &root,
@@ -93,7 +107,9 @@ fn new_entry(terminal: &mut Term, app: &mut App) -> AppResult<()> {
             create_entry(&root, &journal_name, &editor)
         }
     })?;
-    app.set_status("Entry saved");
+    if created.is_some() {
+        app.set_status("Entry saved");
+    }
     app.refresh()?;
     Ok(())
 }
@@ -108,8 +124,12 @@ pub(super) fn edit_selected(terminal: &mut Term, app: &mut App) -> AppResult<()>
     }
 
     let editor = app.config.editor.clone();
-    edit_entry_at(terminal, app, &target.path, &editor)?;
-    app.set_status(format!("Edited {}", target.path.display()));
+    let kept = edit_entry_at(terminal, app, &target.path, &editor)?;
+    if kept {
+        app.set_status(format!("Edited {}", target.path.display()));
+    } else {
+        app.set_status("Empty entry deleted");
+    }
     app.refresh()?;
     Ok(())
 }
