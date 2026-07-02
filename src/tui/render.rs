@@ -16,8 +16,8 @@ use ratatui_markdown::{
 };
 
 use super::app::{
-    App, ENTRY_LIST_MIN_WIDTH, Focus, JOURNAL_LIST_WIDTH, MarkdownView, Mode, preview_is_visible,
-    single_panel_is_active,
+    App, ENTRY_LIST_MIN_WIDTH, Focus, JOURNAL_LIST_WIDTH, MarkdownView, Mode,
+    inline_entry_view_is_visible, single_panel_is_active,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,9 +26,9 @@ pub(crate) struct TuiLayout {
     pub(crate) footer: Rect,
     pub(crate) journals: Option<Rect>,
     pub(crate) entries: Option<Rect>,
-    pub(crate) preview: Option<Rect>,
+    pub(crate) entry_view: Option<Rect>,
     pub(crate) stats: Option<Rect>,
-    pub(crate) preview_visible: bool,
+    pub(crate) inline_entry_view_visible: bool,
     pub(crate) single_panel: bool,
 }
 
@@ -44,7 +44,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         return;
     }
 
-    app.normalize_focus(preview_is_visible(frame.area().width));
+    app.normalize_focus(inline_entry_view_is_visible(frame.area().width));
     let layout = tui_layout(frame.area(), app);
 
     if let Some(area) = layout.journals {
@@ -55,11 +55,11 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     }
     if let Some(area) = layout.stats {
         draw_journal_stats(frame, area, app);
-    } else if let Some(area) = layout.preview {
-        draw_selected_preview(frame, area, app);
+    } else if let Some(area) = layout.entry_view {
+        draw_selected_entry_view(frame, area, app);
     }
 
-    let footer_text = footer_text(app, layout.preview_visible);
+    let footer_text = footer_text(app, layout.inline_entry_view_visible);
     let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::TOP));
     frame.render_widget(footer, layout.footer);
 
@@ -93,7 +93,7 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
         .split(area);
     let content = root[0];
     let footer = root[1];
-    let preview_visible = preview_is_visible(content.width);
+    let inline_entry_view_visible = inline_entry_view_is_visible(content.width);
     let single_panel = single_panel_is_active(content.width);
 
     let mut layout = TuiLayout {
@@ -101,22 +101,22 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
         footer,
         journals: None,
         entries: None,
-        preview: None,
+        entry_view: None,
         stats: None,
-        preview_visible,
+        inline_entry_view_visible,
         single_panel,
     };
 
     if single_panel {
         match app.focus {
             Focus::Journals if app.mode == Mode::Browse => layout.journals = Some(content),
-            Focus::Preview => layout.preview = Some(content),
+            Focus::EntryView => layout.entry_view = Some(content),
             Focus::Journals | Focus::Entries => layout.entries = Some(content),
         }
         return layout;
     }
 
-    if preview_visible {
+    if inline_entry_view_visible {
         let body = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -130,7 +130,7 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
         if app.mode == Mode::Browse && app.focus == Focus::Journals {
             layout.stats = Some(body[2]);
         } else {
-            layout.preview = Some(body[2]);
+            layout.entry_view = Some(body[2]);
         }
     } else {
         let body = Layout::default()
@@ -147,26 +147,26 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
     layout
 }
 
-pub(crate) fn footer_text(app: &App, preview_visible: bool) -> String {
+pub(crate) fn footer_text(app: &App, inline_entry_view_visible: bool) -> String {
     if !app.status.is_empty() {
         return app.status.clone();
     }
 
     match app.mode {
-        Mode::Search => search_footer_text(app, preview_visible),
-        Mode::Browse => browse_footer_text(app, preview_visible),
+        Mode::Search => search_footer_text(app, inline_entry_view_visible),
+        Mode::Browse => browse_footer_text(app, inline_entry_view_visible),
     }
 }
 
-fn search_footer_text(app: &App, preview_visible: bool) -> String {
+fn search_footer_text(app: &App, inline_entry_view_visible: bool) -> String {
     let query = format!("Search {}: {}", app.search_scope_label(), app.search_query);
     match app.focus {
-        Focus::Preview if app.has_selected_entry_target() => {
+        Focus::EntryView if app.has_selected_entry_target() => {
             format!(
                 "{query} | left results | up/down/k/j scroll | PgUp/PgDn | Home/End | enter/v view | e edit | d delete | Esc search"
             )
         }
-        Focus::Preview => format!("{query} | left results | Esc search"),
+        Focus::EntryView => format!("{query} | left results | Esc search"),
         _ => {
             let mut parts = vec![
                 format!("Search {}: {}", app.search_scope_label(), app.search_query),
@@ -175,9 +175,9 @@ fn search_footer_text(app: &App, preview_visible: bool) -> String {
                 "up/down select".to_string(),
             ];
             if app.has_selected_entry_target() {
-                if preview_visible {
+                if inline_entry_view_visible {
                     parts.push("enter view".to_string());
-                    parts.push("right preview".to_string());
+                    parts.push("right view".to_string());
                 } else {
                     parts.push("right/enter view".to_string());
                 }
@@ -188,7 +188,7 @@ fn search_footer_text(app: &App, preview_visible: bool) -> String {
     }
 }
 
-fn browse_footer_text(app: &App, preview_visible: bool) -> String {
+fn browse_footer_text(app: &App, inline_entry_view_visible: bool) -> String {
     let mut parts = match app.focus {
         Focus::Journals => vec![
             "q quit".to_string(),
@@ -205,8 +205,8 @@ fn browse_footer_text(app: &App, preview_visible: bool) -> String {
                 "up/down select entry".to_string(),
             ];
             if app.has_selected_entry_target() {
-                if preview_visible {
-                    parts.push("right preview".to_string());
+                if inline_entry_view_visible {
+                    parts.push("right view".to_string());
                     parts.push("enter/v view".to_string());
                 } else {
                     parts.push("right/enter/v view".to_string());
@@ -219,7 +219,7 @@ fn browse_footer_text(app: &App, preview_visible: bool) -> String {
             parts.push("q quit".to_string());
             parts
         }
-        Focus::Preview => {
+        Focus::EntryView => {
             let mut parts = vec![
                 "left entries".to_string(),
                 "up/down/k/j scroll".to_string(),
@@ -238,8 +238,8 @@ fn browse_footer_text(app: &App, preview_visible: bool) -> String {
         }
     };
 
-    if !preview_visible {
-        parts.retain(|part| !part.contains("preview"));
+    if !inline_entry_view_visible {
+        parts.retain(|part| !part.contains("right view"));
     }
 
     parts.join(" | ")
@@ -266,19 +266,19 @@ fn draw_markdown_viewer(frame: &mut Frame<'_>, viewer: &mut MarkdownView) {
     );
 }
 
-fn draw_selected_preview(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &mut App) {
-    if let Some((title, content)) = app.selected_entry_preview() {
-        app.preview_scroll = draw_markdown_panel(
+fn draw_selected_entry_view(frame: &mut Frame<'_>, area: ratatui::layout::Rect, app: &mut App) {
+    if let Some((title, content)) = app.selected_entry_view() {
+        app.entry_view_scroll = draw_markdown_panel(
             frame,
             area,
             &title,
             &content,
-            app.preview_scroll,
-            app.focus == Focus::Preview,
+            app.entry_view_scroll,
+            app.focus == Focus::EntryView,
         );
     } else {
         let empty = Paragraph::new("No entry selected")
-            .block(panel_block("Preview", app.focus == Focus::Preview));
+            .block(panel_block("Entry", app.focus == Focus::EntryView));
         frame.render_widget(empty, area);
     }
 }
@@ -1016,25 +1016,25 @@ mod tests {
         let layout = tui_layout(Rect::new(0, 0, 120, 20), &app);
 
         assert!(!layout.single_panel);
-        assert!(layout.preview_visible);
+        assert!(layout.inline_entry_view_visible);
         assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 18));
         assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 42, 18));
-        assert_eq!(layout.preview.unwrap(), Rect::new(60, 0, 60, 18));
+        assert_eq!(layout.entry_view.unwrap(), Rect::new(60, 0, 60, 18));
         assert_eq!(layout.footer, Rect::new(0, 18, 120, 2));
     }
 
     #[test]
-    fn layout_places_hit_targets_in_two_columns_without_preview() {
+    fn layout_places_hit_targets_in_two_columns_without_inline_entry_view() {
         let mut app = app_with_entry();
         app.focus = Focus::Entries;
 
         let layout = tui_layout(Rect::new(0, 0, 80, 20), &app);
 
         assert!(!layout.single_panel);
-        assert!(!layout.preview_visible);
+        assert!(!layout.inline_entry_view_visible);
         assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 18));
         assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 62, 18));
-        assert!(layout.preview.is_none());
+        assert!(layout.entry_view.is_none());
     }
 
     #[test]
@@ -1164,18 +1164,18 @@ mod tests {
         assert!(!entries.contains(" Journals "));
         assert!(!entries.contains("2026-07-01 10:00"));
 
-        let mut preview_focus_app = app_with_entry();
-        preview_focus_app.focus = Focus::Preview;
-        let preview_focus = render_text(preview_focus_app, 57, 16);
-        assert!(preview_focus.contains(">> Entries"));
-        assert!(!preview_focus.contains(" Journals "));
-        assert!(!preview_focus.contains("2026-07-01 10:00"));
+        let mut entry_view_focus_app = app_with_entry();
+        entry_view_focus_app.focus = Focus::EntryView;
+        let entry_view_focus = render_text(entry_view_focus_app, 57, 16);
+        assert!(entry_view_focus.contains(">> Entries"));
+        assert!(!entry_view_focus.contains(" Journals "));
+        assert!(!entry_view_focus.contains("2026-07-01 10:00"));
     }
 
     #[test]
-    fn selected_journal_and_entry_remain_reversed_when_preview_is_focused() {
+    fn selected_journal_and_entry_remain_reversed_when_entry_view_is_focused() {
         let mut app = app_with_entry();
-        app.focus = Focus::Preview;
+        app.focus = Focus::EntryView;
 
         let backend = render_app(app, 120, 20);
         let buffer = backend.buffer();

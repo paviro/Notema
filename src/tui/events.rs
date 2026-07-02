@@ -15,7 +15,7 @@ use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
 use std::{fs, io};
 
 use super::{
-    app::{App, Focus, MarkdownView, Mode, preview_is_visible},
+    app::{App, Focus, MarkdownView, Mode, inline_entry_view_is_visible},
     render,
 };
 
@@ -25,11 +25,11 @@ pub(crate) fn handle_key(
     key: KeyEvent,
 ) -> AppResult<bool> {
     let width = terminal.size()?.width;
-    let preview_visible = preview_is_visible(width);
-    app.normalize_focus(preview_visible);
+    let inline_entry_view_visible = inline_entry_view_is_visible(width);
+    app.normalize_focus(inline_entry_view_visible);
 
     if app.viewer.is_some() {
-        handle_viewer_key(terminal, app, key, preview_visible)?;
+        handle_viewer_key(terminal, app, key, inline_entry_view_visible)?;
         return Ok(false);
     }
 
@@ -52,7 +52,7 @@ pub(crate) fn handle_key(
     }
 
     if app.mode == Mode::Search {
-        handle_search_key(terminal, app, key, preview_visible)?;
+        handle_search_key(terminal, app, key, inline_entry_view_visible)?;
         return Ok(false);
     }
 
@@ -61,16 +61,16 @@ pub(crate) fn handle_key(
         KeyCode::Char('r') => app.refresh()?,
         KeyCode::Char('/') => app.begin_search(),
         KeyCode::Left => move_focus_left(app),
-        KeyCode::Right => handle_right(app, preview_visible)?,
-        KeyCode::Enter => handle_enter(app, preview_visible)?,
-        KeyCode::Up if app.focus == Focus::Preview => app.scroll_preview(-1),
-        KeyCode::Down if app.focus == Focus::Preview => app.scroll_preview(1),
-        KeyCode::Char('k') if app.focus == Focus::Preview => app.scroll_preview(-1),
-        KeyCode::Char('j') if app.focus == Focus::Preview => app.scroll_preview(1),
-        KeyCode::PageUp if app.focus == Focus::Preview => app.page_preview(-1),
-        KeyCode::PageDown if app.focus == Focus::Preview => app.page_preview(1),
-        KeyCode::Home if app.focus == Focus::Preview => app.preview_scroll = 0,
-        KeyCode::End if app.focus == Focus::Preview => app.preview_scroll = u16::MAX,
+        KeyCode::Right => handle_right(app, inline_entry_view_visible)?,
+        KeyCode::Enter => handle_enter(app, inline_entry_view_visible)?,
+        KeyCode::Up if app.focus == Focus::EntryView => app.scroll_entry_view(-1),
+        KeyCode::Down if app.focus == Focus::EntryView => app.scroll_entry_view(1),
+        KeyCode::Char('k') if app.focus == Focus::EntryView => app.scroll_entry_view(-1),
+        KeyCode::Char('j') if app.focus == Focus::EntryView => app.scroll_entry_view(1),
+        KeyCode::PageUp if app.focus == Focus::EntryView => app.page_entry_view(-1),
+        KeyCode::PageDown if app.focus == Focus::EntryView => app.page_entry_view(1),
+        KeyCode::Home if app.focus == Focus::EntryView => app.entry_view_scroll = 0,
+        KeyCode::End if app.focus == Focus::EntryView => app.entry_view_scroll = u16::MAX,
         KeyCode::Up => {
             app.move_selection(-1);
             keep_selection_visible(terminal, app)?;
@@ -94,37 +94,37 @@ fn handle_search_key(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     key: KeyEvent,
-    preview_visible: bool,
+    inline_entry_view_visible: bool,
 ) -> AppResult<()> {
     match key.code {
         KeyCode::Esc => app.exit_search(),
-        KeyCode::Left if app.focus == Focus::Preview => app.focus = Focus::Entries,
+        KeyCode::Left if app.focus == Focus::EntryView => app.focus = Focus::Entries,
         KeyCode::Right
             if app.focus == Focus::Entries
-                && !preview_visible
+                && !inline_entry_view_visible
                 && app.has_selected_entry_target() =>
         {
             view_selected(app)?
         }
-        KeyCode::Right if app.focus == Focus::Entries && preview_visible => {
-            app.focus = Focus::Preview;
+        KeyCode::Right if app.focus == Focus::Entries && inline_entry_view_visible => {
+            app.focus = Focus::EntryView;
         }
-        KeyCode::Up if app.focus == Focus::Preview => app.scroll_preview(-1),
-        KeyCode::Down if app.focus == Focus::Preview => app.scroll_preview(1),
-        KeyCode::Char('k') if app.focus == Focus::Preview => app.scroll_preview(-1),
-        KeyCode::Char('j') if app.focus == Focus::Preview => app.scroll_preview(1),
-        KeyCode::PageUp if app.focus == Focus::Preview => app.page_preview(-1),
-        KeyCode::PageDown if app.focus == Focus::Preview => app.page_preview(1),
-        KeyCode::Home if app.focus == Focus::Preview => app.preview_scroll = 0,
-        KeyCode::End if app.focus == Focus::Preview => app.preview_scroll = u16::MAX,
+        KeyCode::Up if app.focus == Focus::EntryView => app.scroll_entry_view(-1),
+        KeyCode::Down if app.focus == Focus::EntryView => app.scroll_entry_view(1),
+        KeyCode::Char('k') if app.focus == Focus::EntryView => app.scroll_entry_view(-1),
+        KeyCode::Char('j') if app.focus == Focus::EntryView => app.scroll_entry_view(1),
+        KeyCode::PageUp if app.focus == Focus::EntryView => app.page_entry_view(-1),
+        KeyCode::PageDown if app.focus == Focus::EntryView => app.page_entry_view(1),
+        KeyCode::Home if app.focus == Focus::EntryView => app.entry_view_scroll = 0,
+        KeyCode::End if app.focus == Focus::EntryView => app.entry_view_scroll = u16::MAX,
         KeyCode::Enter if app.can_act_on_selected_entry() => view_selected(app)?,
-        KeyCode::Char('e') if app.focus == Focus::Preview && app.has_selected_entry_target() => {
+        KeyCode::Char('e') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             edit_selected(terminal, app)?
         }
-        KeyCode::Char('v') if app.focus == Focus::Preview && app.has_selected_entry_target() => {
+        KeyCode::Char('v') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             view_selected(app)?
         }
-        KeyCode::Char('d') if app.focus == Focus::Preview && app.has_selected_entry_target() => {
+        KeyCode::Char('d') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             app.confirm_delete = true
         }
         KeyCode::Backspace if app.focus == Focus::Entries => {
@@ -164,7 +164,7 @@ fn handle_mouse_in_area(app: &mut App, mouse: MouseEvent, area: Rect) -> AppResu
         return Ok(());
     }
 
-    app.normalize_focus(render::tui_layout(area, app).preview_visible);
+    app.normalize_focus(render::tui_layout(area, app).inline_entry_view_visible);
     let layout = render::tui_layout(area, app);
 
     if app.viewer.is_some() {
@@ -217,29 +217,29 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
             render::entry_index_at(area, mouse.column, mouse.row, app.entry_scroll, &rows)
         {
             app.select_entry_index(index);
-            if !layout.preview_visible {
+            if !layout.inline_entry_view_visible {
                 view_selected(app)?;
             }
         }
         return Ok(());
     }
 
-    if let Some(area) = layout.preview
+    if let Some(area) = layout.entry_view
         && render::point_in_rect(area, mouse.column, mouse.row)
         && app.has_selected_entry_target()
     {
-        app.focus = Focus::Preview;
+        app.focus = Focus::EntryView;
     }
 
     Ok(())
 }
 
 fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, delta: i16) {
-    if let Some(area) = layout.preview
+    if let Some(area) = layout.entry_view
         && render::point_in_rect(area, mouse.column, mouse.row)
     {
-        app.focus = Focus::Preview;
-        app.scroll_preview(delta);
+        app.focus = Focus::EntryView;
+        app.scroll_entry_view(delta);
         return;
     }
 
@@ -311,34 +311,35 @@ fn scroll_viewer(app: &mut App, delta: i16) {
 
 fn move_focus_left(app: &mut App) {
     app.focus = match app.focus {
-        Focus::Preview => Focus::Entries,
+        Focus::EntryView => Focus::Entries,
         Focus::Entries => Focus::Journals,
         Focus::Journals => Focus::Journals,
     };
 }
 
-fn handle_right(app: &mut App, preview_visible: bool) -> AppResult<()> {
-    if app.focus == Focus::Entries && !preview_visible && app.has_selected_entry_target() {
+fn handle_right(app: &mut App, inline_entry_view_visible: bool) -> AppResult<()> {
+    if app.focus == Focus::Entries && !inline_entry_view_visible && app.has_selected_entry_target()
+    {
         view_selected(app)?;
     } else {
-        move_focus_right(app, preview_visible);
+        move_focus_right(app, inline_entry_view_visible);
     }
 
     Ok(())
 }
 
-fn move_focus_right(app: &mut App, preview_available: bool) {
+fn move_focus_right(app: &mut App, inline_entry_view_available: bool) {
     app.focus = match app.focus {
         Focus::Journals => Focus::Entries,
-        Focus::Entries if preview_available => Focus::Preview,
+        Focus::Entries if inline_entry_view_available => Focus::EntryView,
         Focus::Entries => Focus::Entries,
-        Focus::Preview => Focus::Preview,
+        Focus::EntryView => Focus::EntryView,
     };
 }
 
-fn handle_enter(app: &mut App, preview_available: bool) -> AppResult<()> {
+fn handle_enter(app: &mut App, inline_entry_view_available: bool) -> AppResult<()> {
     if app.focus == Focus::Journals {
-        move_focus_right(app, preview_available);
+        move_focus_right(app, inline_entry_view_available);
     } else if app.can_act_on_selected_entry() {
         view_selected(app)?;
     }
@@ -350,9 +351,9 @@ fn handle_viewer_key(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     key: KeyEvent,
-    preview_visible: bool,
+    inline_entry_view_visible: bool,
 ) -> AppResult<()> {
-    if viewer_key_closes(key.code, preview_visible) {
+    if viewer_key_closes(key.code, inline_entry_view_visible) {
         app.viewer = None;
         return Ok(());
     }
@@ -387,9 +388,9 @@ fn handle_viewer_key(
     Ok(())
 }
 
-fn viewer_key_closes(key: KeyCode, preview_visible: bool) -> bool {
+fn viewer_key_closes(key: KeyCode, inline_entry_view_visible: bool) -> bool {
     matches!(key, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q'))
-        || (key == KeyCode::Left && !preview_visible)
+        || (key == KeyCode::Left && !inline_entry_view_visible)
 }
 
 fn edit_viewer_entry(
@@ -504,10 +505,14 @@ fn view_selected(app: &mut App) -> AppResult<()> {
         return Ok(());
     };
 
+    let title = app
+        .selected_entry_view()
+        .map(|(title, _)| title)
+        .unwrap_or_else(|| target.title.clone());
     let content = fs::read_to_string(&target.path)?;
     let (_, body) = split_front_matter(&content);
     app.viewer = Some(MarkdownView {
-        title: target.title,
+        title,
         path: target.path,
         content: body.trim_start().to_string(),
         scroll: 0,
@@ -626,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn right_on_entry_opens_viewer_when_preview_panel_is_hidden() {
+    fn right_on_entry_opens_viewer_when_inline_entry_view_is_hidden() {
         let dir = tempdir().unwrap();
         let entry_dir = dir.path().join("work").join("2026-07-01");
         fs::create_dir_all(&entry_dir).unwrap();
@@ -643,7 +648,27 @@ mod tests {
     }
 
     #[test]
-    fn right_on_entry_focuses_preview_when_preview_panel_is_visible() {
+    fn viewer_title_matches_entry_view_timestamp_title() {
+        let dir = tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join("a.md"),
+            "---\ncreated_at: \"2026-07-01T10:23:00+02:00\"\n---\n\n# A\nBody\n",
+        )
+        .unwrap();
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = App::new(config).unwrap();
+        app.select_journal_by_name("work");
+        app.focus = Focus::Entries;
+
+        handle_right(&mut app, false).unwrap();
+
+        assert_eq!(app.viewer.as_ref().unwrap().title, "2026-07-01 10:23");
+    }
+
+    #[test]
+    fn right_on_entry_focuses_entry_view_when_inline_entry_view_is_visible() {
         let dir = tempdir().unwrap();
         let entry_dir = dir.path().join("work").join("2026-07-01");
         fs::create_dir_all(&entry_dir).unwrap();
@@ -656,11 +681,11 @@ mod tests {
         handle_right(&mut app, true).unwrap();
 
         assert!(app.viewer.is_none());
-        assert_eq!(app.focus, Focus::Preview);
+        assert_eq!(app.focus, Focus::EntryView);
     }
 
     #[test]
-    fn left_closes_viewer_only_when_preview_panel_is_hidden() {
+    fn left_closes_viewer_only_when_inline_entry_view_is_hidden() {
         assert!(viewer_key_closes(KeyCode::Left, false));
         assert!(!viewer_key_closes(KeyCode::Left, true));
     }
@@ -670,7 +695,7 @@ mod tests {
         let mut app = app_with_journals(&["alpha", "beta"]);
         app.focus = Focus::Journals;
         app.selected_entry_index = 3;
-        app.preview_scroll = 10;
+        app.entry_view_scroll = 10;
         let area = Rect::new(0, 0, 120, 20);
         let layout = render::tui_layout(area, &app);
         let journals = render::panel_inner(layout.journals.unwrap());
@@ -688,7 +713,7 @@ mod tests {
 
         assert_eq!(app.selected_journal, 1);
         assert_eq!(app.selected_entry_index, 0);
-        assert_eq!(app.preview_scroll, 0);
+        assert_eq!(app.entry_view_scroll, 0);
         assert_eq!(app.focus, Focus::Journals);
     }
 
@@ -779,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn entry_click_selects_row_and_opens_viewer_when_preview_is_hidden() {
+    fn entry_click_selects_row_and_opens_viewer_when_inline_entry_view_is_hidden() {
         let mut app = app_with_entries(2);
         app.focus = Focus::Entries;
         let area = Rect::new(0, 0, 80, 12);
@@ -805,7 +830,7 @@ mod tests {
     #[test]
     fn entry_panel_click_without_entry_row_focuses_entries_without_opening_viewer() {
         let mut app = app_with_entries(1);
-        app.focus = Focus::Preview;
+        app.focus = Focus::EntryView;
         let area = Rect::new(0, 0, 120, 12);
         let layout = render::tui_layout(area, &app);
         let entries = render::panel_inner(layout.entries.unwrap());
@@ -829,7 +854,7 @@ mod tests {
     #[test]
     fn entry_panel_empty_space_click_focuses_entries_without_opening_viewer() {
         let mut app = app_with_entries(1);
-        app.focus = Focus::Preview;
+        app.focus = Focus::EntryView;
         let area = Rect::new(0, 0, 120, 12);
         let layout = render::tui_layout(area, &app);
         let entries = render::panel_inner(layout.entries.unwrap());
@@ -851,24 +876,24 @@ mod tests {
     }
 
     #[test]
-    fn wheel_over_preview_scrolls_preview_only() {
+    fn wheel_over_entry_view_scrolls_entry_view_only() {
         let mut app = app_with_entries(6);
         app.focus = Focus::Entries;
         let area = Rect::new(0, 0, 120, 20);
         let layout = render::tui_layout(area, &app);
-        let preview = render::panel_inner(layout.preview.unwrap());
+        let entry_view = render::panel_inner(layout.entry_view.unwrap());
 
         handle_mouse_in_area(
             &mut app,
-            mouse(MouseEventKind::ScrollDown, preview.x, preview.y),
+            mouse(MouseEventKind::ScrollDown, entry_view.x, entry_view.y),
             area,
         )
         .unwrap();
 
-        assert_eq!(app.preview_scroll, 1);
+        assert_eq!(app.entry_view_scroll, 1);
         assert_eq!(app.entry_scroll, 0);
         assert_eq!(app.selected_entry_index, 0);
-        assert_eq!(app.focus, Focus::Preview);
+        assert_eq!(app.focus, Focus::EntryView);
     }
 
     #[test]

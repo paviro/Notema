@@ -14,13 +14,13 @@ const STATUS_DURATION: Duration = Duration::from_secs(3);
 pub(crate) const JOURNAL_LIST_WIDTH: u16 = 18;
 pub(crate) const ENTRY_LIST_MIN_WIDTH: u16 = 40;
 pub(crate) const TWO_PANEL_MIN_WIDTH: u16 = JOURNAL_LIST_WIDTH + ENTRY_LIST_MIN_WIDTH;
-pub(crate) const PREVIEW_MIN_WIDTH: u16 = 118;
+pub(crate) const INLINE_ENTRY_VIEW_MIN_WIDTH: u16 = 118;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Focus {
     Journals,
     Entries,
-    Preview,
+    EntryView,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +50,7 @@ pub(crate) struct App {
     pub(crate) selected_entry_index: usize,
     pub(crate) journal_scroll: u16,
     pub(crate) entry_scroll: u16,
-    pub(crate) preview_scroll: u16,
+    pub(crate) entry_view_scroll: u16,
     pub(crate) focus: Focus,
     pub(crate) mode: Mode,
     pub(crate) new_journal_input: Option<String>,
@@ -80,7 +80,7 @@ impl App {
             selected_entry_index: 0,
             journal_scroll: 0,
             entry_scroll: 0,
-            preview_scroll: 0,
+            entry_view_scroll: 0,
             focus: Focus::Journals,
             mode: Mode::Browse,
             new_journal_input: None,
@@ -103,7 +103,7 @@ impl App {
             self.selected_journal = self.journals.len().saturating_sub(1);
             self.journal_scroll = 0;
             self.entry_scroll = 0;
-            self.preview_scroll = 0;
+            self.entry_view_scroll = 0;
         }
         if !self.search_query.is_empty() {
             self.search_hits = self.search_results()?;
@@ -114,7 +114,7 @@ impl App {
             .min(self.current_entry_list_len().saturating_sub(1));
         if self.selected_entry_index != previous_entry_index {
             self.entry_scroll = 0;
-            self.preview_scroll = 0;
+            self.entry_view_scroll = 0;
         }
         Ok(())
     }
@@ -143,7 +143,7 @@ impl App {
     pub(crate) fn move_selection(&mut self, delta: isize) {
         let len = match self.focus {
             Focus::Journals if self.mode == Mode::Browse => self.journals.len(),
-            Focus::Entries | Focus::Preview | Focus::Journals => self.current_entry_list_len(),
+            Focus::Entries | Focus::EntryView | Focus::Journals => self.current_entry_list_len(),
         };
         if len == 0 {
             return;
@@ -161,7 +161,7 @@ impl App {
             self.entry_scroll = 0;
         }
         if self.selected_entry_index != previous_entry_index {
-            self.preview_scroll = 0;
+            self.entry_view_scroll = 0;
         }
     }
 
@@ -174,7 +174,7 @@ impl App {
             self.selected_journal = index;
             self.selected_entry_index = 0;
             self.entry_scroll = 0;
-            self.preview_scroll = 0;
+            self.entry_view_scroll = 0;
         }
     }
 
@@ -185,7 +185,7 @@ impl App {
 
         if self.selected_entry_index != index {
             self.selected_entry_index = index;
-            self.preview_scroll = 0;
+            self.entry_view_scroll = 0;
         }
     }
 
@@ -222,16 +222,16 @@ impl App {
     }
 
     pub(crate) fn can_act_on_selected_entry(&self) -> bool {
-        matches!(self.focus, Focus::Entries | Focus::Preview) && self.has_selected_entry_target()
+        matches!(self.focus, Focus::Entries | Focus::EntryView) && self.has_selected_entry_target()
     }
 
-    pub(crate) fn normalize_focus(&mut self, preview_available: bool) {
-        if self.focus == Focus::Preview && !preview_available {
+    pub(crate) fn normalize_focus(&mut self, inline_entry_view_available: bool) {
+        if self.focus == Focus::EntryView && !inline_entry_view_available {
             self.focus = Focus::Entries;
         }
     }
 
-    pub(crate) fn selected_entry_preview(&self) -> Option<(String, String)> {
+    pub(crate) fn selected_entry_view(&self) -> Option<(String, String)> {
         match self.mode {
             Mode::Search => {
                 let hit = self.selected_search_hit()?;
@@ -260,7 +260,7 @@ impl App {
             self.selected_entry_index = 0;
             self.journal_scroll = index.min(u16::MAX as usize) as u16;
             self.entry_scroll = 0;
-            self.preview_scroll = 0;
+            self.entry_view_scroll = 0;
             self.focus = Focus::Entries;
         }
     }
@@ -279,7 +279,7 @@ impl App {
         self.search_hits.clear();
         self.selected_entry_index = 0;
         self.entry_scroll = 0;
-        self.preview_scroll = 0;
+        self.entry_view_scroll = 0;
     }
 
     pub(crate) fn exit_search(&mut self) {
@@ -289,14 +289,14 @@ impl App {
         self.search_hits.clear();
         self.selected_entry_index = 0;
         self.entry_scroll = 0;
-        self.preview_scroll = 0;
+        self.entry_view_scroll = 0;
     }
 
     pub(crate) fn update_search_results(&mut self) -> AppResult<()> {
         self.search_hits = self.search_results()?;
         self.selected_entry_index = 0;
         self.entry_scroll = 0;
-        self.preview_scroll = 0;
+        self.entry_view_scroll = 0;
         Ok(())
     }
 
@@ -322,16 +322,16 @@ impl App {
         )
     }
 
-    pub(crate) fn scroll_preview(&mut self, delta: i16) {
+    pub(crate) fn scroll_entry_view(&mut self, delta: i16) {
         if delta.is_negative() {
-            self.preview_scroll = self.preview_scroll.saturating_sub(delta.unsigned_abs());
+            self.entry_view_scroll = self.entry_view_scroll.saturating_sub(delta.unsigned_abs());
         } else {
-            self.preview_scroll = self.preview_scroll.saturating_add(delta as u16);
+            self.entry_view_scroll = self.entry_view_scroll.saturating_add(delta as u16);
         }
     }
 
-    pub(crate) fn page_preview(&mut self, delta: i16) {
-        self.scroll_preview(delta.saturating_mul(10));
+    pub(crate) fn page_entry_view(&mut self, delta: i16) {
+        self.scroll_entry_view(delta.saturating_mul(10));
     }
 
     pub(crate) fn set_status(&mut self, message: impl Into<String>) {
@@ -377,7 +377,7 @@ pub(crate) fn entry_timestamp_label(entry: &Entry) -> String {
         .or_else(|| {
             entry_date_from_path(&entry.path).map(|date| date.format("%Y-%m-%d").to_string())
         })
-        .unwrap_or_else(|| "Preview".to_string())
+        .unwrap_or_else(|| "Entry".to_string())
 }
 
 fn parse_entry_timestamp(value: &str) -> Option<DateTime<Local>> {
@@ -391,8 +391,8 @@ fn entry_date_from_path(path: &std::path::Path) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()
 }
 
-pub(crate) fn preview_is_visible(width: u16) -> bool {
-    width >= PREVIEW_MIN_WIDTH
+pub(crate) fn inline_entry_view_is_visible(width: u16) -> bool {
+    width >= INLINE_ENTRY_VIEW_MIN_WIDTH
 }
 
 pub(crate) fn single_panel_is_active(width: u16) -> bool {
@@ -406,7 +406,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn changing_selected_entry_resets_preview_scroll() {
+    fn changing_selected_entry_resets_entry_view_scroll() {
         let dir = tempdir().unwrap();
         let entry_dir = dir.path().join("work").join("2026-07-01");
         fs::create_dir_all(&entry_dir).unwrap();
@@ -417,22 +417,22 @@ mod tests {
         let mut app = App::new(config).unwrap();
         app.select_journal_by_name("work");
         app.focus = Focus::Entries;
-        app.preview_scroll = 20;
+        app.entry_view_scroll = 20;
 
         app.move_selection(1);
 
-        assert_eq!(app.preview_scroll, 0);
+        assert_eq!(app.entry_view_scroll, 0);
     }
 
     #[test]
-    fn markdown_body_strips_front_matter_for_preview() {
+    fn markdown_body_strips_front_matter_for_entry_view() {
         let content = "---\ntags: []\n---\n\n# Title\nBody\n";
 
         assert_eq!(markdown_body(content), "# Title\nBody\n");
     }
 
     #[test]
-    fn selected_preview_title_uses_entry_timestamp() {
+    fn selected_entry_view_title_uses_entry_timestamp() {
         let dir = tempdir().unwrap();
         let entry_dir = dir.path().join("work").join("2026-07-01");
         fs::create_dir_all(&entry_dir).unwrap();
@@ -446,14 +446,14 @@ mod tests {
         let mut app = App::new(config).unwrap();
         app.select_journal_by_name("work");
 
-        let (title, content) = app.selected_entry_preview().unwrap();
+        let (title, content) = app.selected_entry_view().unwrap();
 
         assert_eq!(title, "2026-07-01 10:23");
         assert_eq!(content, "# A\nBody\n");
     }
 
     #[test]
-    fn search_preview_title_uses_entry_timestamp() {
+    fn search_entry_view_title_uses_entry_timestamp() {
         let dir = tempdir().unwrap();
         let entry_dir = dir.path().join("work").join("2026-07-01");
         fs::create_dir_all(&entry_dir).unwrap();
@@ -470,7 +470,7 @@ mod tests {
         app.search_query = "needle".to_string();
         app.update_search_results().unwrap();
 
-        let (title, content) = app.selected_entry_preview().unwrap();
+        let (title, content) = app.selected_entry_view().unwrap();
 
         assert_eq!(title, "2026-07-01 10:23");
         assert_eq!(content, "# A\nneedle\n");
@@ -495,10 +495,10 @@ mod tests {
     }
 
     #[test]
-    fn hidden_preview_focus_falls_back_to_entries() {
+    fn hidden_entry_view_focus_falls_back_to_entries() {
         let config = Config::new(tempdir().unwrap().path().to_path_buf(), "true");
         let mut app = App::new(config).unwrap();
-        app.focus = Focus::Preview;
+        app.focus = Focus::EntryView;
 
         app.normalize_focus(false);
 
@@ -506,9 +506,9 @@ mod tests {
     }
 
     #[test]
-    fn compact_width_uses_single_panel_without_inline_preview() {
+    fn compact_width_uses_single_panel_without_inline_entry_view() {
         assert!(single_panel_is_active(TWO_PANEL_MIN_WIDTH - 1));
-        assert!(!preview_is_visible(TWO_PANEL_MIN_WIDTH - 1));
+        assert!(!inline_entry_view_is_visible(TWO_PANEL_MIN_WIDTH - 1));
     }
 
     #[test]
