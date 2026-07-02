@@ -1,6 +1,9 @@
 mod app;
+mod entry_rows;
 mod events;
+mod hit_test;
 mod render;
+mod scroll;
 
 use crate::{AppResult, config::Config};
 use crossterm::{

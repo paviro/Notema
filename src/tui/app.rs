@@ -2,9 +2,11 @@ use crate::{
     AppResult,
     config::Config,
     markdown::split_front_matter,
-    storage::{self, Entry, Journal, SearchHit, SearchScopeFilter, scan_entries, search_entries},
+    storage::{
+        self, Entry, Journal, SearchHit, SearchScopeFilter, entry_timestamp_label, scan_entries,
+        search_entries,
+    },
 };
-use chrono::{DateTime, Local, NaiveDate};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -366,29 +368,6 @@ impl SearchScope {
 pub(crate) fn markdown_body(content: &str) -> String {
     let (_, body) = split_front_matter(content);
     body.trim_start().to_string()
-}
-
-pub(crate) fn entry_timestamp_label(entry: &Entry) -> String {
-    entry
-        .created_at
-        .as_deref()
-        .and_then(parse_entry_timestamp)
-        .map(|timestamp| timestamp.format("%Y-%m-%d %H:%M").to_string())
-        .or_else(|| {
-            entry_date_from_path(&entry.path).map(|date| date.format("%Y-%m-%d").to_string())
-        })
-        .unwrap_or_else(|| "Entry".to_string())
-}
-
-fn parse_entry_timestamp(value: &str) -> Option<DateTime<Local>> {
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|timestamp| timestamp.with_timezone(&Local))
-}
-
-fn entry_date_from_path(path: &std::path::Path) -> Option<NaiveDate> {
-    let date = path.parent()?.file_name()?.to_str()?;
-    NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()
 }
 
 pub(crate) fn inline_entry_view_is_visible(width: u16) -> bool {

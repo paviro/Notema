@@ -1,0 +1,555 @@
+mod chrome;
+mod entries;
+mod journals;
+mod layout;
+mod markdown_panel;
+mod stats;
+
+use ratatui::{
+    Frame,
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+};
+
+use super::app::{App, inline_entry_view_is_visible};
+#[cfg(test)]
+pub(crate) use super::entry_rows::{
+    EntryRowMeta, entry_day_label, entry_list_lines, entry_month_label,
+};
+pub(crate) use super::entry_rows::{
+    ensure_entry_visible, entry_row_metadata, total_entry_row_height,
+};
+pub(crate) use super::hit_test::{entry_index_at, journal_index_at, panel_inner, point_in_rect};
+pub(crate) use super::scroll::{
+    clamp_scroll, ensure_index_visible, scroll_offset, scrollbar_position, viewer_scroll,
+};
+#[cfg(test)]
+pub(crate) use chrome::panel_title;
+pub(crate) use chrome::{centered_rect, footer_text, panel_block, selected_style};
+use entries::draw_entry_list;
+use journals::draw_journals;
+pub(crate) use layout::{TuiLayout, tui_layout};
+#[cfg(test)]
+pub(crate) use markdown_panel::markdown_theme;
+use markdown_panel::{draw_markdown_viewer, draw_selected_entry_view};
+use stats::draw_journal_stats;
+#[cfg(test)]
+pub(crate) use stats::{centered_stats_layout, journal_stats};
+
+pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
+    if let Some(viewer) = &mut app.viewer {
+        draw_markdown_viewer(frame, viewer);
+        return;
+    }
+
+    app.normalize_focus(inline_entry_view_is_visible(frame.area().width));
+    let layout = tui_layout(frame.area(), app);
+
+    if let Some(area) = layout.journals {
+        draw_journals(frame, area, app);
+    }
+    if let Some(area) = layout.entries {
+        draw_entry_list(frame, area, app);
+    }
+    if let Some(area) = layout.stats {
+        draw_journal_stats(frame, area, app);
+    } else if let Some(area) = layout.entry_view {
+        draw_selected_entry_view(frame, area, app);
+    }
+
+    let footer_text = footer_text(app, layout.inline_entry_view_visible);
+    let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::TOP));
+    frame.render_widget(footer, layout.footer);
+
+    if app.confirm_delete {
+        let area = centered_rect(50, 20, frame.area());
+        frame.render_widget(Clear, area);
+        let dialog = Paragraph::new("Move selected file to trash? y/n")
+            .block(
+                Block::default()
+                    .title("Confirm Delete")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: true });
+        frame.render_widget(dialog, area);
+    }
+
+    if let Some(input) = &app.new_journal_input {
+        let area = centered_rect(60, 20, frame.area());
+        frame.render_widget(Clear, area);
+        let dialog = Paragraph::new(format!("Name: {input}\n\nEnter saves | Esc cancels"))
+            .block(Block::default().title("New Journal").borders(Borders::ALL))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(dialog, area);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        config::Config,
+        storage::Entry,
+        tui::app::{Focus, Mode},
+    };
+    use ratatui::{
+        Terminal,
+        backend::TestBackend,
+        layout::Rect,
+        style::{Color, Modifier},
+    };
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    fn app_with_entry() -> App {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let entry_dir = root.join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join("a.md"),
+            "---\ncreated_at: \"2026-07-01T10:00:00+02:00\"\n---\n\n# A\nBody\n",
+        )
+        .unwrap();
+
+        let config = Config::new(root, "true");
+        let mut app = App::new(config).unwrap();
+        app.select_journal_by_name("work");
+        app
+    }
+
+    fn render_text(mut app: App, width: u16, height: u16) -> String {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    fn render_app(mut app: App, width: u16, height: u16) -> TestBackend {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+
+        terminal.backend().clone()
+    }
+
+    #[test]
+    fn layout_places_hit_targets_in_three_columns() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+
+        let layout = tui_layout(Rect::new(0, 0, 120, 20), &app);
+
+        assert!(!layout.single_panel);
+        assert!(layout.inline_entry_view_visible);
+        assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 18));
+        assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 42, 18));
+        assert_eq!(layout.entry_view.unwrap(), Rect::new(60, 0, 60, 18));
+        assert_eq!(layout.footer, Rect::new(0, 18, 120, 2));
+    }
+
+    #[test]
+    fn layout_places_hit_targets_in_two_columns_without_inline_entry_view() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+
+        let layout = tui_layout(Rect::new(0, 0, 80, 20), &app);
+
+        assert!(!layout.single_panel);
+        assert!(!layout.inline_entry_view_visible);
+        assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 18));
+        assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 62, 18));
+        assert!(layout.entry_view.is_none());
+    }
+
+    #[test]
+    fn layout_uses_single_compact_panel_for_active_focus() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Journals;
+
+        let journals = tui_layout(Rect::new(0, 0, 57, 20), &app);
+        assert!(journals.single_panel);
+        assert_eq!(journals.journals.unwrap(), Rect::new(0, 0, 57, 18));
+        assert!(journals.entries.is_none());
+
+        app.focus = Focus::Entries;
+        let entries = tui_layout(Rect::new(0, 0, 57, 20), &app);
+        assert!(entries.single_panel);
+        assert_eq!(entries.entries.unwrap(), Rect::new(0, 0, 57, 18));
+        assert!(entries.journals.is_none());
+    }
+
+    #[test]
+    fn viewer_scroll_clamps_to_rendered_content_height() {
+        assert_eq!(viewer_scroll(100, 20, 8), 12);
+        assert_eq!(viewer_scroll(5, 4, 8), 0);
+    }
+
+    #[test]
+    fn viewer_scroll_saturates_large_rendered_content_height() {
+        assert_eq!(viewer_scroll(u16::MAX, 100_000, 8), u16::MAX);
+    }
+
+    #[test]
+    fn scrollbar_position_reaches_end_at_viewer_bottom() {
+        let line_count = 40;
+        let height = 20;
+        let scroll = viewer_scroll(u16::MAX, line_count, height);
+
+        assert_eq!(scroll, 20);
+        assert_eq!(scrollbar_position(scroll, line_count, height), 39);
+    }
+
+    #[test]
+    fn scrollbar_position_stays_at_start_when_content_fits() {
+        assert_eq!(scrollbar_position(0, 4, 8), 0);
+    }
+
+    #[test]
+    fn entry_hit_testing_ignores_headers_and_maps_two_line_entries() {
+        let dir = tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join("a.md"),
+            "---\ncreated_at: \"2026-07-01T10:00:00+02:00\"\n---\n\n# A\nFirst preview\n",
+        )
+        .unwrap();
+        fs::write(
+            entry_dir.join("b.md"),
+            "---\ncreated_at: \"2026-07-01T11:00:00+02:00\"\n---\n\n# B\nSecond preview\n",
+        )
+        .unwrap();
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = App::new(config).unwrap();
+        app.select_journal_by_name("work");
+        let area = Rect::new(0, 0, 40, 10);
+        let rows = entry_row_metadata(&app);
+
+        assert_eq!(
+            rows,
+            vec![
+                EntryRowMeta {
+                    entry_index: None,
+                    height: 1,
+                },
+                EntryRowMeta {
+                    entry_index: None,
+                    height: 1,
+                },
+                EntryRowMeta {
+                    entry_index: Some(0),
+                    height: 2,
+                },
+                EntryRowMeta {
+                    entry_index: Some(1),
+                    height: 2,
+                },
+            ]
+        );
+        assert_eq!(entry_index_at(area, 1, 1, 0, &rows), None);
+        assert_eq!(entry_index_at(area, 1, 2, 0, &rows), None);
+        assert_eq!(entry_index_at(area, 1, 3, 0, &rows), Some(0));
+        assert_eq!(entry_index_at(area, 1, 4, 0, &rows), Some(0));
+        assert_eq!(entry_index_at(area, 1, 5, 0, &rows), Some(1));
+        assert_eq!(entry_index_at(area, 1, 1, 2, &rows), Some(0));
+    }
+
+    #[test]
+    fn markdown_theme_uses_terminal_default_foregrounds() {
+        let theme = markdown_theme();
+
+        assert_eq!(theme.text_color, Color::Reset);
+        assert_eq!(theme.muted_text_color, Color::Reset);
+        assert_eq!(theme.primary_color, Color::Reset);
+        assert_eq!(theme.secondary_color, Color::Reset);
+        assert_eq!(theme.accent_yellow, Color::Reset);
+        assert_eq!(theme.code_colors.variable, Color::Reset);
+    }
+
+    #[test]
+    fn focused_panel_titles_have_ascii_focus_marker() {
+        assert_eq!(panel_title("Entries", true), " >> Entries ");
+        assert_eq!(panel_title("Entries", false), " Entries ");
+    }
+
+    #[test]
+    fn compact_render_shows_only_the_active_step() {
+        let mut journals_app = app_with_entry();
+        journals_app.focus = Focus::Journals;
+        let journals = render_text(journals_app, 57, 16);
+        assert!(journals.contains(">> Journals"));
+        assert!(!journals.contains(" Entries "));
+        assert!(!journals.contains("2026-07-01 10:00"));
+
+        let mut entries_app = app_with_entry();
+        entries_app.focus = Focus::Entries;
+        let entries = render_text(entries_app, 57, 16);
+        assert!(entries.contains(">> Entries"));
+        assert!(!entries.contains(" Journals "));
+        assert!(!entries.contains("2026-07-01 10:00"));
+
+        let mut entry_view_focus_app = app_with_entry();
+        entry_view_focus_app.focus = Focus::EntryView;
+        let entry_view_focus = render_text(entry_view_focus_app, 57, 16);
+        assert!(entry_view_focus.contains(">> Entries"));
+        assert!(!entry_view_focus.contains(" Journals "));
+        assert!(!entry_view_focus.contains("2026-07-01 10:00"));
+    }
+
+    #[test]
+    fn selected_journal_and_entry_remain_reversed_when_entry_view_is_focused() {
+        let mut app = app_with_entry();
+        app.focus = Focus::EntryView;
+
+        let backend = render_app(app, 120, 20);
+        let buffer = backend.buffer();
+
+        assert!(
+            buffer
+                .cell((1, 1))
+                .unwrap()
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+        assert!(
+            buffer
+                .cell((19, 3))
+                .unwrap()
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn selected_entry_is_not_reversed_when_journals_are_focused() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Journals;
+
+        let backend = render_app(app, 120, 20);
+        let buffer = backend.buffer();
+
+        assert!(
+            buffer
+                .cell((1, 1))
+                .unwrap()
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+        assert!(
+            !buffer
+                .cell((19, 3))
+                .unwrap()
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn journal_stats_summarizes_selected_journal() {
+        let app = app_with_entry();
+
+        let stats = journal_stats(&app).unwrap();
+
+        assert_eq!(stats.name, "work");
+        assert_eq!(stats.entry_count, 1);
+        assert_eq!(stats.active_days, 1);
+        assert_eq!(stats.year_range, "2026");
+    }
+
+    #[test]
+    fn journal_stats_handles_empty_journals() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("work")).unwrap();
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = App::new(config).unwrap();
+        app.select_journal_by_name("work");
+
+        let stats = journal_stats(&app).unwrap();
+
+        assert_eq!(stats.name, "work");
+        assert_eq!(stats.entry_count, 0);
+        assert_eq!(stats.active_days, 0);
+        assert_eq!(stats.year_range, "No dated entries");
+    }
+
+    #[test]
+    fn centered_stats_layout_places_identity_above_metric_cards() {
+        let layout = centered_stats_layout(Rect {
+            x: 10,
+            y: 3,
+            width: 80,
+            height: 24,
+        });
+
+        assert_eq!(layout.identity.y, 8);
+        assert_eq!(layout.identity.height, 6);
+        assert_eq!(layout.entries.y, 14);
+        assert_eq!(layout.days.y, 14);
+        assert!(layout.entries.x < layout.days.x);
+        assert_eq!(layout.entries.height, 6);
+        assert_eq!(layout.days.height, 6);
+    }
+
+    #[test]
+    fn journal_footer_omits_entry_actions() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Journals;
+
+        let text = footer_text(&app, true);
+
+        assert!(!text.contains("enter/v view"));
+        assert!(!text.contains("e edit"));
+        assert!(!text.contains("d delete"));
+    }
+
+    #[test]
+    fn entries_footer_includes_entry_actions_when_an_entry_is_selected() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+
+        let text = footer_text(&app, true);
+
+        assert!(text.contains("enter/v view"));
+        assert!(text.contains("e edit"));
+        assert!(text.contains("d delete"));
+    }
+
+    #[test]
+    fn entries_footer_omits_entry_actions_without_a_selection() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("work")).unwrap();
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = App::new(config).unwrap();
+        app.select_journal_by_name("work");
+        app.focus = Focus::Entries;
+
+        let text = footer_text(&app, true);
+
+        assert!(!text.contains("enter/v view"));
+        assert!(!text.contains("e edit"));
+        assert!(!text.contains("d delete"));
+    }
+
+    #[test]
+    fn search_results_footer_keeps_text_input_keys_available() {
+        let mut app = app_with_entry();
+        app.mode = Mode::Search;
+        app.focus = Focus::Entries;
+        app.search_query = "body".to_string();
+        app.search_hits = vec![crate::storage::SearchHit {
+            path: app.entries[0].path.clone(),
+            journal: "work".to_string(),
+            title: "A".to_string(),
+            preview: "Body".to_string(),
+        }];
+
+        let text = footer_text(&app, true);
+
+        assert!(text.contains("type query"));
+        assert!(text.contains("Search all: body"));
+        assert!(text.contains("enter view"));
+        assert!(!text.contains("enter/v view"));
+        assert!(!text.contains("e edit"));
+        assert!(!text.contains("d delete"));
+    }
+
+    #[test]
+    fn scoped_search_hit_labels_omit_journal_prefix() {
+        let mut app = app_with_entry();
+        app.search_scope = crate::tui::app::SearchScope::CurrentJournal("work".to_string());
+        let hit = crate::storage::SearchHit {
+            path: app.entries[0].path.clone(),
+            journal: "work".to_string(),
+            title: "A".to_string(),
+            preview: "Body".to_string(),
+        };
+
+        assert_eq!(app.search_hit_label(&hit), "A");
+    }
+
+    #[test]
+    fn global_search_hit_labels_include_journal_prefix() {
+        let app = app_with_entry();
+        let hit = crate::storage::SearchHit {
+            path: app.entries[0].path.clone(),
+            journal: "work".to_string(),
+            title: "A".to_string(),
+            preview: "Body".to_string(),
+        };
+
+        assert_eq!(app.search_hit_label(&hit), "work/A");
+    }
+
+    #[test]
+    fn entry_list_lines_use_time_gutter_and_content() {
+        let entry = Entry {
+            id: "id".to_string(),
+            journal: "work".to_string(),
+            path: PathBuf::from("id.md"),
+            created_at: Some("2026-07-01T10:23:00+02:00".to_string()),
+            updated_at: None,
+            title: "Title".to_string(),
+            preview: "Preview".to_string(),
+            content: String::new(),
+        };
+
+        let lines = entry_list_lines(&entry);
+        let rendered: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect();
+
+        assert_eq!(rendered.len(), 2);
+        assert_eq!(rendered[0], "10:23  Title");
+        assert_eq!(rendered[1], "       Preview");
+    }
+
+    #[test]
+    fn entry_group_labels_use_created_timestamp() {
+        let entry = Entry {
+            id: "id".to_string(),
+            journal: "work".to_string(),
+            path: PathBuf::from("work/2026-01-01/id.md"),
+            created_at: Some("2026-07-01T10:23:00+02:00".to_string()),
+            updated_at: None,
+            title: "Title".to_string(),
+            preview: String::new(),
+            content: String::new(),
+        };
+
+        assert_eq!(entry_month_label(&entry), Some("July 2026".to_string()));
+        assert_eq!(entry_day_label(&entry), Some("Wednesday 01".to_string()));
+    }
+
+    #[test]
+    fn entry_group_labels_fall_back_to_date_folder() {
+        let entry = Entry {
+            id: "id".to_string(),
+            journal: "work".to_string(),
+            path: PathBuf::from("work/2026-07-01/id.md"),
+            created_at: None,
+            updated_at: None,
+            title: "Title".to_string(),
+            preview: String::new(),
+            content: String::new(),
+        };
+
+        assert_eq!(entry_month_label(&entry), Some("July 2026".to_string()));
+        assert_eq!(entry_day_label(&entry), Some("Wednesday 01".to_string()));
+    }
+}
