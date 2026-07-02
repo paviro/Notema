@@ -380,7 +380,7 @@ mod tests {
         );
         assert!(
             buffer
-                .cell((20, 5))
+                .cell((20, 6))
                 .unwrap()
                 .modifier
                 .contains(Modifier::REVERSED)

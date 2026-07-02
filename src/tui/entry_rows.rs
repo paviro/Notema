@@ -81,14 +81,21 @@ fn browse_entry_rows(app: &App) -> Vec<EntryListRow> {
 
         let day = entry_day_label(entry);
         if day != current_day {
+            if current_day.is_some() {
+                rows.push(EntryListRow {
+                    entry_index: None,
+                    lines: vec![Line::from(vec![])],
+                    selected: false,
+                });
+            }
             current_day = day.clone();
             if let Some(day) = day {
                 rows.push(EntryListRow {
                     entry_index: None,
-                    lines: vec![Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(day, Style::default()),
-                    ])],
+                    lines: vec![Line::from(Span::styled(
+                        day,
+                        Style::default().add_modifier(Modifier::UNDERLINED),
+                    ))],
                     selected: false,
                 });
             }
