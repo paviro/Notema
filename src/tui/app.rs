@@ -5,7 +5,7 @@ use crate::{
     markdown::split_front_matter,
     storage::{
         self, Entry, EntryEncryptionState, Journal, SearchHit, SearchScopeFilter,
-        entry_timestamp_label, scan_entries_with_identity, search_entries_with_identity,
+        entry_timestamp_label, search_entries_with_identity,
     },
 };
 use std::{
@@ -81,8 +81,12 @@ impl App {
         config: Config,
         encryption_paths: crypto::EncryptionPaths,
     ) -> AppResult<Self> {
+        storage::ensure_workspace(&config.journal_root)?;
+        let entry_paths = storage::collect_entry_paths(&config.journal_root)?;
         let unlocked_identity = if crypto::can_decrypt(&encryption_paths)
-            && storage::has_encrypted_entries(&config.journal_root)?
+            && entry_paths
+                .iter()
+                .any(|entry| storage::is_encrypted_entry_file(&entry.path))
         {
             Some(crypto::prompt_unlock_identity(&encryption_paths)?)
         } else {
@@ -110,15 +114,19 @@ impl App {
             status: String::new(),
             status_until: None,
         };
-        app.refresh()?;
+        app.load_entries(entry_paths)?;
         Ok(app)
     }
 
     pub(crate) fn refresh(&mut self) -> AppResult<()> {
         storage::ensure_workspace(&self.config.journal_root)?;
+        let entry_paths = storage::collect_entry_paths(&self.config.journal_root)?;
+        self.load_entries(entry_paths)
+    }
+
+    fn load_entries(&mut self, entry_paths: Vec<storage::EntryPath>) -> AppResult<()> {
         self.journals = storage::list_journals(&self.config.journal_root)?;
-        self.entries =
-            scan_entries_with_identity(&self.config.journal_root, self.unlocked_identity.as_ref())?;
+        self.entries = storage::read_entries(entry_paths, self.unlocked_identity.as_ref())?;
         if self.selected_journal >= self.journals.len() {
             self.selected_journal = self.journals.len().saturating_sub(1);
             self.journal_scroll = 0;

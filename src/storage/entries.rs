@@ -6,6 +6,7 @@ use crate::{
 };
 use chrono::{DateTime, Local};
 use nanoid::nanoid;
+use rayon::prelude::*;
 use std::{
     ffi::OsStr,
     fs::{self, OpenOptions},
@@ -246,6 +247,16 @@ pub fn edit_encrypted_entry(
     result
 }
 
+/// Location of an entry file on disk, together with the journal it belongs to.
+///
+/// Produced by [`collect_entry_paths`] as a cheap first pass that touches only
+/// directory listings, so callers can decide what to do (e.g. prompt for a
+/// passphrase) before paying the cost of reading and decrypting entry contents.
+pub struct EntryPath {
+    pub journal: String,
+    pub path: PathBuf,
+}
+
 pub fn scan_entries(root: &Path) -> AppResult<Vec<Entry>> {
     scan_entries_with_identity(root, None)
 }
@@ -254,20 +265,20 @@ pub fn scan_entries_with_identity(
     root: &Path,
     identity: Option<&crypto::UnlockedIdentity>,
 ) -> AppResult<Vec<Entry>> {
-    let mut entries = Vec::new();
-    for journal in list_journals(root)? {
-        collect_entries(&journal.name, &journal.path, identity, &mut entries)?;
-    }
-    entries.sort_by(|a, b| b.path.cmp(&a.path));
-    Ok(entries)
+    read_entries(collect_entry_paths(root)?, identity)
 }
 
-fn collect_entries(
-    journal: &str,
-    dir: &Path,
-    identity: Option<&crypto::UnlockedIdentity>,
-    entries: &mut Vec<Entry>,
-) -> AppResult<()> {
+/// Walk the journal tree once and collect every entry file path without reading
+/// any file contents. Skips `.trash` directories.
+pub fn collect_entry_paths(root: &Path) -> AppResult<Vec<EntryPath>> {
+    let mut paths = Vec::new();
+    for journal in list_journals(root)? {
+        collect_paths(&journal.name, &journal.path, &mut paths)?;
+    }
+    Ok(paths)
+}
+
+fn collect_paths(journal: &str, dir: &Path, paths: &mut Vec<EntryPath>) -> AppResult<()> {
     if !dir.exists() {
         return Ok(());
     }
@@ -278,17 +289,34 @@ fn collect_entries(
         let name = item.file_name().to_string_lossy().to_string();
         if item.file_type()?.is_dir() {
             if name != ".trash" {
-                collect_entries(journal, &path, identity, entries)?;
+                collect_paths(journal, &path, paths)?;
             }
             continue;
         }
 
         if is_entry_file(&path) {
-            entries.push(read_entry_with_identity(journal, &path, identity)?);
+            paths.push(EntryPath {
+                journal: journal.to_string(),
+                path,
+            });
         }
     }
 
     Ok(())
+}
+
+/// Read and parse (and, when encrypted, decrypt) the given entry paths in
+/// parallel, returning them sorted newest-first.
+pub fn read_entries(
+    paths: Vec<EntryPath>,
+    identity: Option<&crypto::UnlockedIdentity>,
+) -> AppResult<Vec<Entry>> {
+    let mut entries = paths
+        .par_iter()
+        .map(|entry| read_entry_with_identity(&entry.journal, &entry.path, identity))
+        .collect::<AppResult<Vec<Entry>>>()?;
+    entries.sort_by(|a, b| b.path.cmp(&a.path));
+    Ok(entries)
 }
 
 pub fn read_entry(journal: &str, path: &Path) -> AppResult<Entry> {
@@ -372,33 +400,6 @@ pub fn is_plain_entry_file(path: &Path) -> bool {
 
 pub fn is_entry_file(path: &Path) -> bool {
     is_plain_entry_file(path) || is_encrypted_entry_file(path)
-}
-
-pub fn has_encrypted_entries(root: &Path) -> AppResult<bool> {
-    has_matching_entry(root, is_encrypted_entry_file)
-}
-
-fn has_matching_entry(root: &Path, predicate: fn(&Path) -> bool) -> AppResult<bool> {
-    if !root.exists() {
-        return Ok(false);
-    }
-
-    for item in fs::read_dir(root)? {
-        let item = item?;
-        let path = item.path();
-        let name = item.file_name().to_string_lossy().to_string();
-        if item.file_type()?.is_dir() {
-            if name != ".trash" && has_matching_entry(&path, predicate)? {
-                return Ok(true);
-            }
-            continue;
-        }
-        if predicate(&path) {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
 }
 
 fn entry_id(path: &Path) -> Option<String> {
