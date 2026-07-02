@@ -10,6 +10,8 @@ use std::{
 pub struct Config {
     pub journal_root: PathBuf,
     pub editor: String,
+    #[serde(default)]
+    pub default_journal: Option<String>,
 }
 
 impl Config {
@@ -17,6 +19,7 @@ impl Config {
         Self {
             journal_root: expand_tilde(journal_root),
             editor: editor.into(),
+            default_journal: None,
         }
     }
 }
@@ -50,10 +53,7 @@ pub fn save_config(path: &Path, config: &Config) -> AppResult<()> {
 }
 
 pub fn load_or_setup(path_override: Option<&Path>) -> AppResult<Config> {
-    let config_path = match path_override {
-        Some(path) => path.to_path_buf(),
-        None => default_config_path()?,
-    };
+    let config_path = config_path(path_override)?;
 
     if config_path.exists() {
         let config = load_config(&config_path)?;
@@ -62,6 +62,28 @@ pub fn load_or_setup(path_override: Option<&Path>) -> AppResult<Config> {
     }
 
     interactive_setup(&config_path)
+}
+
+pub fn load_existing(path_override: Option<&Path>) -> AppResult<(PathBuf, Config)> {
+    let config_path = config_path(path_override)?;
+    if !config_path.exists() {
+        return Err(format!(
+            "config file not found at {}; run `journal` once to set it up or pass --config",
+            config_path.display()
+        )
+        .into());
+    }
+
+    let config = load_config(&config_path)?;
+    crate::storage::ensure_workspace(&config.journal_root)?;
+    Ok((config_path, config))
+}
+
+fn config_path(path_override: Option<&Path>) -> AppResult<PathBuf> {
+    match path_override {
+        Some(path) => Ok(path.to_path_buf()),
+        None => default_config_path(),
+    }
 }
 
 fn interactive_setup(config_path: &Path) -> AppResult<Config> {
@@ -132,6 +154,7 @@ mod tests {
 
         assert!(config.journal_root.ends_with("Journals"));
         assert_eq!(config.editor, "nano");
+        assert_eq!(config.default_journal, None);
     }
 
     #[test]
@@ -144,5 +167,18 @@ mod tests {
         let loaded = load_config(&path).unwrap();
 
         assert_eq!(loaded, config);
+    }
+
+    #[test]
+    fn save_and_load_config_preserves_default_journal() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::new(dir.path().join("root"), "vim");
+        config.default_journal = Some("work".to_string());
+
+        save_config(&path, &config).unwrap();
+        let loaded = load_config(&path).unwrap();
+
+        assert_eq!(loaded.default_journal.as_deref(), Some("work"));
     }
 }

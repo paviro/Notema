@@ -52,6 +52,17 @@ pub fn create_entry(root: &Path, journal: &str, editor: &str) -> AppResult<PathB
     Ok(path)
 }
 
+pub fn create_entry_with_body(root: &Path, journal: &str, body: &str) -> AppResult<PathBuf> {
+    let now = Local::now();
+    let mut content = entry_template(now, now);
+    content.push_str(body);
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+
+    create_entry_file(root, journal, now, &content, || nanoid!(ENTRY_ID_LEN))
+}
+
 fn create_entry_file(
     root: &Path,
     journal: &str,
@@ -244,6 +255,30 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(existing).unwrap(), "keep me");
         assert_eq!(fs::read_to_string(created).unwrap(), "new content");
+    }
+
+    #[test]
+    fn create_entry_with_body_writes_body_after_front_matter() {
+        let dir = tempdir().unwrap();
+
+        let created = create_entry_with_body(dir.path(), "work", "Some text").unwrap();
+        let text = fs::read_to_string(created).unwrap();
+
+        assert!(text.starts_with("---\ncreated_at: \""));
+        assert!(text.contains("\nupdated_at: \""));
+        assert!(text.contains("\ntags: []\n---\n\nSome text\n"));
+    }
+
+    #[test]
+    fn create_entry_with_body_preserves_multiline_body_and_trailing_newline() {
+        let dir = tempdir().unwrap();
+
+        let created =
+            create_entry_with_body(dir.path(), "work", "Line one\n\nLine three\n").unwrap();
+        let text = fs::read_to_string(created).unwrap();
+
+        assert!(text.ends_with("\n\nLine three\n"));
+        assert!(!text.ends_with("\n\nLine three\n\n"));
     }
 
     #[test]
