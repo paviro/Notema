@@ -417,6 +417,28 @@ mod tests {
     }
 
     #[test]
+    fn entry_view_renders_indented_mermaid_diagram() {
+        let dir = tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join("a.md"),
+            "---\ncreated_at: \"2026-07-01T10:00:00+02:00\"\n...\n\n# A\n```mermaid\n  graph TD\n      A[Open journal] --> B[Write entry]\n      B --> C{Preview}\n      C -->|looks good| D[Save]\n      C -->|needs work| B\n  ```\n",
+        )
+        .unwrap();
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = new_app(config);
+        app.select_journal_by_name("work");
+        app.focus = Focus::EntryView;
+
+        let rendered = render_text(app, 140, 28);
+
+        assert!(rendered.contains("mermaid"));
+        assert!(rendered.contains("Open journal"));
+        assert!(rendered.contains("Write entry"));
+    }
+
+    #[test]
     fn focused_panel_titles_have_ascii_focus_marker() {
         assert_eq!(panel_title("Entries", true), " >> Entries ");
         assert_eq!(panel_title("Entries", false), " Entries ");

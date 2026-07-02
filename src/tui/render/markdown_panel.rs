@@ -12,7 +12,7 @@ use ratatui_029::{
     text::{Line as MarkdownLine, Span as MarkdownSpan},
 };
 use ratatui_markdown::{
-    markdown::MarkdownRenderer,
+    markdown::{MarkdownBlock, MarkdownRenderer},
     theme::{CodeColors, ThemeConfig},
 };
 
@@ -84,7 +84,7 @@ fn draw_markdown_panel(
     let width = content_rect.width.saturating_sub(1).max(1) as usize;
     let theme = markdown_theme();
     let renderer = MarkdownRenderer::new(width);
-    let blocks = renderer.parse(content);
+    let blocks = prepare_markdown_blocks(renderer.parse(content), &renderer, &theme);
     let lines = adapt_markdown_lines(renderer.render(&blocks, &theme));
     let line_count = lines.len();
     let scroll = viewer_scroll(requested_scroll, line_count, content_rect.height);
@@ -286,6 +286,117 @@ fn reset_code_colors() -> CodeColors {
         tag: MarkdownColor::Reset,
         label: MarkdownColor::Reset,
         error: MarkdownColor::Reset,
+    }
+}
+
+fn prepare_markdown_blocks(
+    blocks: Vec<MarkdownBlock>,
+    renderer: &MarkdownRenderer,
+    theme: &ThemeConfig,
+) -> Vec<MarkdownBlock> {
+    blocks
+        .into_iter()
+        .map(|block| prepare_markdown_block(block, renderer, theme))
+        .collect()
+}
+
+fn prepare_markdown_block(
+    block: MarkdownBlock,
+    renderer: &MarkdownRenderer,
+    theme: &ThemeConfig,
+) -> MarkdownBlock {
+    match block {
+        MarkdownBlock::CodeBlock {
+            lang,
+            code,
+            header_override,
+            footer_override,
+            prefix_override,
+        } if lang.trim().eq_ignore_ascii_case("mermaid") => {
+            let block = MarkdownBlock::CodeBlock {
+                lang: "mermaid".to_string(),
+                code: normalize_mermaid_code(&code),
+                header_override,
+                footer_override,
+                prefix_override,
+            };
+
+            if renderer
+                .render(std::slice::from_ref(&block), theme)
+                .is_empty()
+            {
+                fallback_mermaid_block(block)
+            } else {
+                block
+            }
+        }
+        MarkdownBlock::Blockquote {
+            level,
+            children,
+            header_override,
+            footer_override,
+        } => MarkdownBlock::Blockquote {
+            level,
+            children: prepare_markdown_blocks(children, renderer, theme),
+            header_override,
+            footer_override,
+        },
+        block => block,
+    }
+}
+
+fn normalize_mermaid_code(code: &str) -> String {
+    let lines: Vec<&str> = code.lines().collect();
+    let Some(start) = lines.iter().position(|line| !line.trim().is_empty()) else {
+        return String::new();
+    };
+    let end = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .map_or(start, |index| index + 1);
+    let body = &lines[start..end];
+    let indent = body
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            line.chars()
+                .take_while(|ch| *ch == ' ' || *ch == '\t')
+                .count()
+        })
+        .min()
+        .unwrap_or(0);
+
+    body.iter()
+        .map(|line| strip_leading_whitespace(line, indent))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn strip_leading_whitespace(line: &str, count: usize) -> &str {
+    let mut chars_to_strip = count;
+    let mut byte_index = 0;
+    for (index, ch) in line.char_indices() {
+        if chars_to_strip == 0 || (ch != ' ' && ch != '\t') {
+            byte_index = index;
+            break;
+        }
+        chars_to_strip -= 1;
+        byte_index = index + ch.len_utf8();
+    }
+    &line[byte_index..]
+}
+
+fn fallback_mermaid_block(block: MarkdownBlock) -> MarkdownBlock {
+    if let MarkdownBlock::CodeBlock { code, .. } = block {
+        MarkdownBlock::CodeBlock {
+            lang: "text".to_string(),
+            code,
+            header_override: Some("```mermaid".to_string()),
+            footer_override: Some("```".to_string()),
+            prefix_override: Some(String::new()),
+        }
+    } else {
+        block
     }
 }
 

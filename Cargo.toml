@@ -14,7 +14,7 @@ noyalib = "0.0.11"
 rayon = "1"
 ratatui = "0.30"
 ratatui_029 = { package = "ratatui", version = "0.29" }
-ratatui-markdown = { version = "0.3.6", default-features = false, features = ["markdown"] }
+ratatui-markdown = { version = "0.3.6", default-features = false, features = ["markdown", "mermaid"] }
 rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 shell-words = "1"
