@@ -715,7 +715,7 @@ mod tests {
 
         let (title, content) = app.selected_entry_view().unwrap();
 
-        assert_eq!(title, "2026-07-01 10:23");
+        assert_eq!(title, "Wednesday, 1 July 2026, 10:23");
         assert_eq!(content, "# A\nBody\n");
     }
 
@@ -739,7 +739,7 @@ mod tests {
 
         let (title, content) = app.selected_entry_view().unwrap();
 
-        assert_eq!(title, "2026-07-01 10:23");
+        assert_eq!(title, "Wednesday, 1 July 2026, 10:23");
         assert_eq!(content, "# A\nneedle\n");
     }
 

@@ -17,15 +17,23 @@ pub(crate) fn entry_group_date(entry: &Entry) -> Option<NaiveDate> {
         .or_else(|| entry_date_from_path(&entry.path))
 }
 
+fn format_date_human(date: NaiveDate) -> String {
+    date.format("%A, %-d %B %Y").to_string()
+}
+
 pub(crate) fn entry_timestamp_label(entry: &Entry) -> String {
     entry
         .created_at
         .as_deref()
         .and_then(parse_entry_timestamp)
-        .map(|timestamp| timestamp.format("%Y-%m-%d %H:%M").to_string())
-        .or_else(|| {
-            entry_date_from_path(&entry.path).map(|date| date.format("%Y-%m-%d").to_string())
+        .map(|timestamp| {
+            format!(
+                "{}, {}",
+                format_date_human(timestamp.date_naive()),
+                timestamp.format("%H:%M")
+            )
         })
+        .or_else(|| entry_date_from_path(&entry.path).map(|date| format_date_human(date)))
         .unwrap_or_else(|| "Entry".to_string())
 }
 
@@ -75,6 +83,9 @@ mod tests {
     fn timestamp_label_prefers_created_timestamp() {
         let entry = entry(Some("2026-07-01T10:23:00+02:00"), "work/2026-01-01/id.md");
 
-        assert_eq!(entry_timestamp_label(&entry), "2026-07-01 10:23");
+        assert_eq!(
+            entry_timestamp_label(&entry),
+            "Wednesday, 1 July 2026, 10:23"
+        );
     }
 }

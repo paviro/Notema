@@ -619,7 +619,7 @@ mod tests {
         let entries = render_text(entries_app, 80, 16);
         assert!(entries.contains(">> Entries"));
         assert!(!entries.contains(" Journals "));
-        assert!(entries.contains("2026-07-01 10:00"));
+        assert!(entries.contains("Wednesday, 1 July 2026, 10:00"));
     }
 
     #[test]
