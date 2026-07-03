@@ -665,9 +665,26 @@ mod tests {
     }
 
     #[test]
-    fn focused_panel_titles_have_ascii_focus_marker() {
-        assert_eq!(panel_title("Entries", true), " >> Entries ");
-        assert_eq!(panel_title("Entries", false), " Entries ");
+    fn focused_panel_titles_have_reversed_text() {
+        let focused = panel_title("Entries", true);
+        assert_eq!(focused.spans.len(), 1);
+        assert_eq!(focused.spans[0].content.as_ref(), " Entries ");
+        assert!(
+            focused.spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+
+        let unfocused = panel_title("Entries", false);
+        assert_eq!(unfocused.spans.len(), 1);
+        assert_eq!(unfocused.spans[0].content.as_ref(), " Entries ");
+        assert!(
+            !unfocused.spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
     }
 
     #[test]
@@ -704,21 +721,21 @@ mod tests {
         let mut journals_app = app_with_entry();
         journals_app.focus = Focus::Journals;
         let journals = render_text(journals_app, 57, 16);
-        assert!(journals.contains(">> Journals"));
+        assert!(journals.contains(" Journals "));
         assert!(!journals.contains(" Entries "));
         assert!(!journals.contains("2026-07-01 10:00"));
 
         let mut entries_app = app_with_entry();
         entries_app.focus = Focus::Entries;
         let entries = render_text(entries_app, 57, 16);
-        assert!(entries.contains(">> Entries"));
+        assert!(entries.contains(" Entries "));
         assert!(!entries.contains(" Journals "));
         assert!(!entries.contains("2026-07-01 10:00"));
 
         let mut entry_view_focus_app = app_with_entry();
         entry_view_focus_app.focus = Focus::EntryView;
         let entry_view_focus = render_text(entry_view_focus_app, 57, 16);
-        assert!(entry_view_focus.contains(">> Entries"));
+        assert!(entry_view_focus.contains(" Entries "));
         assert!(!entry_view_focus.contains(" Journals "));
         assert!(!entry_view_focus.contains("2026-07-01 10:00"));
     }
@@ -728,14 +745,14 @@ mod tests {
         let mut journals_app = app_with_entry();
         journals_app.focus = Focus::Journals;
         let journals = render_text(journals_app, 90, 16);
-        assert!(journals.contains(">> Journals"));
+        assert!(journals.contains(" Journals "));
         assert!(journals.contains(" Entries "));
         assert!(!journals.contains("2026-07-01 10:00"));
 
         let mut entries_app = app_with_entry();
         entries_app.focus = Focus::Entries;
         let entries = render_text(entries_app, 90, 16);
-        assert!(entries.contains(">> Entries"));
+        assert!(entries.contains(" Entries "));
         assert!(!entries.contains(" Journals "));
         assert!(entries.contains("Wednesday, 1 July 2026, 10:00"));
     }

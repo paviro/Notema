@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Flex, Layout, Margin, Rect},
     style::{Modifier, Style},
-    text::{Line, Text},
+    text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use unicode_width::UnicodeWidthStr;
@@ -482,11 +482,15 @@ pub(crate) fn count_label(count: usize, singular: &str, plural: &str) -> String 
     }
 }
 
-pub(crate) fn panel_title(title: &str, focused: bool) -> String {
+pub(crate) fn panel_title(title: &str, focused: bool) -> Line<'static> {
+    let label = format!(" {title} ");
     if focused {
-        format!(" >> {title} ")
+        Line::from(Span::styled(
+            label,
+            Style::default().add_modifier(Modifier::REVERSED),
+        ))
     } else {
-        format!(" {title} ")
+        Line::from(label)
     }
 }
 
