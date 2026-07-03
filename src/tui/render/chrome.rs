@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Flex, Layout, Margin, Rect},
     style::{Modifier, Style},
-    text::Line,
+    text::{Line, Text},
     widgets::{Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use unicode_width::UnicodeWidthStr;
@@ -56,6 +56,13 @@ impl Hint {
     }
 }
 
+#[derive(Debug, Clone)]
+struct RenderedHintLine {
+    text: String,
+    hint_origin: u16,
+    hints: Vec<Hint>,
+}
+
 pub(crate) fn hints_text(hints: &[Hint]) -> String {
     hints
         .iter()
@@ -82,6 +89,73 @@ pub(crate) fn hint_id_at(hints: &[Hint], origin_x: u16, col: u16) -> Option<Hint
     None
 }
 
+pub(crate) fn hint_lines(hints: &[Hint], width: u16) -> Vec<Line<'static>> {
+    rendered_hint_lines(hints, width)
+        .into_iter()
+        .map(|line| Line::from(line.text))
+        .collect()
+}
+
+pub(crate) fn hint_height(hints: &[Hint], width: u16) -> u16 {
+    rendered_hint_lines(hints, width)
+        .len()
+        .max(1)
+        .min(u16::MAX as usize) as u16
+}
+
+pub(crate) fn hint_id_at_wrapped(
+    hints: &[Hint],
+    origin_x: u16,
+    origin_y: u16,
+    width: u16,
+    col: u16,
+    row: u16,
+) -> Option<HintId> {
+    let relative_row = row.checked_sub(origin_y)? as usize;
+    let lines = rendered_hint_lines(hints, width);
+    let line = lines.get(relative_row)?;
+    hint_id_at(&line.hints, origin_x.saturating_add(line.hint_origin), col)
+}
+
+fn rendered_hint_lines(hints: &[Hint], width: u16) -> Vec<RenderedHintLine> {
+    wrapped_hint_rows(hints, width)
+        .into_iter()
+        .map(|hints| RenderedHintLine {
+            text: hints_text(&hints),
+            hint_origin: 0,
+            hints,
+        })
+        .collect()
+}
+
+fn wrapped_hint_rows(hints: &[Hint], width: u16) -> Vec<Vec<Hint>> {
+    let available = width as usize;
+    let mut rows: Vec<Vec<Hint>> = Vec::new();
+    let mut row: Vec<Hint> = Vec::new();
+    let mut row_width = 0usize;
+
+    for hint in hints.iter().copied() {
+        let hint_width = UnicodeWidthStr::width(hint.text().as_str());
+        let separator_width = if row.is_empty() { 0 } else { 3 };
+        if !row.is_empty() && row_width + separator_width + hint_width > available {
+            rows.push(std::mem::take(&mut row));
+            row_width = 0;
+        }
+        if !row.is_empty() {
+            row_width += 3;
+        }
+        row_width += hint_width;
+        row.push(hint);
+    }
+
+    if !row.is_empty() {
+        rows.push(row);
+    }
+
+    rows
+}
+
+#[cfg(test)]
 pub(crate) fn footer_text(app: &App) -> String {
     if !app.status().is_empty() {
         return app.status().to_string();
@@ -93,6 +167,30 @@ pub(crate) fn footer_text(app: &App) -> String {
     }
 }
 
+pub(crate) fn footer_lines(app: &App, width: u16) -> Text<'static> {
+    if !app.status().is_empty() {
+        return Text::from(app.status().to_string());
+    }
+
+    let lines = match app.mode {
+        Mode::Search => search_footer_line(app).lines(width),
+        Mode::Browse => browse_footer_line(app).lines(width),
+    };
+    Text::from(lines)
+}
+
+pub(crate) fn footer_height(app: &App, width: u16) -> u16 {
+    if !app.status().is_empty() {
+        return 1;
+    }
+
+    match app.mode {
+        Mode::Search => search_footer_line(app).height(width),
+        Mode::Browse => browse_footer_line(app).height(width),
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn footer_hint_id_at(app: &App, origin_x: u16, col: u16) -> Option<HintId> {
     if !app.status().is_empty() {
         return None;
@@ -104,12 +202,54 @@ pub(crate) fn footer_hint_id_at(app: &App, origin_x: u16, col: u16) -> Option<Hi
     }
 }
 
-pub(crate) fn expanded_footer_text() -> String {
-    format!(" {}", hints_text(&expanded_footer_hints()))
+pub(crate) fn footer_hint_id_at_point(
+    app: &App,
+    origin_x: u16,
+    origin_y: u16,
+    width: u16,
+    col: u16,
+    row: u16,
+) -> Option<HintId> {
+    if !app.status().is_empty() {
+        return None;
+    }
+
+    match app.mode {
+        Mode::Search => {
+            search_footer_line(app).hint_id_at_point(origin_x, origin_y, width, col, row)
+        }
+        Mode::Browse => {
+            browse_footer_line(app).hint_id_at_point(origin_x, origin_y, width, col, row)
+        }
+    }
 }
 
-pub(crate) fn expanded_footer_hint_id_at(origin_x: u16, col: u16) -> Option<HintId> {
-    hint_id_at(&expanded_footer_hints(), origin_x.saturating_add(1), col)
+pub(crate) fn expanded_footer_lines(width: u16) -> Text<'static> {
+    Text::from(hint_lines(
+        &expanded_footer_hints(),
+        width.saturating_sub(1),
+    ))
+}
+
+pub(crate) fn expanded_footer_height(width: u16) -> u16 {
+    hint_height(&expanded_footer_hints(), width.saturating_sub(1))
+}
+
+pub(crate) fn expanded_footer_hint_id_at_point(
+    origin_x: u16,
+    origin_y: u16,
+    width: u16,
+    col: u16,
+    row: u16,
+) -> Option<HintId> {
+    hint_id_at_wrapped(
+        &expanded_footer_hints(),
+        origin_x.saturating_add(1),
+        origin_y,
+        width.saturating_sub(1),
+        col,
+        row,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +259,77 @@ struct HintLine {
 }
 
 impl HintLine {
+    fn rendered_lines(&self, width: u16) -> Vec<RenderedHintLine> {
+        if self.hints.is_empty() {
+            return self
+                .prefix
+                .as_ref()
+                .map(|prefix| {
+                    vec![RenderedHintLine {
+                        text: prefix.clone(),
+                        hint_origin: 0,
+                        hints: Vec::new(),
+                    }]
+                })
+                .unwrap_or_default();
+        }
+
+        let Some(prefix) = &self.prefix else {
+            return rendered_hint_lines(&self.hints, width);
+        };
+
+        let prefix_width = UnicodeWidthStr::width(prefix.as_str()).min(u16::MAX as usize) as u16;
+        let first_hint_width = self
+            .hints
+            .first()
+            .map(|hint| UnicodeWidthStr::width(hint.text().as_str()).min(u16::MAX as usize) as u16)
+            .unwrap_or(0);
+
+        let mut lines = Vec::new();
+        let mut remaining_hints = self.hints.as_slice();
+        if prefix_width
+            .saturating_add(3)
+            .saturating_add(first_hint_width)
+            <= width
+        {
+            let first_width = width.saturating_sub(prefix_width).saturating_sub(3);
+            let first_rows = wrapped_hint_rows(remaining_hints, first_width);
+            if let Some(first_row) = first_rows.first() {
+                let consumed = first_row.len();
+                lines.push(RenderedHintLine {
+                    text: format!("{prefix} | {}", hints_text(first_row)),
+                    hint_origin: prefix_width.saturating_add(3),
+                    hints: first_row.clone(),
+                });
+                remaining_hints = &remaining_hints[consumed..];
+            }
+        } else {
+            lines.push(RenderedHintLine {
+                text: prefix.clone(),
+                hint_origin: 0,
+                hints: Vec::new(),
+            });
+        }
+
+        lines.extend(rendered_hint_lines(remaining_hints, width));
+        lines
+    }
+
+    fn lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.rendered_lines(width)
+            .into_iter()
+            .map(|line| Line::from(line.text))
+            .collect()
+    }
+
+    fn height(&self, width: u16) -> u16 {
+        self.rendered_lines(width)
+            .len()
+            .max(1)
+            .min(u16::MAX as usize) as u16
+    }
+
+    #[cfg(test)]
     fn text(&self) -> String {
         let hints = hints_text(&self.hints);
         match (&self.prefix, hints.is_empty()) {
@@ -129,6 +340,7 @@ impl HintLine {
         }
     }
 
+    #[cfg(test)]
     fn hint_id_at(&self, origin_x: u16, col: u16) -> Option<HintId> {
         let hint_origin = origin_x.saturating_add(
             self.prefix
@@ -139,6 +351,20 @@ impl HintLine {
                 .unwrap_or(0),
         );
         hint_id_at(&self.hints, hint_origin, col)
+    }
+
+    fn hint_id_at_point(
+        &self,
+        origin_x: u16,
+        origin_y: u16,
+        width: u16,
+        col: u16,
+        row: u16,
+    ) -> Option<HintId> {
+        let relative_row = row.checked_sub(origin_y)? as usize;
+        let lines = self.rendered_lines(width);
+        let line = lines.get(relative_row)?;
+        hint_id_at(&line.hints, origin_x.saturating_add(line.hint_origin), col)
     }
 }
 

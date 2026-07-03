@@ -6,6 +6,8 @@ use crate::tui::app::{
 };
 use crate::tui::surface::{EntryListGeometry, PanelGeometry};
 
+use super::chrome::footer_height;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TuiLayout {
     pub(crate) content: Rect,
@@ -18,9 +20,10 @@ pub(crate) struct TuiLayout {
 }
 
 pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
+    let footer_height = footer_height(app, area.width).min(area.height);
     let root = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([Constraint::Min(0), Constraint::Length(footer_height)])
         .split(area);
     let content = root[0];
     let footer = root[1];

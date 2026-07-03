@@ -25,9 +25,9 @@ pub(crate) fn handle_mouse(
     }
 
     if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-        let layout = render::tui_layout(area, app);
-        if render::point_in_rect(layout.footer, mouse.column, mouse.row) {
-            if let Some(action) = footer_click_to_action(app, mouse, layout) {
+        let footer = footer_area(app, area);
+        if render::point_in_rect(footer, mouse.column, mouse.row) {
+            if let Some(action) = footer_click_to_action(app, mouse, footer) {
                 return super::dispatch_action(terminal, app, action);
             }
             return Ok(false);
@@ -161,18 +161,41 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
 
 // ── Footer click ──────────────────────────────────────────────────────────────
 
-fn footer_click_to_action(
-    app: &App,
-    mouse: MouseEvent,
-    layout: render::TuiLayout,
-) -> Option<Action> {
+fn footer_click_to_action(app: &App, mouse: MouseEvent, footer: Rect) -> Option<Action> {
     let hint_id = if app.entry_view_expanded {
-        render::expanded_footer_hint_id_at(layout.footer.x, mouse.column)
+        render::expanded_footer_hint_id_at_point(
+            footer.x,
+            footer.y,
+            footer.width,
+            mouse.column,
+            mouse.row,
+        )
     } else {
-        render::footer_hint_id_at(app, layout.footer.x, mouse.column)
+        render::footer_hint_id_at_point(
+            app,
+            footer.x,
+            footer.y,
+            footer.width,
+            mouse.column,
+            mouse.row,
+        )
     };
 
     hint_id.and_then(|id| hint_id_to_action(app, id))
+}
+
+fn footer_area(app: &App, area: Rect) -> Rect {
+    if app.entry_view_expanded {
+        let height = render::expanded_footer_height(area.width).min(area.height);
+        return Rect {
+            x: area.x,
+            y: area.y + area.height.saturating_sub(height),
+            width: area.width,
+            height,
+        };
+    }
+
+    render::tui_layout(area, app).footer
 }
 
 // ── Dialog mouse routing ──────────────────────────────────────────────────────
@@ -216,9 +239,15 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
     if let Some(focus) = app.edit_tag_state().map(|s| s.focus) {
         let filtered_len = app.edit_tag_state().map_or(0, |s| s.filtered.len());
         let layout = render::tags_dialog_layout(area, filtered_len);
-        if row == layout.hints.y
-            && let Some(id) =
-                render::hint_id_at(render::tags_dialog_hints(focus), layout.hints.x + 1, col)
+        if render::point_in_rect(layout.hints, col, row)
+            && let Some(id) = render::hint_id_at_wrapped(
+                render::tags_dialog_hints(focus),
+                layout.hints.x + 1,
+                layout.hints.y,
+                layout.hints.width.saturating_sub(1),
+                col,
+                row,
+            )
         {
             return hint_id_to_action(app, id);
         }
@@ -246,9 +275,15 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
     if app.edit_feeling_state().is_some() {
         let all_len = app.edit_feeling_state().map_or(0, |s| s.all_feelings.len());
         let layout = render::feelings_dialog_layout(area, all_len);
-        if row == layout.hints.y
-            && let Some(id) =
-                render::hint_id_at(render::feelings_dialog_hints(), layout.hints.x + 1, col)
+        if render::point_in_rect(layout.hints, col, row)
+            && let Some(id) = render::hint_id_at_wrapped(
+                render::feelings_dialog_hints(),
+                layout.hints.x + 1,
+                layout.hints.y,
+                layout.hints.width.saturating_sub(1),
+                col,
+                row,
+            )
         {
             return hint_id_to_action(app, id);
         }
@@ -265,9 +300,15 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
 
     if app.edit_mood_state().is_some() {
         let layout = render::mood_dialog_layout(area);
-        if row == layout.hints.y
-            && let Some(id) =
-                render::hint_id_at(render::mood_dialog_hints(), layout.hints.x + 1, col)
+        if render::point_in_rect(layout.hints, col, row)
+            && let Some(id) = render::hint_id_at_wrapped(
+                render::mood_dialog_hints(),
+                layout.hints.x + 1,
+                layout.hints.y,
+                layout.hints.width.saturating_sub(1),
+                col,
+                row,
+            )
         {
             return hint_id_to_action(app, id);
         }

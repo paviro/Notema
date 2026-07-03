@@ -9,7 +9,7 @@ use ratatui::{
 use crate::tui::state::{EditFeelingState, EditMoodState, EditTagFocus, EditTagState};
 
 use super::{
-    chrome::{Hint, HintId, hints_text, render_scrollbar_if_needed},
+    chrome::{Hint, HintId, hint_height, hint_lines, render_scrollbar_if_needed},
     list_state_for_render,
     markdown_panel::MoodBar,
 };
@@ -58,35 +58,46 @@ pub(crate) fn tags_dialog_hints(focus: EditTagFocus) -> &'static [Hint] {
     }
 }
 
-pub(crate) fn tags_dialog_text(focus: EditTagFocus) -> String {
-    format!(" {}", hints_text(tags_dialog_hints(focus)))
-}
-
-fn feelings_dialog_text() -> String {
-    format!(" {}", hints_text(feelings_dialog_hints()))
-}
-
-fn mood_dialog_text() -> String {
-    format!(" {}", hints_text(mood_dialog_hints()))
-}
-
 // ── Dialog area helpers (re-used by the mouse handler for hit-testing) ───────
 
 pub(crate) fn tags_dialog_area(frame_area: Rect, filtered_len: usize) -> Rect {
-    const FIXED: u16 = 6;
+    const FIXED: u16 = 7;
+    let hint_height = tag_dialog_hint_height(frame_area);
     let visible = (filtered_len as u16).clamp(1, 10);
-    let h = (FIXED + visible + 2).min(frame_area.height.saturating_sub(2));
+    let h = (FIXED + hint_height + visible).min(frame_area.height.saturating_sub(2));
     super::centered_rect_fixed_height(40, h, frame_area)
 }
 
 pub(crate) fn feelings_dialog_area(frame_area: Rect, all_len: usize) -> Rect {
+    const FIXED: u16 = 5;
+    let hint_height = feelings_dialog_hint_height(frame_area);
     let visible = (all_len as u16).min(11);
-    let h = (4 + visible + 2).min(frame_area.height.saturating_sub(2));
+    let h = (FIXED + hint_height + visible).min(frame_area.height.saturating_sub(2));
     super::centered_rect_fixed_height(40, h, frame_area)
 }
 
 pub(crate) fn mood_dialog_area(frame_area: Rect) -> Rect {
-    super::centered_rect_fixed_height(44, 8, frame_area)
+    let h = 7 + mood_dialog_hint_height(frame_area);
+    super::centered_rect_fixed_height(44, h.min(frame_area.height.saturating_sub(2)), frame_area)
+}
+
+fn dialog_hint_width(frame_area: Rect, percent_x: u16) -> u16 {
+    let area = super::centered_rect_fixed_height(percent_x, 1, frame_area);
+    let inner = super::panel_inner(area);
+    inner.width.saturating_sub(1)
+}
+
+fn tag_dialog_hint_height(frame_area: Rect) -> u16 {
+    let width = dialog_hint_width(frame_area, 40);
+    hint_height(&TAGS_DIALOG_LIST_HINTS, width).max(hint_height(&TAGS_DIALOG_INPUT_HINTS, width))
+}
+
+fn feelings_dialog_hint_height(frame_area: Rect) -> u16 {
+    hint_height(&FEELINGS_DIALOG_HINTS, dialog_hint_width(frame_area, 40))
+}
+
+fn mood_dialog_hint_height(frame_area: Rect) -> u16 {
+    hint_height(&MOOD_DIALOG_HINTS, dialog_hint_width(frame_area, 44))
 }
 
 #[derive(Clone, Copy)]
@@ -103,7 +114,8 @@ pub(crate) struct TagsDialogLayout {
 pub(crate) fn tags_dialog_layout(frame_area: Rect, filtered_len: usize) -> TagsDialogLayout {
     let area = tags_dialog_area(frame_area, filtered_len);
     let inner = super::panel_inner(area);
-    let list_height = inner.height.saturating_sub(6);
+    let hint_height = tag_dialog_hint_height(frame_area);
+    let list_height = inner.height.saturating_sub(5 + hint_height);
     let list = Rect {
         x: inner.x,
         y: inner.y + 2,
@@ -130,9 +142,9 @@ pub(crate) fn tags_dialog_layout(frame_area: Rect, filtered_len: usize) -> TagsD
     };
     let hints = Rect {
         x: inner.x,
-        y: inner.y + inner.height.saturating_sub(1),
+        y: inner.y + inner.height.saturating_sub(hint_height),
         width: inner.width,
-        height: 1,
+        height: hint_height,
     };
 
     TagsDialogLayout {
@@ -159,11 +171,12 @@ pub(crate) struct FeelingsDialogLayout {
 pub(crate) fn feelings_dialog_layout(frame_area: Rect, all_len: usize) -> FeelingsDialogLayout {
     let area = feelings_dialog_area(frame_area, all_len);
     let inner = super::panel_inner(area);
+    let hint_height = feelings_dialog_hint_height(frame_area);
     let list = Rect {
         x: inner.x,
         y: inner.y + 2,
         width: inner.width,
-        height: inner.height.saturating_sub(4),
+        height: inner.height.saturating_sub(3 + hint_height),
     };
     let list_top_separator = Rect {
         x: inner.x,
@@ -179,9 +192,9 @@ pub(crate) fn feelings_dialog_layout(frame_area: Rect, all_len: usize) -> Feelin
     };
     let hints = Rect {
         x: inner.x,
-        y: inner.y + inner.height.saturating_sub(1),
+        y: inner.y + inner.height.saturating_sub(hint_height),
         width: inner.width,
-        height: 1,
+        height: hint_height,
     };
 
     FeelingsDialogLayout {
@@ -206,6 +219,7 @@ pub(crate) struct MoodDialogLayout {
 pub(crate) fn mood_dialog_layout(frame_area: Rect) -> MoodDialogLayout {
     let area = mood_dialog_area(frame_area);
     let inner = super::panel_inner(area);
+    let hint_height = mood_dialog_hint_height(frame_area);
     let right_w = " Blissful".len() as u16;
     let bar_row = Rect {
         x: inner.x,
@@ -237,9 +251,9 @@ pub(crate) fn mood_dialog_layout(frame_area: Rect) -> MoodDialogLayout {
         .split(value_row);
     let hints = Rect {
         x: inner.x,
-        y: inner.y + inner.height.saturating_sub(1),
+        y: inner.y + inner.height.saturating_sub(hint_height),
         width: inner.width,
-        height: 1,
+        height: hint_height,
     };
 
     MoodDialogLayout {
@@ -300,6 +314,19 @@ fn render_separator(frame: &mut Frame<'_>, area: Rect) {
             .style(Style::default().add_modifier(Modifier::DIM)),
         Rect { height: 1, ..area },
     );
+}
+
+fn hint_content_area(area: Rect) -> Rect {
+    Rect {
+        x: area.x.saturating_add(1),
+        width: area.width.saturating_sub(1),
+        ..area
+    }
+}
+
+fn render_hint_line(frame: &mut Frame<'_>, hints: &[Hint], area: Rect) {
+    let content = hint_content_area(area);
+    frame.render_widget(Paragraph::new(hint_lines(hints, content.width)), content);
 }
 
 // ── Dialog draw functions ─────────────────────────────────────────────────────
@@ -400,10 +427,7 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
         Paragraph::new(Line::from(Span::styled(input_text, input_style))),
         layout.input,
     );
-    frame.render_widget(
-        Paragraph::new(Line::from(tags_dialog_text(state.focus))),
-        layout.hints,
-    );
+    render_hint_line(frame, tags_dialog_hints(state.focus), layout.hints);
     render_dialog_scrollbar(
         frame,
         layout.area,
@@ -471,7 +495,7 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
 
     // Hint line
     if layout.hints.y < layout.inner.y + layout.inner.height {
-        frame.render_widget(Paragraph::new(Line::from(mood_dialog_text())), layout.hints);
+        render_hint_line(frame, mood_dialog_hints(), layout.hints);
     }
 }
 
@@ -519,10 +543,7 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
         list_state_for_render(state.selected_index(), scroll, layout.list.height, true);
     frame.render_stateful_widget(list, layout.list, &mut render_state);
     render_separator(frame, layout.list_bottom_separator);
-    frame.render_widget(
-        Paragraph::new(Line::from(feelings_dialog_text())),
-        layout.hints,
-    );
+    render_hint_line(frame, feelings_dialog_hints(), layout.hints);
     render_dialog_scrollbar(
         frame,
         layout.area,

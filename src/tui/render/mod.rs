@@ -30,10 +30,12 @@ pub(crate) use super::surface::{
 #[cfg(test)]
 pub(crate) use chrome::panel_title;
 pub(crate) use chrome::{
-    HintId, centered_rect, centered_rect_fixed_height, count_label, expanded_footer_hint_id_at,
-    expanded_footer_text, footer_hint_id_at, footer_text, hint_id_at, panel_block,
-    render_scrollbar_if_needed,
+    HintId, centered_rect, centered_rect_fixed_height, count_label, expanded_footer_height,
+    expanded_footer_hint_id_at_point, expanded_footer_lines, footer_hint_id_at_point, footer_lines,
+    hint_id_at_wrapped, panel_block, render_scrollbar_if_needed,
 };
+#[cfg(test)]
+pub(crate) use chrome::{footer_height, footer_hint_id_at, footer_text, hint_height, hint_id_at};
 use dialogs::{
     draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_mood_dialog, draw_edit_tags_dialog,
     draw_new_journal_input,
@@ -69,12 +71,22 @@ pub(crate) fn list_state_for_render(
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if app.entry_view_expanded {
         let area = frame.area();
+        let footer_height = expanded_footer_height(area.width).min(area.height);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(1)])
+            .constraints([Constraint::Min(0), Constraint::Length(footer_height)])
             .split(area);
         draw_selected_entry_view(frame, chunks[0], app);
-        frame.render_widget(Paragraph::new(expanded_footer_text()), chunks[1]);
+        let footer_area = chunks[1];
+        let footer_text_area = ratatui::layout::Rect {
+            x: footer_area.x.saturating_add(1),
+            width: footer_area.width.saturating_sub(1),
+            ..footer_area
+        };
+        frame.render_widget(
+            Paragraph::new(expanded_footer_lines(footer_area.width)),
+            footer_text_area,
+        );
         return;
     }
 
@@ -93,8 +105,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         draw_selected_entry_view(frame, area.area, app);
     }
 
-    let footer_text = footer_text(app);
-    let footer = Paragraph::new(footer_text);
+    let footer = Paragraph::new(footer_lines(app, layout.footer.width));
     frame.render_widget(footer, layout.footer);
 
     if app.is_confirming_delete() {
@@ -260,8 +271,15 @@ mod tests {
         assert!(layout.entry_view.is_some());
         assert!(layout.stats.is_none());
         assert!(layout.journals.is_none());
-        assert_eq!(layout.entries.unwrap().panel.area, Rect::new(0, 0, 42, 19));
-        assert_eq!(layout.entry_view.unwrap().area, Rect::new(42, 0, 48, 19));
+        let content_height = 20 - footer_height(&app, 90);
+        assert_eq!(
+            layout.entries.unwrap().panel.area,
+            Rect::new(0, 0, 42, content_height)
+        );
+        assert_eq!(
+            layout.entry_view.unwrap().area,
+            Rect::new(42, 0, 48, content_height)
+        );
     }
 
     #[test]
@@ -277,7 +295,10 @@ mod tests {
         app.focus = Focus::Entries;
         let entries = tui_layout(Rect::new(0, 0, 57, 20), &app);
         assert!(entries.single_panel);
-        assert_eq!(entries.entries.unwrap().panel.area, Rect::new(0, 0, 57, 19));
+        assert_eq!(
+            entries.entries.unwrap().panel.area,
+            Rect::new(0, 0, 57, 20 - footer_height(&app, 57))
+        );
         assert!(entries.journals.is_none());
     }
 
@@ -817,6 +838,29 @@ mod tests {
     }
 
     #[test]
+    fn narrow_footer_wraps_actions_below_columns() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+
+        let layout = tui_layout(Rect::new(0, 0, 60, 20), &app);
+
+        assert!(layout.footer.height > 1);
+        assert_eq!(layout.footer.height, footer_height(&app, 60));
+        assert_eq!(layout.content.height, 20 - layout.footer.height);
+    }
+
+    #[test]
+    fn wrapped_footer_hint_routing_uses_visible_row() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+
+        assert_eq!(
+            footer_hint_id_at_point(&app, 0, 18, 60, 0, 19),
+            Some(HintId::BeginEditTags)
+        );
+    }
+
+    #[test]
     fn footer_hint_routing_uses_typed_ids() {
         let mut app = app_with_entry();
         app.focus = Focus::Entries;
@@ -829,6 +873,17 @@ mod tests {
         assert_eq!(
             footer_hint_id_at(&app, 0, text.find("edit (e)").unwrap() as u16),
             Some(HintId::EditSelected)
+        );
+    }
+
+    #[test]
+    fn dialog_hints_wrap_and_remain_clickable_by_row() {
+        let hints = tags_dialog_hints(EditTagFocus::List);
+
+        assert_eq!(hint_height(hints, 29), 2);
+        assert_eq!(
+            hint_id_at_wrapped(hints, 10, 5, 29, 10, 6),
+            Some(HintId::TagsSave)
         );
     }
 
