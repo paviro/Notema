@@ -1,10 +1,14 @@
-use ratatui::{Frame, widgets::List};
+use ratatui::{
+    Frame,
+    style::{Modifier, Style},
+    widgets::{HighlightSpacing, List},
+};
 
 use crate::tui::{
     app::{App, Focus, Mode},
     entry_rows::{entry_list_rows, visible_entry_items},
     render::{
-        EntryListGeometry, clamp_scroll, entry_row_metadata, panel_block,
+        EntryListGeometry, clamp_scroll, entry_row_metadata, list_state_for_render, panel_block,
         render_scrollbar_if_needed, total_entry_row_height,
     },
 };
@@ -24,16 +28,32 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
     let viewport_height = geometry.viewport_height;
     let meta = entry_row_metadata(app, text_width);
     let total_height = total_entry_row_height(&meta);
-    app.scroll.entry = clamp_scroll(app.scroll.entry, total_height, viewport_height);
-    let items = visible_entry_items(&rows, app.scroll.entry, viewport_height);
+    let pixel_offset =
+        clamp_scroll(app.entry_list.offset() as u16, total_height, viewport_height);
+    *app.entry_list.offset_mut() = pixel_offset as usize;
+
+    let highlight_active = app.focus != Focus::Journals;
+    let (items, selected_visible) = visible_entry_items(
+        &rows,
+        pixel_offset,
+        viewport_height,
+        app.selected_entry_index,
+        highlight_active,
+    );
+
+    let list = List::new(items)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_spacing(HighlightSpacing::Never);
+
+    let mut render_state = list_state_for_render(selected_visible, 0, viewport_height, highlight_active);
 
     frame.render_widget(block, geometry.panel.area);
-    frame.render_widget(List::new(items), geometry.panel.content);
+    frame.render_stateful_widget(list, geometry.panel.content, &mut render_state);
     render_scrollbar_if_needed(
         frame,
         geometry.panel.area,
         total_height,
         viewport_height,
-        app.scroll.entry,
+        pixel_offset,
     );
 }

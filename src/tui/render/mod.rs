@@ -9,7 +9,7 @@ mod stats;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
-    widgets::Paragraph,
+    widgets::{ListState, Paragraph},
 };
 
 use super::app::{App, entry_view_is_available};
@@ -17,15 +17,13 @@ use super::app::{App, entry_view_is_available};
 pub(crate) use super::entry_rows::{
     EntryRowMeta, entry_day_label, entry_list_lines, entry_month_label,
 };
-pub(crate) use super::entry_rows::{
-    ensure_entry_visible, entry_row_metadata, total_entry_row_height,
-};
-pub(crate) use super::hit_test::{
-    entry_index_at, feeling_at_point, journal_index_at, tag_at_point,
-};
+pub(crate) use super::entry_rows::{entry_row_metadata, total_entry_row_height};
+pub(crate) use super::hit_test::{entry_index_at, feeling_at_point, tag_at_point};
+#[cfg(test)]
+pub(crate) use super::hit_test::journal_index_at;
 #[cfg(test)]
 pub(crate) use super::scroll::scrollbar_position;
-pub(crate) use super::scroll::{clamp_scroll, ensure_index_visible, scroll_offset, viewer_scroll};
+pub(crate) use super::scroll::{clamp_scroll, viewer_scroll};
 pub(crate) use super::surface::{
     EntryListGeometry, PanelGeometry, entry_metadata_layout, panel_inner, point_in_rect,
 };
@@ -34,7 +32,7 @@ pub(crate) use chrome::panel_title;
 pub(crate) use chrome::{
     HintId, centered_rect, centered_rect_fixed_height, expanded_footer_hint_id_at,
     expanded_footer_text, footer_hint_id_at, footer_text, hint_id_at, panel_block,
-    render_scrollbar_if_needed, selected_style,
+    render_scrollbar_if_needed,
 };
 use dialogs::{
     draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_mood_dialog, draw_edit_tags_dialog,
@@ -53,6 +51,20 @@ pub(crate) use markdown_panel::markdown_theme;
 use stats::draw_journal_stats;
 #[cfg(test)]
 pub(crate) use stats::{centered_stats_layout, journal_stats};
+
+pub(crate) fn list_state_for_render(
+    selected: Option<usize>,
+    offset: usize,
+    viewport_height: u16,
+    highlight_active: bool,
+) -> ListState {
+    let visible_end = offset.saturating_add(viewport_height as usize);
+    let visible_selection =
+        selected.filter(|index| highlight_active && *index >= offset && *index < visible_end);
+    ListState::default()
+        .with_offset(offset)
+        .with_selected(visible_selection)
+}
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if app.entry_view_expanded {
@@ -289,20 +301,15 @@ mod tests {
                 entries,
                 entries.panel.content.x,
                 click_y,
-                app.scroll.entry,
+                app.entry_list.offset() as u16,
                 &rows
             ),
             Some(0)
         );
 
-        let mut scroll = app.scroll.entry;
-        ensure_entry_visible(
-            &mut scroll,
-            &rows,
-            app.selected_entry_index,
-            entries.viewport_height,
-        );
-        assert_eq!(scroll, app.scroll.entry);
+        let offset_before = app.entry_list.offset();
+        app.entry_list_ensure_visible(&rows, entries.viewport_height);
+        assert_eq!(app.entry_list.offset(), offset_before);
     }
 
     #[test]
@@ -317,7 +324,7 @@ mod tests {
                 journals,
                 journals.content.x,
                 journals.content.y,
-                app.scroll.journal,
+                app.journal_list.offset() as u16,
                 app.journals.len()
             ),
             Some(0)
@@ -327,7 +334,7 @@ mod tests {
                 journals,
                 panel_inner(journals.area).x,
                 panel_inner(journals.area).y,
-                app.scroll.journal,
+                app.journal_list.offset() as u16,
                 app.journals.len()
             ),
             None

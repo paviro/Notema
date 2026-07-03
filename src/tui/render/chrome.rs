@@ -228,14 +228,6 @@ fn expanded_footer_hints() -> [Hint; 3] {
     ]
 }
 
-pub(crate) fn selected_style(selected: bool) -> Style {
-    if selected {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    }
-}
-
 pub(crate) fn panel_block(title: &str, focused: bool, word_count: Option<usize>) -> Block<'static> {
     let mut block = Block::default()
         .title(panel_title(title, focused))

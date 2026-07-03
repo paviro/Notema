@@ -3,15 +3,14 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Wrap,
-    },
+    widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph, Wrap},
 };
 
 use crate::tui::state::{EditFeelingState, EditMoodState, EditTagFocus, EditTagState};
 
 use super::{
     chrome::{Hint, HintId, hints_text, render_scrollbar_if_needed},
+    list_state_for_render,
     markdown_panel::MoodBar,
 };
 
@@ -301,20 +300,6 @@ fn render_separator(frame: &mut Frame<'_>, area: Rect) {
             .style(Style::default().add_modifier(Modifier::DIM)),
         Rect { height: 1, ..area },
     );
-}
-
-fn list_state_for_render(
-    selected: Option<usize>,
-    offset: usize,
-    viewport_height: u16,
-    highlight_active: bool,
-) -> ListState {
-    let visible_end = offset.saturating_add(viewport_height as usize);
-    let visible_selection =
-        selected.filter(|index| highlight_active && *index >= offset && *index < visible_end);
-    ListState::default()
-        .with_offset(offset)
-        .with_selected(visible_selection)
 }
 
 // ── Dialog draw functions ─────────────────────────────────────────────────────

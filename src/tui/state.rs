@@ -10,24 +10,15 @@ use super::app::SearchScope;
 
 const STATUS_DURATION: Duration = Duration::from_secs(3);
 
-/// Vertical scroll offsets for the three panels.
+/// Vertical scroll offset for the entry preview panel.
 #[derive(Default)]
 pub(crate) struct ScrollState {
-    pub(crate) journal: u16,
-    pub(crate) entry: u16,
     pub(crate) entry_view: u16,
 }
 
 impl ScrollState {
-    /// Reset every panel's scroll to the top.
-    pub(crate) fn reset(&mut self) {
-        self.journal = 0;
-        self.reset_entry();
-    }
-
-    /// Reset the entry list and entry preview scroll, leaving the journal list.
-    pub(crate) fn reset_entry(&mut self) {
-        self.entry = 0;
+    /// Reset the entry preview scroll.
+    pub(crate) fn reset_entry_view(&mut self) {
         self.entry_view = 0;
     }
 }
@@ -284,7 +275,7 @@ impl EditFeelingState {
     }
 }
 
-fn normalize_list_state(state: &mut ListState, len: usize) {
+pub(crate) fn normalize_list_state(state: &mut ListState, len: usize) {
     if len == 0 {
         state.select(None);
         return;
@@ -297,7 +288,7 @@ fn normalize_list_state(state: &mut ListState, len: usize) {
     }
 }
 
-fn move_list_selection(state: &mut ListState, len: usize, delta: isize) {
+pub(crate) fn move_list_selection(state: &mut ListState, len: usize, delta: isize) {
     if len == 0 {
         state.select(None);
         return;
@@ -308,7 +299,7 @@ fn move_list_selection(state: &mut ListState, len: usize, delta: isize) {
     state.select(Some(next));
 }
 
-fn scroll_list_offset(state: &mut ListState, delta: i16, len: usize, viewport_height: u16) {
+pub(crate) fn scroll_list_offset(state: &mut ListState, delta: i16, len: usize, viewport_height: u16) {
     if len == 0 || viewport_height == 0 {
         *state.offset_mut() = 0;
         return;
@@ -323,7 +314,7 @@ fn scroll_list_offset(state: &mut ListState, delta: i16, len: usize, viewport_he
     *state.offset_mut() = offset.min(max_offset);
 }
 
-fn ensure_selected_visible(state: &mut ListState, len: usize, viewport_height: u16) {
+pub(crate) fn ensure_selected_visible(state: &mut ListState, len: usize, viewport_height: u16) {
     if len == 0 || viewport_height == 0 {
         *state.offset_mut() = 0;
         return;

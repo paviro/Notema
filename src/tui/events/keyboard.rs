@@ -228,21 +228,11 @@ pub(super) fn keep_selection_visible(
     let layout = render::tui_layout(Rect::new(0, 0, size.width, size.height), app);
     if app.focus == Focus::Journals && app.mode == Mode::Browse {
         if let Some(area) = layout.journals {
-            render::ensure_index_visible(
-                &mut app.scroll.journal,
-                app.selected_journal,
-                app.journals.len(),
-                area.content.height,
-            );
+            app.journal_list_ensure_visible(area.content.height);
         }
     } else if let Some(area) = layout.entries {
         let rows = render::entry_row_metadata(app, area.text_width);
-        render::ensure_entry_visible(
-            &mut app.scroll.entry,
-            &rows,
-            app.selected_entry_index,
-            area.viewport_height,
-        );
+        app.entry_list_ensure_visible(&rows, area.viewport_height);
     }
     Ok(())
 }

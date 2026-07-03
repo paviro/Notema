@@ -5,11 +5,7 @@ use ratatui::{
     widgets::ListItem,
 };
 
-use super::{
-    app::{App, Focus, Mode},
-    render::selected_style,
-    scroll::clamp_scroll,
-};
+use super::{app::{App, Mode}, scroll::clamp_scroll};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EntryRowMeta {
@@ -21,7 +17,6 @@ pub(crate) struct EntryRowMeta {
 pub(crate) struct EntryListRow {
     pub(crate) entry_index: Option<usize>,
     lines: Vec<Line<'static>>,
-    selected: bool,
 }
 
 impl EntryListRow {
@@ -46,7 +41,6 @@ pub(crate) fn entry_list_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
                         Style::default().add_modifier(Modifier::DIM),
                     )),
                 ],
-                selected: entry_selection_is_visible(app) && index == app.selected_entry_index,
             })
             .collect(),
         Mode::Browse => browse_entry_rows(app, text_width),
@@ -80,7 +74,6 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
                             Style::default().add_modifier(Modifier::DIM),
                         )),
                     ],
-                    selected: false,
                 });
             }
         }
@@ -91,7 +84,6 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
                 rows.push(EntryListRow {
                     entry_index: None,
                     lines: vec![Line::from(vec![])],
-                    selected: false,
                 });
             }
             current_day = day.clone();
@@ -102,7 +94,6 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
                         day,
                         Style::default().add_modifier(Modifier::UNDERLINED),
                     ))],
-                    selected: false,
                 });
             }
         }
@@ -110,16 +101,12 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
         rows.push(EntryListRow {
             entry_index: Some(index),
             lines: entry_list_lines(entry, text_width),
-            selected: entry_selection_is_visible(app) && index == app.selected_entry_index,
         });
     }
 
     rows
 }
 
-fn entry_selection_is_visible(app: &App) -> bool {
-    app.focus != Focus::Journals
-}
 
 pub(crate) fn entry_row_metadata(app: &App, text_width: u16) -> Vec<EntryRowMeta> {
     entry_list_rows(app, text_width)
@@ -131,14 +118,19 @@ pub(crate) fn entry_row_metadata(app: &App, text_width: u16) -> Vec<EntryRowMeta
         .collect()
 }
 
+/// Returns visible `ListItem`s and the 0-based index of the selected entry
+/// within those items (`None` if not visible or `!selection_visible`).
 pub(crate) fn visible_entry_items(
     rows: &[EntryListRow],
     scroll: u16,
     viewport_height: u16,
-) -> Vec<ListItem<'static>> {
+    selected_entry_index: usize,
+    selection_visible: bool,
+) -> (Vec<ListItem<'static>>, Option<usize>) {
     let mut remaining_skip = scroll;
     let mut remaining_height = viewport_height;
     let mut items = Vec::new();
+    let mut selected_visible_idx: Option<usize> = None;
 
     for row in rows {
         if remaining_height == 0 {
@@ -157,10 +149,17 @@ pub(crate) fn visible_entry_items(
         let end = start + visible_height as usize;
         let lines = row.lines[start..end].to_vec();
         remaining_height = remaining_height.saturating_sub(visible_height);
-        items.push(ListItem::new(lines).style(selected_style(row.selected)));
+
+        if selection_visible
+            && selected_visible_idx.is_none()
+            && row.entry_index == Some(selected_entry_index)
+        {
+            selected_visible_idx = Some(items.len());
+        }
+        items.push(ListItem::new(lines));
     }
 
-    items
+    (items, selected_visible_idx)
 }
 
 pub(crate) fn entry_month_label(entry: &Entry) -> Option<String> {

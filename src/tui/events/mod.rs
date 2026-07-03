@@ -471,7 +471,7 @@ mod tests {
             20,
         );
 
-        assert_eq!(app.selected_journal, 1);
+        assert_eq!(app.selected_journal_index(), 1);
         assert_eq!(app.selected_entry_index, 0);
         assert_eq!(app.scroll.entry_view, 0);
         assert_eq!(app.focus, Focus::Journals);
@@ -495,7 +495,7 @@ mod tests {
             20,
         );
 
-        assert_eq!(app.selected_journal, 0);
+        assert_eq!(app.selected_journal_index(), 0);
         assert_eq!(app.focus, Focus::Entries);
     }
 
@@ -517,7 +517,7 @@ mod tests {
             20,
         );
 
-        assert_eq!(app.selected_journal, 0);
+        assert_eq!(app.selected_journal_index(), 0);
         assert_eq!(app.focus, Focus::Journals);
     }
 
@@ -535,8 +535,8 @@ mod tests {
             8,
         );
 
-        assert_eq!(app.selected_journal, 0);
-        assert_eq!(app.scroll.journal, 1);
+        assert_eq!(app.selected_journal_index(), 0);
+        assert_eq!(app.journal_list.offset(), 1);
         assert_eq!(app.focus, Focus::Entries);
     }
 
@@ -555,7 +555,7 @@ mod tests {
         );
 
         assert_eq!(app.selected_entry_index, 0);
-        assert_eq!(app.scroll.entry, 1);
+        assert_eq!(app.entry_list.offset(), 1);
         assert_eq!(app.focus, Focus::Journals);
     }
 
@@ -643,7 +643,7 @@ mod tests {
         );
 
         assert_eq!(app.scroll.entry_view, 1);
-        assert_eq!(app.scroll.entry, 0);
+        assert_eq!(app.entry_list.offset(), 0);
         assert_eq!(app.selected_entry_index, 0);
         assert_eq!(app.focus, Focus::EntryView);
     }

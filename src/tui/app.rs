@@ -11,9 +11,13 @@ use crate::{
 };
 use std::{path::PathBuf, time::Duration};
 
+use ratatui::widgets::ListState;
+
 use super::state::{
     EditFeelingState, EditMoodState, EditTagState, Overlay, ScrollState, SearchState, StatusBar,
+    ensure_selected_visible, move_list_selection, normalize_list_state, scroll_list_offset,
 };
+use crate::tui::entry_rows::EntryRowMeta;
 
 pub(crate) const JOURNAL_LIST_WIDTH: u16 = 18;
 pub(crate) const ENTRY_LIST_INLINE_WIDTH: u16 = 42;
@@ -53,8 +57,9 @@ pub(crate) struct App {
     pub(crate) unlocked_identity: Option<crypto::UnlockedIdentity>,
     pub(crate) journals: Vec<Journal>,
     pub(crate) entries: Vec<Entry>,
-    pub(crate) selected_journal: usize,
+    pub(crate) journal_list: ListState,
     pub(crate) selected_entry_index: usize,
+    pub(crate) entry_list: ListState,
     pub(crate) scroll: ScrollState,
     pub(crate) focus: Focus,
     pub(crate) mode: Mode,
@@ -82,8 +87,9 @@ impl App {
             unlocked_identity,
             journals: Vec::new(),
             entries: Vec::new(),
-            selected_journal: 0,
+            journal_list: ListState::default(),
             selected_entry_index: 0,
+            entry_list: ListState::default(),
             scroll: ScrollState::default(),
             focus: Focus::Journals,
             mode: Mode::Browse,
@@ -105,10 +111,7 @@ impl App {
     fn load_entries(&mut self, entry_paths: Vec<storage::EntryPath>) -> AppResult<()> {
         self.journals = storage::list_journals(&self.config.journal_root)?;
         self.entries = storage::read_entries(entry_paths, self.unlocked_identity.as_ref())?;
-        if self.selected_journal >= self.journals.len() {
-            self.selected_journal = self.journals.len().saturating_sub(1);
-            self.scroll.reset();
-        }
+        normalize_list_state(&mut self.journal_list, self.journals.len());
         if !self.search.query.is_empty() {
             self.search.hits = self.search_results();
         }
@@ -117,13 +120,60 @@ impl App {
             .selected_entry_index
             .min(self.current_entry_list_len().saturating_sub(1));
         if self.selected_entry_index != previous_entry_index {
-            self.scroll.reset_entry();
+            self.reset_entry_scroll();
         }
         Ok(())
     }
 
+    pub(crate) fn selected_journal_index(&self) -> usize {
+        self.journal_list.selected().unwrap_or(0)
+    }
+
     pub(crate) fn selected_journal(&self) -> Option<&Journal> {
-        self.journals.get(self.selected_journal)
+        self.journals.get(self.selected_journal_index())
+    }
+
+    pub(crate) fn journal_list_ensure_visible(&mut self, viewport_height: u16) {
+        ensure_selected_visible(&mut self.journal_list, self.journals.len(), viewport_height);
+    }
+
+    pub(crate) fn journal_list_scroll(&mut self, delta: i16, viewport_height: u16) {
+        scroll_list_offset(&mut self.journal_list, delta, self.journals.len(), viewport_height);
+    }
+
+    fn reset_entry_scroll(&mut self) {
+        *self.entry_list.offset_mut() = 0;
+        self.scroll.reset_entry_view();
+    }
+
+    pub(crate) fn entry_list_scroll(
+        &mut self,
+        delta: i16,
+        total_height: usize,
+        viewport_height: u16,
+    ) {
+        let max = total_height.saturating_sub(viewport_height as usize);
+        let offset = if delta < 0 {
+            self.entry_list.offset().saturating_sub(delta.unsigned_abs() as usize)
+        } else {
+            self.entry_list.offset().saturating_add(delta as usize)
+        };
+        *self.entry_list.offset_mut() = offset.min(max);
+    }
+
+    pub(crate) fn entry_list_ensure_visible(
+        &mut self,
+        rows: &[EntryRowMeta],
+        viewport_height: u16,
+    ) {
+        let mut scroll = self.entry_list.offset() as u16;
+        crate::tui::entry_rows::ensure_entry_visible(
+            &mut scroll,
+            rows,
+            self.selected_entry_index,
+            viewport_height,
+        );
+        *self.entry_list.offset_mut() = scroll as usize;
     }
 
     pub(crate) fn selected_entries(&self) -> Vec<&Entry> {
@@ -153,15 +203,14 @@ impl App {
         }
 
         let previous_entry_index = self.selected_entry_index;
-        let index = match self.focus {
-            Focus::Journals if self.mode == Mode::Browse => &mut self.selected_journal,
-            _ => &mut self.selected_entry_index,
-        };
-        let next = (*index as isize + delta).clamp(0, len as isize - 1);
-        *index = next as usize;
-        if self.focus == Focus::Journals {
+        if self.focus == Focus::Journals && self.mode == Mode::Browse {
+            move_list_selection(&mut self.journal_list, len, delta);
             self.selected_entry_index = 0;
-            self.scroll.entry = 0;
+            *self.entry_list.offset_mut() = 0;
+        } else {
+            let next =
+                (self.selected_entry_index as isize + delta).clamp(0, len as isize - 1) as usize;
+            self.selected_entry_index = next;
         }
         if self.selected_entry_index != previous_entry_index {
             self.scroll.entry_view = 0;
@@ -173,10 +222,10 @@ impl App {
             return;
         }
 
-        if self.selected_journal != index {
-            self.selected_journal = index;
+        if self.selected_journal_index() != index {
+            self.journal_list.select(Some(index));
             self.selected_entry_index = 0;
-            self.scroll.reset_entry();
+            self.reset_entry_scroll();
         }
     }
 
@@ -395,10 +444,10 @@ impl App {
             .iter()
             .position(|journal| journal.name == name)
         {
-            self.selected_journal = index;
+            self.journal_list.select(Some(index));
+            *self.journal_list.offset_mut() = index;
             self.selected_entry_index = 0;
-            self.scroll.journal = index.min(u16::MAX as usize) as u16;
-            self.scroll.reset_entry();
+            self.reset_entry_scroll();
             self.focus = Focus::Entries;
         }
     }
@@ -465,7 +514,7 @@ impl App {
         self.search.query = format!("tags:{tag}");
         self.search.hits = self.search_results_by_tag(tag);
         self.selected_entry_index = 0;
-        self.scroll.reset_entry();
+        self.reset_entry_scroll();
     }
 
     pub(crate) fn begin_feeling_search(&mut self, feeling: &str) {
@@ -478,7 +527,7 @@ impl App {
         self.search.query = format!("feelings:{feeling}");
         self.search.hits = self.search_results_by_feeling(feeling);
         self.selected_entry_index = 0;
-        self.scroll.reset_entry();
+        self.reset_entry_scroll();
     }
 
     pub(crate) fn begin_search(&mut self) {
@@ -494,7 +543,7 @@ impl App {
         self.search.query.clear();
         self.search.hits.clear();
         self.selected_entry_index = 0;
-        self.scroll.reset_entry();
+        self.reset_entry_scroll();
     }
 
     pub(crate) fn exit_search(&mut self) {
@@ -503,13 +552,13 @@ impl App {
         self.search.query.clear();
         self.search.hits.clear();
         self.selected_entry_index = 0;
-        self.scroll.reset_entry();
+        self.reset_entry_scroll();
     }
 
     pub(crate) fn update_search_results(&mut self) {
         self.search.hits = self.search_results();
         self.selected_entry_index = 0;
-        self.scroll.reset_entry();
+        self.reset_entry_scroll();
     }
 
     pub(crate) fn search_scope_label(&self) -> String {
