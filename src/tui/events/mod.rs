@@ -386,13 +386,42 @@ mod tests {
     }
 
     #[test]
+    fn typed_hint_ids_route_to_actions_without_string_parsing() {
+        let mut app = app_with_entries(1);
+        app.focus = Focus::Entries;
+
+        assert_eq!(
+            mouse::hint_id_to_action(&app, render::HintId::BeginEditTags),
+            Some(Action::BeginEditTags)
+        );
+        assert_eq!(
+            mouse::hint_id_to_action(&app, render::HintId::EditSelected),
+            Some(Action::EditSelected)
+        );
+        assert_eq!(
+            mouse::hint_id_to_action(&app, render::HintId::TagsToggle),
+            None
+        );
+
+        app.begin_edit_tags();
+        if let Some(state) = app.edit_tag_state_mut() {
+            state.all_tags.push(("work".to_string(), 1));
+            state.filtered.push(0);
+        }
+        assert_eq!(
+            mouse::hint_id_to_action(&app, render::HintId::TagsToggle),
+            Some(Action::TagsToggle)
+        );
+    }
+
+    #[test]
     fn wide_journal_click_selects_journal_and_keeps_journal_focus() {
         let mut app = app_with_journals(&["alpha", "beta"]);
         app.focus = Focus::Journals;
         app.selected_entry_index = 3;
         app.scroll.entry_view = 10;
         let layout = render::tui_layout(Rect::new(0, 0, 120, 20), &app);
-        let journals = render::panel_inner(layout.journals.unwrap());
+        let journals = layout.journals.unwrap().content;
 
         mouse_in_area(
             &mut app,
@@ -416,7 +445,7 @@ mod tests {
         let mut app = app_with_journals(&["work"]);
         app.focus = Focus::Journals;
         let layout = render::tui_layout(Rect::new(0, 0, 57, 20), &app);
-        let journals = render::panel_inner(layout.journals.unwrap());
+        let journals = layout.journals.unwrap().content;
 
         mouse_in_area(
             &mut app,
@@ -438,7 +467,7 @@ mod tests {
         let mut app = app_with_journals(&["alpha"]);
         app.focus = Focus::Entries;
         let layout = render::tui_layout(Rect::new(0, 0, 120, 20), &app);
-        let journals = render::panel_inner(layout.journals.unwrap());
+        let journals = layout.journals.unwrap().content;
 
         mouse_in_area(
             &mut app,
@@ -460,7 +489,7 @@ mod tests {
         let mut app = app_with_journals(&["a", "b", "c", "d", "e", "f", "g"]);
         app.focus = Focus::Entries;
         let layout = render::tui_layout(Rect::new(0, 0, 120, 8), &app);
-        let journals = render::panel_inner(layout.journals.unwrap());
+        let journals = layout.journals.unwrap().content;
 
         mouse_in_area(
             &mut app,
@@ -479,7 +508,7 @@ mod tests {
         let mut app = app_with_entries(8);
         app.focus = Focus::Journals;
         let layout = render::tui_layout(Rect::new(0, 0, 80, 8), &app);
-        let entries = render::panel_inner(layout.entries.unwrap());
+        let entries = layout.entries.unwrap().panel.content;
 
         mouse_in_area(
             &mut app,
@@ -498,7 +527,7 @@ mod tests {
         let mut app = app_with_entries(2);
         app.focus = Focus::Entries;
         let layout = render::tui_layout(Rect::new(0, 0, 80, 12), &app);
-        let entries = render::panel_inner(layout.entries.unwrap());
+        let entries = layout.entries.unwrap().panel.content;
 
         mouse_in_area(
             &mut app,
@@ -521,7 +550,7 @@ mod tests {
         let mut app = app_with_entries(1);
         app.focus = Focus::EntryView;
         let layout = render::tui_layout(Rect::new(0, 0, 120, 12), &app);
-        let entries = render::panel_inner(layout.entries.unwrap());
+        let entries = layout.entries.unwrap().panel.content;
 
         mouse_in_area(
             &mut app,
@@ -544,7 +573,7 @@ mod tests {
         let mut app = app_with_entries(1);
         app.focus = Focus::EntryView;
         let layout = render::tui_layout(Rect::new(0, 0, 120, 12), &app);
-        let entries = render::panel_inner(layout.entries.unwrap());
+        let entries = layout.entries.unwrap().panel.content;
 
         mouse_in_area(
             &mut app,
@@ -567,7 +596,7 @@ mod tests {
         let mut app = app_with_entries(6);
         app.focus = Focus::Entries;
         let layout = render::tui_layout(Rect::new(0, 0, 120, 20), &app);
-        let entry_view = render::panel_inner(layout.entry_view.unwrap());
+        let entry_view = layout.entry_view.unwrap().content;
 
         mouse_in_area(
             &mut app,
@@ -587,12 +616,7 @@ mod tests {
         let mut app = app_with_entries(1);
         view_selected(&mut app).unwrap();
 
-        mouse_in_area(
-            &mut app,
-            mouse(MouseEventKind::ScrollDown, 1, 1),
-            80,
-            20,
-        );
+        mouse_in_area(&mut app, mouse(MouseEventKind::ScrollDown, 1, 1), 80, 20);
         assert_eq!(app.scroll.entry_view, 1);
 
         mouse_in_area(

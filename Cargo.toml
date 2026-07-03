@@ -18,6 +18,7 @@ rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 shell-words = "1"
 toml = "1.1"
+unicode-width = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

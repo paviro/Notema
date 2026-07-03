@@ -5,6 +5,7 @@ mod hit_test;
 mod render;
 mod scroll;
 mod state;
+mod surface;
 
 use crate::{AppResult, config::Config, crypto};
 use crossterm::{

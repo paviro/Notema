@@ -119,7 +119,7 @@ fn interactive_setup(config_path: &Path) -> AppResult<Config> {
         editor_input.trim().to_string()
     };
 
-    write!(stdout, "Enable age encryption? [y/N]: ")?;
+    write!(stdout, "Enable encryption? [y/N]: ")?;
     stdout.flush()?;
     let mut encryption_input = String::new();
     io::stdin().read_line(&mut encryption_input)?;

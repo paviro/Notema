@@ -26,7 +26,11 @@ pub(crate) fn handle_key(
     }
 }
 
-pub(super) fn key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) -> Option<Action> {
+pub(super) fn key_to_action(
+    app: &App,
+    key: KeyEvent,
+    entry_view_available: bool,
+) -> Option<Action> {
     match &app.overlay {
         Overlay::None if app.entry_view_expanded => expanded_key_to_action(app, key),
         Overlay::None if app.mode == Mode::Search => {
@@ -119,29 +123,19 @@ fn search_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
             Some(Action::FocusRight)
         }
         KeyCode::Enter if app.can_act_on_selected_entry() => Some(Action::ViewSelected),
-        KeyCode::Char('e')
-            if app.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
+        KeyCode::Char('e') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             Some(Action::EditSelected)
         }
-        KeyCode::Char('d')
-            if app.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
+        KeyCode::Char('d') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             Some(Action::BeginDelete)
         }
-        KeyCode::Char('t')
-            if app.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
+        KeyCode::Char('t') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             Some(Action::BeginEditTags)
         }
-        KeyCode::Char('f')
-            if app.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
+        KeyCode::Char('f') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             Some(Action::BeginEditFeelings)
         }
-        KeyCode::Char('m')
-            if app.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
+        KeyCode::Char('m') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             Some(Action::BeginEditMood)
         }
         KeyCode::Backspace if app.focus == Focus::Entries => Some(Action::SearchBackspace),
@@ -238,17 +232,16 @@ pub(super) fn keep_selection_visible(
                 &mut app.scroll.journal,
                 app.selected_journal,
                 app.journals.len(),
-                render::panel_inner(area).height,
+                area.content.height,
             );
         }
     } else if let Some(area) = layout.entries {
-        let text_width = area.width.saturating_sub(11);
-        let rows = render::entry_row_metadata(app, text_width);
+        let rows = render::entry_row_metadata(app, area.text_width);
         render::ensure_entry_visible(
             &mut app.scroll.entry,
             &rows,
             app.selected_entry_index,
-            render::panel_inner(area).height,
+            area.viewport_height,
         );
     }
     Ok(())

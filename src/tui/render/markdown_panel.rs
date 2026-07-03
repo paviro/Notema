@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, ScrollbarState, Widget},
+    widgets::{Paragraph, Widget},
 };
 use ratatui_029::{
     layout::Alignment as MarkdownAlignment,
@@ -18,10 +18,7 @@ use ratatui_markdown::{
 
 use crate::tui::{
     app::{App, Focus},
-    render::{
-        panel_block, panel_content_inner, render_vertical_scrollbar, scrollbar_position,
-        viewer_scroll,
-    },
+    render::{entry_metadata_layout, panel_block, render_scrollbar_if_needed, viewer_scroll},
 };
 
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
@@ -67,19 +64,13 @@ fn draw_markdown_panel(
 ) -> u16 {
     let wc = word_count(content);
     let block = panel_block(title, focused, Some(wc));
-    let inner = panel_content_inner(block.inner(area));
-    let metadata_height = metadata_section_height(metadata.tags, metadata.feelings, metadata.mood);
-    let show_metadata = metadata_height > 0 && inner.height > metadata_height;
-
-    let (content_rect, metadata_rect) = if show_metadata {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(metadata_height)])
-            .split(inner);
-        (chunks[0], Some(chunks[1]))
-    } else {
-        (inner, None)
-    };
+    let layout = entry_metadata_layout(
+        area,
+        !metadata.tags.is_empty(),
+        !metadata.feelings.is_empty(),
+        metadata.mood.is_some(),
+    );
+    let content_rect = layout.content;
 
     let width = content_rect.width.saturating_sub(1).max(1) as usize;
     let theme = markdown_theme();
@@ -92,17 +83,11 @@ fn draw_markdown_panel(
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), content_rect);
 
-    if let Some(metadata_rect) = metadata_rect {
-        draw_metadata_section(frame, metadata_rect, metadata);
+    if layout.metadata.is_some() {
+        draw_metadata_section(frame, layout, metadata);
     }
 
-    if line_count > content_rect.height as usize {
-        let mut state = ScrollbarState::default()
-            .content_length(line_count)
-            .viewport_content_length(content_rect.height as usize)
-            .position(scrollbar_position(scroll, line_count, content_rect.height));
-        render_vertical_scrollbar(frame, area, &mut state);
-    }
+    render_scrollbar_if_needed(frame, area, line_count, content_rect.height, scroll);
 
     scroll
 }
@@ -114,25 +99,23 @@ struct EntryMetadata<'a> {
     mood: Option<i8>,
 }
 
-fn metadata_section_height(tags: &[String], feelings: &[String], mood: Option<i8>) -> u16 {
-    let rows = mood.is_some() as u16 + (!feelings.is_empty()) as u16 + (!tags.is_empty()) as u16;
-    if rows == 0 { 0 } else { 1 + rows }
-}
-
-fn draw_metadata_section(frame: &mut Frame<'_>, area: Rect, metadata: EntryMetadata<'_>) {
+fn draw_metadata_section(
+    frame: &mut Frame<'_>,
+    layout: crate::tui::surface::EntryMetadataLayout,
+    metadata: EntryMetadata<'_>,
+) {
+    let Some(area) = layout.metadata else {
+        return;
+    };
     let sep = "─".repeat(area.width.saturating_sub(1) as usize);
     frame.render_widget(
         Paragraph::new(sep).style(Style::default().add_modifier(Modifier::DIM)),
         Rect { height: 1, ..area },
     );
 
-    let mut y = area.y + 1;
-    if let Some(score) = metadata.mood {
-        let mood_rect = Rect {
-            y,
-            height: 1,
-            ..area
-        };
+    if let Some(score) = metadata.mood
+        && let Some(mood_rect) = layout.mood
+    {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -144,9 +127,10 @@ fn draw_metadata_section(frame: &mut Frame<'_>, area: Rect, metadata: EntryMetad
         frame.render_widget(Paragraph::new("Miserable "), chunks[0]);
         frame.render_widget(MoodBar::new(score), chunks[1]);
         frame.render_widget(Paragraph::new(" Blissful"), chunks[2]);
-        y = y.saturating_add(1);
     }
-    if !metadata.feelings.is_empty() {
+    if !metadata.feelings.is_empty()
+        && let Some(row) = layout.feelings
+    {
         let feelings_line = Line::from(vec![
             Span::styled("Feelings: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(metadata.feelings.join(" | ")),
@@ -154,15 +138,16 @@ fn draw_metadata_section(frame: &mut Frame<'_>, area: Rect, metadata: EntryMetad
         frame.render_widget(
             Paragraph::new(feelings_line),
             Rect {
-                y,
+                y: row.rect.y,
                 height: 1,
                 ..area
             },
         );
-        y = y.saturating_add(1);
     }
 
-    if !metadata.tags.is_empty() {
+    if !metadata.tags.is_empty()
+        && let Some(row) = layout.tags
+    {
         let tags_line = Line::from(vec![
             Span::styled("Tags: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(metadata.tags.join(" | ")),
@@ -170,7 +155,7 @@ fn draw_metadata_section(frame: &mut Frame<'_>, area: Rect, metadata: EntryMetad
         frame.render_widget(
             Paragraph::new(tags_line),
             Rect {
-                y,
+                y: row.rect.y,
                 height: 1,
                 ..area
             },

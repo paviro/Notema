@@ -21,24 +21,28 @@ pub(crate) use super::entry_rows::{
     ensure_entry_visible, entry_row_metadata, total_entry_row_height,
 };
 pub(crate) use super::hit_test::{
-    entry_index_at, feeling_at_point, journal_index_at, panel_inner, point_in_rect, tag_at_point,
+    entry_index_at, feeling_at_point, journal_index_at, tag_at_point,
 };
-pub(crate) use super::scroll::{
-    clamp_scroll, ensure_index_visible, scroll_offset, scrollbar_position, viewer_scroll,
+#[cfg(test)]
+pub(crate) use super::scroll::scrollbar_position;
+pub(crate) use super::scroll::{clamp_scroll, ensure_index_visible, scroll_offset, viewer_scroll};
+pub(crate) use super::surface::{
+    EntryListGeometry, PanelGeometry, entry_metadata_layout, panel_inner, point_in_rect,
 };
 #[cfg(test)]
 pub(crate) use chrome::panel_title;
 pub(crate) use chrome::{
-    centered_rect, centered_rect_fixed_height, footer_text, panel_block, panel_content_inner,
-    render_vertical_scrollbar, selected_style,
-};
-pub(crate) use dialogs::{
-    FEELINGS_HINT, MOOD_HINT, feelings_dialog_area, mood_dialog_area, tags_dialog_area,
-    tags_dialog_hint,
+    HintId, centered_rect, centered_rect_fixed_height, expanded_footer_hint_id_at,
+    expanded_footer_text, footer_hint_id_at, footer_text, hint_id_at, panel_block,
+    render_scrollbar_if_needed, selected_style,
 };
 use dialogs::{
     draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_mood_dialog, draw_edit_tags_dialog,
     draw_new_journal_input,
+};
+pub(crate) use dialogs::{
+    feelings_dialog_area, feelings_dialog_hints, mood_dialog_area, mood_dialog_hints,
+    tags_dialog_area, tags_dialog_hints,
 };
 use entries::draw_entry_list;
 use journals::draw_journals;
@@ -58,10 +62,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
             .constraints([Constraint::Min(0), Constraint::Length(1)])
             .split(area);
         draw_selected_entry_view(frame, chunks[0], app);
-        frame.render_widget(
-            Paragraph::new(" close (enter/esc) | edit (e) | quit (q)"),
-            chunks[1],
-        );
+        frame.render_widget(Paragraph::new(expanded_footer_text()), chunks[1]);
         return;
     }
 
@@ -75,12 +76,12 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         draw_entry_list(frame, area, app);
     }
     if let Some(area) = layout.stats {
-        draw_journal_stats(frame, area, app);
+        draw_journal_stats(frame, area.area, app);
     } else if let Some(area) = layout.entry_view {
-        draw_selected_entry_view(frame, area, app);
+        draw_selected_entry_view(frame, area.area, app);
     }
 
-    let footer_text = footer_text(app, layout.entry_view_visible);
+    let footer_text = footer_text(app);
     let footer = Paragraph::new(footer_text);
     frame.render_widget(footer, layout.footer);
 
@@ -122,6 +123,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use tempfile::tempdir;
+    use unicode_width::UnicodeWidthStr;
 
     fn new_app(config: Config) -> App {
         let encryption_paths = crypto::EncryptionPaths::for_config(
@@ -198,10 +200,11 @@ mod tests {
         let layout = tui_layout(Rect::new(0, 0, 120, 20), &app);
 
         assert!(!layout.single_panel);
-        assert!(layout.entry_view_visible);
-        assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 19));
-        assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 42, 19));
-        assert_eq!(layout.entry_view.unwrap(), Rect::new(60, 0, 60, 19));
+        assert!(layout.entry_view.is_some());
+        assert!(layout.stats.is_none());
+        assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 18, 19));
+        assert_eq!(layout.entries.unwrap().panel.area, Rect::new(18, 0, 42, 19));
+        assert_eq!(layout.entry_view.unwrap().area, Rect::new(60, 0, 60, 19));
         assert_eq!(layout.footer, Rect::new(0, 19, 120, 1));
     }
 
@@ -213,10 +216,11 @@ mod tests {
         let layout = tui_layout(Rect::new(0, 0, INLINE_ENTRY_VIEW_MIN_WIDTH, 20), &app);
 
         assert!(!layout.single_panel);
-        assert!(layout.entry_view_visible);
-        assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 19));
-        assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 42, 19));
-        assert_eq!(layout.entry_view.unwrap(), Rect::new(60, 0, 40, 19));
+        assert!(layout.entry_view.is_some());
+        assert!(layout.stats.is_none());
+        assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 18, 19));
+        assert_eq!(layout.entries.unwrap().panel.area, Rect::new(18, 0, 42, 19));
+        assert_eq!(layout.entry_view.unwrap().area, Rect::new(60, 0, 40, 19));
     }
 
     #[test]
@@ -227,10 +231,10 @@ mod tests {
         let layout = tui_layout(Rect::new(0, 0, 80, 20), &app);
 
         assert!(!layout.single_panel);
-        assert!(!layout.entry_view_visible);
-        assert_eq!(layout.journals.unwrap(), Rect::new(0, 0, 18, 19));
-        assert_eq!(layout.entries.unwrap(), Rect::new(18, 0, 62, 19));
         assert!(layout.entry_view.is_none());
+        assert!(layout.stats.is_none());
+        assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 18, 19));
+        assert_eq!(layout.entries.unwrap().panel.area, Rect::new(18, 0, 62, 19));
     }
 
     #[test]
@@ -241,10 +245,11 @@ mod tests {
         let layout = tui_layout(Rect::new(0, 0, 80, 20), &app);
 
         assert!(!layout.single_panel);
-        assert!(layout.entry_view_visible);
+        assert!(layout.entry_view.is_some());
+        assert!(layout.stats.is_none());
         assert!(layout.journals.is_none());
-        assert_eq!(layout.entries.unwrap(), Rect::new(0, 0, 42, 19));
-        assert_eq!(layout.entry_view.unwrap(), Rect::new(42, 0, 38, 19));
+        assert_eq!(layout.entries.unwrap().panel.area, Rect::new(0, 0, 42, 19));
+        assert_eq!(layout.entry_view.unwrap().area, Rect::new(42, 0, 38, 19));
     }
 
     #[test]
@@ -254,14 +259,145 @@ mod tests {
 
         let journals = tui_layout(Rect::new(0, 0, 57, 20), &app);
         assert!(journals.single_panel);
-        assert_eq!(journals.journals.unwrap(), Rect::new(0, 0, 57, 19));
+        assert_eq!(journals.journals.unwrap().area, Rect::new(0, 0, 57, 19));
         assert!(journals.entries.is_none());
 
         app.focus = Focus::Entries;
         let entries = tui_layout(Rect::new(0, 0, 57, 20), &app);
         assert!(entries.single_panel);
-        assert_eq!(entries.entries.unwrap(), Rect::new(0, 0, 57, 19));
+        assert_eq!(entries.entries.unwrap().panel.area, Rect::new(0, 0, 57, 19));
         assert!(entries.journals.is_none());
+    }
+
+    #[test]
+    fn entry_list_geometry_is_shared_by_render_hit_test_and_visibility() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+        let layout = tui_layout(Rect::new(0, 0, 80, 20), &app);
+        let entries = layout.entries.unwrap();
+
+        assert_eq!(
+            entries.text_width,
+            entries.panel.content.width.saturating_sub(7)
+        );
+
+        let rows = entry_row_metadata(&app, entries.text_width);
+        let click_y = entries.panel.content.y + 4;
+
+        assert_eq!(
+            entry_index_at(
+                entries,
+                entries.panel.content.x,
+                click_y,
+                app.scroll.entry,
+                &rows
+            ),
+            Some(0)
+        );
+
+        let mut scroll = app.scroll.entry;
+        ensure_entry_visible(
+            &mut scroll,
+            &rows,
+            app.selected_entry_index,
+            entries.viewport_height,
+        );
+        assert_eq!(scroll, app.scroll.entry);
+    }
+
+    #[test]
+    fn panel_content_rect_defines_selectable_rows_not_padding() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Journals;
+        let layout = tui_layout(Rect::new(0, 0, 120, 20), &app);
+        let journals = layout.journals.unwrap();
+
+        assert_eq!(
+            journal_index_at(
+                journals,
+                journals.content.x,
+                journals.content.y,
+                app.scroll.journal,
+                app.journals.len()
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            journal_index_at(
+                journals,
+                panel_inner(journals.area).x,
+                panel_inner(journals.area).y,
+                app.scroll.journal,
+                app.journals.len()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn metadata_hit_map_accounts_for_mood_row() {
+        let area = Rect::new(42, 0, 60, 19);
+        let tags = vec!["work".to_string()];
+        let feelings = vec!["focused".to_string()];
+        let layout = crate::tui::surface::entry_metadata_layout(area, true, true, true);
+        let feelings_row = layout.feelings.unwrap();
+        let tags_row = layout.tags.unwrap();
+
+        assert_eq!(
+            feeling_at_point(
+                area,
+                feelings_row.rect.x + feelings_row.prefix_width,
+                feelings_row.rect.y,
+                &tags,
+                &feelings,
+                Some(2)
+            ),
+            Some("focused".to_string())
+        );
+        assert_eq!(
+            tag_at_point(
+                area,
+                tags_row.rect.x + tags_row.prefix_width,
+                tags_row.rect.y,
+                &tags,
+                &feelings,
+                Some(2)
+            ),
+            Some("work".to_string())
+        );
+    }
+
+    #[test]
+    fn metadata_hit_map_uses_terminal_cell_width_for_wide_text() {
+        let area = Rect::new(42, 0, 60, 19);
+        let tags = vec!["集中".to_string()];
+        let feelings = vec!["嬉しい".to_string()];
+        let layout = crate::tui::surface::entry_metadata_layout(area, true, true, false);
+        let feelings_row = layout.feelings.unwrap();
+        let tags_row = layout.tags.unwrap();
+
+        assert_eq!(
+            feeling_at_point(
+                area,
+                feelings_row.rect.x + feelings_row.prefix_width + 5,
+                feelings_row.rect.y,
+                &tags,
+                &feelings,
+                None
+            ),
+            Some("嬉しい".to_string())
+        );
+        assert_eq!(
+            tag_at_point(
+                area,
+                tags_row.rect.x + tags_row.prefix_width + 3,
+                tags_row.rect.y,
+                &tags,
+                &feelings,
+                None
+            ),
+            Some("集中".to_string())
+        );
     }
 
     #[test]
@@ -352,7 +488,7 @@ mod tests {
         let config = Config::new(dir.path().to_path_buf(), "true");
         let mut app = new_app(config);
         app.select_journal_by_name("work");
-        let area = Rect::new(0, 0, 40, 10);
+        let area = EntryListGeometry::new(Rect::new(0, 0, 40, 10));
         // text_width=10 gives entries height 3 (title + 2 preview lines)
         let rows = entry_row_metadata(&app, 10);
 
@@ -377,15 +513,15 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(entry_index_at(area, 1, 1, 0, &rows), None);
-        assert_eq!(entry_index_at(area, 1, 2, 0, &rows), None);
-        assert_eq!(entry_index_at(area, 1, 3, 0, &rows), None);
-        assert_eq!(entry_index_at(area, 1, 4, 0, &rows), None);
-        assert_eq!(entry_index_at(area, 1, 5, 0, &rows), Some(0));
-        assert_eq!(entry_index_at(area, 1, 6, 0, &rows), Some(0));
-        assert_eq!(entry_index_at(area, 1, 7, 0, &rows), Some(0));
-        assert_eq!(entry_index_at(area, 1, 8, 0, &rows), Some(1));
-        assert_eq!(entry_index_at(area, 1, 1, 2, &rows), None);
+        assert_eq!(entry_index_at(area, 2, 1, 0, &rows), None);
+        assert_eq!(entry_index_at(area, 2, 2, 0, &rows), None);
+        assert_eq!(entry_index_at(area, 2, 3, 0, &rows), None);
+        assert_eq!(entry_index_at(area, 2, 4, 0, &rows), None);
+        assert_eq!(entry_index_at(area, 2, 5, 0, &rows), Some(0));
+        assert_eq!(entry_index_at(area, 2, 6, 0, &rows), Some(0));
+        assert_eq!(entry_index_at(area, 2, 7, 0, &rows), Some(0));
+        assert_eq!(entry_index_at(area, 2, 8, 0, &rows), Some(1));
+        assert_eq!(entry_index_at(area, 2, 1, 2, &rows), None);
     }
 
     #[test]
@@ -588,7 +724,7 @@ mod tests {
         let mut app = app_with_entry();
         app.focus = Focus::Journals;
 
-        let text = footer_text(&app, true);
+        let text = footer_text(&app);
 
         assert!(!text.contains("view (enter)"));
         assert!(!text.contains("edit (e)"));
@@ -600,7 +736,7 @@ mod tests {
         let mut app = app_with_entry();
         app.focus = Focus::Entries;
 
-        let text = footer_text(&app, true);
+        let text = footer_text(&app);
 
         assert!(text.contains("view (enter)"));
         assert!(text.contains("edit (e)"));
@@ -616,7 +752,7 @@ mod tests {
         app.select_journal_by_name("work");
         app.focus = Focus::Entries;
 
-        let text = footer_text(&app, true);
+        let text = footer_text(&app);
 
         assert!(!text.contains("view (enter)"));
         assert!(!text.contains("edit (e)"));
@@ -636,7 +772,7 @@ mod tests {
             preview: "Body".to_string(),
         }];
 
-        let text = footer_text(&app, true);
+        let text = footer_text(&app);
 
         assert!(text.contains("Search all: body"));
         assert!(text.contains("view (enter)"));
@@ -645,6 +781,44 @@ mod tests {
         assert!(!text.contains("backspace"));
         assert!(!text.contains("edit (e)"));
         assert!(!text.contains("delete (d)"));
+    }
+
+    #[test]
+    fn footer_hint_routing_uses_typed_ids() {
+        let mut app = app_with_entry();
+        app.focus = Focus::Entries;
+        let text = footer_text(&app);
+
+        assert_eq!(
+            footer_hint_id_at(&app, 0, text.find("edit tags").unwrap() as u16),
+            Some(HintId::BeginEditTags)
+        );
+        assert_eq!(
+            footer_hint_id_at(&app, 0, text.find("edit (e)").unwrap() as u16),
+            Some(HintId::EditSelected)
+        );
+    }
+
+    #[test]
+    fn dialog_hint_routing_uses_typed_ids() {
+        let tags = tags_dialog_hints(EditTagFocus::List);
+        assert_eq!(hint_id_at(tags, 10, 11), Some(HintId::TagsToggle));
+
+        let feelings = feelings_dialog_hints();
+        assert_eq!(
+            hint_id_at(feelings, 20, 20 + "toggle (space) | ".len() as u16),
+            Some(HintId::FeelingsSave)
+        );
+
+        let mood = mood_dialog_hints();
+        assert_eq!(
+            hint_id_at(
+                mood,
+                30,
+                30 + UnicodeWidthStr::width("decrease (←) | ") as u16
+            ),
+            Some(HintId::MoodIncrease)
+        );
     }
 
     #[test]

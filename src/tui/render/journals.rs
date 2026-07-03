@@ -1,23 +1,20 @@
 use ratatui::{
     Frame,
-    layout::Rect,
     text::{Line, Span},
-    widgets::{List, ListItem, ScrollbarState},
+    widgets::{List, ListItem},
 };
 
 use crate::tui::{
     app::{App, Focus},
     render::{
-        clamp_scroll, panel_block, panel_content_inner, render_vertical_scrollbar,
-        scrollbar_position, selected_style,
+        PanelGeometry, clamp_scroll, panel_block, render_scrollbar_if_needed, selected_style,
     },
 };
 
-pub(crate) fn draw_journals(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
+pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app: &mut App) {
     let focused = app.focus == Focus::Journals;
     let block = panel_block("Journals", focused, None);
-    let inner = panel_content_inner(block.inner(area));
-    let viewport_height = inner.height;
+    let viewport_height = geometry.content.height;
     app.scroll.journal = clamp_scroll(app.scroll.journal, app.journals.len(), viewport_height);
     let offset = app.scroll.journal as usize;
     let items: Vec<ListItem> = app
@@ -32,18 +29,13 @@ pub(crate) fn draw_journals(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
         })
         .collect();
 
-    frame.render_widget(block, area);
-    frame.render_widget(List::new(items), inner);
-
-    if app.journals.len() > viewport_height as usize {
-        let mut state = ScrollbarState::default()
-            .content_length(app.journals.len())
-            .viewport_content_length(viewport_height as usize)
-            .position(scrollbar_position(
-                app.scroll.journal,
-                app.journals.len(),
-                viewport_height,
-            ));
-        render_vertical_scrollbar(frame, area, &mut state);
-    }
+    frame.render_widget(block, geometry.area);
+    frame.render_widget(List::new(items), geometry.content);
+    render_scrollbar_if_needed(
+        frame,
+        geometry.area,
+        app.journals.len(),
+        viewport_height,
+        app.scroll.journal,
+    );
 }

@@ -3,25 +3,70 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, ScrollbarState, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::tui::{
-    render::{markdown_panel::MoodBar, render_vertical_scrollbar, scrollbar_position},
-    state::{EditFeelingState, EditMoodState, EditTagFocus, EditTagState},
+use crate::tui::state::{EditFeelingState, EditMoodState, EditTagFocus, EditTagState};
+
+use super::{
+    chrome::{Hint, HintId, hints_text, render_scrollbar_if_needed},
+    markdown_panel::MoodBar,
 };
 
 // ── Hint text constants and helpers ──────────────────────────────────────────
 
-pub(crate) const FEELINGS_HINT: &str = " toggle (space) | save (enter) | cancel (esc)";
-pub(crate) const MOOD_HINT: &str =
-    " decrease (←) | increase (→) | save (enter) | clear (del) | cancel (esc)";
+const FEELINGS_DIALOG_HINTS: [Hint; 3] = [
+    Hint::new("toggle", "space", HintId::FeelingsToggle),
+    Hint::new("save", "enter", HintId::FeelingsSave),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
 
-pub(crate) fn tags_dialog_hint(focus: EditTagFocus) -> &'static str {
+const MOOD_DIALOG_HINTS: [Hint; 5] = [
+    Hint::new("decrease", "←", HintId::MoodDecrease),
+    Hint::new("increase", "→", HintId::MoodIncrease),
+    Hint::new("save", "enter", HintId::MoodSave),
+    Hint::new("clear", "del", HintId::MoodClear),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
+const TAGS_DIALOG_LIST_HINTS: [Hint; 4] = [
+    Hint::new("toggle", "space", HintId::TagsToggle),
+    Hint::new("input", "tab", HintId::TagsSwitchFocus),
+    Hint::new("save", "enter", HintId::TagsSave),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
+const TAGS_DIALOG_INPUT_HINTS: [Hint; 3] = [
+    Hint::new("add", "enter", HintId::TagsAddFromInput),
+    Hint::new("list", "tab", HintId::TagsSwitchFocus),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
+pub(crate) fn feelings_dialog_hints() -> &'static [Hint] {
+    &FEELINGS_DIALOG_HINTS
+}
+
+pub(crate) fn mood_dialog_hints() -> &'static [Hint] {
+    &MOOD_DIALOG_HINTS
+}
+
+pub(crate) fn tags_dialog_hints(focus: EditTagFocus) -> &'static [Hint] {
     match focus {
-        EditTagFocus::List => " toggle (space) | input (tab) | save (enter) | cancel (esc)",
-        EditTagFocus::Input => " add (enter) | list (tab) | cancel (esc)",
+        EditTagFocus::List => &TAGS_DIALOG_LIST_HINTS,
+        EditTagFocus::Input => &TAGS_DIALOG_INPUT_HINTS,
     }
+}
+
+pub(crate) fn tags_dialog_text(focus: EditTagFocus) -> String {
+    format!(" {}", hints_text(tags_dialog_hints(focus)))
+}
+
+fn feelings_dialog_text() -> String {
+    format!(" {}", hints_text(feelings_dialog_hints()))
+}
+
+fn mood_dialog_text() -> String {
+    format!(" {}", hints_text(mood_dialog_hints()))
 }
 
 // ── Dialog area helpers (re-used by the mouse handler for hit-testing) ───────
@@ -74,13 +119,7 @@ fn render_dialog_scrollbar(
     max_visible: u16,
     scroll: u16,
 ) {
-    if list_lines > max_visible {
-        let mut state = ScrollbarState::default()
-            .content_length(list_lines as usize)
-            .viewport_content_length(max_visible as usize)
-            .position(scrollbar_position(scroll, list_lines as usize, max_visible));
-        render_vertical_scrollbar(frame, area, &mut state);
-    }
+    render_scrollbar_if_needed(frame, area, list_lines as usize, max_visible, scroll);
 }
 
 // ── Dialog draw functions ─────────────────────────────────────────────────────
@@ -180,7 +219,7 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
     };
     lines.push(Line::from(Span::styled(input_text, input_style)));
     lines.push(Line::from(""));
-    lines.push(Line::from(tags_dialog_hint(state.focus)));
+    lines.push(Line::from(tags_dialog_text(state.focus)));
 
     frame.render_widget(Clear, area);
     frame.render_widget(
@@ -267,7 +306,7 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
     let hint_y = inner.y + inner.height.saturating_sub(1);
     if hint_y < inner.y + inner.height {
         frame.render_widget(
-            Paragraph::new(Line::from(MOOD_HINT)),
+            Paragraph::new(Line::from(mood_dialog_text())),
             Rect {
                 x: inner.x,
                 y: hint_y,
@@ -323,7 +362,7 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(FEELINGS_HINT));
+    lines.push(Line::from(feelings_dialog_text()));
 
     frame.render_widget(Clear, area);
     frame.render_widget(
