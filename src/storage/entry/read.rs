@@ -1,7 +1,7 @@
 use super::paths::{entry_id, is_encrypted_entry_file, is_entry_file};
 use super::{Entry, EntryEncryptionState};
 use crate::feelings::normalize_feelings;
-use crate::storage::list_journals;
+use crate::storage::{journals::is_hidden_name, list_journals};
 use crate::{
     AppResult, crypto,
     markdown::{
@@ -37,7 +37,7 @@ pub fn scan_entries_with_identity(
 }
 
 /// Walk the journal tree once and collect every entry file path without reading
-/// any file contents. Skips `.trash` directories.
+/// any file contents. Skips hidden directories.
 pub fn collect_entry_paths(root: &Path) -> AppResult<Vec<EntryPath>> {
     let mut paths = Vec::new();
     for journal in list_journals(root)? {
@@ -56,7 +56,7 @@ fn collect_paths(journal: &str, dir: &Path, paths: &mut Vec<EntryPath>) -> AppRe
         let path = item.path();
         let name = item.file_name().to_string_lossy().to_string();
         if item.file_type()?.is_dir() {
-            if name != ".trash" {
+            if !is_hidden_name(&name) {
                 collect_paths(journal, &path, paths)?;
             }
             continue;

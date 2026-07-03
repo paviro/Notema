@@ -23,7 +23,7 @@ pub fn list_journals(root: &Path) -> AppResult<Vec<Journal>> {
         }
 
         let name = entry.file_name().to_string_lossy().to_string();
-        if name == ".trash" {
+        if is_hidden_name(&name) {
             continue;
         }
 
@@ -49,7 +49,7 @@ pub fn validate_journal_name(name: &str) -> AppResult<String> {
     if trimmed.is_empty() {
         return Err("journal name cannot be empty".into());
     }
-    if trimmed == ".trash" || trimmed == "." || trimmed == ".." {
+    if is_hidden_name(trimmed) || trimmed == "." || trimmed == ".." {
         return Err(format!("'{trimmed}' is a reserved journal name").into());
     }
     let path = Path::new(trimmed);
@@ -58,6 +58,10 @@ pub fn validate_journal_name(name: &str) -> AppResult<String> {
     }
 
     Ok(trimmed.to_string())
+}
+
+pub(crate) fn is_hidden_name(name: &str) -> bool {
+    name.starts_with('.')
 }
 
 #[cfg(test)]
@@ -76,20 +80,22 @@ mod tests {
     }
 
     #[test]
-    fn create_journal_rejects_reserved_and_nested_names() {
+    fn create_journal_rejects_reserved_hidden_and_nested_names() {
         let dir = tempdir().unwrap();
 
         assert!(create_journal(dir.path(), ".trash").is_err());
+        assert!(create_journal(dir.path(), ".hidden").is_err());
         assert!(create_journal(dir.path(), "nested/name").is_err());
         assert!(create_journal(dir.path(), "../outside").is_err());
         assert!(create_journal(dir.path(), "").is_err());
     }
 
     #[test]
-    fn list_journals_ignores_files_and_trash() {
+    fn list_journals_ignores_files_and_hidden_directories() {
         let dir = tempdir().unwrap();
         fs::create_dir_all(dir.path().join("work")).unwrap();
         fs::create_dir_all(dir.path().join(".trash")).unwrap();
+        fs::create_dir_all(dir.path().join(".sync")).unwrap();
         fs::write(dir.path().join("notes.md"), "not a journal").unwrap();
 
         let journals = list_journals(dir.path()).unwrap();
