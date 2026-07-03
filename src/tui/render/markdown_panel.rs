@@ -18,7 +18,9 @@ use ratatui_markdown::{
 
 use crate::tui::{
     app::{App, Focus},
-    render::{entry_metadata_layout, panel_block, render_scrollbar_if_needed, viewer_scroll},
+    render::{
+        count_label, entry_metadata_layout, panel_block, render_scrollbar_if_needed, viewer_scroll,
+    },
 };
 
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
@@ -63,7 +65,7 @@ fn draw_markdown_panel(
     focused: bool,
 ) -> u16 {
     let wc = word_count(content);
-    let block = panel_block(title, focused, Some(wc));
+    let block = panel_block(title, focused, Some(count_label(wc, "word", "words")));
     let layout = entry_metadata_layout(
         area,
         !metadata.tags.is_empty(),

@@ -8,8 +8,8 @@ use crate::tui::{
     app::{App, Focus, Mode},
     entry_rows::{entry_list_rows, visible_entry_items},
     render::{
-        EntryListGeometry, clamp_scroll, entry_row_metadata, list_state_for_render, panel_block,
-        render_scrollbar_if_needed, total_entry_row_height,
+        EntryListGeometry, clamp_scroll, count_label, entry_row_metadata, list_state_for_render,
+        panel_block, render_scrollbar_if_needed, total_entry_row_height,
     },
 };
 
@@ -21,7 +21,11 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
             Mode::Browse => "Entries",
         },
         focused,
-        None,
+        Some(count_label(
+            app.current_entry_list_len(),
+            "entry",
+            "entries",
+        )),
     );
     let text_width = geometry.text_width;
     let rows = entry_list_rows(app, text_width);

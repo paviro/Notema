@@ -30,7 +30,7 @@ pub(crate) use super::surface::{
 #[cfg(test)]
 pub(crate) use chrome::panel_title;
 pub(crate) use chrome::{
-    HintId, centered_rect, centered_rect_fixed_height, expanded_footer_hint_id_at,
+    HintId, centered_rect, centered_rect_fixed_height, count_label, expanded_footer_hint_id_at,
     expanded_footer_text, footer_hint_id_at, footer_text, hint_id_at, panel_block,
     render_scrollbar_if_needed,
 };
@@ -586,6 +586,35 @@ mod tests {
     fn focused_panel_titles_have_ascii_focus_marker() {
         assert_eq!(panel_title("Entries", true), " >> Entries ");
         assert_eq!(panel_title("Entries", false), " Entries ");
+    }
+
+    #[test]
+    fn list_panels_show_counts_in_bottom_titles() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let work_entry_dir = root.join("work").join("2026-07-01");
+        fs::create_dir_all(&work_entry_dir).unwrap();
+        fs::write(
+            work_entry_dir.join("a.md"),
+            "+++\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\n# A\nBody\n",
+        )
+        .unwrap();
+        fs::write(
+            work_entry_dir.join("b.md"),
+            "+++\ncreated_at = \"2026-07-01T11:00:00+02:00\"\n+++\n\n# B\nBody\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("personal")).unwrap();
+
+        let config = Config::new(root, "true");
+        let mut app = new_app(config);
+        app.select_journal_by_name("work");
+        app.focus = Focus::Entries;
+
+        let rendered = render_text(app, 130, 20);
+
+        assert!(rendered.contains("2 journals"));
+        assert!(rendered.contains("2 entries"));
     }
 
     #[test]

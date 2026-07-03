@@ -226,7 +226,11 @@ fn expanded_footer_hints() -> [Hint; 3] {
     ]
 }
 
-pub(crate) fn panel_block(title: &str, focused: bool, word_count: Option<usize>) -> Block<'static> {
+pub(crate) fn panel_block(
+    title: &str,
+    focused: bool,
+    footer_label: Option<String>,
+) -> Block<'static> {
     let mut block = Block::default()
         .title(panel_title(title, focused))
         .borders(Borders::ALL);
@@ -237,11 +241,19 @@ pub(crate) fn panel_block(title: &str, focused: bool, word_count: Option<usize>)
             .border_style(Style::default().add_modifier(Modifier::BOLD));
     }
 
-    if let Some(count) = word_count {
-        block = block.title_bottom(Line::from(format!(" {count} words ")).right_aligned());
+    if let Some(label) = footer_label {
+        block = block.title_bottom(Line::from(format!(" {label} ")).right_aligned());
     }
 
     block
+}
+
+pub(crate) fn count_label(count: usize, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("{count} {singular}")
+    } else {
+        format!("{count} {plural}")
+    }
 }
 
 pub(crate) fn panel_title(title: &str, focused: bool) -> String {

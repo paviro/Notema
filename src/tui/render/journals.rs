@@ -7,14 +7,20 @@ use ratatui::{
 
 use crate::tui::{
     app::{App, Focus},
-    render::{PanelGeometry, list_state_for_render, panel_block, render_scrollbar_if_needed},
+    render::{
+        PanelGeometry, count_label, list_state_for_render, panel_block, render_scrollbar_if_needed,
+    },
     state::normalize_list_state,
 };
 
 pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app: &mut App) {
     let focused = app.focus == Focus::Journals;
     let highlight_active = app.focus != Focus::Entries;
-    let block = panel_block("Journals", focused, None);
+    let block = panel_block(
+        "Journals",
+        focused,
+        Some(count_label(app.journals.len(), "journal", "journals")),
+    );
     let viewport_height = geometry.content.height;
 
     normalize_list_state(&mut app.journal_list, app.journals.len());
