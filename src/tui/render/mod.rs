@@ -156,12 +156,10 @@ mod tests {
     use unicode_width::UnicodeWidthStr;
 
     fn new_app(config: Config) -> App {
-        let encryption_paths = crypto::EncryptionPaths::for_config(
-            &config.journal_root.join("config.toml"),
-            &config.journal_root,
-        )
-        .unwrap();
-        App::new(config, encryption_paths).unwrap()
+        let config_path = config.journal_root.join("config.toml");
+        let encryption_paths =
+            crypto::EncryptionPaths::for_config(&config_path, &config.journal_root).unwrap();
+        App::new(config_path, config, encryption_paths).unwrap()
     }
 
     fn app_with_entry() -> App {
@@ -490,13 +488,13 @@ mod tests {
             "focused".to_string(),
             "tired".to_string(),
         ];
-        let entry_view = Rect::new(0, 0, 24, 14 - expanded_footer_height(&app, 24));
+        let entry_view = Rect::new(0, 0, 24, 15 - expanded_footer_height(&app, 24));
         let metadata =
             crate::tui::surface::entry_metadata_layout(entry_view, &tags, &feelings, None);
         let feelings_row = metadata.feelings.unwrap();
         let tags_row = metadata.tags.unwrap();
 
-        let backend = render_app(app, 24, 14);
+        let backend = render_app(app, 24, 15);
         let buffer = backend.buffer();
 
         assert_eq!(feelings_row.rect.height, 2);

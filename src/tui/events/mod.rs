@@ -248,6 +248,11 @@ pub(crate) fn dispatch_action(
             app.search.query.pop();
             app.update_search_results();
         }
+
+        Action::ToggleHints => {
+            app.config.show_hints = !app.config.show_hints;
+            crate::config::save_config(&app.config_path, &app.config)?;
+        }
     }
 
     Ok(false)
@@ -356,12 +361,10 @@ mod tests {
     }
 
     fn new_app(config: Config) -> App {
-        let encryption_paths = crypto::EncryptionPaths::for_config(
-            &config.journal_root.join("config.toml"),
-            &config.journal_root,
-        )
-        .unwrap();
-        App::new(config, encryption_paths).unwrap()
+        let config_path = config.journal_root.join("config.toml");
+        let encryption_paths =
+            crypto::EncryptionPaths::for_config(&config_path, &config.journal_root).unwrap();
+        App::new(config_path, config, encryption_paths).unwrap()
     }
 
     fn app_with_journals(names: &[&str]) -> App {

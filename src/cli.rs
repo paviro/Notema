@@ -94,7 +94,7 @@ pub fn run() -> AppResult<()> {
     storage::ensure_workspace(&config.journal_root)?;
 
     let encryption_paths = crypto::EncryptionPaths::for_config(&config_path, &config.journal_root)?;
-    tui::run(config, encryption_paths)
+    tui::run(config_path, config, encryption_paths)
 }
 
 fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppResult<()> {

@@ -33,6 +33,7 @@ pub(crate) enum HintId {
     MoodIncrease,
     MoodSave,
     MoodClear,
+    HintsToggle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +172,9 @@ pub(crate) fn footer_lines(app: &App, width: u16) -> Text<'static> {
     if !app.status().is_empty() {
         return Text::from(app.status().to_string());
     }
+    if !app.config.show_hints {
+        return Text::default();
+    }
 
     let lines = match app.mode {
         Mode::Search => search_footer_line(app).lines(width),
@@ -182,6 +186,9 @@ pub(crate) fn footer_lines(app: &App, width: u16) -> Text<'static> {
 pub(crate) fn footer_height(app: &App, width: u16) -> u16 {
     if !app.status().is_empty() {
         return 1;
+    }
+    if !app.config.show_hints {
+        return 0;
     }
 
     match app.mode {
@@ -210,7 +217,7 @@ pub(crate) fn footer_hint_id_at_point(
     col: u16,
     row: u16,
 ) -> Option<HintId> {
-    if !app.status().is_empty() {
+    if !app.status().is_empty() || !app.config.show_hints {
         return None;
     }
 
@@ -230,6 +237,9 @@ pub(crate) fn expanded_footer_text(app: &App) -> String {
 }
 
 pub(crate) fn expanded_footer_lines(app: &App, width: u16) -> Text<'static> {
+    if !app.config.show_hints {
+        return Text::default();
+    }
     Text::from(hint_lines(
         &expanded_footer_hints(app),
         width.saturating_sub(1),
@@ -237,6 +247,9 @@ pub(crate) fn expanded_footer_lines(app: &App, width: u16) -> Text<'static> {
 }
 
 pub(crate) fn expanded_footer_height(app: &App, width: u16) -> u16 {
+    if !app.config.show_hints {
+        return 0;
+    }
     hint_height(&expanded_footer_hints(app), width.saturating_sub(1))
 }
 
@@ -248,6 +261,9 @@ pub(crate) fn expanded_footer_hint_id_at_point(
     col: u16,
     row: u16,
 ) -> Option<HintId> {
+    if !app.config.show_hints {
+        return None;
+    }
     hint_id_at_wrapped(
         &expanded_footer_hints(app),
         origin_x.saturating_add(1),
@@ -408,6 +424,7 @@ fn browse_footer_line(app: &App) -> HintLine {
         Focus::Journals => vec![
             Hint::new("new journal", "n", HintId::NewJournal),
             Hint::new("search", "/", HintId::BeginSearch),
+            Hint::new("hints", "h", HintId::HintsToggle),
             Hint::new("quit", "q", HintId::Quit),
         ],
         Focus::Entries => {
@@ -416,6 +433,7 @@ fn browse_footer_line(app: &App) -> HintLine {
                 hints.extend(selected_entry_action_hints(true));
             }
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
+            hints.push(Hint::new("hints", "h", HintId::HintsToggle));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
         }
@@ -425,6 +443,7 @@ fn browse_footer_line(app: &App) -> HintLine {
                 hints.extend(selected_entry_action_hints(true));
             }
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
+            hints.push(Hint::new("hints", "h", HintId::HintsToggle));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
         }
@@ -467,6 +486,7 @@ fn expanded_footer_hints(app: &App) -> Vec<Hint> {
     if app.mode == Mode::Browse {
         hints.push(Hint::new("search", "/", HintId::BeginSearch));
     }
+    hints.push(Hint::new("hints", "h", HintId::HintsToggle));
     hints.push(Hint::new("quit", "q", HintId::Quit));
     hints
 }

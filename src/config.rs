@@ -12,6 +12,12 @@ pub struct Config {
     pub editor: String,
     #[serde(default)]
     pub default_journal: Option<String>,
+    #[serde(default = "default_true")]
+    pub show_hints: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Config {
@@ -20,6 +26,7 @@ impl Config {
             journal_root: expand_tilde(journal_root),
             editor: editor.into(),
             default_journal: None,
+            show_hints: true,
         }
     }
 }

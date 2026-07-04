@@ -409,6 +409,7 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::MoodIncrease => Some(Action::MoodIncrease),
         render::HintId::MoodSave => Some(Action::MoodSave),
         render::HintId::MoodClear => Some(Action::MoodClear),
+        render::HintId::HintsToggle => Some(Action::ToggleHints),
         _ => None,
     }
 }

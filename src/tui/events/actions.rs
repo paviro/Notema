@@ -293,12 +293,10 @@ mod tests {
     use tempfile::tempdir;
 
     fn new_app(config: Config) -> App {
-        let encryption_paths = crypto::EncryptionPaths::for_config(
-            &config.journal_root.join("config.toml"),
-            &config.journal_root,
-        )
-        .unwrap();
-        App::new(config, encryption_paths).unwrap()
+        let config_path = config.journal_root.join("config.toml");
+        let encryption_paths =
+            crypto::EncryptionPaths::for_config(&config_path, &config.journal_root).unwrap();
+        App::new(config_path, config, encryption_paths).unwrap()
     }
 
     #[test]

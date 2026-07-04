@@ -86,6 +86,7 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Char('t') if app.can_act_on_selected_entry() => Some(Action::BeginEditTags),
         KeyCode::Char('f') if app.can_act_on_selected_entry() => Some(Action::BeginEditFeelings),
         KeyCode::Char('m') if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
+        KeyCode::Char('h') => Some(Action::ToggleHints),
         _ => None,
     }
 }

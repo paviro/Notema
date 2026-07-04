@@ -52,4 +52,5 @@ pub(crate) enum Action {
     // Search text input (only active when mode=Search and focus=Entries)
     SearchInput(char),
     SearchBackspace,
+    ToggleHints,
 }

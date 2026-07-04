@@ -54,6 +54,7 @@ pub(crate) struct EntryTarget {
 }
 
 pub(crate) struct App {
+    pub(crate) config_path: PathBuf,
     pub(crate) config: Config,
     pub(crate) encryption_paths: crypto::EncryptionPaths,
     pub(crate) unlocked_identity: Option<crypto::UnlockedIdentity>,
@@ -72,6 +73,7 @@ pub(crate) struct App {
 
 impl App {
     pub(crate) fn new(
+        config_path: PathBuf,
         config: Config,
         encryption_paths: crypto::EncryptionPaths,
     ) -> AppResult<Self> {
@@ -83,6 +85,7 @@ impl App {
             None
         };
         let mut app = Self {
+            config_path,
             config,
             encryption_paths,
             unlocked_identity,
@@ -754,12 +757,10 @@ mod tests {
     use tempfile::tempdir;
 
     fn new_app(config: Config) -> App {
-        let encryption_paths = crypto::EncryptionPaths::for_config(
-            &config.journal_root.join("config.toml"),
-            &config.journal_root,
-        )
-        .unwrap();
-        App::new(config, encryption_paths).unwrap()
+        let config_path = config.journal_root.join("config.toml");
+        let encryption_paths =
+            crypto::EncryptionPaths::for_config(&config_path, &config.journal_root).unwrap();
+        App::new(config_path, config, encryption_paths).unwrap()
     }
 
     #[test]
