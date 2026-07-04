@@ -18,8 +18,8 @@ use crate::{
 
 use action::Action;
 use actions::{
-    create_entry_in_selected_journal, delete_selected, edit_selected, set_feelings_on_entry,
-    set_mood_on_entry, set_tags_on_entry, submit_new_journal, view_selected,
+    create_entry_in_selected_journal, delete_selected, delete_selected_journal, edit_selected,
+    set_feelings_on_entry, set_mood_on_entry, set_tags_on_entry, submit_new_journal, view_selected,
 };
 use keyboard::{keep_selection_visible, move_focus_left, move_focus_right};
 
@@ -296,9 +296,21 @@ fn restore_entry_view_or_close(app: &mut App, snapshot: Option<EntryViewSnapshot
 }
 
 fn confirm_delete(app: &mut App) -> AppResult<()> {
-    delete_selected(app)?;
+    let is_journal = matches!(
+        &app.overlay,
+        Overlay::ConfirmDelete(crate::tui::state::DeleteContext::Journal { .. })
+    );
+    if is_journal {
+        delete_selected_journal(app)?;
+    } else {
+        delete_selected(app)?;
+    }
     app.close_overlay();
-    app.focus = Focus::Entries;
+    app.focus = if is_journal {
+        Focus::Journals
+    } else {
+        Focus::Entries
+    };
     app.scroll.reset_entry_view();
     app.refresh()
 }

@@ -35,7 +35,7 @@ pub(super) fn key_to_action(
             search_key_to_action(app, key, entry_view_available)
         }
         Overlay::None => browse_key_to_action(app, key, entry_view_available),
-        Overlay::ConfirmDelete => confirm_delete_key_to_action(key),
+        Overlay::ConfirmDelete(_) => confirm_delete_key_to_action(key),
         Overlay::NewJournal(_) => new_journal_key_to_action(key),
         Overlay::EditTags(_) => tags_key_to_action(app, key),
         Overlay::EditFeelings(_) => feelings_key_to_action(key),
@@ -82,6 +82,9 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Char('e') if app.can_act_on_selected_entry() => Some(Action::EditSelected),
         KeyCode::Char('n') if app.focus == Focus::Journals => Some(Action::NewJournal),
         KeyCode::Char('n') => Some(Action::NewEntry),
+        KeyCode::Char('d') if app.focus == Focus::Journals && app.selected_journal().is_some() => {
+            Some(Action::BeginDelete)
+        }
         KeyCode::Char('d') if app.can_act_on_selected_entry() => Some(Action::BeginDelete),
         KeyCode::Char('t') if app.can_act_on_selected_entry() => Some(Action::BeginEditTags),
         KeyCode::Char('f') if app.can_act_on_selected_entry() => Some(Action::BeginEditFeelings),

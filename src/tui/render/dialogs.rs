@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::tui::state::{EditFeelingState, EditMoodState, EditTagFocus, EditTagState};
+use crate::tui::state::{DeleteContext, EditFeelingState, EditMoodState, EditTagFocus, EditTagState};
 
 use super::{
     chrome::{Hint, HintId, hint_height, hint_lines, render_scrollbar_if_needed},
@@ -345,8 +345,34 @@ fn render_hint_line(frame: &mut Frame<'_>, hints: &[Hint], area: Rect) {
 
 // ── Dialog draw functions ─────────────────────────────────────────────────────
 
-pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>) {
-    let area = super::centered_rect_fixed_size(CONFIRM_DIALOG_WIDTH, 5, frame.area());
+pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext) {
+    let (height, message) = match ctx {
+        DeleteContext::Entry { has_body: true } => (5, "Move entry to trash?  y/n".to_string()),
+        DeleteContext::Entry { has_body: false } => {
+            (5, "Permanently delete entry?  y/n".to_string())
+        }
+        DeleteContext::Journal {
+            name,
+            trash_count,
+            delete_count,
+        } => {
+            let line2 = match (*trash_count, *delete_count) {
+                (0, d) => format!("{d} entries deleted permanently  y/n"),
+                (t, 0) => format!("{t} entries moved to trash  y/n"),
+                (t, d) => format!("{t} entries → trash, {d} deleted  y/n"),
+            };
+            (6, format!("Delete journal '{name}'?\n{line2}"))
+        }
+    };
+
+    let dialog_width = (CONFIRM_DIALOG_WIDTH).max(
+        message
+            .lines()
+            .map(|l| l.len() as u16 + 4)
+            .max()
+            .unwrap_or(0),
+    );
+    let area = super::centered_rect_fixed_size(dialog_width, height, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title("Confirm Delete")
@@ -354,15 +380,19 @@ pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let message_area = Rect {
-        y: inner.y + inner.height.saturating_sub(1) / 2,
-        height: inner.height.min(1),
-        ..inner
-    };
-    frame.render_widget(
-        Paragraph::new("Move selected file to trash? y/n").alignment(Alignment::Center),
-        message_area,
-    );
+    let lines: Vec<&str> = message.lines().collect();
+    let start_y = inner.y + inner.height.saturating_sub(lines.len() as u16) / 2;
+    for (i, line) in lines.iter().enumerate() {
+        let line_area = Rect {
+            y: start_y + i as u16,
+            height: 1,
+            ..inner
+        };
+        frame.render_widget(
+            Paragraph::new(*line).alignment(Alignment::Center),
+            line_area,
+        );
+    }
 }
 
 pub(super) fn draw_new_journal_input(frame: &mut Frame<'_>, input: &str) {

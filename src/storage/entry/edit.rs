@@ -11,6 +11,41 @@ use std::{
     process::Command,
 };
 
+pub fn delete_journal(
+    root: &Path,
+    journal_name: &str,
+    journal_path: &Path,
+    entries: &[(PathBuf, bool)],
+) -> AppResult<()> {
+    let has_any_with_body = entries.iter().any(|(_, has_body)| *has_body);
+
+    if !has_any_with_body {
+        fs::remove_dir_all(journal_path)?;
+        return Ok(());
+    }
+
+    let has_any_without_body = entries.iter().any(|(_, has_body)| !*has_body);
+    let trash_journal_path = root.join(".trash").join(journal_name);
+
+    if !has_any_without_body && !trash_journal_path.exists() {
+        if let Some(parent) = trash_journal_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::rename(journal_path, &trash_journal_path)?;
+    } else {
+        for (path, has_body) in entries {
+            if *has_body {
+                move_entry_to_trash(root, path)?;
+            } else if path.exists() {
+                fs::remove_file(path)?;
+            }
+        }
+        fs::remove_dir_all(journal_path)?;
+    }
+
+    Ok(())
+}
+
 pub fn open_editor(editor: &str, path: &Path) -> AppResult<()> {
     let mut parts = shell_words::split(editor)?;
     if parts.is_empty() {
@@ -97,7 +132,7 @@ pub fn move_entry_to_trash(root: &Path, entry_path: &Path) -> AppResult<PathBuf>
         return Err("entry path is missing file path after journal component".into());
     }
 
-    let trash_path = root.join(journal).join(".trash").join(entry_relative_path);
+    let trash_path = root.join(".trash").join(journal).join(entry_relative_path);
     if let Some(parent) = trash_path.parent() {
         fs::create_dir_all(parent)?;
     }

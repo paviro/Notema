@@ -5,8 +5,8 @@ use crate::{
         set_tags_in_front_matter,
     },
     storage::{
-        create_encrypted_entry, create_entry, create_journal, edit_encrypted_entry,
-        is_encrypted_entry_file, move_entry_to_trash, open_editor_body_only,
+        create_encrypted_entry, create_entry, create_journal, delete_journal,
+        edit_encrypted_entry, is_encrypted_entry_file, move_entry_to_trash, open_editor_body_only,
         read_entry_content_with_identity, set_updated_at_now,
     },
 };
@@ -162,9 +162,40 @@ pub(super) fn delete_selected(app: &mut App) -> AppResult<()> {
     let Some(target) = app.selected_entry_target() else {
         return Ok(());
     };
-    move_entry_to_trash(&app.config.journal_root, &target.path)?;
+    let has_body = app
+        .entries
+        .iter()
+        .find(|e| e.path == target.path)
+        .map(|e| entry_has_body(&e.content))
+        .unwrap_or(false);
 
-    app.set_status("Moved to trash");
+    if has_body {
+        move_entry_to_trash(&app.config.journal_root, &target.path)?;
+        app.set_status("Moved to trash");
+    } else {
+        fs::remove_file(&target.path)?;
+        app.set_status("Deleted");
+    }
+    Ok(())
+}
+
+pub(super) fn delete_selected_journal(app: &mut App) -> AppResult<()> {
+    let Some(journal) = app.selected_journal() else {
+        return Ok(());
+    };
+    let journal_name = journal.name.clone();
+    let journal_path = journal.path.clone();
+    let root = app.config.journal_root.clone();
+
+    let entries: Vec<(PathBuf, bool)> = app
+        .entries
+        .iter()
+        .filter(|e| e.journal == journal_name)
+        .map(|e| (e.path.clone(), entry_has_body(&e.content)))
+        .collect();
+
+    delete_journal(&root, &journal_name, &journal_path, &entries)?;
+    app.set_status(format!("Deleted journal {journal_name}"));
     Ok(())
 }
 

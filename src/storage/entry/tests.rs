@@ -349,8 +349,8 @@ fn delete_moves_entry_to_journal_trash() {
     assert_eq!(
         trash,
         dir.path()
-            .join("work")
             .join(".trash")
+            .join("work")
             .join("2026")
             .join("07")
             .join("01")

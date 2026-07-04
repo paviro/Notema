@@ -3,7 +3,7 @@ use crate::{
     config::Config,
     crypto,
     feelings::{FEELINGS, normalize_feeling},
-    markdown::split_front_matter,
+    markdown::{entry_has_body, split_front_matter},
     storage::{
         self, Entry, EntryEncryptionState, Journal, SearchHit, SearchScopeFilter,
         entry_timestamp_label, search_loaded_entries,
@@ -17,8 +17,9 @@ use std::{
 use ratatui::widgets::ListState;
 
 use super::state::{
-    EditFeelingState, EditMoodState, EditTagState, Overlay, ScrollState, SearchState, StatusBar,
-    ensure_selected_visible, move_list_selection, normalize_list_state, scroll_list_offset,
+    DeleteContext, EditFeelingState, EditMoodState, EditTagState, Overlay, ScrollState,
+    SearchState, StatusBar, ensure_selected_visible, move_list_selection, normalize_list_state,
+    scroll_list_offset,
 };
 use crate::tui::entry_rows::EntryRowMeta;
 
@@ -466,12 +467,41 @@ impl App {
         }
     }
 
-    pub(crate) fn is_confirming_delete(&self) -> bool {
-        matches!(self.overlay, Overlay::ConfirmDelete)
+    pub(crate) fn begin_confirm_delete(&mut self) {
+        match self.focus {
+            Focus::Journals => self.begin_confirm_delete_journal(),
+            Focus::Entries | Focus::EntryView => self.begin_confirm_delete_entry(),
+        }
     }
 
-    pub(crate) fn begin_confirm_delete(&mut self) {
-        self.overlay = Overlay::ConfirmDelete;
+    fn begin_confirm_delete_entry(&mut self) {
+        let has_body = self
+            .selected_entry()
+            .map(|e| entry_has_body(&e.content))
+            .unwrap_or(false);
+        self.overlay = Overlay::ConfirmDelete(DeleteContext::Entry { has_body });
+    }
+
+    fn begin_confirm_delete_journal(&mut self) {
+        let Some(journal) = self.selected_journal() else {
+            return;
+        };
+        let name = journal.name.clone();
+        let trash_count = self
+            .entries
+            .iter()
+            .filter(|e| e.journal == name && entry_has_body(&e.content))
+            .count();
+        let delete_count = self
+            .entries
+            .iter()
+            .filter(|e| e.journal == name && !entry_has_body(&e.content))
+            .count();
+        self.overlay = Overlay::ConfirmDelete(DeleteContext::Journal {
+            name,
+            trash_count,
+            delete_count,
+        });
     }
 
     pub(crate) fn has_overlay(&self) -> bool {

@@ -38,7 +38,7 @@ pub use create::{
     create_entry_with_editor_and_feelings, entry_template,
 };
 pub use edit::{
-    edit_encrypted_entry, move_entry_to_trash, open_editor, open_editor_body_only,
+    delete_journal, edit_encrypted_entry, move_entry_to_trash, open_editor, open_editor_body_only,
     set_updated_at_now,
 };
 pub use paths::{entry_path, is_encrypted_entry_file, is_entry_file, is_plain_entry_file};

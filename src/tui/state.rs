@@ -350,13 +350,18 @@ pub(crate) struct EditMoodState {
     pub(crate) draft: i8,
 }
 
+pub(crate) enum DeleteContext {
+    Entry { has_body: bool },
+    Journal { name: String, trash_count: usize, delete_count: usize },
+}
+
 /// The single modal overlay that can be active over the browse view. Making
 /// this an enum keeps the modals mutually exclusive by construction.
 #[derive(Default)]
 pub(crate) enum Overlay {
     #[default]
     None,
-    ConfirmDelete,
+    ConfirmDelete(DeleteContext),
     NewJournal(String),
     EditTags(EditTagState),
     EditFeelings(EditFeelingState),

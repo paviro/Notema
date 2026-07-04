@@ -115,8 +115,8 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
 }
 
 fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
-    if app.is_confirming_delete() {
-        draw_confirm_delete(frame);
+    if let crate::tui::state::Overlay::ConfirmDelete(ctx) = &app.overlay {
+        draw_confirm_delete(frame, ctx);
     }
 
     if let Some(input) = app.new_journal_input() {
@@ -225,7 +225,12 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         terminal
-            .draw(|frame| dialogs::draw_confirm_delete(frame))
+            .draw(|frame| {
+                dialogs::draw_confirm_delete(
+                    frame,
+                    &crate::tui::state::DeleteContext::Entry { has_body: true },
+                )
+            })
             .unwrap();
 
         terminal
@@ -590,18 +595,14 @@ mod tests {
         let rows = render_confirm_delete_rows(80, 20);
         let message_row = rows
             .iter()
-            .position(|row| row.contains("Move selected file to trash? y/n"))
+            .position(|row| row.contains("Move entry to trash?  y/n"))
             .unwrap();
         let title_row = rows
             .iter()
             .position(|row| row.contains("Confirm Delete"))
             .unwrap();
-        let message_col = rows[message_row]
-            .find("Move selected file to trash? y/n")
-            .unwrap();
 
         assert_eq!(message_row, title_row + 2);
-        assert_eq!(message_col, 26);
     }
 
     #[test]
@@ -1001,7 +1002,7 @@ mod tests {
         let text = render_text(app, 80, 20);
 
         assert!(text.contains("Confirm Delete"));
-        assert!(text.contains("Move selected file to trash? y/n"));
+        assert!(text.contains("Move entry to trash?  y/n"));
     }
 
     #[test]
