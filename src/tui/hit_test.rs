@@ -52,12 +52,7 @@ pub(crate) fn tag_at_point(
     feelings: &[String],
     mood: Option<i8>,
 ) -> Option<String> {
-    let layout = entry_metadata_layout(
-        entry_view_area,
-        !tags.is_empty(),
-        !feelings.is_empty(),
-        mood.is_some(),
-    );
+    let layout = entry_metadata_layout(entry_view_area, tags, feelings, mood);
     metadata_item_at(layout.tags?, x, y, tags)
 }
 
@@ -69,11 +64,6 @@ pub(crate) fn feeling_at_point(
     feelings: &[String],
     mood: Option<i8>,
 ) -> Option<String> {
-    let layout = entry_metadata_layout(
-        entry_view_area,
-        !tags.is_empty(),
-        !feelings.is_empty(),
-        mood.is_some(),
-    );
+    let layout = entry_metadata_layout(entry_view_area, tags, feelings, mood);
     metadata_item_at(layout.feelings?, x, y, feelings)
 }

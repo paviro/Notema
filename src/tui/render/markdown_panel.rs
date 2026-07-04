@@ -21,6 +21,7 @@ use crate::tui::{
     render::{
         count_label, entry_metadata_layout, panel_block, render_scrollbar_if_needed, viewer_scroll,
     },
+    surface::{EntryMetadataLayout, MetadataRowLayout, metadata_value_rows},
 };
 
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
@@ -66,12 +67,7 @@ fn draw_markdown_panel(
 ) -> u16 {
     let wc = word_count(content);
     let block = panel_block(title, focused, Some(count_label(wc, "word", "words")));
-    let layout = entry_metadata_layout(
-        area,
-        !metadata.tags.is_empty(),
-        !metadata.feelings.is_empty(),
-        metadata.mood.is_some(),
-    );
+    let layout = entry_metadata_layout(area, metadata.tags, metadata.feelings, metadata.mood);
     let content_rect = layout.content;
 
     let width = content_rect.width.saturating_sub(1).max(1) as usize;
@@ -103,7 +99,7 @@ struct EntryMetadata<'a> {
 
 fn draw_metadata_section(
     frame: &mut Frame<'_>,
-    layout: crate::tui::surface::EntryMetadataLayout,
+    layout: EntryMetadataLayout,
     metadata: EntryMetadata<'_>,
 ) {
     let Some(area) = layout.metadata else {
@@ -133,36 +129,47 @@ fn draw_metadata_section(
     if !metadata.feelings.is_empty()
         && let Some(row) = layout.feelings
     {
-        let feelings_line = Line::from(vec![
-            Span::styled("Feelings: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(metadata.feelings.join(" | ")),
-        ]);
         frame.render_widget(
-            Paragraph::new(feelings_line),
-            Rect {
-                y: row.rect.y,
-                height: 1,
-                ..area
-            },
+            Paragraph::new(metadata_value_lines("Feelings: ", row, metadata.feelings)),
+            row.rect,
         );
     }
 
     if !metadata.tags.is_empty()
         && let Some(row) = layout.tags
     {
-        let tags_line = Line::from(vec![
-            Span::styled("Tags: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(metadata.tags.join(" | ")),
-        ]);
         frame.render_widget(
-            Paragraph::new(tags_line),
-            Rect {
-                y: row.rect.y,
-                height: 1,
-                ..area
-            },
+            Paragraph::new(metadata_value_lines("Tags: ", row, metadata.tags)),
+            row.rect,
         );
     }
+}
+
+fn metadata_value_lines(
+    prefix: &'static str,
+    row: MetadataRowLayout,
+    values: &[String],
+) -> Vec<Line<'static>> {
+    metadata_value_rows(row.prefix_width, row.rect.width, values)
+        .into_iter()
+        .enumerate()
+        .map(|(row_index, value_indices)| {
+            let mut spans = Vec::new();
+            if row_index == 0 {
+                spans.push(Span::styled(
+                    prefix,
+                    Style::default().add_modifier(Modifier::BOLD),
+                ));
+            }
+            for (index, value_index) in value_indices.into_iter().enumerate() {
+                if index > 0 {
+                    spans.push(Span::raw(" | "));
+                }
+                spans.push(Span::raw(values[value_index].clone()));
+            }
+            Line::from(spans)
+        })
+        .collect()
 }
 
 pub(crate) struct MoodBar {

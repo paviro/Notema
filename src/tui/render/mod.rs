@@ -391,7 +391,7 @@ mod tests {
         let area = Rect::new(42, 0, 60, 19);
         let tags = vec!["work".to_string()];
         let feelings = vec!["focused".to_string()];
-        let layout = crate::tui::surface::entry_metadata_layout(area, true, true, true);
+        let layout = crate::tui::surface::entry_metadata_layout(area, &tags, &feelings, Some(2));
         let feelings_row = layout.feelings.unwrap();
         let tags_row = layout.tags.unwrap();
 
@@ -424,7 +424,7 @@ mod tests {
         let area = Rect::new(42, 0, 60, 19);
         let tags = vec!["集中".to_string()];
         let feelings = vec!["嬉しい".to_string()];
-        let layout = crate::tui::surface::entry_metadata_layout(area, true, true, false);
+        let layout = crate::tui::surface::entry_metadata_layout(area, &tags, &feelings, None);
         let feelings_row = layout.feelings.unwrap();
         let tags_row = layout.tags.unwrap();
 
@@ -449,6 +449,94 @@ mod tests {
                 None
             ),
             Some("集中".to_string())
+        );
+    }
+
+    #[test]
+    fn metadata_rows_wrap_without_leading_separator() {
+        let values = vec![
+            "calm".to_string(),
+            "focused".to_string(),
+            "tired".to_string(),
+        ];
+
+        let rows = crate::tui::surface::metadata_value_rows("Feelings: ".len() as u16, 20, &values);
+
+        assert_eq!(rows, vec![vec![0], vec![1, 2]]);
+    }
+
+    #[test]
+    fn entry_view_wraps_metadata_rows_without_leading_space_or_separator() {
+        let dir = tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join("a.md"),
+            "+++\ncreated_at = \"2026-07-01T10:00:00+02:00\"\ntags = [\"work\", \"personal\", \"health\"]\nfeelings = [\"calm\", \"focused\", \"tired\"]\n+++\n\n# A\nBody\n",
+        )
+        .unwrap();
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = new_app(config);
+        app.select_journal_by_name("work");
+        app.focus = Focus::EntryView;
+        app.entry_view_expanded = true;
+
+        let tags = vec![
+            "work".to_string(),
+            "personal".to_string(),
+            "health".to_string(),
+        ];
+        let feelings = vec![
+            "calm".to_string(),
+            "focused".to_string(),
+            "tired".to_string(),
+        ];
+        let entry_view = Rect::new(0, 0, 24, 14 - expanded_footer_height(&app, 24));
+        let metadata =
+            crate::tui::surface::entry_metadata_layout(entry_view, &tags, &feelings, None);
+        let feelings_row = metadata.feelings.unwrap();
+        let tags_row = metadata.tags.unwrap();
+
+        let backend = render_app(app, 24, 14);
+        let buffer = backend.buffer();
+
+        assert_eq!(feelings_row.rect.height, 2);
+        assert_eq!(tags_row.rect.height, 2);
+        assert_eq!(
+            buffer
+                .cell((feelings_row.rect.x, feelings_row.rect.y + 1))
+                .unwrap()
+                .symbol(),
+            "f"
+        );
+        assert_eq!(
+            buffer
+                .cell((tags_row.rect.x, tags_row.rect.y + 1))
+                .unwrap()
+                .symbol(),
+            "p"
+        );
+        assert_eq!(
+            feeling_at_point(
+                entry_view,
+                feelings_row.rect.x,
+                feelings_row.rect.y + 1,
+                &tags,
+                &feelings,
+                None
+            ),
+            Some("focused".to_string())
+        );
+        assert_eq!(
+            tag_at_point(
+                entry_view,
+                tags_row.rect.x,
+                tags_row.rect.y + 1,
+                &tags,
+                &feelings,
+                None
+            ),
+            Some("personal".to_string())
         );
     }
 

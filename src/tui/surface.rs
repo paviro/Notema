@@ -77,12 +77,12 @@ pub(crate) fn point_in_rect(area: Rect, x: u16, y: u16) -> bool {
 
 pub(crate) fn entry_metadata_layout(
     entry_view_area: Rect,
-    has_tags: bool,
-    has_feelings: bool,
-    has_mood: bool,
+    tags: &[String],
+    feelings: &[String],
+    mood_score: Option<i8>,
 ) -> EntryMetadataLayout {
     let inner = PanelGeometry::new(entry_view_area).content;
-    let metadata_height = metadata_section_height(has_tags, has_feelings, has_mood);
+    let metadata_height = metadata_section_height(inner.width, tags, feelings, mood_score);
     let show_metadata = metadata_height > 0 && inner.height > metadata_height;
 
     let (content, metadata) = if show_metadata {
@@ -95,36 +95,39 @@ pub(crate) fn entry_metadata_layout(
         (inner, None)
     };
 
-    let mut mood = None;
-    let mut feelings = None;
-    let mut tags = None;
+    let mut mood_rect = None;
+    let mut feelings_row = None;
+    let mut tags_row = None;
 
     if let Some(metadata_rect) = metadata {
         let mut y = metadata_rect.y.saturating_add(1);
-        if has_mood {
-            mood = Some(Rect {
+        if mood_score.is_some() {
+            mood_rect = Some(Rect {
                 y,
                 height: 1,
                 ..metadata_rect
             });
             y = y.saturating_add(1);
         }
-        if has_feelings {
-            feelings = Some(MetadataRowLayout {
+        if !feelings.is_empty() {
+            let height =
+                metadata_row_height("Feelings: ".len() as u16, metadata_rect.width, feelings);
+            feelings_row = Some(MetadataRowLayout {
                 rect: Rect {
                     y,
-                    height: 1,
+                    height,
                     ..metadata_rect
                 },
                 prefix_width: "Feelings: ".len() as u16,
             });
-            y = y.saturating_add(1);
+            y = y.saturating_add(height);
         }
-        if has_tags {
-            tags = Some(MetadataRowLayout {
+        if !tags.is_empty() {
+            let height = metadata_row_height("Tags: ".len() as u16, metadata_rect.width, tags);
+            tags_row = Some(MetadataRowLayout {
                 rect: Rect {
                     y,
-                    height: 1,
+                    height,
                     ..metadata_rect
                 },
                 prefix_width: "Tags: ".len() as u16,
@@ -135,9 +138,9 @@ pub(crate) fn entry_metadata_layout(
     EntryMetadataLayout {
         content,
         metadata,
-        mood,
-        feelings,
-        tags,
+        mood: mood_rect,
+        feelings: feelings_row,
+        tags: tags_row,
     }
 }
 
@@ -147,16 +150,23 @@ pub(crate) fn metadata_item_at(
     y: u16,
     values: &[String],
 ) -> Option<String> {
-    if y != row.rect.y || values.is_empty() {
+    if y < row.rect.y || y >= row.rect.y.saturating_add(row.rect.height) || values.is_empty() {
         return None;
     }
 
-    let mut x_pos = row.rect.x.saturating_add(row.prefix_width);
+    let row_index = y.saturating_sub(row.rect.y) as usize;
+    let rows = metadata_value_rows(row.prefix_width, row.rect.width, values);
+    let value_indices = rows.get(row_index)?;
+    let mut x_pos = row.rect.x;
+    if row_index == 0 {
+        x_pos = x_pos.saturating_add(row.prefix_width);
+    }
     if x < x_pos {
         return None;
     }
 
-    for value in values {
+    for index in value_indices {
+        let value = &values[*index];
         let width = UnicodeWidthStr::width(value.as_str()).min(u16::MAX as usize) as u16;
         if x >= x_pos && x < x_pos.saturating_add(width) {
             return Some(value.clone());
@@ -167,7 +177,53 @@ pub(crate) fn metadata_item_at(
     None
 }
 
-fn metadata_section_height(has_tags: bool, has_feelings: bool, has_mood: bool) -> u16 {
-    let rows = has_mood as u16 + has_feelings as u16 + has_tags as u16;
+pub(crate) fn metadata_value_rows(
+    prefix_width: u16,
+    row_width: u16,
+    values: &[String],
+) -> Vec<Vec<usize>> {
+    let available = row_width as usize;
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut row: Vec<usize> = Vec::new();
+    let mut row_width = prefix_width as usize;
+
+    for (index, value) in values.iter().enumerate() {
+        let value_width = UnicodeWidthStr::width(value.as_str());
+        let separator_width = if row.is_empty() { 0 } else { 3 };
+        if !row.is_empty() && row_width + separator_width + value_width > available {
+            rows.push(std::mem::take(&mut row));
+            row_width = 0;
+        }
+        if !row.is_empty() {
+            row_width += 3;
+        }
+        row_width += value_width;
+        row.push(index);
+    }
+
+    if !row.is_empty() {
+        rows.push(row);
+    }
+
+    rows
+}
+
+fn metadata_row_height(prefix_width: u16, row_width: u16, values: &[String]) -> u16 {
+    metadata_value_rows(prefix_width, row_width, values)
+        .len()
+        .max(1)
+        .min(u16::MAX as usize) as u16
+}
+
+fn metadata_section_height(
+    row_width: u16,
+    tags: &[String],
+    feelings: &[String],
+    mood: Option<i8>,
+) -> u16 {
+    let rows = mood.is_some() as u16
+        + (!feelings.is_empty() as u16)
+            * metadata_row_height("Feelings: ".len() as u16, row_width, feelings)
+        + (!tags.is_empty() as u16) * metadata_row_height("Tags: ".len() as u16, row_width, tags);
     if rows == 0 { 0 } else { 1 + rows }
 }
