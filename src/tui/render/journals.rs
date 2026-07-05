@@ -15,7 +15,7 @@ use crate::tui::{
 
 pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app: &mut App) {
     let focused = app.focus == Focus::Journals;
-    let highlight_active = app.focus != Focus::Entries;
+    let highlight_active = true;
     let block = panel_block(
         "Journals",
         focused,
