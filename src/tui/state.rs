@@ -351,8 +351,14 @@ pub(crate) struct EditMoodState {
 }
 
 pub(crate) enum DeleteContext {
-    Entry { has_body: bool },
-    Journal { name: String, trash_count: usize, delete_count: usize },
+    Entry {
+        has_body: bool,
+    },
+    Journal {
+        name: String,
+        trash_count: usize,
+        delete_count: usize,
+    },
 }
 
 /// The single modal overlay that can be active over the browse view. Making

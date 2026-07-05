@@ -21,8 +21,10 @@ use crate::tui::{
     render::{
         count_label, entry_metadata_layout, panel_block, render_scrollbar_if_needed, viewer_scroll,
     },
-    surface::{EntryMetadataLayout, MetadataRowLayout, metadata_value_rows},
+    surface::{EntryMetadataLayout, MetadataRowLayout, PanelGeometry, metadata_value_rows},
 };
+
+const SCROLLING_METADATA_ENTRY_VIEW_HEIGHT_CUTOFF: u16 = 20;
 
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     if let Some((title, content)) = app.selected_entry_view() {
@@ -68,26 +70,38 @@ fn draw_markdown_panel(
     let wc = word_count(content);
     let block = panel_block(title, focused, Some(count_label(wc, "word", "words")));
     let layout = entry_metadata_layout(area, metadata.tags, metadata.feelings, metadata.mood);
-    let content_rect = layout.content;
+    let metadata_scrolls = metadata_scrolls_with_body(area);
+    let content_rect = if metadata_scrolls {
+        PanelGeometry::new(area).content
+    } else {
+        layout.content
+    };
 
     let width = content_rect.width.saturating_sub(1).max(1) as usize;
     let theme = markdown_theme();
     let renderer = MarkdownRenderer::new(width);
     let blocks = prepare_markdown_blocks(renderer.parse(content), &renderer, &theme);
-    let lines = adapt_markdown_lines(renderer.render(&blocks, &theme));
+    let mut lines = adapt_markdown_lines(renderer.render(&blocks, &theme));
+    if metadata_scrolls {
+        lines.extend(metadata_section_lines(content_rect.width, metadata));
+    }
     let line_count = lines.len();
     let scroll = viewer_scroll(requested_scroll, line_count, content_rect.height);
 
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), content_rect);
 
-    if layout.metadata.is_some() {
+    if !metadata_scrolls && layout.metadata.is_some() {
         draw_metadata_section(frame, layout, metadata);
     }
 
     render_scrollbar_if_needed(frame, area, line_count, content_rect.height, scroll);
 
     scroll
+}
+
+fn metadata_scrolls_with_body(area: Rect) -> bool {
+    area.height < SCROLLING_METADATA_ENTRY_VIEW_HEIGHT_CUTOFF
 }
 
 #[derive(Clone, Copy)]
@@ -130,7 +144,11 @@ fn draw_metadata_section(
         && let Some(row) = layout.feelings
     {
         frame.render_widget(
-            Paragraph::new(metadata_value_lines("Feelings: ", row, metadata.feelings)),
+            Paragraph::new(metadata_value_lines_for_row(
+                "Feelings: ",
+                row,
+                metadata.feelings,
+            )),
             row.rect,
         );
     }
@@ -139,18 +157,60 @@ fn draw_metadata_section(
         && let Some(row) = layout.tags
     {
         frame.render_widget(
-            Paragraph::new(metadata_value_lines("Tags: ", row, metadata.tags)),
+            Paragraph::new(metadata_value_lines_for_row("Tags: ", row, metadata.tags)),
             row.rect,
         );
     }
 }
 
-fn metadata_value_lines(
+fn metadata_section_lines(width: u16, metadata: EntryMetadata<'_>) -> Vec<Line<'static>> {
+    if metadata.mood.is_none() && metadata.feelings.is_empty() && metadata.tags.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = vec![Line::from(Span::styled(
+        "─".repeat(width.saturating_sub(1) as usize),
+        Style::default().add_modifier(Modifier::DIM),
+    ))];
+
+    if let Some(score) = metadata.mood {
+        lines.push(mood_line(width, score));
+    }
+    if !metadata.feelings.is_empty() {
+        lines.extend(metadata_value_lines_for_width(
+            "Feelings: ",
+            "Feelings: ".len() as u16,
+            width,
+            metadata.feelings,
+        ));
+    }
+    if !metadata.tags.is_empty() {
+        lines.extend(metadata_value_lines_for_width(
+            "Tags: ",
+            "Tags: ".len() as u16,
+            width,
+            metadata.tags,
+        ));
+    }
+
+    lines
+}
+
+fn metadata_value_lines_for_row(
     prefix: &'static str,
     row: MetadataRowLayout,
     values: &[String],
 ) -> Vec<Line<'static>> {
-    metadata_value_rows(row.prefix_width, row.rect.width, values)
+    metadata_value_lines_for_width(prefix, row.prefix_width, row.rect.width, values)
+}
+
+fn metadata_value_lines_for_width(
+    prefix: &'static str,
+    prefix_width: u16,
+    width: u16,
+    values: &[String],
+) -> Vec<Line<'static>> {
+    metadata_value_rows(prefix_width, width, values)
         .into_iter()
         .enumerate()
         .map(|(row_index, value_indices)| {
@@ -172,6 +232,25 @@ fn metadata_value_lines(
         .collect()
 }
 
+fn mood_line(width: u16, score: i8) -> Line<'static> {
+    let mut spans = Vec::new();
+    let label_width = "Miserable ".len() as u16 + " Blissful".len() as u16;
+    let bar_width = if width > label_width.saturating_add(3) {
+        spans.push(Span::raw("Miserable "));
+        width.saturating_sub(label_width)
+    } else {
+        width
+    };
+
+    spans.extend(mood_bar_spans(bar_width, score));
+
+    if width > label_width.saturating_add(3) {
+        spans.push(Span::raw(" Blissful"));
+    }
+
+    Line::from(spans)
+}
+
 pub(crate) struct MoodBar {
     score: i8,
 }
@@ -184,61 +263,80 @@ impl MoodBar {
 
 impl Widget for MoodBar {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let width = area.width as usize;
-        if width < 3 {
+        if area.width < 3 {
             return;
         }
 
-        let center = width / 2;
-        let lw = center;
-        let rw = width - center - 1;
-
-        let neg = self.score.min(0).unsigned_abs() as usize;
-        let pos = self.score.max(0) as usize;
-
-        let filled_left = if lw > 0 && neg > 0 {
-            (neg * lw / 5).max(1).min(lw)
-        } else {
-            0
-        };
-        let filled_right = if rw > 0 && pos > 0 {
-            (pos * rw / 5).max(1).min(rw)
-        } else {
-            0
-        };
-
-        let bold = Style::default().add_modifier(Modifier::BOLD);
-        let dim = Style::default().add_modifier(Modifier::DIM);
-
-        for i in 0..width {
+        for (i, (symbol, style)) in mood_bar_cells(area.width, self.score)
+            .into_iter()
+            .enumerate()
+        {
             let x = area.x + i as u16;
             let Some(cell) = buf.cell_mut((x, area.y)) else {
                 continue;
             };
-            if i == center {
-                cell.set_symbol(if self.score == 0 { "┃" } else { "│" });
-                cell.set_style(Style::default());
-            } else if i < center {
-                let dist = center - i;
-                if dist <= filled_left {
-                    cell.set_symbol("━");
-                    cell.set_style(bold);
-                } else {
-                    cell.set_symbol("─");
-                    cell.set_style(dim);
-                }
-            } else {
-                let dist = i - center;
-                if dist <= filled_right {
-                    cell.set_symbol("━");
-                    cell.set_style(bold);
-                } else {
-                    cell.set_symbol("─");
-                    cell.set_style(dim);
-                }
-            }
+            cell.set_symbol(symbol);
+            cell.set_style(style);
         }
     }
+}
+
+fn mood_bar_spans(width: u16, score: i8) -> Vec<Span<'static>> {
+    mood_bar_cells(width, score)
+        .into_iter()
+        .map(|(symbol, style)| Span::styled(symbol, style))
+        .collect()
+}
+
+fn mood_bar_cells(width: u16, score: i8) -> Vec<(&'static str, Style)> {
+    let width = width as usize;
+    if width < 3 {
+        return Vec::new();
+    }
+
+    let center = width / 2;
+    let lw = center;
+    let rw = width - center - 1;
+
+    let neg = score.min(0).unsigned_abs() as usize;
+    let pos = score.max(0) as usize;
+
+    let filled_left = if lw > 0 && neg > 0 {
+        (neg * lw / 5).max(1).min(lw)
+    } else {
+        0
+    };
+    let filled_right = if rw > 0 && pos > 0 {
+        (pos * rw / 5).max(1).min(rw)
+    } else {
+        0
+    };
+
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let dim = Style::default().add_modifier(Modifier::DIM);
+
+    let mut cells = Vec::with_capacity(width);
+    for i in 0..width {
+        if i == center {
+            cells.push((if score == 0 { "┃" } else { "│" }, Style::default()));
+        } else if i < center {
+            let dist = center - i;
+            cells.push(if dist <= filled_left {
+                ("━", bold)
+            } else {
+                ("─", dim)
+            });
+        } else {
+            let dist = i - center;
+            cells.push(if dist <= filled_right {
+                ("━", bold)
+            } else {
+                ("─", dim)
+            });
+        }
+    }
+
+    cells
 }
 
 pub(crate) fn markdown_theme() -> ThemeConfig {

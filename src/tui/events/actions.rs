@@ -5,8 +5,8 @@ use crate::{
         set_tags_in_front_matter,
     },
     storage::{
-        create_encrypted_entry, create_entry, create_journal, delete_journal,
-        edit_encrypted_entry, is_encrypted_entry_file, move_entry_to_trash, open_editor_body_only,
+        create_encrypted_entry, create_entry, create_journal, delete_journal, edit_encrypted_entry,
+        is_encrypted_entry_file, move_entry_to_trash, open_editor_body_only,
         read_entry_content_with_identity, set_updated_at_now,
     },
 };

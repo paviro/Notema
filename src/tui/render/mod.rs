@@ -493,13 +493,13 @@ mod tests {
             "focused".to_string(),
             "tired".to_string(),
         ];
-        let entry_view = Rect::new(0, 0, 24, 15 - expanded_footer_height(&app, 24));
+        let entry_view = Rect::new(0, 0, 24, 60 - expanded_footer_height(&app, 24));
         let metadata =
             crate::tui::surface::entry_metadata_layout(entry_view, &tags, &feelings, None);
         let feelings_row = metadata.feelings.unwrap();
         let tags_row = metadata.tags.unwrap();
 
-        let backend = render_app(app, 24, 15);
+        let backend = render_app(app, 24, 60);
         let buffer = backend.buffer();
 
         assert_eq!(feelings_row.rect.height, 2);
@@ -540,6 +540,40 @@ mod tests {
             ),
             Some("personal".to_string())
         );
+    }
+
+    #[test]
+    fn short_entry_view_scrolls_metadata_after_body() {
+        let dir = tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        let body = (1..=40)
+            .map(|index| format!("Line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(
+            entry_dir.join("a.md"),
+            format!(
+                "+++\ncreated_at = \"2026-07-01T10:00:00+02:00\"\ntags = [\"tiny-screen\"]\nfeelings = [\"focused\"]\n+++\n\n# A\n{body}\n",
+            ),
+        )
+        .unwrap();
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = new_app(config);
+        app.select_journal_by_name("work");
+        app.focus = Focus::EntryView;
+
+        let top = render_text(app, 80, 20);
+        assert!(!top.contains("Tags: tiny-screen"));
+
+        let mut app = new_app(Config::new(dir.path().to_path_buf(), "true"));
+        app.select_journal_by_name("work");
+        app.focus = Focus::EntryView;
+        app.scroll.entry_view = u16::MAX;
+
+        let bottom = render_text(app, 80, 20);
+        assert!(bottom.contains("Feelings: focused"));
+        assert!(bottom.contains("Tags: tiny-screen"));
     }
 
     #[test]

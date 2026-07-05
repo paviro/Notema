@@ -6,7 +6,9 @@ use ratatui::{
     widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph, Wrap},
 };
 
-use crate::tui::state::{DeleteContext, EditFeelingState, EditMoodState, EditTagFocus, EditTagState};
+use crate::tui::state::{
+    DeleteContext, EditFeelingState, EditMoodState, EditTagFocus, EditTagState,
+};
 
 use super::{
     chrome::{Hint, HintId, hint_height, hint_lines, render_scrollbar_if_needed},

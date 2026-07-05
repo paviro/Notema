@@ -9,7 +9,6 @@ mod surface;
 mod watcher;
 
 use crate::{AppResult, config::Config, crypto};
-use std::path::PathBuf;
 use crossterm::{
     cursor::Show,
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
@@ -17,6 +16,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::path::PathBuf;
 use std::{
     io::{self, Write},
     time::Duration,
