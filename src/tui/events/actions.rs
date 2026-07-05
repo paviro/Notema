@@ -77,7 +77,7 @@ fn new_entry(terminal: &mut Term, app: &mut App) -> AppResult<Option<PathBuf>> {
     if let Some(path) = &created {
         let report = app
             .store
-            .process_entry_assets(path, app.config.download_remote_images)?;
+            .process_entry_assets(path, app.config.download_remote_images, false)?;
         app.set_status(save_status("Entry saved", &report));
     }
     app.refresh()?;
@@ -134,7 +134,7 @@ pub(super) fn edit_selected(terminal: &mut Term, app: &mut App) -> AppResult<()>
     if kept {
         let report = app
             .store
-            .process_entry_assets(&target.path, app.config.download_remote_images)?;
+            .process_entry_assets(&target.path, app.config.download_remote_images, false)?;
         app.set_status(save_status(&format!("Edited {}", target.title), &report));
     } else {
         app.set_status("Empty entry deleted");

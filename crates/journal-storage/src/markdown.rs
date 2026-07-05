@@ -16,6 +16,8 @@ struct FrontMatter {
     feelings: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mood: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    import_id: Option<String>,
 }
 
 pub fn split_front_matter(content: &str) -> (Option<&str>, &str) {
@@ -81,8 +83,13 @@ pub fn front_matter_value(front_matter: &str, key: &str) -> Option<String> {
     match key {
         "created_at" => fm.created_at,
         "updated_at" => fm.updated_at,
+        "import_id" => fm.import_id,
         _ => None,
     }
+}
+
+pub fn front_matter_import_id(front_matter: &str) -> Option<String> {
+    parse_front_matter(front_matter).and_then(|fm| fm.import_id)
 }
 
 /// A one-line summary of the body: display lines collapsed onto a single line,
@@ -156,6 +163,7 @@ pub fn set_front_matter_value(content: &str, key: &str, value: &str) -> String {
     match key {
         "created_at" => metadata.created_at = Some(value.to_string()),
         "updated_at" => metadata.updated_at = Some(value.to_string()),
+        "import_id" => metadata.import_id = Some(value.to_string()),
         _ => return content.to_string(),
     }
     render_content_with_front_matter(&metadata, body)

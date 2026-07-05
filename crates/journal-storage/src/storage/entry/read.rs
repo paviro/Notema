@@ -4,8 +4,9 @@ use crate::storage::{journals::is_hidden_name, list_journals};
 use crate::{
     AppResult, crypto,
     markdown::{
-        display_preview, front_matter_activities, front_matter_feelings, front_matter_mood,
-        front_matter_people, front_matter_tags, front_matter_value, split_front_matter,
+        display_preview, front_matter_activities, front_matter_feelings, front_matter_import_id,
+        front_matter_mood, front_matter_people, front_matter_tags, front_matter_value,
+        split_front_matter,
     },
 };
 use journal_core::feelings::normalize_feelings;
@@ -107,6 +108,7 @@ pub fn read_entry_with_identity(
         .map(|feelings| normalize_feelings(feelings.iter().map(String::as_str)))
         .unwrap_or_default();
     let mood = front_matter.and_then(front_matter_mood);
+    let import_id = front_matter.and_then(front_matter_import_id);
     let id = entry_id(path).ok_or("entry file has no UTF-8 stem")?;
     let preview = display_preview(body);
     let body = body.trim_start_matches('\n').to_string();
@@ -124,6 +126,7 @@ pub fn read_entry_with_identity(
         activities,
         feelings,
         mood,
+        import_id,
         content: body,
     })
 }
@@ -143,6 +146,7 @@ fn locked_entry(journal: &str, path: &Path) -> AppResult<Entry> {
         activities: Vec::new(),
         feelings: Vec::new(),
         mood: None,
+        import_id: None,
         content: "Encryption identity not available".to_string(),
     })
 }

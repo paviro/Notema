@@ -225,6 +225,44 @@ impl JournalStore {
         }
     }
 
+    /// Create an entry from an external import, preserving its original
+    /// creation/modification dates and recording an `import_id` provenance
+    /// marker in the front matter. Encryption follows the store's setting, like
+    /// [`create_entry_with_body`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_imported_entry(
+        &self,
+        journal: &str,
+        body: &str,
+        metadata: EntryMetadata<'_>,
+        created_at: chrono::DateTime<chrono::Local>,
+        updated_at: chrono::DateTime<chrono::Local>,
+        import_id: &str,
+    ) -> JournalResult<PathBuf> {
+        if self.encryption_enabled() {
+            storage::create_encrypted_imported_entry_with_body_and_metadata(
+                &self.paths.journal_root,
+                journal,
+                body,
+                metadata,
+                created_at,
+                updated_at,
+                import_id,
+                &self.encryption_paths(),
+            )
+        } else {
+            storage::create_imported_entry_with_body_and_metadata(
+                &self.paths.journal_root,
+                journal,
+                body,
+                metadata,
+                created_at,
+                updated_at,
+                import_id,
+            )
+        }
+    }
+
     /// Open a new entry in the editor. The callback receives an empty string
     /// and returns the body text the user wrote, or `None` to cancel.
     pub fn create_entry_via_editor(
@@ -369,6 +407,7 @@ impl JournalStore {
         &self,
         path: &Path,
         download_remote: bool,
+        replace_offline: bool,
     ) -> JournalResult<storage::AssetReport> {
         let encrypted = storage::is_encrypted_entry_file(path);
         let content = if encrypted {
@@ -385,8 +424,13 @@ impl JournalStore {
 
         let paths = self.encryption_paths();
         let encryption = encrypted.then_some(&paths);
-        let (new_body, report) =
-            storage::ingest_and_cleanup(path, body, encryption, download_remote)?;
+        let (new_body, report) = storage::ingest_and_cleanup_opts(
+            path,
+            body,
+            encryption,
+            download_remote,
+            replace_offline,
+        )?;
 
         if let Some(new_body) = new_body {
             let new_content = if let Some(fm) = front_matter {

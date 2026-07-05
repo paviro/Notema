@@ -1342,6 +1342,7 @@ mod tests {
             activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
+            import_id: None,
             content: String::new(),
         }
     }
@@ -1414,6 +1415,7 @@ mod tests {
             activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
+            import_id: None,
             content: String::new(),
         };
 
@@ -1436,6 +1438,7 @@ mod tests {
             activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
+            import_id: None,
             content: String::new(),
         };
 

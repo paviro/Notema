@@ -4,7 +4,7 @@ version = "2026.7.1"
 edition = "2024"
 
 [workspace]
-members = ["crates/journal-core", "crates/journal-storage"]
+members = ["crates/journal-core", "crates/journal-storage", "crates/journal-import"]
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -16,6 +16,7 @@ image = { version = "0.25", default-features = false }
 # hand it images we already decoded on the 0.25 side (see `tui::image::to_rascii_image`).
 image_024 = { package = "image", version = "0.24", default-features = false }
 journal-core = { path = "crates/journal-core" }
+journal-import = { path = "crates/journal-import" }
 journal-storage = { path = "crates/journal-storage" }
 mimalloc = "0.1"
 notify = "7.0"

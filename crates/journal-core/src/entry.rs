@@ -14,6 +14,10 @@ pub struct Entry {
     pub activities: Vec<String>,
     pub feelings: Vec<String>,
     pub mood: Option<i8>,
+    /// Provenance of an imported entry, e.g. `"dayone:<UUID>"`. `None` for
+    /// entries created directly in the app. Used to skip re-importing and as an
+    /// anchor for back-filling richer metadata once the format supports it.
+    pub import_id: Option<String>,
     pub content: String,
 }
 

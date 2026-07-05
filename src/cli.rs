@@ -57,6 +57,34 @@ enum CliCommand {
     Encrypt,
     /// Decrypt every encrypted entry in the store
     Decrypt,
+    /// Import entries from another journaling app
+    Import {
+        #[command(subcommand)]
+        source: ImportSource,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ImportSource {
+    /// Import a Day One JSON export (with photos)
+    Dayone(DayoneArgs),
+}
+
+#[derive(Debug, Args)]
+struct DayoneArgs {
+    /// Path to the Day One export `.json` file
+    #[arg(value_name = "PATH")]
+    path: PathBuf,
+
+    /// Journal to import into (created if missing); defaults to the configured journal
+    #[arg(long, value_name = "NAME")]
+    journal: Option<String>,
+
+    /// Download remote http(s) image links found in entry bodies. Off by
+    /// default; when on, unreachable hosts are detected once and skipped rather
+    /// than retried for every link. Skipped links are left in place in the body.
+    #[arg(long)]
+    download_images: bool,
 }
 
 #[derive(Debug, Args)]
@@ -139,7 +167,97 @@ fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppRe
             let (config_path, config) = config::load_existing(cli.config.as_deref())?;
             migrate::decrypt_store(&config_path, &config)
         }
+        CliCommand::Import { source } => {
+            validate_no_legacy_entry_args(cli)?;
+            match source {
+                ImportSource::Dayone(args) => import_dayone_command(cli, args),
+            }
+        }
     }
+}
+
+fn import_dayone_command(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
+    let (config_path, config) = config::load_existing(cli.config.as_deref())?;
+    let journal = args
+        .journal
+        .as_deref()
+        .or(config.default_journal.as_deref())
+        .ok_or("no journal specified; pass --journal or set one with `journal use <name>`")?;
+    // Validate the name only — the importer creates the journal if it's missing.
+    let journal = JournalStore::validate_journal_name(journal)?;
+
+    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    store.ensure()?;
+
+    let report = journal_import::import_dayone(&store, &journal, &args.path, args.download_images)?;
+
+    println!(
+        "{}",
+        import_report_summary(&report, &journal, args.download_images)
+    );
+    for failure in &report.failures {
+        eprintln!("  ! {failure}");
+    }
+    Ok(())
+}
+
+fn import_report_summary(
+    report: &journal_import::ImportReport,
+    journal: &str,
+    download_images: bool,
+) -> String {
+    let mut parts = vec![format!(
+        "Imported {} {} into '{journal}'",
+        report.imported,
+        plural(report.imported, "entry", "entries"),
+    )];
+    if report.skipped_duplicate > 0 {
+        parts.push(format!(
+            "{} already imported (skipped)",
+            report.skipped_duplicate
+        ));
+    }
+    if report.images_stored > 0 {
+        parts.push(format!(
+            "{} {} stored",
+            report.images_stored,
+            plural(report.images_stored, "image", "images")
+        ));
+    }
+    if report.attachments_skipped > 0 {
+        parts.push(format!(
+            "{} audio/video/pdf {} skipped (not yet supported)",
+            report.attachments_skipped,
+            plural(report.attachments_skipped, "attachment", "attachments")
+        ));
+    }
+    if report.remote_images_skipped > 0 {
+        if download_images {
+            parts.push(format!(
+                "{} offline {} replaced with [Offline Image]",
+                report.remote_images_skipped,
+                plural(report.remote_images_skipped, "image", "images")
+            ));
+        } else {
+            parts.push(format!(
+                "{} remote {} left as links (pass --download-images to fetch)",
+                report.remote_images_skipped,
+                plural(report.remote_images_skipped, "link", "links")
+            ));
+        }
+    }
+    if report.images_failed > 0 {
+        parts.push(format!(
+            "{} {} not stored",
+            report.images_failed,
+            plural(report.images_failed, "image", "images")
+        ));
+    }
+    parts.join("; ")
+}
+
+fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 { one } else { many }
 }
 
 fn validate_no_legacy_entry_args(cli: &Cli) -> AppResult<()> {
@@ -233,7 +351,7 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
         })?
     };
     if let Some(path) = path {
-        let report = store.process_entry_assets(&path, config.download_remote_images)?;
+        let report = store.process_entry_assets(&path, config.download_remote_images, false)?;
         if !report.is_noop() {
             eprintln!("{}", asset_report_message(&report));
         }

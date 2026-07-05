@@ -1695,6 +1695,7 @@ dependencies = [
  "image 0.24.9",
  "image 0.25.10",
  "journal-core",
+ "journal-import",
  "journal-storage",
  "mimalloc",
  "notify",
@@ -1719,6 +1720,18 @@ dependencies = [
  "chrono",
  "nucleo",
  "serde",
+]
+
+[[package]]
+name = "journal-import"
+version = "2026.7.1"
+dependencies = [
+ "chrono",
+ "journal-core",
+ "journal-storage",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -3246,6 +3259,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json"
+version = "1.0.150"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4362,6 +4388,12 @@ dependencies = [
  "serde",
  "zerofrom",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zune-core"

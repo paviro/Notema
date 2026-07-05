@@ -16,7 +16,10 @@ use nanoid::nanoid;
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    net::{TcpStream, ToSocketAddrs},
     path::{Component, Path, PathBuf},
+    sync::{Mutex, OnceLock, mpsc},
+    thread,
     time::Duration,
 };
 
@@ -28,6 +31,8 @@ const ASSET_ID_ATTEMPTS: usize = 32;
 const MAX_REMOTE_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 /// Network timeout for opt-in remote image ingestion.
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Timeout for the cheap "is this host up?" probe done before a full download.
+const HOST_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Supported raster image extensions (lowercase, no dot).
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "avif"];
@@ -54,11 +59,26 @@ impl AssetReport {
 /// suffix and are age-encrypted); `download_remote` gates fetching `http(s)`
 /// URLs. Returns the rewritten body only when it changed. Sources that fail to
 /// fetch are skipped and recorded in the report rather than aborting.
+#[cfg(test)]
 pub(crate) fn ingest_and_cleanup(
     entry_path: &Path,
     body: &str,
     encryption: Option<&crypto::EncryptionPaths>,
     download_remote: bool,
+) -> AppResult<(Option<String>, AssetReport)> {
+    ingest_and_cleanup_opts(entry_path, body, encryption, download_remote, false)
+}
+
+/// Like [`ingest_and_cleanup`], but when `replace_offline` is set, external image
+/// references that could not be ingested are replaced with an `[Offline Image]`
+/// placeholder instead of being left in the body. Used by bulk import so dead
+/// links don't linger as broken image tags.
+pub(crate) fn ingest_and_cleanup_opts(
+    entry_path: &Path,
+    body: &str,
+    encryption: Option<&crypto::EncryptionPaths>,
+    download_remote: bool,
+    replace_offline: bool,
 ) -> AppResult<(Option<String>, AssetReport)> {
     let (Some(assets_dir), Some(dir_name)) = (
         entry_assets_dir(entry_path),
@@ -72,6 +92,7 @@ pub(crate) fn ingest_and_cleanup(
         dir_name: &dir_name,
         encryption,
         download_remote,
+        replace_offline,
         stored_sources: HashMap::new(),
         report: AssetReport::default(),
     };
@@ -90,9 +111,14 @@ struct IngestContext<'a> {
     dir_name: &'a str,
     encryption: Option<&'a crypto::EncryptionPaths>,
     download_remote: bool,
+    replace_offline: bool,
     stored_sources: HashMap<String, String>,
     report: AssetReport,
 }
+
+/// Placeholder substituted for an image that could not be ingested when
+/// `replace_offline` is set.
+const OFFLINE_IMAGE_PLACEHOLDER: &str = "[Offline Image]";
 
 /// Rewrite a body line by line, ingesting external image references. Code
 /// fences are passed through untouched.
@@ -147,6 +173,7 @@ fn rewrite_markdown_images(line: &str, ctx: &mut IngestContext<'_>) -> String {
         if is_external_target(target, ctx.dir_name) {
             match store_source(target, image.alt(rest), ctx) {
                 Some(link) => out.push_str(&link),
+                None if ctx.replace_offline => out.push_str(OFFLINE_IMAGE_PLACEHOLDER),
                 None => out.push_str(&rest[image.start..image.end]),
             }
         } else {
@@ -181,9 +208,12 @@ fn rewrite_bare_line(line: &str, ctx: &mut IngestContext<'_>) -> Option<String> 
         return None;
     }
 
-    let link = store_source(&source, "", ctx)?;
     let indent = &line[..line.len() - line.trim_start().len()];
-    Some(format!("{indent}{link}"))
+    match store_source(&source, "", ctx) {
+        Some(link) => Some(format!("{indent}{link}")),
+        None if ctx.replace_offline => Some(format!("{indent}{OFFLINE_IMAGE_PLACEHOLDER}")),
+        None => None,
+    }
 }
 
 /// Fetch a source, store it in the asset folder (encrypted when configured),
@@ -241,6 +271,15 @@ fn fetch_source(source: &str, download_remote: bool) -> Result<(Vec<u8>, String)
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {
+    // Probe the host first (once per host, cached). A bulk import can reference
+    // hundreds of links on a server that no longer exists; without this each
+    // one would block for the full `REMOTE_TIMEOUT` before failing.
+    if let Some((host, port)) = host_port(url)
+        && !host_reachable(&host, port)
+    {
+        return Err(format!("host unreachable: {host}"));
+    }
+
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(REMOTE_TIMEOUT))
         .build();
@@ -255,6 +294,66 @@ fn download(url: &str) -> Result<Vec<u8>, String> {
         .read_to_vec()
         .map_err(|error| error.to_string())?;
     Ok(bytes)
+}
+
+/// Per-process cache of host reachability (`"host:port" -> up?`), so a dead host
+/// referenced by many links is probed only once for the lifetime of the run.
+fn host_status_cache() -> &'static Mutex<HashMap<String, bool>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn host_reachable(host: &str, port: u16) -> bool {
+    let key = format!("{host}:{port}");
+    if let Some(&reachable) = host_status_cache().lock().unwrap().get(&key) {
+        return reachable;
+    }
+    let reachable = probe_host(host, port);
+    host_status_cache().lock().unwrap().insert(key, reachable);
+    reachable
+}
+
+/// Attempt a TCP connection to `host:port`, bounding both DNS resolution and the
+/// connect by `HOST_PROBE_TIMEOUT`. Resolution has no native timeout, so it runs
+/// on a helper thread we stop waiting on once the deadline passes.
+fn probe_host(host: &str, port: u16) -> bool {
+    let host = host.to_string();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let reachable = (host.as_str(), port)
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut addrs| addrs.next())
+            .map(|addr| TcpStream::connect_timeout(&addr, HOST_PROBE_TIMEOUT).is_ok())
+            .unwrap_or(false);
+        let _ = tx.send(reachable);
+    });
+    rx.recv_timeout(HOST_PROBE_TIMEOUT).unwrap_or(false)
+}
+
+/// Extract `(host, port)` from an `http(s)` URL, defaulting the port by scheme.
+/// Returns `None` for unparseable authorities (e.g. bracketed IPv6), in which
+/// case the caller downloads without a pre-probe.
+fn host_port(url: &str) -> Option<(String, u16)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    // Drop any `user:pass@` prefix.
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, hp)| hp);
+    if host_port.contains('[') {
+        return None; // Skip IPv6 literals rather than mis-parse them.
+    }
+    let (host, port) = match host_port.rsplit_once(':') {
+        Some((host, port)) if !host.is_empty() => (host, port.parse().ok()?),
+        _ => {
+            let default = if scheme.eq_ignore_ascii_case("https") {
+                443
+            } else {
+                80
+            };
+            (host_port, default)
+        }
+    };
+    (!host.is_empty()).then(|| (host.to_string(), port))
 }
 
 /// Write bytes as `<id>.<ext>` (`.age`-suffixed when encrypting) under a

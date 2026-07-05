@@ -48,8 +48,65 @@ pub fn create_encrypted_entry_with_body_and_metadata(
     )
 }
 
+/// Create an entry that carries an explicit creation/modification date and an
+/// `import_id` provenance marker (used by importers). The on-disk path and
+/// filename are derived from `created_at`, so imported entries land in their
+/// original date folder rather than today's.
+pub fn create_imported_entry_with_body_and_metadata(
+    root: &Path,
+    journal: &str,
+    body: &str,
+    metadata: EntryMetadata<'_>,
+    created_at: DateTime<Local>,
+    updated_at: DateTime<Local>,
+    import_id: &str,
+) -> AppResult<PathBuf> {
+    let content = entry_content(created_at, updated_at, body, metadata, Some(import_id));
+    create_entry_file(
+        root,
+        journal,
+        created_at,
+        &content,
+        WriteTarget::Plain,
+        || nanoid!(ENTRY_ID_LEN),
+    )
+}
+
+/// Encrypted counterpart of [`create_imported_entry_with_body_and_metadata`].
+#[allow(clippy::too_many_arguments)]
+pub fn create_encrypted_imported_entry_with_body_and_metadata(
+    root: &Path,
+    journal: &str,
+    body: &str,
+    metadata: EntryMetadata<'_>,
+    created_at: DateTime<Local>,
+    updated_at: DateTime<Local>,
+    import_id: &str,
+    paths: &crypto::EncryptionPaths,
+) -> AppResult<PathBuf> {
+    let content = entry_content(created_at, updated_at, body, metadata, Some(import_id));
+    create_entry_file(
+        root,
+        journal,
+        created_at,
+        &content,
+        WriteTarget::Encrypted(paths),
+        || nanoid!(ENTRY_ID_LEN),
+    )
+}
+
 fn entry_with_body_at(now: DateTime<Local>, body: &str, metadata: EntryMetadata<'_>) -> String {
-    let mut content = entry_template(now, now);
+    entry_content(now, now, body, metadata, None)
+}
+
+fn entry_content(
+    created_at: DateTime<Local>,
+    updated_at: DateTime<Local>,
+    body: &str,
+    metadata: EntryMetadata<'_>,
+    import_id: Option<&str>,
+) -> String {
+    let mut content = entry_template(created_at, updated_at);
     if !metadata.tags.is_empty() {
         content =
             crate::markdown::set_tags_in_front_matter(&content, metadata.tags).unwrap_or(content);
@@ -69,6 +126,9 @@ fn entry_with_body_at(now: DateTime<Local>, body: &str, metadata: EntryMetadata<
     if metadata.mood.is_some() {
         content =
             crate::markdown::set_mood_in_front_matter(&content, metadata.mood).unwrap_or(content);
+    }
+    if let Some(import_id) = import_id {
+        content = crate::markdown::set_front_matter_value(&content, "import_id", import_id);
     }
     content.push_str(body);
     if !content.ends_with('\n') {
