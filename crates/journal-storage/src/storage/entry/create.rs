@@ -1,5 +1,5 @@
-use super::paths::{ENTRY_ID_LEN, encrypted_entry_path_with_id, entry_path_with_id};
 use super::EntryMetadata;
+use super::paths::{ENTRY_ID_LEN, encrypted_entry_path_with_id, entry_path_with_id};
 use crate::{AppResult, crypto};
 use chrono::{DateTime, Local};
 use nanoid::nanoid;

@@ -122,7 +122,10 @@ fn log_command_writes_tags() {
     assert!(output.status.success());
     let entries = scan_entries_for(&root, "work");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].tags, vec!["rust".to_string(), "open source".to_string()]);
+    assert_eq!(
+        entries[0].tags,
+        vec!["rust".to_string(), "open source".to_string()]
+    );
 }
 
 #[test]
@@ -145,7 +148,10 @@ fn log_command_accepts_comma_separated_tags() {
 
     assert!(output.status.success());
     let entries = scan_entries_for(&root, "work");
-    assert_eq!(entries[0].tags, vec!["rust".to_string(), "open source".to_string()]);
+    assert_eq!(
+        entries[0].tags,
+        vec!["rust".to_string(), "open source".to_string()]
+    );
 }
 
 #[test]
@@ -172,7 +178,10 @@ fn log_command_writes_people_and_activities() {
 
     assert!(output.status.success());
     let entries = scan_entries_for(&root, "work");
-    assert_eq!(entries[0].people, vec!["alex".to_string(), "sam".to_string()]);
+    assert_eq!(
+        entries[0].people,
+        vec!["alex".to_string(), "sam".to_string()]
+    );
     assert_eq!(
         entries[0].activities,
         vec!["programming".to_string(), "cycling".to_string()]
@@ -199,7 +208,10 @@ fn log_command_accepts_comma_separated_feelings() {
 
     assert!(output.status.success());
     let entries = scan_entries_for(&root, "work");
-    assert_eq!(entries[0].feelings, vec!["calm".to_string(), "focused".to_string()]);
+    assert_eq!(
+        entries[0].feelings,
+        vec!["calm".to_string(), "focused".to_string()]
+    );
 }
 
 #[test]
@@ -225,7 +237,10 @@ fn log_command_writes_repeatable_feelings() {
     assert!(output.status.success());
     let entries = scan_entries_for(&root, "work");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].feelings, vec!["calm".to_string(), "focused".to_string()]);
+    assert_eq!(
+        entries[0].feelings,
+        vec!["calm".to_string(), "focused".to_string()]
+    );
 }
 
 #[test]

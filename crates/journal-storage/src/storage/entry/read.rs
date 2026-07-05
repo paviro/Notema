@@ -11,10 +11,7 @@ use crate::{
 };
 use journal_core::feelings::normalize_feelings;
 use rayon::prelude::*;
-use std::{
-    fs,
-    path::Path,
-};
+use std::{fs, path::Path};
 
 #[cfg(test)]
 pub fn scan_entries(root: &Path) -> AppResult<Vec<Entry>> {

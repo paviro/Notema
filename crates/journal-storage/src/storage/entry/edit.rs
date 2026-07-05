@@ -92,10 +92,7 @@ fn write_entry_content(
     if let Some((paths, _)) = encryption {
         write_encrypted_entry_content(paths, path, content)
     } else {
-        let temp = unique_temp_path(
-            path.parent().unwrap_or_else(|| Path::new(".")),
-            "edit.md",
-        );
+        let temp = unique_temp_path(path.parent().unwrap_or_else(|| Path::new(".")), "edit.md");
         let result = (|| {
             fs::write(&temp, content)?;
             fs::rename(&temp, path)?;

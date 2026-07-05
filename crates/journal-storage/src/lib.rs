@@ -9,7 +9,7 @@ mod migrate;
 mod storage;
 
 pub use journal_core::{
-    AppResult, JournalResult, Entry, EntryEncryptionState, EntryMetadata, EntryPath, SearchHit,
+    AppResult, Entry, EntryEncryptionState, EntryMetadata, EntryPath, JournalResult, SearchHit,
     SearchScopeFilter, search_loaded_entries,
 };
 pub use migrate::{DecryptSummary, MigrationSummary};
@@ -100,7 +100,10 @@ impl JournalStore {
     /// and written. After this succeeds, the store transparently handles both
     /// plaintext and encrypted entries.
     pub fn unlock(&mut self, passphrase: &str) -> JournalResult<()> {
-        self.identity = Some(crypto::unlock_identity(&self.encryption_paths(), passphrase)?);
+        self.identity = Some(crypto::unlock_identity(
+            &self.encryption_paths(),
+            passphrase,
+        )?);
         Ok(())
     }
 
@@ -241,7 +244,9 @@ impl JournalStore {
     }
 
     pub fn set_entry_tags(&self, path: &Path, tags: &[String]) -> JournalResult<()> {
-        self.update_entry_metadata(path, |content| markdown::set_tags_in_front_matter(content, tags))
+        self.update_entry_metadata(path, |content| {
+            markdown::set_tags_in_front_matter(content, tags)
+        })
     }
 
     pub fn set_entry_people(&self, path: &Path, people: &[String]) -> JournalResult<()> {
