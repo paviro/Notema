@@ -22,7 +22,8 @@ use crate::tui::{
     app::{App, EntryViewImageHits, Focus},
     image::{digit_for_image, sole_image_ref},
     render::{
-        count_label, entry_metadata_layout, panel_block, render_scrollbar_if_needed, viewer_scroll,
+        count_label, entry_metadata_layout, panel_block, render_centered_notice,
+        render_scrollbar_if_needed, viewer_scroll,
     },
     surface::{
         EntryMetadataLayout, EntryMetadataValues, MetadataRowLayout, PanelGeometry,
@@ -66,12 +67,10 @@ pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &
             labels,
         };
     } else {
-        let empty = Paragraph::new("No entry selected").block(panel_block(
-            "Entry",
-            app.focus == Focus::EntryView,
-            None,
-        ));
-        frame.render_widget(empty, area);
+        let block = panel_block("Entry", app.focus == Focus::EntryView, None);
+        let content = PanelGeometry::new(area).content;
+        frame.render_widget(block, area);
+        render_centered_notice(frame, content, "No entry selected");
     }
 }
 

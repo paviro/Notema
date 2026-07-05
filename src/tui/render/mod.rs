@@ -36,7 +36,7 @@ pub(crate) use chrome::panel_title;
 pub(crate) use chrome::{
     HintId, centered_rect_fixed_size, count_label, expanded_footer_height,
     expanded_footer_hint_id_at_point, expanded_footer_lines, footer_hint_id_at_point, footer_lines,
-    hint_id_at_wrapped, panel_block, render_scrollbar_if_needed,
+    hint_id_at_wrapped, panel_block, render_centered_notice, render_scrollbar_if_needed,
 };
 #[cfg(test)]
 pub(crate) use chrome::{

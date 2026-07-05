@@ -10,7 +10,7 @@ use crate::tui::{
     entry_rows::{entry_list_rows, entry_month_sections, visible_entry_items},
     render::{
         EntryListGeometry, clamp_scroll, count_label, entry_row_metadata, list_state_for_render,
-        panel_block, render_scrollbar_if_needed, total_entry_row_height,
+        panel_block, render_centered_notice, render_scrollbar_if_needed, total_entry_row_height,
     },
 };
 
@@ -78,6 +78,13 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
         viewport_height,
         pixel_offset,
     );
+
+    // An empty list in search mode — whether the query is blank or simply
+    // matches nothing — gets a centered notice so the column doesn't read as a
+    // rendering glitch.
+    if app.mode == Mode::Search && rows.is_empty() {
+        render_centered_notice(frame, geometry.panel.content, "No results");
+    }
 }
 
 /// The search query drawn on the panel's top-right border. While the field is

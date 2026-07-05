@@ -1,9 +1,11 @@
 use ratatui::{
     Frame,
-    layout::{Constraint, Flex, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Flex, Layout, Margin, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, BorderType, Borders, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    },
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -544,6 +546,26 @@ pub(crate) fn panel_block(
     }
 
     block
+}
+
+/// Draw a dimmed message centered both horizontally and vertically within a
+/// panel's content area — used for empty states like "No entry selected" and
+/// "No results".
+pub(crate) fn render_centered_notice(frame: &mut Frame<'_>, content: Rect, message: &str) {
+    if content.width == 0 || content.height == 0 {
+        return;
+    }
+    let line = Rect {
+        y: content.y + content.height.saturating_sub(1) / 2,
+        height: 1,
+        ..content
+    };
+    frame.render_widget(
+        Paragraph::new(message)
+            .alignment(Alignment::Center)
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        line,
+    );
 }
 
 pub(crate) fn count_label(count: usize, singular: &str, plural: &str) -> String {
