@@ -74,11 +74,40 @@ fn new_entry(terminal: &mut Term, app: &mut App) -> AppResult<Option<PathBuf>> {
             |body| editor::edit_body(&editor_cmd, body),
         )
     })?;
-    if created.is_some() {
-        app.set_status("Entry saved");
+    if let Some(path) = &created {
+        let report = app
+            .store
+            .process_entry_assets(path, app.config.download_remote_images)?;
+        app.set_status(save_status("Entry saved", &report));
     }
     app.refresh()?;
     Ok(created)
+}
+
+/// Build a save status message, appending image ingest details when relevant.
+fn save_status(base: &str, report: &journal_storage::AssetReport) -> String {
+    if report.is_noop() {
+        return base.to_string();
+    }
+    let mut parts = vec![base.to_string()];
+    if report.stored > 0 {
+        parts.push(format!(
+            "{} image{} stored",
+            report.stored,
+            if report.stored == 1 { "" } else { "s" }
+        ));
+    }
+    if report.removed > 0 {
+        parts.push(format!("{} removed", report.removed));
+    }
+    if !report.failed.is_empty() {
+        parts.push(format!(
+            "{} image{} not stored",
+            report.failed.len(),
+            if report.failed.len() == 1 { "" } else { "s" }
+        ));
+    }
+    parts.join(" — ")
 }
 
 /// Reports a friendly status and returns `false` when the target is a locked
@@ -103,7 +132,10 @@ pub(super) fn edit_selected(terminal: &mut Term, app: &mut App) -> AppResult<()>
     let editor = app.config.editor.clone();
     let kept = edit_entry_at(terminal, app, &target.path, &editor)?;
     if kept {
-        app.set_status(format!("Edited {}", target.title));
+        let report = app
+            .store
+            .process_entry_assets(&target.path, app.config.download_remote_images)?;
+        app.set_status(save_status(&format!("Edited {}", target.title), &report));
     } else {
         app.set_status("Empty entry deleted");
     }

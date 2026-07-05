@@ -14,9 +14,67 @@ pub use journal_core::{
 };
 pub use migrate::{DecryptSummary, MigrationSummary};
 pub use storage::{
-    Journal, entry_group_date, entry_id, entry_timestamp_label, parse_entry_timestamp,
+    AssetReport, Journal, entry_group_date, entry_id, entry_timestamp_label, parse_entry_timestamp,
+    sole_stored_image, stored_image_reference,
 };
 
+/// Decode image bytes to a displayable sRGB image with EXIF orientation baked
+/// into the pixels. Both normalizations matter for terminal rendering:
+/// orientation, because re-encoding drops EXIF; and Display P3 -> sRGB, because
+/// `image` ignores the ICC profile and a terminal is not color-managed, so
+/// wider-gamut pixels would render desaturated.
+///
+/// `max_dimensions` (pixels) downscales *before* the color transform and
+/// encoding, bounding peak memory to the display size rather than the source
+/// resolution. `None` keeps full resolution.
+pub fn decode_image_with_orientation(
+    bytes: &[u8],
+    max_dimensions: Option<(u32, u32)>,
+) -> AppResult<image::DynamicImage> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()?
+        .into_decoder()?;
+    let icc_profile = decoder.icc_profile().ok().flatten();
+    let orientation = decoder.orientation()?;
+    let mut image = image::DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+
+    // Shrink to the display target before the per-pixel work; never upscale.
+    if let Some((max_width, max_height)) = max_dimensions
+        && (image.width() > max_width || image.height() > max_height)
+    {
+        image = image.resize(max_width, max_height, image::imageops::FilterType::Triangle);
+    }
+
+    if let Some(icc) = icc_profile.filter(|profile| !profile.is_empty())
+        && let Some(converted) = convert_to_srgb(&image, &icc)
+    {
+        image = converted;
+    }
+    Ok(image)
+}
+
+/// Convert an image's pixels from its embedded ICC color space to sRGB.
+/// Best-effort: returns `None` if the profile can't be parsed or the transform
+/// fails, leaving the caller to use the un-converted image.
+fn convert_to_srgb(image: &image::DynamicImage, icc: &[u8]) -> Option<image::DynamicImage> {
+    use moxcms::{ColorProfile, Layout, TransformOptions};
+    let source = ColorProfile::new_from_slice(icc).ok()?;
+    let srgb = ColorProfile::new_srgb();
+    let transform = source
+        .create_transform_8bit(Layout::Rgb, &srgb, Layout::Rgb, TransformOptions::default())
+        .ok()?;
+    let rgb = image.to_rgb8();
+    let (width, height) = (rgb.width(), rgb.height());
+    let mut out = vec![0u8; rgb.as_raw().len()];
+    transform.transform(rgb.as_raw(), &mut out).ok()?;
+    Some(image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(
+        width, height, out,
+    )?))
+}
+
+#[derive(Clone)]
 pub struct JournalStore {
     paths: JournalStorePaths,
     identity: Option<crypto::UnlockedIdentity>,
@@ -299,6 +357,74 @@ impl JournalStore {
             };
             fs::write(path, markdown::set_updated_at_now_in_content(&new_content))?;
             Ok(())
+        }
+    }
+
+    /// Ingest external image references in the entry (copy/download them into
+    /// the entry's `<stem>.assets/` folder, encrypting when the entry is
+    /// encrypted, and rewrite the references) and delete orphaned assets. Runs
+    /// after create and edit; a no-op when the body has no external references
+    /// and no orphaned assets.
+    pub fn process_entry_assets(
+        &self,
+        path: &Path,
+        download_remote: bool,
+    ) -> JournalResult<storage::AssetReport> {
+        let encrypted = storage::is_encrypted_entry_file(path);
+        let content = if encrypted {
+            let Some(identity) = self.identity.as_ref() else {
+                return Ok(storage::AssetReport::default());
+            };
+            storage::read_entry_content_with_identity(path, Some(identity))?
+        } else {
+            fs::read_to_string(path)?
+        };
+
+        let (front_matter, body) = markdown::split_front_matter(&content);
+        let body = body.trim_start_matches('\n');
+
+        let paths = self.encryption_paths();
+        let encryption = encrypted.then_some(&paths);
+        let (new_body, report) =
+            storage::ingest_and_cleanup(path, body, encryption, download_remote)?;
+
+        if let Some(new_body) = new_body {
+            let new_content = if let Some(fm) = front_matter {
+                let reassembled =
+                    format!("+++\n{fm}\n+++\n\n{}", new_body.trim_start_matches('\n'));
+                markdown::set_updated_at_now_in_content(&reassembled)
+            } else {
+                new_body
+            };
+            if encrypted {
+                storage::write_encrypted_entry_content(&paths, path, &new_content)?;
+            } else {
+                fs::write(path, &new_content)?;
+            }
+        }
+
+        Ok(report)
+    }
+
+    /// Read an entry-owned image asset into memory, decrypting `.age` assets
+    /// with the unlocked identity. Never writes a plaintext copy to disk, and
+    /// refuses paths outside the entry's own `<stem>.assets` folder.
+    pub fn read_entry_asset_bytes(
+        &self,
+        entry_path: &Path,
+        file_name: &str,
+    ) -> JournalResult<Option<Vec<u8>>> {
+        let Some(path) = storage::resolve_entry_asset_path(entry_path, file_name)? else {
+            return Ok(None);
+        };
+        if path.extension().is_some_and(|ext| ext == "age") {
+            let identity = self
+                .identity
+                .as_ref()
+                .ok_or("encrypted asset requires an unlocked journal encryption identity")?;
+            Ok(Some(crypto::decrypt_to_bytes(identity, &path)?))
+        } else {
+            Ok(Some(fs::read(path)?))
         }
     }
 

@@ -7,6 +7,7 @@ use journal_storage::SearchHit;
 use ratatui::widgets::ListState;
 
 use super::app::SearchScope;
+use super::image::ImageAsset;
 
 const STATUS_DURATION: Duration = Duration::from_secs(3);
 
@@ -386,6 +387,13 @@ pub(crate) struct EditMoodState {
     pub(crate) draft: i8,
 }
 
+/// Fullscreen image viewer overlay: the entry's images in body order and the
+/// one currently shown.
+pub(crate) struct ImageViewerState {
+    pub(crate) assets: Vec<ImageAsset>,
+    pub(crate) index: usize,
+}
+
 pub(crate) enum DeleteContext {
     Entry {
         has_body: bool,
@@ -408,6 +416,7 @@ pub(crate) enum Overlay {
     EditTags(EditTagState),
     EditFeelings(EditFeelingState),
     EditMood(EditMoodState),
+    ImageViewer(ImageViewerState),
 }
 
 #[cfg(test)]

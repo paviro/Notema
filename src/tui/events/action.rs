@@ -51,6 +51,10 @@ pub(crate) enum Action {
     MoodIncrease,
     MoodSave,
     MoodClear,
+    // Image viewer overlay
+    OpenImageViewer(usize),
+    ImageViewerNext,
+    ImageViewerPrev,
     // Search text input (only active when mode=Search and focus=Entries)
     SearchInput(char),
     SearchBackspace,

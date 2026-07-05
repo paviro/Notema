@@ -19,6 +19,8 @@ pub struct Config {
     pub show_journals: bool,
     #[serde(default)]
     pub last_journal: Option<String>,
+    #[serde(default = "default_true")]
+    pub download_remote_images: bool,
 }
 
 fn default_true() -> bool {
@@ -34,6 +36,7 @@ impl Config {
             show_hints: true,
             show_journals: true,
             last_journal: None,
+            download_remote_images: true,
         }
     }
 }
@@ -242,6 +245,22 @@ mod tests {
 
         assert!(config.show_journals);
         assert_eq!(config.last_journal, None);
+        assert!(config.download_remote_images);
+    }
+
+    #[test]
+    fn explicit_image_config_values_are_preserved() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(
+            &path,
+            "journal_root = \"~/Journals\"\neditor = \"nano\"\ndownload_remote_images = true\n",
+        )
+        .unwrap();
+
+        let config = load_config(&path).unwrap();
+
+        assert!(config.download_remote_images);
     }
 
     #[test]

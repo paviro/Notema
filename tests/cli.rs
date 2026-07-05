@@ -44,6 +44,12 @@ fn empty_metadata() -> EntryMetadata<'static> {
     }
 }
 
+fn png_bytes() -> Vec<u8> {
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    bytes.extend_from_slice(&[0u8; 16]);
+    bytes
+}
+
 fn age_cli_available() -> bool {
     Command::new("age").arg("--version").output().is_ok()
         && Command::new("age-keygen").arg("--version").output().is_ok()
@@ -97,6 +103,34 @@ fn log_command_creates_entry_in_default_journal() {
     let entries = scan_entries_for(&root, "work");
     assert_eq!(entries.len(), 1);
     assert!(entries[0].content.contains("Some text"));
+}
+
+#[test]
+fn log_command_ingests_local_image_asset() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("journals");
+    let config = dir.path().join("config.toml");
+    fs::create_dir_all(root.join("work")).unwrap();
+    write_config(&config, &root, Some("work"));
+    let image = dir.path().join("photo.png");
+    fs::write(&image, png_bytes()).unwrap();
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(&config)
+        .arg("log")
+        .arg(image.to_string_lossy().as_ref())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let created = Path::new(std::str::from_utf8(&output.stdout).unwrap().trim());
+    let content = fs::read_to_string(created).unwrap();
+    let stem = journal_storage::entry_id(created).unwrap();
+    let assets = created.parent().unwrap().join(format!("{stem}.assets"));
+
+    assert!(content.contains(&format!("![]({stem}.assets/")));
+    assert_eq!(fs::read_dir(&assets).unwrap().count(), 1);
 }
 
 #[test]

@@ -233,9 +233,35 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
         })?
     };
     if let Some(path) = path {
+        let report = store.process_entry_assets(&path, config.download_remote_images)?;
+        if !report.is_noop() {
+            eprintln!("{}", asset_report_message(&report));
+        }
         println!("{}", path.display());
     }
     Ok(())
+}
+
+fn asset_report_message(report: &journal_storage::AssetReport) -> String {
+    let mut parts = Vec::new();
+    if report.stored > 0 {
+        parts.push(format!(
+            "{} image{} stored",
+            report.stored,
+            if report.stored == 1 { "" } else { "s" }
+        ));
+    }
+    if report.removed > 0 {
+        parts.push(format!("{} removed", report.removed));
+    }
+    if !report.failed.is_empty() {
+        parts.push(format!(
+            "{} image{} not stored",
+            report.failed.len(),
+            if report.failed.len() == 1 { "" } else { "s" }
+        ));
+    }
+    parts.join("; ")
 }
 
 fn comma_separated_values(values: &[String]) -> Vec<String> {

@@ -248,6 +248,10 @@ pub(crate) fn dispatch_action(
             app.close_overlay();
         }
 
+        Action::OpenImageViewer(index) => app.begin_image_viewer(index),
+        Action::ImageViewerNext => app.image_viewer_step(1),
+        Action::ImageViewerPrev => app.image_viewer_step(-1),
+
         Action::SearchInput(ch) => {
             app.search.query.push(ch);
             app.update_search_results();

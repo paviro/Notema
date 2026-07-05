@@ -24,6 +24,7 @@ struct StoredIdentity {
     encrypted_identity: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub struct UnlockedIdentity {
     identity: x25519::Identity,
 }
@@ -94,6 +95,12 @@ pub fn decrypt_file(identity: &UnlockedIdentity, input: &Path, output: &Path) ->
 
 pub fn decrypt_to_string(identity: &UnlockedIdentity, input: &Path) -> AppResult<String> {
     Ok(String::from_utf8(decrypt_file_bytes(identity, input)?)?)
+}
+
+/// Decrypt an encrypted file into memory. Used for viewing encrypted binary
+/// assets (e.g. images) without ever writing a plaintext copy to disk.
+pub fn decrypt_to_bytes(identity: &UnlockedIdentity, input: &Path) -> AppResult<Vec<u8>> {
+    decrypt_file_bytes(identity, input)
 }
 
 fn decrypt_file_bytes(identity: &UnlockedIdentity, input: &Path) -> AppResult<Vec<u8>> {

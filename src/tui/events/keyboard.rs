@@ -5,6 +5,7 @@ use std::io;
 
 use crate::tui::{
     app::{App, Focus, Mode, entry_view_is_available},
+    image::image_for_digit,
     render,
     state::{EditTagFocus, Overlay},
 };
@@ -40,6 +41,22 @@ pub(super) fn key_to_action(
         Overlay::EditTags(_) => tags_key_to_action(app, key),
         Overlay::EditFeelings(_) => feelings_key_to_action(key),
         Overlay::EditMood(_) => mood_key_to_action(key),
+        Overlay::ImageViewer(_) => image_viewer_key_to_action(key),
+    }
+}
+
+/// Map a digit key to the image index it opens (`0`–`9`), gated on that image
+/// existing. Shared by browse and the search entry view.
+fn image_shortcut(app: &App, key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Char('i') if app.selected_entry_image_count() > 0 => {
+            Some(Action::OpenImageViewer(0))
+        }
+        KeyCode::Char(ch) => {
+            let index = image_for_digit(ch)?;
+            (index < app.selected_entry_image_count()).then_some(Action::OpenImageViewer(index))
+        }
+        _ => None,
     }
 }
 
@@ -91,6 +108,11 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Char('a') if app.can_act_on_selected_entry() => Some(Action::BeginEditActivities),
         KeyCode::Char('f') if app.can_act_on_selected_entry() => Some(Action::BeginEditFeelings),
         KeyCode::Char('m') if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
+        KeyCode::Char('i' | '0'..='9')
+            if app.focus == Focus::EntryView && app.has_selected_entry_target() =>
+        {
+            image_shortcut(app, key)
+        }
         KeyCode::Char('h') => Some(Action::ToggleHints),
         KeyCode::Char('j') => Some(Action::ToggleJournals),
         _ => None,
@@ -138,6 +160,11 @@ fn search_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         }
         KeyCode::Char('m') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             Some(Action::BeginEditMood)
+        }
+        KeyCode::Char('i' | '0'..='9')
+            if app.focus == Focus::EntryView && app.has_selected_entry_target() =>
+        {
+            image_shortcut(app, key)
         }
         KeyCode::Backspace if app.focus == Focus::Entries => Some(Action::SearchBackspace),
         KeyCode::Char(ch) if app.focus == Focus::Entries => Some(Action::SearchInput(ch)),
@@ -201,6 +228,17 @@ fn mood_key_to_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Delete | KeyCode::Backspace => Some(Action::MoodClear),
         KeyCode::Left => Some(Action::MoodDecrease),
         KeyCode::Right => Some(Action::MoodIncrease),
+        _ => None,
+    }
+}
+
+fn image_viewer_key_to_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char('i') => {
+            Some(Action::CancelOverlay)
+        }
+        KeyCode::Left | KeyCode::Up => Some(Action::ImageViewerPrev),
+        KeyCode::Right | KeyCode::Down => Some(Action::ImageViewerNext),
         _ => None,
     }
 }

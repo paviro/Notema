@@ -1,0 +1,72 @@
+//! Terminal-graphics backend: protocol detection and encoding a decoded image
+//! into a [`SlicedProtocol`] sized to fit the viewer.
+
+use journal_storage::JournalStore;
+use ratatui::layout::Size;
+use ratatui_image::{
+    picker::{Picker, ProtocolType},
+    sliced::SlicedProtocol,
+};
+
+use super::CacheKey;
+
+/// Upper bound (px) on the longest side an image is decoded to. The effective
+/// cap is the smaller of this and the terminal's pixel viewport (see
+/// [`build_protocol`]); this ceiling only bites on very large displays.
+const MAX_IMAGE_DIMENSION: u32 = 3000;
+
+/// Query the terminal for a graphics protocol, applying the iTerm2 fix. `None`
+/// when the query fails; the caller then falls back to ASCII art.
+pub(super) fn detect_picker() -> Option<Picker> {
+    let mut picker = Picker::from_query_stdio().ok()?;
+    prefer_iterm2_over_kitty(&mut picker);
+    Some(picker)
+}
+
+/// iTerm2 (3.5+) answers the Kitty capability query, so
+/// [`Picker::from_query_stdio`] picks [`ProtocolType::Kitty`] — but
+/// ratatui-image's Kitty renderer uses Unicode placeholders that iTerm2 doesn't
+/// implement, so nothing appears. Force iTerm2's own inline-image protocol
+/// instead. Mirrors ratatui-image's existing WezTerm/Konsole blacklist for the
+/// same "answers the query but has no placeholder support" reason.
+fn prefer_iterm2_over_kitty(picker: &mut Picker) {
+    if picker.protocol_type() == ProtocolType::Kitty && is_iterm2() {
+        picker.set_protocol_type(ProtocolType::Iterm2);
+    }
+}
+
+/// Whether the host terminal is iTerm2, per the env vars it (and terminals
+/// tunnelling through it via `LC_TERMINAL`) set.
+fn is_iterm2() -> bool {
+    std::env::var_os("TERM_PROGRAM").is_some_and(|value| value == "iTerm.app")
+        || std::env::var_os("LC_TERMINAL").is_some_and(|value| value == "iTerm2")
+}
+
+/// Decrypt, decode and encode an image into a terminal protocol sized to fit
+/// the viewer area. `None` if any step fails.
+pub(super) fn build_protocol(
+    store: &JournalStore,
+    picker: &Picker,
+    key: &CacheKey,
+) -> Option<SlicedProtocol> {
+    let bytes = store
+        .read_entry_asset_bytes(&key.entry_path, &key.file_name)
+        .ok()??;
+    // Cap the decode before the color transform and encoding: full-res photos
+    // otherwise spawn several full-frame intermediate buffers (see
+    // `decode_image_with_orientation`), spiking memory far beyond the small
+    // cached protocol. Cap to the device's pixel viewport (viewer cells × font
+    // cell size), clamped to `MAX_IMAGE_DIMENSION` so a huge display can't blow up.
+    let font = picker.font_size();
+    let max_width =
+        (u32::from(key.width) * u32::from(font.width.max(1))).clamp(1, MAX_IMAGE_DIMENSION);
+    let max_height =
+        (u32::from(key.height) * u32::from(font.height.max(1))).clamp(1, MAX_IMAGE_DIMENSION);
+    let image =
+        journal_storage::decode_image_with_orientation(&bytes, Some((max_width, max_height)))
+            .ok()?;
+    // `SlicedProtocol` fits the image into the area preserving aspect ratio,
+    // downscaling the already-capped image to the cell footprint.
+    let bounds = Size::new(key.width.max(1), key.height.max(1));
+    SlicedProtocol::new(picker, image, Some(bounds)).ok()
+}

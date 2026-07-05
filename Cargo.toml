@@ -11,12 +11,20 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
 dirs = "6"
+image = { version = "0.25", default-features = false }
+# rascii_art still targets image 0.24; a second, decode-feature-free copy lets us
+# hand it images we already decoded on the 0.25 side (see `tui::image::to_rascii_image`).
+image_024 = { package = "image", version = "0.24", default-features = false }
 journal-core = { path = "crates/journal-core" }
 journal-storage = { path = "crates/journal-storage" }
+mimalloc = "0.1"
 notify = "7.0"
 ratatui = "0.30"
 ratatui_029 = { package = "ratatui", version = "0.29" }
+ratatui-image = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
 ratatui-markdown = { version = "0.3.6", default-features = false, features = ["markdown", "mermaid"] }
+rascii_art = "0.4.5"
+rayon = "1"
 rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 shell-words = "1"

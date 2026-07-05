@@ -1,4 +1,4 @@
-use super::paths::{entry_id, is_encrypted_entry_file, is_entry_file};
+use super::paths::{entry_id, is_assets_dir, is_encrypted_entry_file, is_entry_file};
 use super::{Entry, EntryEncryptionState, EntryPath};
 use crate::storage::{journals::is_hidden_name, list_journals};
 use crate::{
@@ -45,7 +45,7 @@ fn collect_paths(journal: &str, dir: &Path, paths: &mut Vec<EntryPath>) -> AppRe
         let path = item.path();
         let name = item.file_name().to_string_lossy().to_string();
         if item.file_type()?.is_dir() {
-            if !is_hidden_name(&name) {
+            if !is_hidden_name(&name) && !is_assets_dir(&path) {
                 collect_paths(journal, &path, paths)?;
             }
             continue;

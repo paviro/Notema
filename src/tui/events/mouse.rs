@@ -32,6 +32,11 @@ pub(crate) fn handle_mouse(
             }
             return Ok(false);
         }
+        // Clicking an entry-view `[Image N …]` label opens the viewer via the
+        // same action as the footer hint and keyboard shortcut.
+        if let Some(index) = app.image_label_at(mouse.column, mouse.row) {
+            return super::dispatch_action(terminal, app, Action::OpenImageViewer(index));
+        }
     }
 
     handle_mouse_in_area(app, mouse, area)?;
@@ -439,6 +444,9 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::MoodIncrease => Some(Action::MoodIncrease),
         render::HintId::MoodSave => Some(Action::MoodSave),
         render::HintId::MoodClear => Some(Action::MoodClear),
+        render::HintId::OpenImageViewer if app.selected_entry_image_count() > 0 => {
+            Some(Action::OpenImageViewer(0))
+        }
         render::HintId::HintsToggle => Some(Action::ToggleHints),
         render::HintId::ToggleJournals => Some(Action::ToggleJournals),
         _ => None,

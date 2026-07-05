@@ -56,6 +56,28 @@ pub fn entry_id(path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The sibling asset directory for an entry: `<parent>/<stem>.assets`, where
+/// `<stem>` is the entry id (the file name without the `.md`/`.md.age` suffix).
+/// Images referenced by the entry are stored (and encrypted) inside it.
+pub(crate) fn entry_assets_dir(entry_path: &Path) -> Option<PathBuf> {
+    let stem = entry_id(entry_path)?;
+    let parent = entry_path.parent()?;
+    Some(parent.join(format!("{stem}.assets")))
+}
+
+/// The directory name used for an entry's asset folder inside the body links,
+/// e.g. `2026-07-05T14-30-00-abc123.assets`.
+pub(crate) fn entry_assets_dir_name(entry_path: &Path) -> Option<String> {
+    Some(format!("{}.assets", entry_id(entry_path)?))
+}
+
+/// True when `path` names a per-entry asset directory (`<stem>.assets`).
+pub(crate) fn is_assets_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".assets"))
+}
+
 pub(crate) fn entry_date_from_path(path: &Path) -> Option<NaiveDate> {
     let stem = path.file_stem()?.to_str()?;
     let date = stem.get(..10)?;

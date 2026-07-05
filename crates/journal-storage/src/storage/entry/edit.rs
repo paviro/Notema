@@ -1,4 +1,4 @@
-use super::paths::ENTRY_ID_LEN;
+use super::paths::{ENTRY_ID_LEN, entry_assets_dir};
 use crate::{AppResult, crypto, markdown};
 use nanoid::nanoid;
 use std::{
@@ -66,6 +66,7 @@ pub fn edit_entry_body(
 
     if remove_if_empty && new_body.trim().is_empty() {
         fs::remove_file(path)?;
+        remove_entry_assets(path);
         return Ok(false);
     }
 
@@ -81,7 +82,19 @@ pub fn edit_entry_body(
 }
 
 pub fn delete_empty_entry(path: &Path) -> AppResult<()> {
-    Ok(fs::remove_file(path)?)
+    fs::remove_file(path)?;
+    remove_entry_assets(path);
+    Ok(())
+}
+
+/// Remove an entry's sibling `<stem>.assets` folder, if present. Best-effort:
+/// failures are ignored since the entry itself is already gone.
+fn remove_entry_assets(entry_path: &Path) {
+    if let Some(assets) = entry_assets_dir(entry_path)
+        && assets.exists()
+    {
+        let _ = fs::remove_dir_all(assets);
+    }
 }
 
 fn write_entry_content(
@@ -139,8 +152,38 @@ pub fn move_entry_to_trash(root: &Path, entry_path: &Path) -> AppResult<PathBuf>
     if let Some(parent) = trash_path.parent() {
         fs::create_dir_all(parent)?;
     }
+    preflight_entry_assets_trash(entry_path, &trash_path)?;
     fs::rename(entry_path, &trash_path)?;
+    move_entry_assets_to_trash(entry_path, &trash_path)?;
     Ok(trash_path)
+}
+
+fn preflight_entry_assets_trash(entry_path: &Path, trash_path: &Path) -> AppResult<()> {
+    let (Some(source), Some(dest)) = (entry_assets_dir(entry_path), entry_assets_dir(trash_path))
+    else {
+        return Ok(());
+    };
+    if source.exists() && dest.exists() {
+        return Err(format!("asset trash destination already exists: {}", dest.display()).into());
+    }
+    Ok(())
+}
+
+/// Move an entry's sibling `<stem>.assets` folder next to its trashed entry
+/// file so images are trashed together with the entry.
+fn move_entry_assets_to_trash(entry_path: &Path, trash_path: &Path) -> AppResult<()> {
+    let (Some(source), Some(dest)) = (entry_assets_dir(entry_path), entry_assets_dir(trash_path))
+    else {
+        return Ok(());
+    };
+    if !source.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::rename(&source, &dest)?;
+    Ok(())
 }
 
 pub(super) fn encrypted_replacement_temp_path(path: &Path) -> PathBuf {

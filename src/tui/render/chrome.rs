@@ -35,6 +35,7 @@ pub(crate) enum HintId {
     MoodIncrease,
     MoodSave,
     MoodClear,
+    OpenImageViewer,
     HintsToggle,
     ToggleJournals,
 }
@@ -398,6 +399,7 @@ fn search_footer_line(app: &App) -> HintLine {
     let hints = match app.focus {
         Focus::EntryView if app.has_selected_entry_target() => {
             let mut hints = selected_entry_action_hints(true);
+            hints.extend(image_hint(app));
             hints.push(Hint::new("exit search", "esc", HintId::ExitSearch));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
@@ -436,6 +438,8 @@ fn browse_footer_line(app: &App) -> HintLine {
             if app.has_selected_entry_target() {
                 hints.extend(selected_entry_action_hints(true));
             }
+            // The image viewer opens only from a focused entry view, so no
+            // `images` hint here.
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
             hints.push(journals_hint(app));
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));
@@ -447,6 +451,7 @@ fn browse_footer_line(app: &App) -> HintLine {
             if app.has_selected_entry_target() {
                 hints.extend(selected_entry_action_hints(true));
             }
+            hints.extend(image_hint(app));
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
             hints.push(journals_hint(app));
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));
@@ -459,6 +464,15 @@ fn browse_footer_line(app: &App) -> HintLine {
         prefix: None,
         hints,
     }
+}
+
+/// The `images (i)` hint, shown only when the selected entry has images.
+fn image_hint(app: &App) -> Option<Hint> {
+    (app.selected_entry_image_count() > 0).then_some(Hint::new(
+        "images",
+        "i",
+        HintId::OpenImageViewer,
+    ))
 }
 
 fn journals_hint(app: &App) -> Hint {
@@ -497,6 +511,7 @@ fn expanded_footer_hints(app: &App) -> Vec<Hint> {
         hints.push(Hint::new("act", "a", HintId::BeginEditActivities));
         hints.push(Hint::new("feel", "f", HintId::BeginEditFeelings));
         hints.push(Hint::new("mood", "m", HintId::BeginEditMood));
+        hints.extend(image_hint(app));
     } else {
         hints.push(Hint::new("close", "enter/esc", HintId::CancelOverlay));
     }

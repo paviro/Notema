@@ -412,3 +412,55 @@ fn delete_moves_entry_to_journal_trash() {
     assert!(trash.exists());
     assert!(!path.exists());
 }
+
+#[test]
+fn delete_relocates_entry_asset_folder_to_trash() {
+    let dir = tempdir().unwrap();
+    let day = dir.path().join("work").join("2026").join("07").join("01");
+    fs::create_dir_all(&day).unwrap();
+    let path = day.join("id.md");
+    fs::write(&path, "body").unwrap();
+    let assets = day.join("id.assets");
+    fs::create_dir_all(&assets).unwrap();
+    fs::write(assets.join("x9.png"), b"img").unwrap();
+
+    move_entry_to_trash(dir.path(), &path).unwrap();
+
+    let trashed_assets = dir
+        .path()
+        .join(".trash")
+        .join("work")
+        .join("2026")
+        .join("07")
+        .join("01")
+        .join("id.assets");
+    assert!(trashed_assets.join("x9.png").exists());
+    assert!(!assets.exists());
+}
+
+#[test]
+fn delete_does_not_move_entry_when_asset_trash_destination_exists() {
+    let dir = tempdir().unwrap();
+    let day = dir.path().join("work").join("2026").join("07").join("01");
+    fs::create_dir_all(&day).unwrap();
+    let path = day.join("id.md");
+    fs::write(&path, "body").unwrap();
+    let assets = day.join("id.assets");
+    fs::create_dir_all(&assets).unwrap();
+    fs::write(assets.join("x9.png"), b"img").unwrap();
+    let trashed_assets = dir
+        .path()
+        .join(".trash")
+        .join("work")
+        .join("2026")
+        .join("07")
+        .join("01")
+        .join("id.assets");
+    fs::create_dir_all(&trashed_assets).unwrap();
+
+    let error = move_entry_to_trash(dir.path(), &path).unwrap_err();
+
+    assert!(error.to_string().contains("asset trash destination"));
+    assert!(path.exists());
+    assert!(assets.join("x9.png").exists());
+}

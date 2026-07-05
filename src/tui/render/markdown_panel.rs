@@ -16,8 +16,11 @@ use ratatui_markdown::{
     theme::{CodeColors, ThemeConfig},
 };
 
+use std::path::Path;
+
 use crate::tui::{
-    app::{App, Focus},
+    app::{App, EntryViewImageHits, Focus},
+    image::{digit_for_image, sole_image_ref},
     render::{
         count_label, entry_metadata_layout, panel_block, render_scrollbar_if_needed, viewer_scroll,
     },
@@ -36,21 +39,32 @@ pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &
         let activities = app.selected_entry_activities();
         let feelings = app.selected_entry_feelings();
         let mood = app.selected_entry_mood();
-        app.scroll.entry_view = draw_markdown_panel(
+        let entry_path = app.selected_entry_target().map(|target| target.path);
+
+        let (scroll, labels, content_rect) = draw_markdown_panel(
             frame,
             area,
-            &title,
-            &content,
-            EntryMetadata {
-                tags: &tags,
-                people: &people,
-                activities: &activities,
-                feelings: &feelings,
-                mood,
+            PanelEntry {
+                title: &title,
+                content: &content,
+                metadata: EntryMetadata {
+                    tags: &tags,
+                    people: &people,
+                    activities: &activities,
+                    feelings: &feelings,
+                    mood,
+                },
             },
             app.scroll.entry_view,
             app.focus == Focus::EntryView,
+            entry_path.as_deref(),
         );
+        app.scroll.entry_view = scroll;
+        app.entry_view_image_hits = EntryViewImageHits {
+            content_rect,
+            scroll,
+            labels,
+        };
     } else {
         let empty = Paragraph::new("No entry selected").block(panel_block(
             "Entry",
@@ -65,15 +79,29 @@ fn word_count(s: &str) -> usize {
     s.split_whitespace().count()
 }
 
+/// The entry content rendered by the markdown panel.
+struct PanelEntry<'a> {
+    title: &'a str,
+    content: &'a str,
+    metadata: EntryMetadata<'a>,
+}
+
+/// Draw the entry body and metadata, returning the applied scroll, the clickable
+/// image-label positions (`(body line index, image index)`), and the body rect
+/// (for mapping clicks back to labels).
 fn draw_markdown_panel(
     frame: &mut Frame<'_>,
     area: Rect,
-    title: &str,
-    content: &str,
-    metadata: EntryMetadata<'_>,
+    entry: PanelEntry<'_>,
     requested_scroll: u16,
     focused: bool,
-) -> u16 {
+    entry_path: Option<&Path>,
+) -> (u16, Vec<(usize, usize)>, Rect) {
+    let PanelEntry {
+        title,
+        content,
+        metadata,
+    } = entry;
     let wc = word_count(content);
     let block = panel_block(title, focused, Some(count_label(wc, "word", "words")));
     let layout = entry_metadata_layout(area, metadata.values());
@@ -87,8 +115,7 @@ fn draw_markdown_panel(
     let width = content_rect.width.saturating_sub(1).max(1) as usize;
     let theme = markdown_theme();
     let renderer = MarkdownRenderer::new(width);
-    let blocks = prepare_markdown_blocks(renderer.parse(content), &renderer, &theme);
-    let mut lines = adapt_markdown_lines(renderer.render(&blocks, &theme));
+    let (mut lines, labels) = build_body_lines(content, &renderer, &theme, entry_path);
     if metadata_scrolls {
         lines.extend(metadata_section_lines(content_rect.width, metadata));
     }
@@ -104,11 +131,122 @@ fn draw_markdown_panel(
 
     render_scrollbar_if_needed(frame, area, line_count, content_rect.height, scroll);
 
-    scroll
+    (scroll, labels, content_rect)
 }
 
 fn metadata_scrolls_with_body(area: Rect) -> bool {
     area.height < SCROLLING_METADATA_ENTRY_VIEW_HEIGHT_CUTOFF
+}
+
+/// Build the entry-body lines, replacing each lone in-folder image with a
+/// clickable `[Image N …]` label and recording `(body line index, image index)`
+/// so clicks and the viewer agree on numbering. Without an entry path the body
+/// is rendered as-is.
+fn build_body_lines(
+    content: &str,
+    renderer: &MarkdownRenderer,
+    theme: &ThemeConfig,
+    entry_path: Option<&Path>,
+) -> (Vec<Line<'static>>, Vec<(usize, usize)>) {
+    let Some(entry_path) = entry_path else {
+        return (render_text_chunk(content, renderer, theme), Vec::new());
+    };
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut labels = Vec::new();
+    let mut buffer = String::new();
+    let mut image_index = 0usize;
+    // True while the last emitted row was an image label with nothing buffered
+    // since. Lets a blank source line right after an image emit an explicit blank
+    // row instead of being swallowed by the empty buffer, preserving the gap.
+    let mut after_image = false;
+
+    for line in content.split('\n') {
+        let Some((alt, _asset)) = sole_image_ref(line, entry_path) else {
+            if after_image && buffer.is_empty() && line.trim().is_empty() {
+                lines.push(Line::from(""));
+                continue;
+            }
+            if !buffer.is_empty() {
+                buffer.push('\n');
+            }
+            buffer.push_str(line);
+            after_image = false;
+            continue;
+        };
+
+        if !buffer.is_empty() {
+            // A trailing blank source line leaves the buffer ending in a single
+            // `\n`, which the renderer collapses; add a second so the gap before
+            // the label survives.
+            if buffer.ends_with('\n') {
+                buffer.push('\n');
+            }
+            lines.extend(render_text_chunk(&buffer, renderer, theme));
+            buffer.clear();
+        }
+        after_image = true;
+
+        let start_row = lines.len();
+        lines.push(image_label_line(image_index, &alt));
+        labels.push((start_row, image_index));
+        image_index += 1;
+    }
+
+    if !buffer.is_empty() {
+        lines.extend(render_text_chunk(&buffer, renderer, theme));
+    }
+
+    (lines, labels)
+}
+
+/// A clickable `[Image N: alt - click here or press K]` label. The number is
+/// 1-based; images 1-9 bind to their digit, the tenth to `0`, and later images
+/// drop the `press K` hint (no digit left to bind).
+fn image_label_line(index: usize, alt: &str) -> Line<'static> {
+    let alt = alt.trim();
+    let number = index + 1;
+    let head = if alt.is_empty() {
+        format!("Image {number}")
+    } else {
+        format!("Image {number}: {alt}")
+    };
+    let text = match digit_for_image(index) {
+        Some(key) => format!("[{head} - click here or press {key}]"),
+        None => format!("[{head} - click here]"),
+    };
+    Line::from(Span::styled(
+        text,
+        Style::default().add_modifier(Modifier::UNDERLINED),
+    ))
+}
+
+/// Render a chunk of markdown text into owned (`'static`) lines.
+fn render_text_chunk(
+    text: &str,
+    renderer: &MarkdownRenderer,
+    theme: &ThemeConfig,
+) -> Vec<Line<'static>> {
+    let blocks = prepare_markdown_blocks(renderer.parse(text), renderer, theme);
+    adapt_markdown_lines(renderer.render(&blocks, theme))
+        .into_iter()
+        .map(into_owned_line)
+        .collect()
+}
+
+fn into_owned_line(line: Line<'_>) -> Line<'static> {
+    Line {
+        style: line.style,
+        alignment: line.alignment,
+        spans: line
+            .spans
+            .into_iter()
+            .map(|span| Span {
+                style: span.style,
+                content: std::borrow::Cow::Owned(span.content.into_owned()),
+            })
+            .collect(),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -630,5 +768,100 @@ fn adapt_markdown_color(color: MarkdownColor) -> Color {
         MarkdownColor::White => Color::White,
         MarkdownColor::Rgb(r, g, b) => Color::Rgb(r, g, b),
         MarkdownColor::Indexed(index) => Color::Indexed(index),
+    }
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    fn entry_path_with_asset() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("2026-07-05T14-30-00-abc123.assets");
+        fs::create_dir_all(&assets).unwrap();
+        fs::write(assets.join("x9k2.png"), b"img").unwrap();
+        fs::write(assets.join("aa11.png"), b"img").unwrap();
+        let entry_path = dir.path().join("2026-07-05T14-30-00-abc123.md");
+        fs::write(&entry_path, b"entry").unwrap();
+        (dir, entry_path)
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn image_label_includes_alt_and_press_hint_and_is_one_based() {
+        assert_eq!(
+            line_text(&image_label_line(0, "sunset")),
+            "[Image 1: sunset - click here or press 1]"
+        );
+        assert_eq!(
+            line_text(&image_label_line(3, "")),
+            "[Image 4 - click here or press 4]"
+        );
+    }
+
+    #[test]
+    fn tenth_image_binds_to_zero_key() {
+        assert_eq!(
+            line_text(&image_label_line(9, "")),
+            "[Image 10 - click here or press 0]"
+        );
+    }
+
+    #[test]
+    fn image_label_past_ten_drops_press_hint() {
+        assert_eq!(
+            line_text(&image_label_line(10, "late")),
+            "[Image 11: late - click here]"
+        );
+    }
+
+    /// Each lone in-folder image becomes a numbered clickable label, and its body
+    /// line index is recorded so clicks map back to the right image.
+    #[test]
+    fn replaces_images_with_numbered_labels_and_records_positions() {
+        let (_guard, entry_path) = entry_path_with_asset();
+        let renderer = MarkdownRenderer::new(40);
+        let theme = markdown_theme();
+        let content = concat!(
+            "Text above\n",
+            "\n",
+            "![a shot](2026-07-05T14-30-00-abc123.assets/x9k2.png)\n",
+            "\n",
+            "![](2026-07-05T14-30-00-abc123.assets/aa11.png)\n",
+            "\n",
+            "Text below",
+        );
+
+        let (lines, labels) = build_body_lines(content, &renderer, &theme, Some(&entry_path));
+
+        let rendered: Vec<String> = lines.iter().map(line_text).collect();
+        assert_eq!(
+            rendered,
+            vec![
+                "Text above".to_string(),
+                String::new(),
+                "[Image 1: a shot - click here or press 1]".to_string(),
+                String::new(),
+                "[Image 2 - click here or press 2]".to_string(),
+                String::new(),
+                "Text below".to_string(),
+            ],
+        );
+        assert_eq!(labels, vec![(2, 0), (4, 1)]);
+    }
+
+    /// Without an entry path (no selected entry) the body renders untouched.
+    #[test]
+    fn no_labels_without_entry_path() {
+        let renderer = MarkdownRenderer::new(40);
+        let theme = markdown_theme();
+        let (_lines, labels) = build_body_lines("just text", &renderer, &theme, None);
+        assert!(labels.is_empty());
     }
 }

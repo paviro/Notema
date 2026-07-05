@@ -4,16 +4,20 @@ use journal_storage::{
     Entry, EntryEncryptionState, EntryPath, Journal, JournalStore, SearchHit, SearchScopeFilter,
     entry_timestamp_label, search_loaded_entries,
 };
-use std::{path::PathBuf, time::Duration};
+use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Duration};
 
-use ratatui::widgets::ListState;
+use ratatui::{
+    layout::{Rect, Size},
+    widgets::ListState,
+};
 
 use super::state::{
-    DeleteContext, EditFeelingState, EditMoodState, EditTagState, MetadataKind, Overlay,
-    ScrollState, SearchState, StatusBar, ensure_selected_visible, move_list_selection,
+    DeleteContext, EditFeelingState, EditMoodState, EditTagState, ImageViewerState, MetadataKind,
+    Overlay, ScrollState, SearchState, StatusBar, ensure_selected_visible, move_list_selection,
     normalize_list_state, scroll_list_offset,
 };
 use crate::tui::entry_rows::EntryRowMeta;
+use crate::tui::image::{ImageAsset, ImageRuntime, entry_images, viewer_image_size};
 
 pub(crate) const JOURNAL_LIST_WIDTH: u16 = 22;
 pub(crate) const ENTRY_LIST_INLINE_WIDTH: u16 = 42;
@@ -68,6 +72,26 @@ pub(crate) struct App {
     pub(crate) search: SearchState,
     pub(crate) overlay: Overlay,
     pub(crate) status_bar: StatusBar,
+    pub(crate) images: ImageRuntime,
+    /// `(entry_path, viewer_size)` the image cache is warmed for, or `None` when
+    /// no entry view is open. Compared against the desired context each tick.
+    image_warm: Option<(PathBuf, Size)>,
+    /// Clickable `[Image N …]` label positions from the last entry-view render.
+    pub(crate) entry_view_image_hits: EntryViewImageHits,
+    /// Selected entry's in-folder images, memoized by path; `RefCell` so `&self`
+    /// render/hint/shortcut paths can read it. Re-parsed on a path change or when
+    /// `refresh` clears it.
+    selected_images_cache: RefCell<Option<(PathBuf, Rc<Vec<ImageAsset>>)>>,
+}
+
+/// Clickable image label positions in the entry view, captured at render time so
+/// the mouse handler can map a click back to an image index.
+#[derive(Default)]
+pub(crate) struct EntryViewImageHits {
+    pub(crate) content_rect: Rect,
+    pub(crate) scroll: u16,
+    /// `(body line index, image index)` per label line.
+    pub(crate) labels: Vec<(usize, usize)>,
 }
 
 impl App {
@@ -97,6 +121,10 @@ impl App {
             search: SearchState::default(),
             overlay: Overlay::None,
             status_bar: StatusBar::default(),
+            images: ImageRuntime::default(),
+            image_warm: None,
+            entry_view_image_hits: EntryViewImageHits::default(),
+            selected_images_cache: RefCell::new(None),
         };
         app.load_entries(entry_paths)?;
         // Restore the journal selected in the previous session without disturbing
@@ -116,6 +144,11 @@ impl App {
 
     pub(crate) fn refresh(&mut self) -> AppResult<()> {
         self.store.ensure()?;
+        self.images.clear();
+        // Content may have changed: force `sync_image_warm` to rebuild next tick
+        // and drop the memo so images are re-parsed from the reloaded body.
+        self.image_warm = None;
+        self.selected_images_cache.borrow_mut().take();
         let entry_paths = self.store.collect_entry_paths()?;
         self.load_entries(entry_paths)
     }
@@ -552,7 +585,137 @@ impl App {
     }
 
     pub(crate) fn close_overlay(&mut self) {
+        // Cache is scoped to the entry-viewing session, not the viewer overlay
+        // (see `sync_image_warm`), so reopening within the same entry stays warm.
         self.overlay = Overlay::None;
+    }
+
+    /// Manage the image cache lifecycle. Called every tick. Warming is kicked off
+    /// when the fullscreen viewer opens (not merely when the entry does), so we
+    /// don't decode images the user may never look at. The cache then lives until
+    /// the entry closes (or switches, or the target size changes), so reopening
+    /// the viewer within the same entry stays instant.
+    pub(crate) fn sync_image_warm(&mut self, terminal_size: Size) {
+        let size = viewer_image_size(Rect::new(0, 0, terminal_size.width, terminal_size.height));
+        // The entry currently open in the entry view, if any.
+        let open_entry = self
+            .selected_entry_target()
+            .map(|target| target.path)
+            .filter(|_| self.focus == Focus::EntryView);
+
+        // Drop the cache when the entry that warmed it is no longer open (closed
+        // or switched to another entry) or the viewer's target size changed.
+        let stale = match &self.image_warm {
+            Some((warmed_path, warmed_size)) => {
+                open_entry.as_deref() != Some(warmed_path.as_path()) || *warmed_size != size
+            }
+            None => false,
+        };
+        if stale {
+            self.images.clear();
+            self.image_warm = None;
+        }
+
+        // Warm only once the viewer is actually opened. `image_warm` is `None`
+        // here only when nothing valid is cached (a matching cache is never
+        // stale), so this builds each entry's images at most once per session.
+        if matches!(self.overlay, Overlay::ImageViewer(_))
+            && self.image_warm.is_none()
+            && let Some(path) = open_entry
+        {
+            let assets = self.selected_images();
+            if !assets.is_empty() {
+                self.images.warm(&assets, size);
+                self.image_warm = Some((path, size));
+            }
+        }
+    }
+
+    /// Selected entry's referenced images in body order, memoized per entry path
+    /// since hot callers hit it every render, keypress, and tick. Empty when no
+    /// entry is selected or it has no in-folder images.
+    fn selected_images(&self) -> Rc<Vec<ImageAsset>> {
+        let target_path = self.selected_entry_target().map(|target| target.path);
+
+        if let Some((path, images)) = self.selected_images_cache.borrow().as_ref()
+            && target_path.as_deref() == Some(path.as_path())
+        {
+            return images.clone();
+        }
+
+        let images = Rc::new(match (&target_path, self.selected_entry_view()) {
+            (Some(path), Some((_, content))) => entry_images(&content, path),
+            _ => Vec::new(),
+        });
+        if let Some(path) = target_path {
+            *self.selected_images_cache.borrow_mut() = Some((path, images.clone()));
+        }
+        images
+    }
+
+    /// Owned copy for the viewer overlay, which takes ownership. Prefer
+    /// [`Self::selected_images`] on read-only paths.
+    fn selected_entry_images(&self) -> Vec<ImageAsset> {
+        (*self.selected_images()).clone()
+    }
+
+    /// In-folder image count for the selected entry; drives the `i` footer hint
+    /// and the digit shortcuts.
+    pub(crate) fn selected_entry_image_count(&self) -> usize {
+        self.selected_images().len()
+    }
+
+    /// Open the fullscreen viewer on the selected entry's image at `index`
+    /// (clamped); no-op when the entry has no images. Focuses the entry view
+    /// first so the viewer is only ever open with `Focus::EntryView` — the
+    /// invariant [`App::sync_image_warm`] relies on to own the cache lifecycle.
+    pub(crate) fn begin_image_viewer(&mut self, index: usize) {
+        let assets = self.selected_entry_images();
+        if assets.is_empty() {
+            return;
+        }
+        self.focus = Focus::EntryView;
+        let index = index.min(assets.len() - 1);
+        self.overlay = Overlay::ImageViewer(ImageViewerState { assets, index });
+    }
+
+    pub(crate) fn image_viewer_state(&self) -> Option<&ImageViewerState> {
+        match &self.overlay {
+            Overlay::ImageViewer(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Step the open viewer by `delta`, clamped at the ends.
+    pub(crate) fn image_viewer_step(&mut self, delta: isize) {
+        if let Overlay::ImageViewer(state) = &mut self.overlay {
+            let len = state.assets.len();
+            if len == 0 {
+                return;
+            }
+            state.index = (state.index as isize + delta).clamp(0, len as isize - 1) as usize;
+        }
+    }
+
+    /// Image index if `(col, row)` lands on a clickable image label in the entry
+    /// view, using the positions captured at render time.
+    pub(crate) fn image_label_at(&self, col: u16, row: u16) -> Option<usize> {
+        let hits = &self.entry_view_image_hits;
+        let rect = hits.content_rect;
+        if rect.width == 0
+            || rect.height == 0
+            || col < rect.x
+            || col >= rect.x + rect.width
+            || row < rect.y
+            || row >= rect.y + rect.height
+        {
+            return None;
+        }
+        let line_index = hits.scroll as usize + (row - rect.y) as usize;
+        hits.labels
+            .iter()
+            .find(|(label_row, _)| *label_row == line_index)
+            .map(|(_, image_index)| *image_index)
     }
 
     pub(crate) fn select_journal_by_name(&mut self, name: &str) {

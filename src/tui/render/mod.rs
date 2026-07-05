@@ -1,6 +1,7 @@
 mod chrome;
 mod dialogs;
 mod entries;
+mod image_viewer;
 mod journals;
 mod layout;
 mod markdown_panel;
@@ -12,7 +13,7 @@ use ratatui::{
     widgets::{ListState, Paragraph},
 };
 
-use super::app::{App, Focus, single_panel_is_active};
+use super::app::{App, EntryViewImageHits, Focus, single_panel_is_active};
 #[cfg(test)]
 pub(crate) use super::entry_rows::{
     EntryRowMeta, entry_day_label, entry_list_lines, entry_month_label,
@@ -50,6 +51,7 @@ pub(crate) use dialogs::{
     tags_dialog_hints, tags_dialog_layout,
 };
 use entries::draw_entry_list;
+use image_viewer::draw_image_viewer;
 use journals::draw_journals;
 pub(crate) use layout::{TuiLayout, tui_layout};
 use markdown_panel::draw_selected_entry_view;
@@ -75,6 +77,10 @@ pub(crate) fn list_state_for_render(
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
+
+    // Cleared each frame; the entry-view render repopulates it when an entry is
+    // shown, so a stale hit-map can't leak onto stats or empty views.
+    app.entry_view_image_hits = EntryViewImageHits::default();
 
     if single_panel_is_active(area.width) && app.focus == Focus::EntryView {
         let footer_height = expanded_footer_height(app, area.width).min(area.height);
@@ -141,6 +147,10 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
 
     if let Some(state) = app.edit_mood_state() {
         draw_edit_mood_dialog(frame, state);
+    }
+
+    if let Some(state) = app.image_viewer_state() {
+        draw_image_viewer(frame, state, &app.images);
     }
 }
 
