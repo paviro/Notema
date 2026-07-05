@@ -21,7 +21,10 @@ use crate::tui::{
     render::{
         count_label, entry_metadata_layout, panel_block, render_scrollbar_if_needed, viewer_scroll,
     },
-    surface::{EntryMetadataLayout, MetadataRowLayout, PanelGeometry, metadata_value_rows},
+    surface::{
+        EntryMetadataLayout, EntryMetadataValues, MetadataRowLayout, PanelGeometry,
+        metadata_value_rows,
+    },
 };
 
 const SCROLLING_METADATA_ENTRY_VIEW_HEIGHT_CUTOFF: u16 = 20;
@@ -29,6 +32,8 @@ const SCROLLING_METADATA_ENTRY_VIEW_HEIGHT_CUTOFF: u16 = 20;
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     if let Some((title, content)) = app.selected_entry_view() {
         let tags = app.selected_entry_tags();
+        let people = app.selected_entry_people();
+        let activities = app.selected_entry_activities();
         let feelings = app.selected_entry_feelings();
         let mood = app.selected_entry_mood();
         app.scroll.entry_view = draw_markdown_panel(
@@ -38,6 +43,8 @@ pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &
             &content,
             EntryMetadata {
                 tags: &tags,
+                people: &people,
+                activities: &activities,
                 feelings: &feelings,
                 mood,
             },
@@ -69,7 +76,7 @@ fn draw_markdown_panel(
 ) -> u16 {
     let wc = word_count(content);
     let block = panel_block(title, focused, Some(count_label(wc, "word", "words")));
-    let layout = entry_metadata_layout(area, metadata.tags, metadata.feelings, metadata.mood);
+    let layout = entry_metadata_layout(area, metadata.values());
     let metadata_scrolls = metadata_scrolls_with_body(area);
     let content_rect = if metadata_scrolls {
         PanelGeometry::new(area).content
@@ -107,8 +114,22 @@ fn metadata_scrolls_with_body(area: Rect) -> bool {
 #[derive(Clone, Copy)]
 struct EntryMetadata<'a> {
     tags: &'a [String],
+    people: &'a [String],
+    activities: &'a [String],
     feelings: &'a [String],
     mood: Option<i8>,
+}
+
+impl<'a> EntryMetadata<'a> {
+    fn values(self) -> EntryMetadataValues<'a> {
+        EntryMetadataValues {
+            tags: self.tags,
+            people: self.people,
+            activities: self.activities,
+            feelings: self.feelings,
+            mood: self.mood,
+        }
+    }
 }
 
 fn draw_metadata_section(
@@ -153,6 +174,32 @@ fn draw_metadata_section(
         );
     }
 
+    if !metadata.people.is_empty()
+        && let Some(row) = layout.people
+    {
+        frame.render_widget(
+            Paragraph::new(metadata_value_lines_for_row(
+                "People: ",
+                row,
+                metadata.people,
+            )),
+            row.rect,
+        );
+    }
+
+    if !metadata.activities.is_empty()
+        && let Some(row) = layout.activities
+    {
+        frame.render_widget(
+            Paragraph::new(metadata_value_lines_for_row(
+                "Activities: ",
+                row,
+                metadata.activities,
+            )),
+            row.rect,
+        );
+    }
+
     if !metadata.tags.is_empty()
         && let Some(row) = layout.tags
     {
@@ -164,7 +211,12 @@ fn draw_metadata_section(
 }
 
 fn metadata_section_lines(width: u16, metadata: EntryMetadata<'_>) -> Vec<Line<'static>> {
-    if metadata.mood.is_none() && metadata.feelings.is_empty() && metadata.tags.is_empty() {
+    if metadata.mood.is_none()
+        && metadata.feelings.is_empty()
+        && metadata.people.is_empty()
+        && metadata.activities.is_empty()
+        && metadata.tags.is_empty()
+    {
         return Vec::new();
     }
 
@@ -182,6 +234,22 @@ fn metadata_section_lines(width: u16, metadata: EntryMetadata<'_>) -> Vec<Line<'
             "Feelings: ".len() as u16,
             width,
             metadata.feelings,
+        ));
+    }
+    if !metadata.people.is_empty() {
+        lines.extend(metadata_value_lines_for_width(
+            "People: ",
+            "People: ".len() as u16,
+            width,
+            metadata.people,
+        ));
+    }
+    if !metadata.activities.is_empty() {
+        lines.extend(metadata_value_lines_for_width(
+            "Activities: ",
+            "Activities: ".len() as u16,
+            width,
+            metadata.activities,
         ));
     }
     if !metadata.tags.is_empty() {

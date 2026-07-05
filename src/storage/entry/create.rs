@@ -19,6 +19,27 @@ pub(crate) enum WriteTarget<'a> {
     Encrypted(&'a crypto::EncryptionPaths),
 }
 
+#[derive(Clone, Copy)]
+pub struct EntryMetadata<'a> {
+    pub tags: &'a [String],
+    pub people: &'a [String],
+    pub activities: &'a [String],
+    pub feelings: &'a [String],
+    pub mood: Option<i8>,
+}
+
+impl<'a> EntryMetadata<'a> {
+    fn empty() -> Self {
+        Self {
+            tags: &[],
+            people: &[],
+            activities: &[],
+            feelings: &[],
+            mood: None,
+        }
+    }
+}
+
 pub fn create_entry(root: &Path, journal: &str, editor: &str) -> AppResult<Option<PathBuf>> {
     let now = Local::now();
     let content = entry_template(now, now);
@@ -59,63 +80,47 @@ pub fn create_encrypted_entry(
     }
 }
 
-pub fn create_entry_with_editor_and_feelings(
+pub fn create_entry_with_editor_and_metadata(
     root: &Path,
     journal: &str,
     editor: &str,
-    tags: &[String],
-    feelings: &[String],
-    mood: Option<i8>,
+    metadata: EntryMetadata<'_>,
 ) -> AppResult<Option<PathBuf>> {
-    create_entry_from_editor(
-        root,
-        journal,
-        editor,
-        tags,
-        feelings,
-        mood,
-        WriteTarget::Plain,
-    )
+    create_entry_from_editor(root, journal, editor, metadata, WriteTarget::Plain)
 }
 
-pub fn create_encrypted_entry_with_editor_and_feelings(
+pub fn create_encrypted_entry_with_editor_and_metadata(
     root: &Path,
     journal: &str,
     editor: &str,
-    tags: &[String],
-    feelings: &[String],
-    mood: Option<i8>,
+    metadata: EntryMetadata<'_>,
     paths: &crypto::EncryptionPaths,
 ) -> AppResult<Option<PathBuf>> {
     create_entry_from_editor(
         root,
         journal,
         editor,
-        tags,
-        feelings,
-        mood,
+        metadata,
         WriteTarget::Encrypted(paths),
     )
 }
 
 pub fn create_entry_with_body(root: &Path, journal: &str, body: &str) -> AppResult<PathBuf> {
     let now = Local::now();
-    let content = entry_with_body(now, body, &[], &[], None);
+    let content = entry_with_body(now, body, EntryMetadata::empty());
     create_entry_file(root, journal, now, &content, WriteTarget::Plain, || {
         nanoid!(ENTRY_ID_LEN)
     })
 }
 
-pub fn create_entry_with_body_and_feelings(
+pub fn create_entry_with_body_and_metadata(
     root: &Path,
     journal: &str,
     body: &str,
-    tags: &[String],
-    feelings: &[String],
-    mood: Option<i8>,
+    metadata: EntryMetadata<'_>,
 ) -> AppResult<PathBuf> {
     let now = Local::now();
-    let content = entry_with_body(now, body, tags, feelings, mood);
+    let content = entry_with_body(now, body, metadata);
     create_entry_file(root, journal, now, &content, WriteTarget::Plain, || {
         nanoid!(ENTRY_ID_LEN)
     })
@@ -128,7 +133,7 @@ pub fn create_encrypted_entry_with_body(
     paths: &crypto::EncryptionPaths,
 ) -> AppResult<PathBuf> {
     let now = Local::now();
-    let content = entry_with_body(now, body, &[], &[], None);
+    let content = entry_with_body(now, body, EntryMetadata::empty());
     create_entry_file(
         root,
         journal,
@@ -139,17 +144,15 @@ pub fn create_encrypted_entry_with_body(
     )
 }
 
-pub fn create_encrypted_entry_with_body_and_feelings(
+pub fn create_encrypted_entry_with_body_and_metadata(
     root: &Path,
     journal: &str,
     body: &str,
-    tags: &[String],
-    feelings: &[String],
-    mood: Option<i8>,
+    metadata: EntryMetadata<'_>,
     paths: &crypto::EncryptionPaths,
 ) -> AppResult<PathBuf> {
     let now = Local::now();
-    let content = entry_with_body(now, body, tags, feelings, mood);
+    let content = entry_with_body(now, body, metadata);
     create_entry_file(
         root,
         journal,
@@ -164,15 +167,13 @@ fn create_entry_from_editor(
     root: &Path,
     journal: &str,
     editor: &str,
-    tags: &[String],
-    feelings: &[String],
-    mood: Option<i8>,
+    metadata: EntryMetadata<'_>,
     target: WriteTarget<'_>,
 ) -> AppResult<Option<PathBuf>> {
     let now = Local::now();
     let temp_path = unique_temp_path(&std::env::temp_dir(), "new-entry.md");
     let result = (|| {
-        fs::write(&temp_path, entry_with_body(now, "", tags, feelings, mood))?;
+        fs::write(&temp_path, entry_with_body(now, "", metadata))?;
         open_editor_body_only(editor, &temp_path)?;
         if !entry_has_body(&fs::read_to_string(&temp_path)?) {
             return Ok(None);
@@ -188,23 +189,27 @@ fn create_entry_from_editor(
     result
 }
 
-fn entry_with_body(
-    now: DateTime<Local>,
-    body: &str,
-    tags: &[String],
-    feelings: &[String],
-    mood: Option<i8>,
-) -> String {
+fn entry_with_body(now: DateTime<Local>, body: &str, metadata: EntryMetadata<'_>) -> String {
     let mut content = entry_template(now, now);
-    if !tags.is_empty() {
-        content = crate::markdown::set_tags_in_front_matter(&content, tags).unwrap_or(content);
-    }
-    if !feelings.is_empty() {
+    if !metadata.tags.is_empty() {
         content =
-            crate::markdown::set_feelings_in_front_matter(&content, feelings).unwrap_or(content);
+            crate::markdown::set_tags_in_front_matter(&content, metadata.tags).unwrap_or(content);
     }
-    if mood.is_some() {
-        content = crate::markdown::set_mood_in_front_matter(&content, mood).unwrap_or(content);
+    if !metadata.people.is_empty() {
+        content = crate::markdown::set_people_in_front_matter(&content, metadata.people)
+            .unwrap_or(content);
+    }
+    if !metadata.activities.is_empty() {
+        content = crate::markdown::set_activities_in_front_matter(&content, metadata.activities)
+            .unwrap_or(content);
+    }
+    if !metadata.feelings.is_empty() {
+        content = crate::markdown::set_feelings_in_front_matter(&content, metadata.feelings)
+            .unwrap_or(content);
+    }
+    if metadata.mood.is_some() {
+        content =
+            crate::markdown::set_mood_in_front_matter(&content, metadata.mood).unwrap_or(content);
     }
     content.push_str(body);
     if !content.ends_with('\n') {
@@ -263,7 +268,7 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 pub fn entry_template(created_at: DateTime<Local>, updated_at: DateTime<Local>) -> String {
     format!(
-        "+++\ncreated_at = \"{}\"\nupdated_at = \"{}\"\ntags = []\nfeelings = []\n+++\n\n",
+        "+++\ncreated_at = \"{}\"\nupdated_at = \"{}\"\ntags = []\npeople = []\nactivities = []\nfeelings = []\n+++\n\n",
         created_at.to_rfc3339(),
         updated_at.to_rfc3339()
     )

@@ -20,12 +20,15 @@ pub(crate) use super::entry_rows::{
 pub(crate) use super::entry_rows::{entry_row_metadata, total_entry_row_height};
 #[cfg(test)]
 pub(crate) use super::hit_test::journal_index_at;
-pub(crate) use super::hit_test::{entry_index_at, feeling_at_point, tag_at_point};
+pub(crate) use super::hit_test::{
+    activity_at_point, entry_index_at, feeling_at_point, person_at_point, tag_at_point,
+};
 #[cfg(test)]
 pub(crate) use super::scroll::scrollbar_position;
 pub(crate) use super::scroll::{clamp_scroll, viewer_scroll};
 pub(crate) use super::surface::{
-    EntryListGeometry, PanelGeometry, entry_metadata_layout, panel_inner, point_in_rect,
+    EntryListGeometry, EntryMetadataValues, PanelGeometry, entry_metadata_layout, panel_inner,
+    point_in_rect,
 };
 #[cfg(test)]
 pub(crate) use chrome::panel_title;
@@ -145,7 +148,7 @@ mod tests {
         storage::{Entry, EntryEncryptionState},
         tui::{
             app::{Focus, INLINE_ENTRY_VIEW_MIN_WIDTH, Mode},
-            state::{EditTagFocus, EditTagState},
+            state::{EditTagFocus, EditTagState, MetadataKind},
         },
     };
     use ratatui::{Terminal, backend::TestBackend, layout::Rect, style::Modifier};
@@ -218,6 +221,20 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect()
+    }
+
+    fn metadata_values<'a>(
+        tags: &'a [String],
+        feelings: &'a [String],
+        mood: Option<i8>,
+    ) -> EntryMetadataValues<'a> {
+        EntryMetadataValues {
+            tags,
+            people: &[],
+            activities: &[],
+            feelings,
+            mood,
+        }
     }
 
     fn render_confirm_delete_rows(width: u16, height: u16) -> Vec<String> {
@@ -394,7 +411,8 @@ mod tests {
         let area = Rect::new(42, 0, 60, 19);
         let tags = vec!["work".to_string()];
         let feelings = vec!["focused".to_string()];
-        let layout = crate::tui::surface::entry_metadata_layout(area, &tags, &feelings, Some(2));
+        let values = metadata_values(&tags, &feelings, Some(2));
+        let layout = crate::tui::surface::entry_metadata_layout(area, values);
         let feelings_row = layout.feelings.unwrap();
         let tags_row = layout.tags.unwrap();
 
@@ -403,9 +421,7 @@ mod tests {
                 area,
                 feelings_row.rect.x + feelings_row.prefix_width,
                 feelings_row.rect.y,
-                &tags,
-                &feelings,
-                Some(2)
+                values
             ),
             Some("focused".to_string())
         );
@@ -414,9 +430,7 @@ mod tests {
                 area,
                 tags_row.rect.x + tags_row.prefix_width,
                 tags_row.rect.y,
-                &tags,
-                &feelings,
-                Some(2)
+                values
             ),
             Some("work".to_string())
         );
@@ -427,7 +441,8 @@ mod tests {
         let area = Rect::new(42, 0, 60, 19);
         let tags = vec!["集中".to_string()];
         let feelings = vec!["嬉しい".to_string()];
-        let layout = crate::tui::surface::entry_metadata_layout(area, &tags, &feelings, None);
+        let values = metadata_values(&tags, &feelings, None);
+        let layout = crate::tui::surface::entry_metadata_layout(area, values);
         let feelings_row = layout.feelings.unwrap();
         let tags_row = layout.tags.unwrap();
 
@@ -436,9 +451,7 @@ mod tests {
                 area,
                 feelings_row.rect.x + feelings_row.prefix_width + 5,
                 feelings_row.rect.y,
-                &tags,
-                &feelings,
-                None
+                values
             ),
             Some("嬉しい".to_string())
         );
@@ -447,9 +460,7 @@ mod tests {
                 area,
                 tags_row.rect.x + tags_row.prefix_width + 3,
                 tags_row.rect.y,
-                &tags,
-                &feelings,
-                None
+                values
             ),
             Some("集中".to_string())
         );
@@ -494,8 +505,8 @@ mod tests {
             "tired".to_string(),
         ];
         let entry_view = Rect::new(0, 0, 24, 60 - expanded_footer_height(&app, 24));
-        let metadata =
-            crate::tui::surface::entry_metadata_layout(entry_view, &tags, &feelings, None);
+        let values = metadata_values(&tags, &feelings, None);
+        let metadata = crate::tui::surface::entry_metadata_layout(entry_view, values);
         let feelings_row = metadata.feelings.unwrap();
         let tags_row = metadata.tags.unwrap();
 
@@ -523,21 +534,12 @@ mod tests {
                 entry_view,
                 feelings_row.rect.x,
                 feelings_row.rect.y + 1,
-                &tags,
-                &feelings,
-                None
+                values
             ),
             Some("focused".to_string())
         );
         assert_eq!(
-            tag_at_point(
-                entry_view,
-                tags_row.rect.x,
-                tags_row.rect.y + 1,
-                &tags,
-                &feelings,
-                None
-            ),
+            tag_at_point(entry_view, tags_row.rect.x, tags_row.rect.y + 1, values),
             Some("personal".to_string())
         );
     }
@@ -646,7 +648,7 @@ mod tests {
             .collect();
         let filtered: Vec<usize> = (0..all_tags.len()).collect();
         let rendered = render_edit_tags_dialog_text(
-            EditTagState::new(all_tags, filtered, Vec::new()),
+            EditTagState::new(MetadataKind::Tags, all_tags, filtered, Vec::new()),
             200,
             20,
         );
@@ -664,7 +666,7 @@ mod tests {
             .map(|index| (format!("tag-{index:02}"), index))
             .collect();
         let filtered: Vec<usize> = (0..all_tags.len()).collect();
-        let mut state = EditTagState::new(all_tags, filtered, Vec::new());
+        let mut state = EditTagState::new(MetadataKind::Tags, all_tags, filtered, Vec::new());
         *state.list_state.offset_mut() = 5;
 
         let rendered = render_edit_tags_dialog_text(state, 200, 20);
@@ -674,13 +676,33 @@ mod tests {
 
     #[test]
     fn edit_tags_dialog_counts_no_matches_row_when_sizing() {
-        let mut state = EditTagState::new(vec![("work".to_string(), 1)], Vec::new(), Vec::new());
+        let mut state = EditTagState::new(
+            MetadataKind::Tags,
+            vec![("work".to_string(), 1)],
+            Vec::new(),
+            Vec::new(),
+        );
         state.input = "missing".to_string();
         state.focus = EditTagFocus::Input;
         let rendered = render_edit_tags_dialog_text(state, 200, 12);
 
         assert!(rendered.contains(" (no matches)"));
         assert!(rendered.contains(" add (enter) | list (tab) | cancel (esc)"));
+    }
+
+    #[test]
+    fn edit_metadata_input_hint_saves_when_empty_and_adds_when_not_empty() {
+        let mut empty = EditTagState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
+        empty.focus = EditTagFocus::Input;
+        let rendered_empty = render_edit_tags_dialog_text(empty, 200, 12);
+        assert!(rendered_empty.contains(" save (enter) | list (tab) | cancel (esc)"));
+
+        let mut with_value =
+            EditTagState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
+        with_value.focus = EditTagFocus::Input;
+        with_value.input = "alex".to_string();
+        let rendered_value = render_edit_tags_dialog_text(with_value, 200, 12);
+        assert!(rendered_value.contains(" add (enter) | list (tab) | cancel (esc)"));
     }
 
     #[test]
@@ -987,7 +1009,7 @@ mod tests {
 
         assert!(!text.contains("view (enter)"));
         assert!(!text.contains("edit (e)"));
-        assert!(!text.contains("delete (d)"));
+        assert!(!text.contains("del (d)"));
     }
 
     #[test]
@@ -999,7 +1021,7 @@ mod tests {
 
         assert!(text.contains("view (enter)"));
         assert!(text.contains("edit (e)"));
-        assert!(text.contains("delete (d)"));
+        assert!(text.contains("del (d)"));
     }
 
     #[test]
@@ -1013,9 +1035,9 @@ mod tests {
         for label in [
             "new entry (n)",
             "edit (e)",
-            "delete (d)",
+            "del (d)",
             "tags (t)",
-            "feelings (f)",
+            "feel (f)",
             "mood (m)",
             "search (/)",
             "quit (q)",
@@ -1023,8 +1045,12 @@ mod tests {
             assert!(inline_text.contains(label));
             assert!(expanded_text.contains(label));
         }
+        for label in ["ppl (p)", "act (a)"] {
+            assert!(!inline_text.contains(label));
+            assert!(expanded_text.contains(label));
+        }
         assert!(expanded_text.contains("close (enter/esc)"));
-        assert!(expanded_text.contains("edit (e) | close (enter/esc) | delete (d)"));
+        assert!(expanded_text.contains("edit (e) | close (enter/esc) | del (d)"));
     }
 
     #[test]
@@ -1052,7 +1078,7 @@ mod tests {
 
         assert!(!text.contains("view (enter)"));
         assert!(!text.contains("edit (e)"));
-        assert!(!text.contains("delete (d)"));
+        assert!(!text.contains("del (d)"));
     }
 
     #[test]
@@ -1076,7 +1102,7 @@ mod tests {
         assert!(!text.contains("type query"));
         assert!(!text.contains("backspace"));
         assert!(!text.contains("edit (e)"));
-        assert!(!text.contains("delete (d)"));
+        assert!(!text.contains("del (d)"));
     }
 
     #[test]
@@ -1098,7 +1124,7 @@ mod tests {
 
         assert_eq!(
             footer_hint_id_at_point(&app, 0, 18, 60, 0, 19),
-            Some(HintId::BeginEditTags)
+            Some(HintId::BeginEditFeelings)
         );
     }
 
@@ -1139,7 +1165,7 @@ mod tests {
 
     #[test]
     fn dialog_hints_wrap_and_remain_clickable_by_row() {
-        let hints = tags_dialog_hints(EditTagFocus::List);
+        let hints = tags_dialog_hints(EditTagFocus::List, true);
 
         assert_eq!(hint_height(hints, 29), 2);
         assert_eq!(
@@ -1150,8 +1176,17 @@ mod tests {
 
     #[test]
     fn dialog_hint_routing_uses_typed_ids() {
-        let tags = tags_dialog_hints(EditTagFocus::List);
+        let tags = tags_dialog_hints(EditTagFocus::List, true);
         assert_eq!(hint_id_at(tags, 10, 11), Some(HintId::TagsToggle));
+
+        let empty_input = tags_dialog_hints(EditTagFocus::Input, true);
+        assert_eq!(hint_id_at(empty_input, 10, 11), Some(HintId::TagsSave));
+
+        let value_input = tags_dialog_hints(EditTagFocus::Input, false);
+        assert_eq!(
+            hint_id_at(value_input, 10, 11),
+            Some(HintId::TagsAddFromInput)
+        );
 
         let feelings = feelings_dialog_hints();
         assert_eq!(
@@ -1209,6 +1244,8 @@ mod tests {
             title: "Title".to_string(),
             preview: "Preview".to_string(),
             tags: Vec::new(),
+            people: Vec::new(),
+            activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
             content: String::new(),
@@ -1242,6 +1279,8 @@ mod tests {
             title: "A very long title".to_string(),
             preview: "preview text".to_string(),
             tags: Vec::new(),
+            people: Vec::new(),
+            activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
             content: String::new(),
@@ -1278,6 +1317,8 @@ mod tests {
             title: "[locked] Encrypted entry".to_string(),
             preview: "Encryption identity not available".to_string(),
             tags: Vec::new(),
+            people: Vec::new(),
+            activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
             content: "Encryption identity not available".to_string(),
@@ -1311,6 +1352,8 @@ mod tests {
             title: "Title".to_string(),
             preview: String::new(),
             tags: Vec::new(),
+            people: Vec::new(),
+            activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
             content: String::new(),
@@ -1332,6 +1375,8 @@ mod tests {
             title: "Title".to_string(),
             preview: String::new(),
             tags: Vec::new(),
+            people: Vec::new(),
+            activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
             content: String::new(),

@@ -9,6 +9,10 @@ struct FrontMatter {
     #[serde(default)]
     tags: Vec<String>,
     #[serde(default)]
+    people: Vec<String>,
+    #[serde(default)]
+    activities: Vec<String>,
+    #[serde(default)]
     feelings: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mood: Option<i64>,
@@ -50,6 +54,18 @@ pub fn front_matter_tags(front_matter: &str) -> Vec<String> {
 pub fn front_matter_feelings(front_matter: &str) -> Vec<String> {
     parse_front_matter(front_matter)
         .map(|fm| fm.feelings)
+        .unwrap_or_default()
+}
+
+pub fn front_matter_people(front_matter: &str) -> Vec<String> {
+    parse_front_matter(front_matter)
+        .map(|fm| fm.people)
+        .unwrap_or_default()
+}
+
+pub fn front_matter_activities(front_matter: &str) -> Vec<String> {
+    parse_front_matter(front_matter)
+        .map(|fm| fm.activities)
         .unwrap_or_default()
 }
 
@@ -109,6 +125,29 @@ pub(crate) fn set_tags_in_front_matter(content: &str, tags: &[String]) -> Option
     let front_matter = front_matter?;
     let mut metadata = parse_front_matter(front_matter)?;
     metadata.tags = tags.to_vec();
+    Some(render_content_with_front_matter(&metadata, body))
+}
+
+/// Replace the `people` field in the TOML front matter with the given list.
+/// Returns `None` when there is no front matter.
+pub(crate) fn set_people_in_front_matter(content: &str, people: &[String]) -> Option<String> {
+    let (front_matter, body) = split_front_matter(content);
+    let front_matter = front_matter?;
+    let mut metadata = parse_front_matter(front_matter)?;
+    metadata.people = people.to_vec();
+    Some(render_content_with_front_matter(&metadata, body))
+}
+
+/// Replace the `activities` field in the TOML front matter with the given list.
+/// Returns `None` when there is no front matter.
+pub(crate) fn set_activities_in_front_matter(
+    content: &str,
+    activities: &[String],
+) -> Option<String> {
+    let (front_matter, body) = split_front_matter(content);
+    let front_matter = front_matter?;
+    let mut metadata = parse_front_matter(front_matter)?;
+    metadata.activities = activities.to_vec();
     Some(render_content_with_front_matter(&metadata, body))
 }
 

@@ -5,8 +5,9 @@ use crate::storage::{journals::is_hidden_name, list_journals};
 use crate::{
     AppResult, crypto,
     markdown::{
-        display_title_and_preview, front_matter_feelings, front_matter_mood, front_matter_tags,
-        front_matter_value, split_front_matter,
+        display_title_and_preview, front_matter_activities, front_matter_feelings,
+        front_matter_mood, front_matter_people, front_matter_tags, front_matter_value,
+        split_front_matter,
     },
 };
 use rayon::prelude::*;
@@ -109,6 +110,10 @@ pub fn read_entry_with_identity(
     let created_at = front_matter.and_then(|yaml| front_matter_value(yaml, "created_at"));
     let updated_at = front_matter.and_then(|yaml| front_matter_value(yaml, "updated_at"));
     let tags = front_matter.map(front_matter_tags).unwrap_or_default();
+    let people = front_matter.map(front_matter_people).unwrap_or_default();
+    let activities = front_matter
+        .map(front_matter_activities)
+        .unwrap_or_default();
     let feelings = front_matter
         .map(front_matter_feelings)
         .map(|feelings| normalize_feelings(feelings.iter().map(String::as_str)))
@@ -127,6 +132,8 @@ pub fn read_entry_with_identity(
         title,
         preview,
         tags,
+        people,
+        activities,
         feelings,
         mood,
         content,
@@ -145,6 +152,8 @@ fn locked_entry(journal: &str, path: &Path) -> AppResult<Entry> {
         title: "[locked] Encrypted entry".to_string(),
         preview: "Encryption identity not available".to_string(),
         tags: Vec::new(),
+        people: Vec::new(),
+        activities: Vec::new(),
         feelings: Vec::new(),
         mood: None,
         content: "Encryption identity not available".to_string(),

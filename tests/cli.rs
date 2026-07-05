@@ -152,6 +152,41 @@ fn log_command_accepts_comma_separated_tags() {
 }
 
 #[test]
+fn log_command_writes_people_and_activities() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("journals");
+    let config = dir.path().join("config.toml");
+    fs::create_dir_all(root.join("work")).unwrap();
+    write_config(&config, &root, Some("work"));
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(&config)
+        .arg("log")
+        .arg("--person")
+        .arg("alex,sam")
+        .arg("--activity")
+        .arg("programming")
+        .arg("--activity")
+        .arg("cycling")
+        .arg("Some text")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let entries = entry_texts(&root, "work");
+    let (front_matter, _) = journal::markdown::split_front_matter(&entries[0]);
+    assert_eq!(
+        front_matter.map(journal::markdown::front_matter_people),
+        Some(vec!["alex".to_string(), "sam".to_string()])
+    );
+    assert_eq!(
+        front_matter.map(journal::markdown::front_matter_activities),
+        Some(vec!["programming".to_string(), "cycling".to_string()])
+    );
+}
+
+#[test]
 fn log_command_accepts_comma_separated_feelings() {
     let dir = tempdir().unwrap();
     let root = dir.path().join("journals");

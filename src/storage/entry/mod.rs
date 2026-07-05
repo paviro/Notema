@@ -19,6 +19,8 @@ pub struct Entry {
     pub title: String,
     pub preview: String,
     pub tags: Vec<String>,
+    pub people: Vec<String>,
+    pub activities: Vec<String>,
     pub feelings: Vec<String>,
     pub mood: Option<i8>,
     pub content: String,
@@ -32,10 +34,10 @@ pub enum EntryEncryptionState {
 }
 
 pub use create::{
-    create_encrypted_entry, create_encrypted_entry_with_body,
-    create_encrypted_entry_with_body_and_feelings, create_encrypted_entry_with_editor_and_feelings,
-    create_entry, create_entry_with_body, create_entry_with_body_and_feelings,
-    create_entry_with_editor_and_feelings, entry_template,
+    EntryMetadata, create_encrypted_entry, create_encrypted_entry_with_body,
+    create_encrypted_entry_with_body_and_metadata, create_encrypted_entry_with_editor_and_metadata,
+    create_entry, create_entry_with_body, create_entry_with_body_and_metadata,
+    create_entry_with_editor_and_metadata, entry_template,
 };
 pub use edit::{
     delete_journal, edit_encrypted_entry, move_entry_to_trash, open_editor, open_editor_body_only,

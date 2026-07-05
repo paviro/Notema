@@ -1,8 +1,8 @@
 use crate::{
     AppResult, crypto,
     markdown::{
-        entry_has_body, set_feelings_in_front_matter, set_mood_in_front_matter,
-        set_tags_in_front_matter,
+        entry_has_body, set_activities_in_front_matter, set_feelings_in_front_matter,
+        set_mood_in_front_matter, set_people_in_front_matter, set_tags_in_front_matter,
     },
     storage::{
         create_encrypted_entry, create_entry, create_journal, delete_journal, edit_encrypted_entry,
@@ -18,6 +18,7 @@ use std::{
 
 use super::terminal::suspend_terminal;
 use crate::tui::app::{App, Focus};
+use crate::tui::state::MetadataKind;
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
 
@@ -199,7 +200,11 @@ pub(super) fn delete_selected_journal(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-pub(super) fn set_tags_on_entry(app: &mut App, tags: &[String]) -> AppResult<()> {
+pub(super) fn set_metadata_on_entry(
+    app: &mut App,
+    kind: MetadataKind,
+    values: &[String],
+) -> AppResult<()> {
     let Some(target) = app.selected_entry_target() else {
         return Ok(());
     };
@@ -210,11 +215,12 @@ pub(super) fn set_tags_on_entry(app: &mut App, tags: &[String]) -> AppResult<()>
             return Ok(());
         };
         let content = read_entry_content_with_identity(&target.path, Some(identity))?;
-        let Some(new_content) = set_tags_in_front_matter(&content, tags) else {
+        let Some(new_content) = set_metadata_in_front_matter(kind, &content, values) else {
             return Ok(());
         };
         let temp_path = std::env::temp_dir().join(format!(
-            ".journal-tag-{}-{}",
+            ".journal-{}-{}-{}",
+            kind.search_prefix(),
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -226,16 +232,28 @@ pub(super) fn set_tags_on_entry(app: &mut App, tags: &[String]) -> AppResult<()>
         let _ = fs::remove_file(&temp_path);
     } else {
         let content = fs::read_to_string(&target.path)?;
-        let Some(new_content) = set_tags_in_front_matter(&content, tags) else {
+        let Some(new_content) = set_metadata_in_front_matter(kind, &content, values) else {
             return Ok(());
         };
         fs::write(&target.path, new_content)?;
         set_updated_at_now(&target.path)?;
     }
 
-    app.set_status("Tags saved");
+    app.set_status(format!("{} saved", kind.title()));
     app.refresh()?;
     Ok(())
+}
+
+fn set_metadata_in_front_matter(
+    kind: MetadataKind,
+    content: &str,
+    values: &[String],
+) -> Option<String> {
+    match kind {
+        MetadataKind::Tags => set_tags_in_front_matter(content, values),
+        MetadataKind::People => set_people_in_front_matter(content, values),
+        MetadataKind::Activities => set_activities_in_front_matter(content, values),
+    }
 }
 
 pub(super) fn set_feelings_on_entry(app: &mut App, feelings: &[String]) -> AppResult<()> {

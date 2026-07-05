@@ -19,7 +19,8 @@ use crate::{
 use action::Action;
 use actions::{
     create_entry_in_selected_journal, delete_selected, delete_selected_journal, edit_selected,
-    set_feelings_on_entry, set_mood_on_entry, set_tags_on_entry, submit_new_journal, view_selected,
+    set_feelings_on_entry, set_metadata_on_entry, set_mood_on_entry, submit_new_journal,
+    view_selected,
 };
 use keyboard::{keep_selection_visible, move_focus_left, move_focus_right};
 
@@ -78,6 +79,8 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::BeginEditTags => app.begin_edit_tags(),
+        Action::BeginEditPeople => app.begin_edit_people(),
+        Action::BeginEditActivities => app.begin_edit_activities(),
         Action::BeginEditFeelings => app.begin_edit_feelings(),
         Action::BeginEditMood => app.begin_edit_mood(),
         Action::NewEntry => {
@@ -174,7 +177,11 @@ pub(crate) fn dispatch_action(
                 .edit_tag_state()
                 .map(|s| s.selected.clone())
                 .unwrap_or_default();
-            set_tags_on_entry(app, &tags)?;
+            let kind = app
+                .edit_tag_state()
+                .map(|s| s.kind)
+                .unwrap_or(crate::tui::state::MetadataKind::Tags);
+            set_metadata_on_entry(app, kind, &tags)?;
             restore_entry_view_or_close(app, snapshot);
             app.close_overlay();
         }
@@ -358,7 +365,9 @@ mod tests {
             state::EditTagFocus,
         },
     };
-    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
     use ratatui::layout::Rect;
     use std::fs;
     use tempfile::tempdir;
@@ -531,6 +540,34 @@ mod tests {
         assert_eq!(
             mouse::hint_id_to_action(&app, render::HintId::CancelOverlay),
             Some(Action::CancelOverlay)
+        );
+    }
+
+    #[test]
+    fn enter_in_metadata_input_saves_when_input_is_empty() {
+        let mut app = app_with_entries(1);
+        app.begin_edit_tags();
+        let state = app.edit_tag_state_mut().unwrap();
+        state.focus = EditTagFocus::Input;
+        state.input.clear();
+
+        assert_eq!(
+            keyboard::key_to_action(
+                &app,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+                true
+            ),
+            Some(Action::TagsSave)
+        );
+
+        app.edit_tag_state_mut().unwrap().input = "rust".to_string();
+        assert_eq!(
+            keyboard::key_to_action(
+                &app,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+                true
+            ),
+            Some(Action::TagsAddFromInput)
         );
     }
 
@@ -753,7 +790,12 @@ mod tests {
 
         let snapshot = EntryViewSnapshot::capture(&app);
         app.begin_edit_tags();
-        super::actions::set_tags_on_entry(&mut app, &["work".to_string()]).unwrap();
+        super::actions::set_metadata_on_entry(
+            &mut app,
+            crate::tui::state::MetadataKind::Tags,
+            &["work".to_string()],
+        )
+        .unwrap();
         restore_entry_view_or_close(&mut app, snapshot);
         app.close_overlay();
 

@@ -17,9 +17,9 @@ use std::{
 use ratatui::widgets::ListState;
 
 use super::state::{
-    DeleteContext, EditFeelingState, EditMoodState, EditTagState, Overlay, ScrollState,
-    SearchState, StatusBar, ensure_selected_visible, move_list_selection, normalize_list_state,
-    scroll_list_offset,
+    DeleteContext, EditFeelingState, EditMoodState, EditTagState, MetadataKind, Overlay,
+    ScrollState, SearchState, StatusBar, ensure_selected_visible, move_list_selection,
+    normalize_list_state, scroll_list_offset,
 };
 use crate::tui::entry_rows::EntryRowMeta;
 
@@ -320,6 +320,18 @@ impl App {
     }
 
     pub(crate) fn selected_entry_tags(&self) -> Vec<String> {
+        self.selected_entry_metadata(MetadataKind::Tags)
+    }
+
+    pub(crate) fn selected_entry_people(&self) -> Vec<String> {
+        self.selected_entry_metadata(MetadataKind::People)
+    }
+
+    pub(crate) fn selected_entry_activities(&self) -> Vec<String> {
+        self.selected_entry_metadata(MetadataKind::Activities)
+    }
+
+    fn selected_entry_metadata(&self, kind: MetadataKind) -> Vec<String> {
         match self.mode {
             Mode::Search => self
                 .selected_search_hit()
@@ -327,12 +339,12 @@ impl App {
                     self.entries
                         .iter()
                         .find(|entry| entry.path == hit.path)
-                        .map(|entry| entry.tags.clone())
+                        .map(|entry| metadata_values(entry, kind).to_vec())
                 })
                 .unwrap_or_default(),
             Mode::Browse => self
                 .selected_entry()
-                .map(|entry| entry.tags.clone())
+                .map(|entry| metadata_values(entry, kind).to_vec())
                 .unwrap_or_default(),
         }
     }
@@ -526,20 +538,20 @@ impl App {
         }
     }
 
-    /// Collect all tags across every loaded entry, sorted by usage count
-    /// (most frequent first) and then alphabetically. Tags differing only in
+    /// Collect metadata values across every loaded entry, sorted by usage count
+    /// (most frequent first) and then alphabetically. Values differing only in
     /// case are consolidated: the most common casing wins (ties go to the
     /// first alphabetically).
-    pub(crate) fn all_tags_sorted(&self) -> Vec<(String, usize)> {
+    pub(crate) fn all_metadata_sorted(&self, kind: MetadataKind) -> Vec<(String, usize)> {
         // First pass — count per lowercased key, track casing frequency.
         let mut lower_to_casing: std::collections::BTreeMap<String, CasingCount> =
             std::collections::BTreeMap::new();
         for entry in &self.entries {
-            for tag in &entry.tags {
-                let lower = tag.to_lowercase();
+            for value in metadata_values(entry, kind) {
+                let lower = value.to_lowercase();
                 let entry = lower_to_casing.entry(lower).or_default();
                 entry.total += 1;
-                *entry.forms.entry(tag.clone()).or_default() += 1;
+                *entry.forms.entry(value.clone()).or_default() += 1;
             }
         }
         let mut pairs: Vec<_> = lower_to_casing
@@ -560,14 +572,26 @@ impl App {
     }
 
     pub(crate) fn begin_edit_tags(&mut self) {
-        let all_tags = self.all_tags_sorted();
+        self.begin_edit_metadata(MetadataKind::Tags);
+    }
+
+    pub(crate) fn begin_edit_people(&mut self) {
+        self.begin_edit_metadata(MetadataKind::People);
+    }
+
+    pub(crate) fn begin_edit_activities(&mut self) {
+        self.begin_edit_metadata(MetadataKind::Activities);
+    }
+
+    fn begin_edit_metadata(&mut self, kind: MetadataKind) {
+        let all_tags = self.all_metadata_sorted(kind);
         let filtered: Vec<usize> = (0..all_tags.len()).collect();
         let entry_tags: Vec<String> = self
-            .selected_entry_tags()
+            .selected_entry_metadata(kind)
             .into_iter()
             .map(|t| t.to_lowercase())
             .collect();
-        self.overlay = Overlay::EditTags(EditTagState::new(all_tags, filtered, entry_tags));
+        self.overlay = Overlay::EditTags(EditTagState::new(kind, all_tags, filtered, entry_tags));
     }
 
     pub(crate) fn begin_edit_feelings(&mut self) {
@@ -586,7 +610,28 @@ impl App {
         self.mode = Mode::Search;
         self.focus = Focus::Entries;
         self.search.query = format!("tags:{tag}");
-        self.search.hits = self.search_results_by_tag(tag);
+        self.search.hits = self.search_results_by_metadata(MetadataKind::Tags, tag);
+        self.selected_entry_index = 0;
+        self.reset_entry_scroll();
+    }
+
+    pub(crate) fn begin_people_search(&mut self, person: &str) {
+        self.begin_metadata_search(MetadataKind::People, person);
+    }
+
+    pub(crate) fn begin_activity_search(&mut self, activity: &str) {
+        self.begin_metadata_search(MetadataKind::Activities, activity);
+    }
+
+    fn begin_metadata_search(&mut self, kind: MetadataKind, value: &str) {
+        self.search.scope = self
+            .selected_journal()
+            .map(|journal| SearchScope::CurrentJournal(journal.name.clone()))
+            .unwrap_or(SearchScope::AllJournals);
+        self.mode = Mode::Search;
+        self.focus = Focus::Entries;
+        self.search.query = format!("{}:{value}", kind.search_prefix());
+        self.search.hits = self.search_results_by_metadata(kind, value);
         self.selected_entry_index = 0;
         self.reset_entry_scroll();
     }
@@ -651,7 +696,11 @@ impl App {
 
     fn search_results(&self) -> Vec<SearchHit> {
         if let Some(tag) = self.search.query.strip_prefix("tags:") {
-            self.search_results_by_tag(tag.trim())
+            self.search_results_by_metadata(MetadataKind::Tags, tag.trim())
+        } else if let Some(person) = self.search.query.strip_prefix("people:") {
+            self.search_results_by_metadata(MetadataKind::People, person.trim())
+        } else if let Some(activity) = self.search.query.strip_prefix("activities:") {
+            self.search_results_by_metadata(MetadataKind::Activities, activity.trim())
         } else if let Some(feeling) = self.search.query.strip_prefix("feelings:") {
             self.search_results_by_feeling(feeling.trim())
         } else {
@@ -663,16 +712,15 @@ impl App {
         }
     }
 
-    fn search_results_by_tag(&self, tag: &str) -> Vec<SearchHit> {
-        let tag_lower = tag.to_lowercase();
+    fn search_results_by_metadata(&self, kind: MetadataKind, query: &str) -> Vec<SearchHit> {
+        let query_lower = query.to_lowercase();
         self.entries
             .iter()
             .filter(|entry| {
                 entry.encryption_state != EntryEncryptionState::EncryptedLocked
-                    && entry
-                        .tags
+                    && metadata_values(entry, kind)
                         .iter()
-                        .any(|t| t.to_lowercase().contains(&tag_lower))
+                        .any(|value| value.to_lowercase().contains(&query_lower))
             })
             .filter(|entry| match self.search.scope {
                 SearchScope::AllJournals => true,
@@ -761,6 +809,14 @@ impl SearchScope {
 struct CasingCount {
     total: usize,
     forms: std::collections::BTreeMap<String, usize>,
+}
+
+fn metadata_values(entry: &Entry, kind: MetadataKind) -> &[String] {
+    match kind {
+        MetadataKind::Tags => &entry.tags,
+        MetadataKind::People => &entry.people,
+        MetadataKind::Activities => &entry.activities,
+    }
 }
 
 pub(crate) fn markdown_body(content: &str) -> String {

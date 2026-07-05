@@ -39,7 +39,13 @@ const TAGS_DIALOG_LIST_HINTS: [Hint; 4] = [
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
-const TAGS_DIALOG_INPUT_HINTS: [Hint; 3] = [
+const TAGS_DIALOG_INPUT_EMPTY_HINTS: [Hint; 3] = [
+    Hint::new("save", "enter", HintId::TagsSave),
+    Hint::new("list", "tab", HintId::TagsSwitchFocus),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
+const TAGS_DIALOG_INPUT_VALUE_HINTS: [Hint; 3] = [
     Hint::new("add", "enter", HintId::TagsAddFromInput),
     Hint::new("list", "tab", HintId::TagsSwitchFocus),
     Hint::new("cancel", "esc", HintId::CancelOverlay),
@@ -60,10 +66,11 @@ pub(crate) fn mood_dialog_hints() -> &'static [Hint] {
     &MOOD_DIALOG_HINTS
 }
 
-pub(crate) fn tags_dialog_hints(focus: EditTagFocus) -> &'static [Hint] {
-    match focus {
-        EditTagFocus::List => &TAGS_DIALOG_LIST_HINTS,
-        EditTagFocus::Input => &TAGS_DIALOG_INPUT_HINTS,
+pub(crate) fn tags_dialog_hints(focus: EditTagFocus, input_is_empty: bool) -> &'static [Hint] {
+    match (focus, input_is_empty) {
+        (EditTagFocus::List, _) => &TAGS_DIALOG_LIST_HINTS,
+        (EditTagFocus::Input, true) => &TAGS_DIALOG_INPUT_EMPTY_HINTS,
+        (EditTagFocus::Input, false) => &TAGS_DIALOG_INPUT_VALUE_HINTS,
     }
 }
 
@@ -102,7 +109,9 @@ fn dialog_hint_width(frame_area: Rect, width: u16) -> u16 {
 
 fn tag_dialog_hint_height(frame_area: Rect) -> u16 {
     let width = dialog_hint_width(frame_area, LIST_DIALOG_WIDTH);
-    hint_height(&TAGS_DIALOG_LIST_HINTS, width).max(hint_height(&TAGS_DIALOG_INPUT_HINTS, width))
+    hint_height(&TAGS_DIALOG_LIST_HINTS, width)
+        .max(hint_height(&TAGS_DIALOG_INPUT_EMPTY_HINTS, width))
+        .max(hint_height(&TAGS_DIALOG_INPUT_VALUE_HINTS, width))
 }
 
 fn feelings_dialog_hint_height(frame_area: Rect) -> u16 {
@@ -408,6 +417,8 @@ pub(super) fn draw_new_journal_input(frame: &mut Frame<'_>, input: &str) {
 
 pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagState) {
     let layout = tags_dialog_layout(frame.area(), state.filtered.len());
+    let title = state.kind.title();
+    let value_name = state.kind.value_name();
 
     let list_focused = state.focus == EditTagFocus::List;
     let input_focused = state.focus == EditTagFocus::Input;
@@ -421,9 +432,9 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
 
     let items: Vec<ListItem<'_>> = if state.filtered.is_empty() {
         let text = if state.input.is_empty() {
-            " (no tags yet)"
+            format!(" (no {title} yet)").to_lowercase()
         } else {
-            " (no matches)"
+            " (no matches)".to_string()
         };
         vec![ListItem::new(Line::from(text))]
     } else {
@@ -440,7 +451,7 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
     };
 
     let input_text = format!(
-        "{}Search / new tag: {}",
+        "{}Search / new {value_name}: {}",
         if input_focused { ">" } else { " " },
         state.input
     );
@@ -452,13 +463,15 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
 
     frame.render_widget(Clear, layout.area);
     frame.render_widget(
-        Block::default().title(" Edit Tags ").borders(Borders::ALL),
+        Block::default()
+            .title(format!(" Edit {title} "))
+            .borders(Borders::ALL),
         layout.area,
     );
     render_lines_in_area(
         frame,
         [Line::from(Span::styled(
-            " Tags ",
+            format!(" {title} "),
             Style::default().add_modifier(Modifier::BOLD),
         ))],
         layout.inner,
@@ -480,7 +493,11 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
         Paragraph::new(Line::from(Span::styled(input_text, input_style))),
         layout.input,
     );
-    render_hint_line(frame, tags_dialog_hints(state.focus), layout.hints);
+    render_hint_line(
+        frame,
+        tags_dialog_hints(state.focus, state.input.trim().is_empty()),
+        layout.hints,
+    );
     render_dialog_scrollbar(
         frame,
         layout.area,

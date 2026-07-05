@@ -53,6 +53,8 @@ mod tests {
             title: "Title".to_string(),
             preview: String::new(),
             tags: Vec::new(),
+            people: Vec::new(),
+            activities: Vec::new(),
             feelings: Vec::new(),
             mood: None,
             content: String::new(),

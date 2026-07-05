@@ -19,6 +19,8 @@ pub(crate) enum HintId {
     ViewSelected,
     BeginDelete,
     BeginEditTags,
+    BeginEditPeople,
+    BeginEditActivities,
     BeginEditFeelings,
     BeginEditMood,
     ExitSearch,
@@ -461,9 +463,9 @@ fn selected_entry_action_hints(include_view: bool) -> Vec<Hint> {
     if include_view {
         hints.push(Hint::new("view", "enter", HintId::ViewSelected));
     }
-    hints.push(Hint::new("delete", "d", HintId::BeginDelete));
+    hints.push(Hint::new("del", "d", HintId::BeginDelete));
     hints.push(Hint::new("tags", "t", HintId::BeginEditTags));
-    hints.push(Hint::new("feelings", "f", HintId::BeginEditFeelings));
+    hints.push(Hint::new("feel", "f", HintId::BeginEditFeelings));
     hints.push(Hint::new("mood", "m", HintId::BeginEditMood));
     hints
 }
@@ -476,9 +478,11 @@ fn expanded_footer_hints(app: &App) -> Vec<Hint> {
     if app.has_selected_entry_target() {
         hints.push(Hint::new("edit", "e", HintId::EditSelected));
         hints.push(Hint::new("close", "enter/esc", HintId::CancelOverlay));
-        hints.push(Hint::new("delete", "d", HintId::BeginDelete));
+        hints.push(Hint::new("del", "d", HintId::BeginDelete));
         hints.push(Hint::new("tags", "t", HintId::BeginEditTags));
-        hints.push(Hint::new("feelings", "f", HintId::BeginEditFeelings));
+        hints.push(Hint::new("ppl", "p", HintId::BeginEditPeople));
+        hints.push(Hint::new("act", "a", HintId::BeginEditActivities));
+        hints.push(Hint::new("feel", "f", HintId::BeginEditFeelings));
         hints.push(Hint::new("mood", "m", HintId::BeginEditMood));
     } else {
         hints.push(Hint::new("close", "enter/esc", HintId::CancelOverlay));

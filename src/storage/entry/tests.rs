@@ -69,7 +69,11 @@ fn create_entry_with_body_writes_body_after_front_matter() {
 
     assert!(text.starts_with("+++\ncreated_at = \""));
     assert!(text.contains("\nupdated_at = \""));
-    assert!(text.contains("\ntags = []\nfeelings = []\n+++\n\nSome text\n"));
+    assert!(
+        text.contains(
+            "\ntags = []\npeople = []\nactivities = []\nfeelings = []\n+++\n\nSome text\n"
+        )
+    );
 }
 
 #[test]
@@ -92,7 +96,7 @@ fn entry_template_has_expected_front_matter() {
     assert_eq!(
         template,
         format!(
-            "+++\ncreated_at = \"{}\"\nupdated_at = \"{}\"\ntags = []\nfeelings = []\n+++\n\n",
+            "+++\ncreated_at = \"{}\"\nupdated_at = \"{}\"\ntags = []\npeople = []\nactivities = []\nfeelings = []\n+++\n\n",
             now.to_rfc3339(),
             now.to_rfc3339()
         )
@@ -178,16 +182,41 @@ fn entry_feelings_read_known_values_only() {
 }
 
 #[test]
-fn create_entry_with_body_and_feelings_writes_feelings() {
+fn create_entry_with_body_and_metadata_writes_metadata() {
     let dir = tempdir().unwrap();
+    let tags = vec!["rust".to_string()];
+    let people = vec!["alex".to_string()];
+    let activities = vec!["programming".to_string(), "cycling".to_string()];
     let feelings = vec!["calm".to_string(), "focused".to_string()];
 
-    let created =
-        create_entry_with_body_and_feelings(dir.path(), "work", "Some text", &[], &feelings, None)
-            .unwrap();
+    let created = create_entry_with_body_and_metadata(
+        dir.path(),
+        "work",
+        "Some text",
+        EntryMetadata {
+            tags: &tags,
+            people: &people,
+            activities: &activities,
+            feelings: &feelings,
+            mood: None,
+        },
+    )
+    .unwrap();
     let text = fs::read_to_string(created).unwrap();
     let (front_matter, _) = crate::markdown::split_front_matter(&text);
 
+    assert_eq!(
+        front_matter.map(crate::markdown::front_matter_tags),
+        Some(tags)
+    );
+    assert_eq!(
+        front_matter.map(crate::markdown::front_matter_people),
+        Some(people)
+    );
+    assert_eq!(
+        front_matter.map(crate::markdown::front_matter_activities),
+        Some(activities)
+    );
     assert_eq!(
         front_matter.map(crate::markdown::front_matter_feelings),
         Some(feelings)

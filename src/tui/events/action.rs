@@ -22,6 +22,8 @@ pub(crate) enum Action {
     // Cancel / close — covers Esc across all overlays and the expanded-entry close gesture
     CancelOverlay,
     BeginEditTags,
+    BeginEditPeople,
+    BeginEditActivities,
     BeginEditFeelings,
     BeginEditMood,
     NewEntry,

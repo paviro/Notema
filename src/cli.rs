@@ -23,6 +23,12 @@ struct Cli {
     #[arg(long, value_name = "TAG", hide = true)]
     tag: Vec<String>,
 
+    #[arg(long, value_name = "NAME", hide = true)]
+    person: Vec<String>,
+
+    #[arg(long, value_name = "ACTIVITY", hide = true)]
+    activity: Vec<String>,
+
     #[arg(long, value_name = "LABEL", hide = true)]
     feeling: Vec<String>,
 
@@ -59,6 +65,12 @@ struct LogArgs {
     #[arg(long, value_name = "TAG")]
     tag: Vec<String>,
 
+    #[arg(long, value_name = "NAME")]
+    person: Vec<String>,
+
+    #[arg(long, value_name = "ACTIVITY")]
+    activity: Vec<String>,
+
     #[arg(long, value_name = "LABEL")]
     feeling: Vec<String>,
 
@@ -85,9 +97,17 @@ pub fn run() -> AppResult<()> {
             "piped entry text requires `journal log`; run `journal log` with piped stdin".into(),
         );
     }
-    if cli.journal.is_some() || !cli.tag.is_empty() || !cli.feeling.is_empty() || cli.mood.is_some()
+    if cli.journal.is_some()
+        || !cli.tag.is_empty()
+        || !cli.person.is_empty()
+        || !cli.activity.is_empty()
+        || !cli.feeling.is_empty()
+        || cli.mood.is_some()
     {
-        return Err("--journal, --tag, --feeling, and --mood belong to `journal log`".into());
+        return Err(
+            "--journal, --tag, --person, --activity, --feeling, and --mood belong to `journal log`"
+                .into(),
+        );
     }
 
     let (config_path, config) = config::load_or_setup_with_path(cli.config.as_deref())?;
@@ -130,6 +150,12 @@ fn validate_no_legacy_entry_args(cli: &Cli) -> AppResult<()> {
     if !cli.tag.is_empty() {
         return Err("--tag belongs to `journal log`".into());
     }
+    if !cli.person.is_empty() {
+        return Err("--person belongs to `journal log`".into());
+    }
+    if !cli.activity.is_empty() {
+        return Err("--activity belongs to `journal log`".into());
+    }
     if !cli.feeling.is_empty() {
         return Err("--feeling belongs to `journal log`".into());
     }
@@ -161,14 +187,9 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
         .or(config.default_journal.as_deref())
         .ok_or("no journal specified; pass --journal or set one with `journal use <name>`")?;
     validate_existing_journal(&config.journal_root, journal)?;
-    let tags: Vec<String> = args
-        .tag
-        .iter()
-        .flat_map(|t| t.split(','))
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .map(str::to_string)
-        .collect();
+    let tags = comma_separated_values(&args.tag);
+    let people = comma_separated_values(&args.person);
+    let activities = comma_separated_values(&args.activity);
     let feelings = feelings::validate_feelings(
         args.feeling
             .iter()
@@ -184,6 +205,13 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
     } else {
         None
     };
+    let metadata = storage::EntryMetadata {
+        tags: &tags,
+        people: &people,
+        activities: &activities,
+        feelings: &feelings,
+        mood,
+    };
 
     let paths = crypto::EncryptionPaths::for_config(&config_path, &config.journal_root)?;
     let path = if body_from_args || stdin_is_pipe {
@@ -196,49 +224,51 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
         };
 
         Some(if crypto::should_encrypt(&paths) {
-            storage::create_encrypted_entry_with_body_and_feelings(
+            storage::create_encrypted_entry_with_body_and_metadata(
                 &config.journal_root,
                 journal,
                 &body,
-                &tags,
-                &feelings,
-                mood,
+                metadata,
                 &paths,
             )?
         } else {
-            storage::create_entry_with_body_and_feelings(
+            storage::create_entry_with_body_and_metadata(
                 &config.journal_root,
                 journal,
                 &body,
-                &tags,
-                &feelings,
-                mood,
+                metadata,
             )?
         })
     } else if crypto::should_encrypt(&paths) {
-        storage::create_encrypted_entry_with_editor_and_feelings(
+        storage::create_encrypted_entry_with_editor_and_metadata(
             &config.journal_root,
             journal,
             &config.editor,
-            &tags,
-            &feelings,
-            mood,
+            metadata,
             &paths,
         )?
     } else {
-        storage::create_entry_with_editor_and_feelings(
+        storage::create_entry_with_editor_and_metadata(
             &config.journal_root,
             journal,
             &config.editor,
-            &tags,
-            &feelings,
-            mood,
+            metadata,
         )?
     };
     if let Some(path) = path {
         println!("{}", path.display());
     }
     Ok(())
+}
+
+fn comma_separated_values(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 #[cfg(unix)]

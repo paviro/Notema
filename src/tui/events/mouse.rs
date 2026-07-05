@@ -103,17 +103,35 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
         && app.has_selected_entry_target()
     {
         let tags = app.selected_entry_tags();
+        let people = app.selected_entry_people();
+        let activities = app.selected_entry_activities();
         let feelings = app.selected_entry_feelings();
         let mood = app.selected_entry_mood();
+        let metadata = render::EntryMetadataValues {
+            tags: &tags,
+            people: &people,
+            activities: &activities,
+            feelings: &feelings,
+            mood,
+        };
         if let Some(feeling) =
-            render::feeling_at_point(area.area, mouse.column, mouse.row, &tags, &feelings, mood)
+            render::feeling_at_point(area.area, mouse.column, mouse.row, metadata)
         {
             app.begin_feeling_search(&feeling);
             return Ok(());
         }
-        if let Some(tag) =
-            render::tag_at_point(area.area, mouse.column, mouse.row, &tags, &feelings, mood)
+        if let Some(person) = render::person_at_point(area.area, mouse.column, mouse.row, metadata)
         {
+            app.begin_people_search(&person);
+            return Ok(());
+        }
+        if let Some(activity) =
+            render::activity_at_point(area.area, mouse.column, mouse.row, metadata)
+        {
+            app.begin_activity_search(&activity);
+            return Ok(());
+        }
+        if let Some(tag) = render::tag_at_point(area.area, mouse.column, mouse.row, metadata) {
             app.begin_tag_search(&tag);
             return Ok(());
         }
@@ -227,12 +245,15 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
     let col = mouse.column;
     let row = mouse.row;
 
-    if let Some(focus) = app.edit_tag_state().map(|s| s.focus) {
+    if let Some((focus, input_is_empty)) = app
+        .edit_tag_state()
+        .map(|s| (s.focus, s.input.trim().is_empty()))
+    {
         let filtered_len = app.edit_tag_state().map_or(0, |s| s.filtered.len());
         let layout = render::tags_dialog_layout(area, filtered_len);
         if render::point_in_rect(layout.hints, col, row)
             && let Some(id) = render::hint_id_at_wrapped(
-                render::tags_dialog_hints(focus),
+                render::tags_dialog_hints(focus, input_is_empty),
                 layout.hints.x + 1,
                 layout.hints.y,
                 layout.hints.width.saturating_sub(1),
@@ -384,6 +405,12 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::BeginDelete if app.has_selected_entry_target() => Some(Action::BeginDelete),
         render::HintId::BeginEditTags if app.has_selected_entry_target() => {
             Some(Action::BeginEditTags)
+        }
+        render::HintId::BeginEditPeople if app.has_selected_entry_target() => {
+            Some(Action::BeginEditPeople)
+        }
+        render::HintId::BeginEditActivities if app.has_selected_entry_target() => {
+            Some(Action::BeginEditActivities)
         }
         render::HintId::BeginEditFeelings if app.has_selected_entry_target() => {
             Some(Action::BeginEditFeelings)

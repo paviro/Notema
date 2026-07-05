@@ -87,6 +87,8 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         }
         KeyCode::Char('d') if app.can_act_on_selected_entry() => Some(Action::BeginDelete),
         KeyCode::Char('t') if app.can_act_on_selected_entry() => Some(Action::BeginEditTags),
+        KeyCode::Char('p') if app.can_act_on_selected_entry() => Some(Action::BeginEditPeople),
+        KeyCode::Char('a') if app.can_act_on_selected_entry() => Some(Action::BeginEditActivities),
         KeyCode::Char('f') if app.can_act_on_selected_entry() => Some(Action::BeginEditFeelings),
         KeyCode::Char('m') if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
         KeyCode::Char('h') => Some(Action::ToggleHints),
@@ -124,6 +126,12 @@ fn search_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Char('t') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             Some(Action::BeginEditTags)
         }
+        KeyCode::Char('p') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
+            Some(Action::BeginEditPeople)
+        }
+        KeyCode::Char('a') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
+            Some(Action::BeginEditActivities)
+        }
         KeyCode::Char('f') if app.focus == Focus::EntryView && app.has_selected_entry_target() => {
             Some(Action::BeginEditFeelings)
         }
@@ -157,11 +165,13 @@ fn new_journal_key_to_action(key: KeyEvent) -> Option<Action> {
 }
 
 fn tags_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
-    let focus = app.edit_tag_state()?.focus;
+    let state = app.edit_tag_state()?;
+    let focus = state.focus;
     match key.code {
         KeyCode::Esc => Some(Action::CancelOverlay),
         KeyCode::Tab => Some(Action::TagsSwitchFocus),
         KeyCode::Enter if focus == EditTagFocus::List => Some(Action::TagsSave),
+        KeyCode::Enter if state.input.trim().is_empty() => Some(Action::TagsSave),
         KeyCode::Enter => Some(Action::TagsAddFromInput),
         KeyCode::Up if focus == EditTagFocus::List => Some(Action::TagsMoveUp),
         KeyCode::Down if focus == EditTagFocus::List => Some(Action::TagsMoveDown),

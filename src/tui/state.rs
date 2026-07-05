@@ -96,17 +96,51 @@ pub(crate) enum EditTagFocus {
     Input,
 }
 
-/// State for the edit-tags overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MetadataKind {
+    Tags,
+    People,
+    Activities,
+}
+
+impl MetadataKind {
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            MetadataKind::Tags => "Tags",
+            MetadataKind::People => "People",
+            MetadataKind::Activities => "Activities",
+        }
+    }
+
+    pub(crate) fn value_name(self) -> &'static str {
+        match self {
+            MetadataKind::Tags => "tag",
+            MetadataKind::People => "person",
+            MetadataKind::Activities => "activity",
+        }
+    }
+
+    pub(crate) fn search_prefix(self) -> &'static str {
+        match self {
+            MetadataKind::Tags => "tags",
+            MetadataKind::People => "people",
+            MetadataKind::Activities => "activities",
+        }
+    }
+}
+
+/// State for the free-form metadata overlay.
 pub(crate) struct EditTagState {
-    /// All tags across every entry, sorted by usage count descending.
+    pub(crate) kind: MetadataKind,
+    /// All values across every entry, sorted by usage count descending.
     pub(crate) all_tags: Vec<(String, usize)>,
     /// Indices into `all_tags` that match the current filter input.
     pub(crate) filtered: Vec<usize>,
-    /// Tags currently selected for the entry (lowercased for look-up).
+    /// Values currently selected for the entry (lowercased for look-up).
     pub(crate) selected: Vec<String>,
     /// Stateful list selection and scroll offset.
     pub(crate) list_state: ListState,
-    /// Text input for filtering tags and adding new ones.
+    /// Text input for filtering values and adding new ones.
     pub(crate) input: String,
     /// Whether keyboard events go to the list or to the input.
     pub(crate) focus: EditTagFocus,
@@ -114,11 +148,13 @@ pub(crate) struct EditTagState {
 
 impl EditTagState {
     pub(crate) fn new(
+        kind: MetadataKind,
         all_tags: Vec<(String, usize)>,
         filtered: Vec<usize>,
         selected: Vec<String>,
     ) -> Self {
         let mut state = Self {
+            kind,
             all_tags,
             filtered,
             selected,
@@ -383,7 +419,7 @@ mod tests {
             .map(|index| (format!("tag-{index:02}"), index))
             .collect();
         let filtered: Vec<usize> = (0..count).collect();
-        EditTagState::new(all_tags, filtered, Vec::new())
+        EditTagState::new(MetadataKind::Tags, all_tags, filtered, Vec::new())
     }
 
     #[test]
