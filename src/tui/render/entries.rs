@@ -39,7 +39,7 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
     );
     *app.entry_list.offset_mut() = pixel_offset as usize;
 
-    let highlight_active = app.focus != Focus::Journals;
+    let highlight_active = app.entries_highlighted();
     let (items, selected_visible) = visible_entry_items(
         &rows,
         pixel_offset,

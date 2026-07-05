@@ -94,6 +94,9 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
             if !inline_entry_view_is_visible(layout.content.width) {
                 view_selected(app)?;
             }
+        } else if app.mode == Mode::Browse {
+            // Clicking empty space in the list deselects, revealing journal stats.
+            app.selected_entry_index = None;
         }
         return Ok(());
     }
@@ -437,6 +440,7 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::MoodSave => Some(Action::MoodSave),
         render::HintId::MoodClear => Some(Action::MoodClear),
         render::HintId::HintsToggle => Some(Action::ToggleHints),
+        render::HintId::ToggleJournals => Some(Action::ToggleJournals),
         _ => None,
     }
 }

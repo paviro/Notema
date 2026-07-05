@@ -126,7 +126,7 @@ pub(crate) fn visible_entry_items(
     rows: &[EntryListRow],
     scroll: u16,
     viewport_height: u16,
-    selected_entry_index: usize,
+    selected_entry_index: Option<usize>,
     selection_visible: bool,
 ) -> (Vec<ListItem<'static>>, Option<usize>) {
     let mut remaining_skip = scroll;
@@ -154,7 +154,7 @@ pub(crate) fn visible_entry_items(
 
         if selection_visible
             && selected_visible_idx.is_none()
-            && row.entry_index == Some(selected_entry_index)
+            && row.entry_index == selected_entry_index
         {
             selected_visible_idx = Some(items.len());
         }
@@ -307,7 +307,7 @@ pub(crate) fn entry_list_lines(entry: &Entry, text_width: u16) -> Vec<Line<'stat
 pub(crate) fn ensure_entry_visible(
     scroll: &mut u16,
     rows: &[EntryRowMeta],
-    selected_entry_index: usize,
+    selected_entry_index: Option<usize>,
     viewport_height: u16,
 ) {
     let Some((row_start, row_height)) = selected_entry_row_span(rows, selected_entry_index) else {
@@ -336,11 +336,12 @@ pub(crate) fn ensure_entry_visible(
 
 pub(crate) fn selected_entry_row_span(
     rows: &[EntryRowMeta],
-    selected_entry_index: usize,
+    selected_entry_index: Option<usize>,
 ) -> Option<(usize, u16)> {
+    selected_entry_index?;
     let mut y = 0usize;
     for row in rows {
-        if row.entry_index == Some(selected_entry_index) {
+        if row.entry_index == selected_entry_index {
             return Some((y, row.height));
         }
         y = y.saturating_add(row.height as usize);

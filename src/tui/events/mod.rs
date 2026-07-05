@@ -90,9 +90,7 @@ pub(crate) fn dispatch_action(
                 .is_some_and(|snapshot| snapshot.focus == Focus::EntryView);
             let created = create_entry_in_selected_journal(terminal, app)?;
             if restore_to_viewer {
-                let created_id = created
-                    .as_deref()
-                    .and_then(journal_storage::entry_id);
+                let created_id = created.as_deref().and_then(journal_storage::entry_id);
                 if let Some(id) = created_id {
                     if app.select_entry_by_id(&id, true) {
                         app.focus = Focus::EntryView;
@@ -261,6 +259,18 @@ pub(crate) fn dispatch_action(
 
         Action::ToggleHints => {
             app.config.show_hints = !app.config.show_hints;
+            crate::config::save_config(&app.config_path, &app.config)?;
+        }
+
+        Action::ToggleJournals => {
+            app.config.show_journals = !app.config.show_journals;
+            if app.config.show_journals {
+                // Focus the column so narrow/medium layouts actually reveal it.
+                app.focus = Focus::Journals;
+            } else if app.focus == Focus::Journals {
+                // Don't leave focus on a now-hidden pane.
+                app.focus = Focus::Entries;
+            }
             crate::config::save_config(&app.config_path, &app.config)?;
         }
     }
@@ -577,7 +587,7 @@ mod tests {
     fn wide_journal_click_selects_journal_and_keeps_journal_focus() {
         let mut app = app_with_journals(&["alpha", "beta"]);
         app.focus = Focus::Journals;
-        app.selected_entry_index = 3;
+        app.selected_entry_index = Some(3);
         app.scroll.entry_view = 10;
         let layout = render::tui_layout(Rect::new(0, 0, 120, 20), &app);
         let journals = layout.journals.unwrap().content;
@@ -594,7 +604,7 @@ mod tests {
         );
 
         assert_eq!(app.selected_journal_index(), 1);
-        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.selected_entry_index, Some(0));
         assert_eq!(app.scroll.entry_view, 0);
         assert_eq!(app.focus, Focus::Journals);
     }
@@ -676,7 +686,7 @@ mod tests {
             8,
         );
 
-        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.selected_entry_index, Some(0));
         assert_eq!(app.entry_list.offset(), 1);
         assert_eq!(app.focus, Focus::Journals);
     }
@@ -684,27 +694,34 @@ mod tests {
     #[test]
     fn entry_click_selects_row_without_opening_viewer_when_entry_view_is_visible() {
         let mut app = app_with_entries(2);
-        app.focus = Focus::Entries;
-        let layout = render::tui_layout(Rect::new(0, 0, 80, 12), &app);
-        let entries = layout.entries.unwrap().panel.content;
+        app.focus = Focus::Journals;
+        let layout = render::tui_layout(Rect::new(0, 0, 130, 12), &app);
+        let geo = layout.entries.unwrap();
+        let entries = geo.panel.content;
+        let rows = render::entry_row_metadata(&app, geo.text_width);
+        let y_off: u16 = rows
+            .iter()
+            .take_while(|row| row.entry_index != Some(1))
+            .map(|row| row.height)
+            .sum();
 
         mouse_in_area(
             &mut app,
             mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 entries.x,
-                entries.y + 2,
+                entries.y + y_off,
             ),
-            80,
+            130,
             12,
         );
 
         assert_eq!(app.focus, Focus::Entries);
-        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.selected_entry_index, Some(1));
     }
 
     #[test]
-    fn entry_panel_click_without_entry_row_focuses_entries_without_opening_viewer() {
+    fn entry_panel_click_without_entry_row_deselects_to_journal_stats() {
         let mut app = app_with_entries(1);
         app.focus = Focus::EntryView;
         let layout = render::tui_layout(Rect::new(0, 0, 120, 12), &app);
@@ -722,29 +739,33 @@ mod tests {
         );
 
         assert_eq!(app.focus, Focus::Entries);
-        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.selected_entry_index, None);
     }
 
     #[test]
-    fn entry_panel_empty_space_click_focuses_entries_without_opening_viewer() {
+    fn entry_panel_empty_space_click_deselects_to_journal_stats() {
         let mut app = app_with_entries(1);
         app.focus = Focus::EntryView;
-        let layout = render::tui_layout(Rect::new(0, 0, 130, 12), &app);
-        let entries = layout.entries.unwrap().panel.content;
+        let layout = render::tui_layout(Rect::new(0, 0, 130, 20), &app);
+        let geo = layout.entries.unwrap();
+        let entries = geo.panel.content;
+        let rows = render::entry_row_metadata(&app, geo.text_width);
+        // First empty row below the (single entry's) list content.
+        let total: u16 = rows.iter().map(|row| row.height).sum();
 
         mouse_in_area(
             &mut app,
             mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 entries.x,
-                entries.y + 5,
+                entries.y + total,
             ),
             130,
-            12,
+            20,
         );
 
         assert_eq!(app.focus, Focus::Entries);
-        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.selected_entry_index, None);
     }
 
     #[test]
@@ -763,7 +784,7 @@ mod tests {
 
         assert_eq!(app.scroll.entry_view, 1);
         assert_eq!(app.entry_list.offset(), 0);
-        assert_eq!(app.selected_entry_index, 0);
+        assert_eq!(app.selected_entry_index, Some(0));
         assert_eq!(app.focus, Focus::EntryView);
     }
 

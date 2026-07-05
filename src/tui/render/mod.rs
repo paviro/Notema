@@ -108,7 +108,12 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if let Some(area) = layout.stats {
         draw_journal_stats(frame, area.area, app);
     } else if let Some(area) = layout.entry_view {
-        draw_selected_entry_view(frame, area.area, app);
+        // With no entry selected, the preview pane shows the journal stats.
+        if app.show_journal_stats_preview() {
+            draw_journal_stats(frame, area.area, app);
+        } else {
+            draw_selected_entry_view(frame, area.area, app);
+        }
     }
 
     let footer = Paragraph::new(footer_lines(app, layout.footer.width));
@@ -283,9 +288,10 @@ mod tests {
         assert!(!layout.single_panel);
         assert!(layout.entry_view.is_some());
         assert!(layout.stats.is_none());
-        assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 22, 19));
-        assert_eq!(layout.entries.unwrap().panel.area, Rect::new(22, 0, 42, 19));
-        assert_eq!(layout.entry_view.unwrap().area, Rect::new(64, 0, 61, 19));
+        let ch = 20 - footer_height(&app, INLINE_ENTRY_VIEW_MIN_WIDTH);
+        assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 22, ch));
+        assert_eq!(layout.entries.unwrap().panel.area, Rect::new(22, 0, 42, ch));
+        assert_eq!(layout.entry_view.unwrap().area, Rect::new(64, 0, 61, ch));
     }
 
     #[test]
@@ -331,7 +337,10 @@ mod tests {
 
         let journals = tui_layout(Rect::new(0, 0, 57, 20), &app);
         assert!(journals.single_panel);
-        assert_eq!(journals.journals.unwrap().area, Rect::new(0, 0, 57, 19));
+        assert_eq!(
+            journals.journals.unwrap().area,
+            Rect::new(0, 0, 57, 20 - footer_height(&app, 57))
+        );
         assert!(journals.entries.is_none());
 
         app.focus = Focus::Entries;

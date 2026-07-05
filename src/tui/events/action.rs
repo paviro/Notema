@@ -55,4 +55,5 @@ pub(crate) enum Action {
     SearchInput(char),
     SearchBackspace,
     ToggleHints,
+    ToggleJournals,
 }

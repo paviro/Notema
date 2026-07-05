@@ -29,6 +29,7 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
     let footer = root[1];
     let inline_entry_view_visible = inline_entry_view_is_visible(content.width);
     let single_panel = single_panel_is_active(content.width);
+    let show_journals = app.config.show_journals;
 
     let mut layout = TuiLayout {
         content,
@@ -42,7 +43,7 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
 
     if single_panel {
         match app.focus {
-            Focus::Journals if app.mode == Mode::Browse => {
+            Focus::Journals if app.mode == Mode::Browse && show_journals => {
                 layout.journals = Some(PanelGeometry::new(content))
             }
             Focus::EntryView => layout.entry_view = Some(PanelGeometry::new(content)),
@@ -54,23 +55,35 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
     }
 
     if inline_entry_view_visible {
-        let body = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(JOURNAL_LIST_WIDTH),
-                Constraint::Length(ENTRY_LIST_INLINE_WIDTH),
-                Constraint::Min(ENTRY_LIST_MIN_WIDTH),
-            ])
-            .split(content);
-        layout.journals = Some(PanelGeometry::new(body[0]));
-        layout.entries = Some(EntryListGeometry::new(body[1]));
-        if app.mode == Mode::Browse && app.focus == Focus::Journals {
-            layout.stats = Some(PanelGeometry::new(body[2]));
+        if show_journals {
+            let body = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Length(JOURNAL_LIST_WIDTH),
+                    Constraint::Length(ENTRY_LIST_INLINE_WIDTH),
+                    Constraint::Min(ENTRY_LIST_MIN_WIDTH),
+                ])
+                .split(content);
+            layout.journals = Some(PanelGeometry::new(body[0]));
+            layout.entries = Some(EntryListGeometry::new(body[1]));
+            if app.mode == Mode::Browse && app.focus == Focus::Journals {
+                layout.stats = Some(PanelGeometry::new(body[2]));
+            } else {
+                layout.entry_view = Some(PanelGeometry::new(body[2]));
+            }
         } else {
-            layout.entry_view = Some(PanelGeometry::new(body[2]));
+            let body = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Length(ENTRY_LIST_INLINE_WIDTH),
+                    Constraint::Min(ENTRY_LIST_MIN_WIDTH),
+                ])
+                .split(content);
+            layout.entries = Some(EntryListGeometry::new(body[0]));
+            layout.entry_view = Some(PanelGeometry::new(body[1]));
         }
     } else {
-        if app.mode == Mode::Browse && app.focus == Focus::Journals {
+        if show_journals && app.mode == Mode::Browse && app.focus == Focus::Journals {
             let body = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([

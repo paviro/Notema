@@ -36,6 +36,7 @@ pub(crate) enum HintId {
     MoodSave,
     MoodClear,
     HintsToggle,
+    ToggleJournals,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -426,6 +427,7 @@ fn browse_footer_line(app: &App) -> HintLine {
         Focus::Journals => vec![
             Hint::new("new journal", "n", HintId::NewJournal),
             Hint::new("search", "/", HintId::BeginSearch),
+            journals_hint(app),
             Hint::new("hints", "h", HintId::HintsToggle),
             Hint::new("quit", "q", HintId::Quit),
         ],
@@ -435,6 +437,7 @@ fn browse_footer_line(app: &App) -> HintLine {
                 hints.extend(selected_entry_action_hints(true));
             }
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
+            hints.push(journals_hint(app));
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
@@ -445,6 +448,7 @@ fn browse_footer_line(app: &App) -> HintLine {
                 hints.extend(selected_entry_action_hints(true));
             }
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
+            hints.push(journals_hint(app));
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
@@ -455,6 +459,15 @@ fn browse_footer_line(app: &App) -> HintLine {
         prefix: None,
         hints,
     }
+}
+
+fn journals_hint(app: &App) -> Hint {
+    let label = if app.config.show_journals {
+        "hide journals"
+    } else {
+        "journals"
+    };
+    Hint::new(label, "j", HintId::ToggleJournals)
 }
 
 fn selected_entry_action_hints(include_view: bool) -> Vec<Hint> {

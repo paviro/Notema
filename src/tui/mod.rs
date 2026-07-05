@@ -122,5 +122,13 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
         }
     }
 
+    // Remember the selected journal for the next session. All break paths fall
+    // through here, so this covers every exit (including Ctrl-C).
+    let selected = app.selected_journal().map(|journal| journal.name.clone());
+    if app.config.last_journal != selected {
+        app.config.last_journal = selected;
+        crate::config::save_config(&app.config_path, &app.config)?;
+    }
+
     Ok(())
 }

@@ -15,6 +15,10 @@ pub struct Config {
     pub default_journal: Option<String>,
     #[serde(default = "default_true")]
     pub show_hints: bool,
+    #[serde(default = "default_true")]
+    pub show_journals: bool,
+    #[serde(default)]
+    pub last_journal: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -28,6 +32,8 @@ impl Config {
             editor: editor.into(),
             default_journal: None,
             show_hints: true,
+            show_journals: true,
+            last_journal: None,
         }
     }
 }
@@ -209,6 +215,33 @@ mod tests {
         let loaded = load_config(&path).unwrap();
 
         assert_eq!(loaded.default_journal.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn save_and_load_config_preserves_show_journals_and_last_journal() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::new(dir.path().join("root"), "vim");
+        config.show_journals = false;
+        config.last_journal = Some("work".to_string());
+
+        save_config(&path, &config).unwrap();
+        let loaded = load_config(&path).unwrap();
+
+        assert!(!loaded.show_journals);
+        assert_eq!(loaded.last_journal.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn missing_show_journals_defaults_to_true() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "journal_root = \"~/Journals\"\neditor = \"nano\"\n").unwrap();
+
+        let config = load_config(&path).unwrap();
+
+        assert!(config.show_journals);
+        assert_eq!(config.last_journal, None);
     }
 
     #[test]

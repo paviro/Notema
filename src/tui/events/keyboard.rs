@@ -45,8 +45,8 @@ pub(super) fn key_to_action(
 
 fn scroll_key_to_action(key: KeyCode) -> Option<Action> {
     match key {
-        KeyCode::Up | KeyCode::Char('k') => Some(Action::ScrollEntryView(-1)),
-        KeyCode::Down | KeyCode::Char('j') => Some(Action::ScrollEntryView(1)),
+        KeyCode::Up => Some(Action::ScrollEntryView(-1)),
+        KeyCode::Down => Some(Action::ScrollEntryView(1)),
         KeyCode::PageUp => Some(Action::PageEntryView(-1)),
         KeyCode::PageDown => Some(Action::PageEntryView(1)),
         KeyCode::Home => Some(Action::ScrollEntryViewToStart),
@@ -92,6 +92,7 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Char('f') if app.can_act_on_selected_entry() => Some(Action::BeginEditFeelings),
         KeyCode::Char('m') if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
         KeyCode::Char('h') => Some(Action::ToggleHints),
+        KeyCode::Char('j') => Some(Action::ToggleJournals),
         _ => None,
     }
 }
@@ -209,15 +210,28 @@ fn mood_key_to_action(key: KeyEvent) -> Option<Action> {
 pub(super) fn move_focus_left(app: &mut App) {
     app.focus = match app.focus {
         Focus::EntryView => Focus::Entries,
-        Focus::Entries => Focus::Journals,
-        Focus::Journals => Focus::Journals,
+        // When the journal list is hidden, Left stops at Entries so focus never
+        // lands on a pane that isn't rendered — use `j` to bring the list back.
+        Focus::Entries if app.config.show_journals => Focus::Journals,
+        Focus::Entries | Focus::Journals => app.focus,
     };
 }
 
 pub(super) fn move_focus_right(app: &mut App, entry_view_available: bool) {
     app.focus = match app.focus {
-        Focus::Journals => Focus::Entries,
-        Focus::Entries if entry_view_available => Focus::EntryView,
+        Focus::Journals => {
+            // Entering the entries column lands on an entry (when the journal has
+            // any); the stats view is reached from there by scrolling up past the
+            // first entry.
+            if app.selected_entry_index.is_none() && app.current_entry_list_len() > 0 {
+                app.selected_entry_index = Some(0);
+            }
+            Focus::Entries
+        }
+        // Don't open the entry view when no entry is selected (stats preview).
+        Focus::Entries if entry_view_available && app.has_selected_entry_target() => {
+            Focus::EntryView
+        }
         Focus::Entries | Focus::EntryView => app.focus,
     };
 }
