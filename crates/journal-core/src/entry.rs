@@ -75,22 +75,11 @@ pub struct Entry {
     pub import_id: Option<String>,
     pub content: String,
     /// Word count of `content`, computed once at load so the entry-list row
-    /// builder never has to tokenize the full body on the render path.
-    ///
-    /// Derived from `content`: any code that mutates `content` in memory must
-    /// recompute this. Today the load path is the only writer — all edits go
-    /// through disk and are re-read — so no in-place update path exists yet.
+    /// builder never tokenizes the full body on the render path.
     pub word_count: usize,
-    /// Body + every metadata value merged into one string, built once at load so
-    /// a whole-corpus fuzzy search never rebuilds the haystack per entry per
-    /// keystroke.
-    ///
-    /// Derived from `content`, `tags`, `people`, `activities`, and `feelings`:
-    /// any code that mutates one of those in memory must call
-    /// [`Entry::rebuild_search_haystack`] afterward. Today the load path
-    /// (`build_search_haystack`) is the only writer — all edits go through disk
-    /// and are re-read — so `rebuild_search_haystack` has no production caller
-    /// yet; it exists to keep the invariant restorable if one is added.
+    /// `content` plus every metadata value merged into one string, built once at
+    /// load ([`build_search_haystack`]) so whole-corpus fuzzy search never
+    /// rebuilds the haystack per entry per keystroke.
     pub search_haystack: String,
 }
 
@@ -119,13 +108,6 @@ impl Entry {
         self.created_raw()
             .map(str::to_string)
             .unwrap_or_else(|| self.id.clone())
-    }
-
-    /// Recompute [`Entry::search_haystack`] from the current body and metadata.
-    /// Call after mutating any of those fields so the precomputed haystack stays
-    /// in sync (the load path builds it directly instead).
-    pub fn rebuild_search_haystack(&mut self) {
-        self.search_haystack = build_search_haystack(&self.content, &self.metadata);
     }
 }
 

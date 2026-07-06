@@ -73,11 +73,12 @@ pub fn search_loaded_entries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry::EntryEncryptionState;
+    use crate::entry::{EntryEncryptionState, Metadata, build_search_haystack};
     use std::path::PathBuf;
 
-    fn plain_entry(id: &str, journal: &str, content: &str) -> Entry {
-        let mut entry = Entry {
+    fn entry_with(id: &str, journal: &str, content: &str, metadata: Metadata) -> Entry {
+        let search_haystack = build_search_haystack(content, &metadata);
+        Entry {
             id: id.to_string(),
             journal: journal.to_string(),
             path: PathBuf::from(format!("{journal}/{id}.md")),
@@ -85,14 +86,16 @@ mod tests {
             created_at: None,
             updated_at: None,
             preview: String::new(),
-            metadata: crate::entry::Metadata::default(),
+            metadata,
             import_id: None,
             content: content.to_string(),
             word_count: content.split_whitespace().count(),
-            search_haystack: String::new(),
-        };
-        entry.rebuild_search_haystack();
-        entry
+            search_haystack,
+        }
+    }
+
+    fn plain_entry(id: &str, journal: &str, content: &str) -> Entry {
+        entry_with(id, journal, content, Metadata::default())
     }
 
     #[test]
@@ -142,18 +145,42 @@ mod tests {
 
     #[test]
     fn search_matches_metadata_without_prefix() {
-        let mut tagged = plain_entry("a", "work", "nothing relevant");
-        tagged.metadata.tags = vec!["project-x".to_string()];
-        tagged.rebuild_search_haystack();
-        let mut person = plain_entry("b", "work", "nothing relevant");
-        person.metadata.people = vec!["Alice".to_string()];
-        person.rebuild_search_haystack();
-        let mut activity = plain_entry("c", "work", "nothing relevant");
-        activity.metadata.activities = vec!["running".to_string()];
-        activity.rebuild_search_haystack();
-        let mut feeling = plain_entry("d", "work", "nothing relevant");
-        feeling.metadata.feelings = vec!["happy".to_string()];
-        feeling.rebuild_search_haystack();
+        let tagged = entry_with(
+            "a",
+            "work",
+            "nothing relevant",
+            Metadata {
+                tags: vec!["project-x".to_string()],
+                ..Default::default()
+            },
+        );
+        let person = entry_with(
+            "b",
+            "work",
+            "nothing relevant",
+            Metadata {
+                people: vec!["Alice".to_string()],
+                ..Default::default()
+            },
+        );
+        let activity = entry_with(
+            "c",
+            "work",
+            "nothing relevant",
+            Metadata {
+                activities: vec!["running".to_string()],
+                ..Default::default()
+            },
+        );
+        let feeling = entry_with(
+            "d",
+            "work",
+            "nothing relevant",
+            Metadata {
+                feelings: vec!["happy".to_string()],
+                ..Default::default()
+            },
+        );
 
         let entries = vec![tagged, person, activity, feeling];
 
@@ -177,14 +204,20 @@ mod tests {
 
     #[test]
     fn multi_word_query_matches_across_body_and_metadata() {
-        let mut entry = plain_entry("a", "work", "hello this is a test");
-        entry.metadata.tags = vec!["love".to_string()];
-        entry.rebuild_search_haystack();
+        let entry = entry_with(
+            "a",
+            "work",
+            "hello this is a test",
+            Metadata {
+                tags: vec!["love".to_string()],
+                ..Default::default()
+            },
+        );
 
         // Every space-separated atom must match somewhere in the merged haystack.
         assert_eq!(
             search_loaded_entries(
-                &[entry.clone()],
+                std::slice::from_ref(&entry),
                 "hello test love",
                 SearchScopeFilter::AllJournals
             )
