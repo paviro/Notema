@@ -6,6 +6,8 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Padding, Paragraph},
 };
 
+use super::caret_style;
+
 /// Width of the "Enter Password" container box, clamped to the available width.
 const CONTAINER_WIDTH: u16 = 68;
 /// Height of the container: border + padding + the sub-field box + a gap + the
@@ -98,13 +100,8 @@ pub(crate) fn draw_unlock(
 /// passphrase) with a trailing block caret — the same reversed-cell idiom the
 /// search field uses (`search_field_title`).
 fn masked_field(input: &str, caret_visible: bool) -> Line<'static> {
-    let caret_style = if caret_visible {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    };
     Line::from(vec![
         Span::raw("*".repeat(input.chars().count())),
-        Span::styled(" ", caret_style),
+        Span::styled(" ", caret_style(caret_visible)),
     ])
 }

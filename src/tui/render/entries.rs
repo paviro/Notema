@@ -9,8 +9,8 @@ use crate::tui::{
     app::{App, Focus, Mode},
     entry_rows::visible_entry_items,
     render::{
-        EntryListGeometry, clamp_scroll, count_label, list_state_for_render, panel_block,
-        render_centered_notice, render_scrollbar_if_needed,
+        EntryListGeometry, caret_style, clamp_scroll, count_label, list_state_for_render,
+        panel_block, render_centered_notice, render_scrollbar_if_needed,
     },
 };
 
@@ -92,11 +92,7 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
 /// only the query text remains.
 fn search_field_title(app: &App) -> Line<'static> {
     let show_caret = app.is_search_input_active();
-    let caret_style = if app.search.cursor_visible {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    };
+    let caret_style = caret_style(app.search.cursor_visible);
 
     if app.search.query.is_empty() {
         let mut spans = vec![Span::raw(" ")];

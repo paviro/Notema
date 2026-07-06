@@ -11,6 +11,7 @@ mod unlock;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
+    style::{Modifier, Style},
     widgets::{ListState, Paragraph},
 };
 
@@ -60,6 +61,16 @@ use stats::draw_journal_stats;
 #[cfg(test)]
 pub(crate) use stats::{centered_stats_layout, journal_stats};
 pub(crate) use unlock::draw_unlock;
+
+/// Style for the blinking block caret shared by the search field and the unlock
+/// screen: reversed video while visible, plain while blinked off.
+pub(crate) fn caret_style(visible: bool) -> Style {
+    if visible {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    }
+}
 
 pub(crate) fn list_state_for_render(
     selected: Option<usize>,
