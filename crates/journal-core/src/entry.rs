@@ -162,6 +162,18 @@ pub struct SearchHit {
     pub preview: String,
 }
 
+impl SearchHit {
+    pub fn from_entry(entry: &Entry) -> Self {
+        Self {
+            id: entry.id.clone(),
+            journal: entry.journal.clone(),
+            created_at: entry.created_raw().map(str::to_string),
+            title: entry.display_label(),
+            preview: entry.preview.clone(),
+        }
+    }
+}
+
 /// Which journals a search covers. Owned so the same value serves as UI state
 /// and as the argument borrowed into [`search_loaded_entries`](crate::search_loaded_entries).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

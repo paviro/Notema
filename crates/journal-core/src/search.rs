@@ -52,16 +52,7 @@ pub fn search_loaded_entries(
             .score(candidate, &mut matcher)
             .filter(|&s| s >= min_score)
         {
-            scored.push((
-                score,
-                SearchHit {
-                    id: entry.id.clone(),
-                    journal: entry.journal.clone(),
-                    created_at: entry.created_raw().map(str::to_string),
-                    title: entry.display_label(),
-                    preview: entry.preview.clone(),
-                },
-            ));
+            scored.push((score, SearchHit::from_entry(entry)));
         }
     }
 
