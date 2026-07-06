@@ -392,7 +392,8 @@ fn wheel_over_entry_view_scrolls_entry_view_only() {
     assert_eq!(app.nav.scroll.entry_view, 1);
     assert_eq!(app.nav.entry_list.offset(), 0);
     assert_eq!(app.nav.selected_entry_index, Some(0));
-    assert_eq!(app.nav.focus, Focus::EntryView);
+    // Scrolling moves the content under the cursor but leaves the active pane alone.
+    assert_eq!(app.nav.focus, Focus::Entries);
 }
 
 #[test]

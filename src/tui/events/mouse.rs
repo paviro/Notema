@@ -359,7 +359,6 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
     if let Some(area) = layout.entry_view
         && render::point_in_rect(area.area, mouse.column, mouse.row)
     {
-        app.nav.focus = Focus::EntryView;
         app.scroll_entry_view(delta);
         return;
     }
