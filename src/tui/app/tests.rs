@@ -1,0 +1,498 @@
+use super::*;
+use std::fs;
+use tempfile::tempdir;
+
+fn new_app(config: Config) -> App {
+    let config_path = config.journal_root.join("config.toml");
+    let store = JournalStore::for_config(&config_path, &config.journal_root).unwrap();
+    App::new(config_path, config, store).unwrap()
+}
+
+#[test]
+fn changing_selected_entry_resets_entry_view_scroll() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(entry_dir.join("a.md"), "+++\ntags = []\n+++\n\n# A\n").unwrap();
+    fs::write(entry_dir.join("b.md"), "+++\ntags = []\n+++\n\n# B\n").unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.nav.focus = Focus::Entries;
+    app.nav.scroll.entry_view = 20;
+
+    app.move_selection(1);
+
+    assert_eq!(app.nav.scroll.entry_view, 0);
+}
+
+#[test]
+fn scrolling_up_past_first_entry_deselects_and_shows_stats() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(entry_dir.join("a.md"), "+++\ntags = []\n+++\n\n# A\n").unwrap();
+    fs::write(entry_dir.join("b.md"), "+++\ntags = []\n+++\n\n# B\n").unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    assert_eq!(app.nav.selected_entry_index, Some(0));
+
+    // Up from the first entry deselects, revealing the journal stats preview.
+    app.move_selection(-1);
+    assert_eq!(app.nav.selected_entry_index, None);
+    assert!(app.show_journal_stats_preview());
+    assert!(!app.entries_highlighted());
+    assert!(app.selected_entry_target().is_none());
+
+    // Down reselects the first entry.
+    app.move_selection(1);
+    assert_eq!(app.nav.selected_entry_index, Some(0));
+    assert!(!app.show_journal_stats_preview());
+}
+
+#[test]
+fn hidden_journals_launch_focuses_entries_with_stats_preview() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(entry_dir.join("a.md"), "+++\ntags = []\n+++\n\n# A\n").unwrap();
+
+    let mut config = Config::new(dir.path().to_path_buf(), "true");
+    config.show_journals = false;
+    let app = new_app(config);
+
+    assert_eq!(app.nav.focus, Focus::Entries);
+    assert_eq!(app.nav.selected_entry_index, None);
+    assert!(app.show_journal_stats_preview());
+}
+
+#[test]
+fn selected_entry_view_title_uses_entry_timestamp() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\ncreated_at = \"2026-07-01T10:23:00+02:00\"\n+++\n\n# A\nBody\n",
+    )
+    .unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+
+    let (title, content) = app.selected_entry_view().unwrap();
+
+    assert_eq!(title, "Wednesday, 1 July 2026, 10:23");
+    assert_eq!(content, "# A\nBody\n");
+}
+
+#[test]
+fn search_entry_view_title_uses_entry_timestamp() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\ncreated_at = \"2026-07-01T10:23:00+02:00\"\n+++\n\n# A\nneedle\n",
+    )
+    .unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.begin_search();
+    app.search.query = "needle".to_string();
+    app.update_search_results();
+
+    let (title, content) = app.selected_entry_view().unwrap();
+
+    assert_eq!(title, "Wednesday, 1 July 2026, 10:23");
+    assert_eq!(content, "# A\nneedle\n");
+}
+
+#[test]
+fn journal_focus_does_not_make_entry_targets_actionable() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(entry_dir.join("a.md"), "+++\ntags = []\n+++\n\n# A\n").unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+
+    app.nav.focus = Focus::Journals;
+    assert!(!app.can_act_on_selected_entry());
+
+    app.nav.focus = Focus::Entries;
+    assert!(app.can_act_on_selected_entry());
+}
+
+#[test]
+fn compact_width_uses_single_panel_without_inline_entry_view() {
+    assert!(single_panel_is_active(TWO_PANEL_MIN_WIDTH - 1));
+    assert!(!inline_entry_view_is_visible(TWO_PANEL_MIN_WIDTH - 1));
+    assert!(!entry_view_is_available(TWO_PANEL_MIN_WIDTH - 1));
+    assert!(entry_view_is_available(TWO_PANEL_MIN_WIDTH));
+}
+
+#[test]
+fn inline_entry_view_uses_minimum_three_column_width() {
+    assert!(!inline_entry_view_is_visible(
+        INLINE_ENTRY_VIEW_MIN_WIDTH - 1
+    ));
+    assert!(inline_entry_view_is_visible(INLINE_ENTRY_VIEW_MIN_WIDTH));
+}
+
+#[test]
+fn search_from_journal_focus_is_global() {
+    let config = Config::new(tempdir().unwrap().path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.nav.focus = Focus::Journals;
+
+    app.begin_search();
+
+    assert_eq!(app.search.scope, SearchScope::AllJournals);
+}
+
+#[test]
+fn search_from_entries_focus_is_scoped_to_selected_journal() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("work")).unwrap();
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.nav.focus = Focus::Entries;
+
+    app.begin_search();
+
+    assert_eq!(app.search.scope, SearchScope::Journal("work".to_string()));
+}
+
+#[test]
+fn feelings_search_matches_exact_known_label() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\nfeelings = [\"calm\"]\n+++\n\n# A\n",
+    )
+    .unwrap();
+    fs::write(
+        entry_dir.join("b.md"),
+        "+++\nfeelings = [\"anxious\"]\n+++\n\n# B\n",
+    )
+    .unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.begin_search();
+    app.search.query = "feelings:calm".to_string();
+    app.update_search_results();
+
+    assert_eq!(app.search.hits.len(), 1);
+    assert_eq!(app.search.hits[0].title, "A");
+}
+
+#[test]
+fn begin_edit_feelings_uses_fixed_list_and_selected_entry_values() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\nfeelings = [\"calm\", \"focused\"]\n+++\n\n# A\n",
+    )
+    .unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+
+    app.begin_edit_feelings();
+
+    let state = app.edit_feeling_state().unwrap();
+    assert_eq!(state.all_feelings[0], "calm");
+    assert_eq!(state.selected, vec!["calm", "focused"]);
+}
+
+#[test]
+fn status_timeout_is_none_without_active_status() {
+    let config = Config::new(tempdir().unwrap().path().to_path_buf(), "true");
+    let app = new_app(config);
+
+    assert!(app.status_timeout().is_none());
+}
+
+#[test]
+fn status_timeout_is_some_with_active_status() {
+    let config = Config::new(tempdir().unwrap().path().to_path_buf(), "true");
+    let mut app = new_app(config);
+
+    app.set_status("Saved");
+
+    assert!(app.status_timeout().is_some());
+}
+
+#[test]
+fn expire_status_reports_visible_change_once() {
+    let config = Config::new(tempdir().unwrap().path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.status_bar.set_expired("Saved");
+
+    assert!(app.expire_status());
+    assert!(app.status().is_empty());
+    assert!(!app.expire_status());
+}
+
+#[test]
+fn entry_rows_cache_is_reused_until_inputs_change() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\n# A\nBody\n",
+    )
+    .unwrap();
+    fs::write(
+        entry_dir.join("b.md"),
+        "+++\ncreated_at = \"2026-07-01T11:00:00+02:00\"\n+++\n\n# B\nBody\n",
+    )
+    .unwrap();
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+
+    let first = app.entry_rows(30);
+    // Same inputs → same cached rows (identity, not just equality).
+    assert!(Rc::ptr_eq(&first, &app.entry_rows(30)));
+    // Moving the selection does not change the rows, so the cache holds.
+    app.move_selection(1);
+    assert!(Rc::ptr_eq(&first, &app.entry_rows(30)));
+    // A different width rebuilds.
+    assert!(!Rc::ptr_eq(&first, &app.entry_rows(20)));
+    // Reloading the store rebuilds.
+    app.refresh().unwrap();
+    assert!(!Rc::ptr_eq(&first, &app.entry_rows(30)));
+}
+
+#[test]
+fn search_insert_defers_hit_recompute_until_committed() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\n# A\nneedle\n",
+    )
+    .unwrap();
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.begin_search();
+
+    for ch in "needle".chars() {
+        app.search_insert(ch);
+    }
+    // The query echoes immediately, but the whole-corpus scan is deferred.
+    assert_eq!(app.search.query, "needle");
+    assert!(app.search.dirty);
+    assert!(app.search.hits.is_empty());
+
+    // Committing (what the event loop does after the debounce) runs the scan.
+    app.update_search_results();
+    assert!(!app.search.dirty);
+    assert_eq!(app.search.hits.len(), 1);
+}
+
+fn write_entry(dir: &std::path::Path, name: &str, created: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    fs::write(
+        &path,
+        format!("+++\ncreated_at = \"{created}\"\n+++\n\n{body}\n"),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn refresh_paths_updates_only_the_changed_entry() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    let a = write_entry(
+        &entry_dir,
+        "a.md",
+        "2026-07-01T10:00:00+02:00",
+        "# A\nold body",
+    );
+    write_entry(&entry_dir, "b.md", "2026-07-01T11:00:00+02:00", "# B\nbee");
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    assert_eq!(app.library.entries.len(), 2);
+
+    // Edit a.md on disk, then reload just that path.
+    write_entry(
+        &entry_dir,
+        "a.md",
+        "2026-07-01T10:00:00+02:00",
+        "# A\nnew body here",
+    );
+    app.refresh_paths(&[a]).unwrap();
+
+    assert_eq!(app.library.entries.len(), 2);
+    let updated = app.library.entry_by_id("a").unwrap();
+    assert!(updated.content.contains("new body here"));
+    // Precomputed word count is rebuilt from the fresh body on re-read.
+    assert_eq!(
+        updated.word_count,
+        updated.content.split_whitespace().count()
+    );
+    assert!(!updated.search_haystack.is_empty());
+    // `entries` stays sorted by path (descending) so `journal_ranges` holds.
+    assert!(
+        app.library
+            .entries
+            .windows(2)
+            .all(|w| w[0].path > w[1].path)
+    );
+    assert_eq!(app.selected_entries().len(), 2);
+}
+
+#[test]
+fn refresh_paths_handles_create_and_delete() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    let a = write_entry(
+        &entry_dir,
+        "a.md",
+        "2026-07-01T10:00:00+02:00",
+        "# A\nalpha",
+    );
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    assert_eq!(app.library.entries.len(), 1);
+
+    // A newly written file is picked up by its path alone.
+    let c = write_entry(&entry_dir, "c.md", "2026-07-01T12:00:00+02:00", "# C\nsea");
+    app.refresh_paths(std::slice::from_ref(&c)).unwrap();
+    assert_eq!(app.library.entries.len(), 2);
+    assert!(app.library.entry_by_id("c").is_some());
+
+    // Deleting the file on disk removes it on the next targeted reload.
+    fs::remove_file(&a).unwrap();
+    app.refresh_paths(&[a]).unwrap();
+    assert_eq!(app.library.entries.len(), 1);
+    assert!(app.library.entry_by_id("a").is_none());
+    assert_eq!(app.selected_entries().len(), 1);
+}
+
+#[test]
+fn refresh_paths_falls_back_to_full_reload_for_a_new_journal() {
+    let dir = tempdir().unwrap();
+    let work = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&work).unwrap();
+    write_entry(&work, "a.md", "2026-07-01T10:00:00+02:00", "# A\nalpha");
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+
+    // A path under a brand-new journal isn't attributable to a known journal,
+    // so the incremental path must fall back to a full reload that also picks
+    // up the new journal in the list.
+    let personal = dir.path().join("personal").join("2026-07-01");
+    fs::create_dir_all(&personal).unwrap();
+    let z = write_entry(&personal, "z.md", "2026-07-02T10:00:00+02:00", "# Z\nzed");
+    app.refresh_paths(&[z]).unwrap();
+
+    assert!(
+        app.library
+            .journals
+            .iter()
+            .any(|journal| journal.name == "personal")
+    );
+    assert!(app.library.entry_by_id("z").is_some());
+}
+
+#[test]
+fn entry_body_cache_is_reused_until_entry_or_width_changes() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    write_entry(&entry_dir, "a.md", "2026-07-01T10:00:00+02:00", "# A\nBody");
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    let path = app.selected_entry_target().map(|target| target.path);
+
+    let first = app.cached_entry_body(path.as_deref(), 40, || (vec![Line::from("x")], vec![]));
+    // Same entry + width → cached rows returned, the builder isn't re-run.
+    let same = app.cached_entry_body(path.as_deref(), 40, || (vec![Line::from("y")], vec![]));
+    assert!(Rc::ptr_eq(&first, &same));
+    // A different width rebuilds.
+    let narrower = app.cached_entry_body(path.as_deref(), 20, || (vec![Line::from("z")], vec![]));
+    assert!(!Rc::ptr_eq(&first, &narrower));
+    // Reloading the store bumps entries_version, invalidating the cache.
+    app.refresh().unwrap();
+    let after = app.cached_entry_body(path.as_deref(), 40, || (vec![Line::from("w")], vec![]));
+    assert!(!Rc::ptr_eq(&first, &after));
+}
+
+#[test]
+fn search_recompute_keeps_body_and_stats_caches_but_rebuilds_rows() {
+    use crate::tui::render::stats::JournalStats;
+
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    write_entry(&entry_dir, "a.md", "2026-07-01T10:00:00+02:00", "# A\nbody");
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    let path = app.selected_entry_target().map(|target| target.path);
+
+    // Prime all three caches.
+    let body = app.cached_entry_body(path.as_deref(), 40, || (vec![Line::from("x")], vec![]));
+    let stats = app.cached_journal_stats("work", || JournalStats {
+        name: "work".to_string(),
+        entry_count: 0,
+        active_days: 0,
+        year_range: String::new(),
+    });
+    let rows = app.entry_rows(30);
+
+    // A search recompute changes the hits but not the entries, so it bumps
+    // only rows_version.
+    app.begin_search();
+    for ch in "body".chars() {
+        app.search_insert(ch);
+    }
+    app.update_search_results();
+
+    // Body and stats caches key on entries_version, which is untouched:
+    // requerying with identical inputs returns the same Rc (builder skipped).
+    let body_after = app.cached_entry_body(path.as_deref(), 40, || (vec![Line::from("y")], vec![]));
+    assert!(Rc::ptr_eq(&body, &body_after));
+    let stats_after = app.cached_journal_stats("work", || JournalStats {
+        name: "work".to_string(),
+        entry_count: 99,
+        active_days: 99,
+        year_range: "changed".to_string(),
+    });
+    assert!(Rc::ptr_eq(&stats, &stats_after));
+
+    // The row cache keys on rows_version, which the recompute bumped, so it
+    // rebuilt.
+    let rows_after = app.entry_rows(30);
+    assert!(!Rc::ptr_eq(&rows, &rows_after));
+}
