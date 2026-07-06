@@ -1,6 +1,5 @@
 use super::paths::{entry_id, is_assets_dir, is_encrypted_entry_file, is_entry_file};
-use super::{Entry, EntryEncryptionState, EntryPath, Metadata};
-use crate::storage::parse_entry_timestamp;
+use super::{Entry, EntryEncryptionState, EntryPath, Metadata, Timestamp};
 use crate::storage::{journals::is_hidden_name, list_journals};
 use crate::{
     AppResult, crypto,
@@ -92,7 +91,7 @@ pub fn read_entry(
         import_id,
     } = front_matter.map(front_matter_fields).unwrap_or_default();
     metadata.feelings = normalize_feelings(metadata.feelings.iter().map(String::as_str));
-    let created = created_at.as_deref().and_then(parse_entry_timestamp);
+    let created_at = created_at.map(Timestamp::parse);
     let id = entry_id(path).ok_or("entry file has no UTF-8 stem")?;
     let preview = display_preview(body);
     let body = body.trim_start_matches('\n').to_string();
@@ -105,7 +104,6 @@ pub fn read_entry(
         path: path.to_path_buf(),
         encryption_state,
         created_at,
-        created,
         updated_at,
         preview,
         metadata,
@@ -124,7 +122,6 @@ fn locked_entry(journal: &str, path: &Path) -> AppResult<Entry> {
         path: path.to_path_buf(),
         encryption_state: EntryEncryptionState::EncryptedLocked,
         created_at: None,
-        created: None,
         updated_at: None,
         preview: "[locked] Encrypted entry".to_string(),
         metadata: Metadata::default(),

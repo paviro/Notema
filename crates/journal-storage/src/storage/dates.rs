@@ -10,7 +10,7 @@ pub fn parse_entry_timestamp(value: &str) -> Option<DateTime<Local>> {
 
 pub fn entry_group_date(entry: &Entry) -> Option<NaiveDate> {
     entry
-        .created
+        .created_time()
         .map(|timestamp| timestamp.date_naive())
         .or_else(|| entry_date_from_path(&entry.path))
 }
@@ -21,7 +21,7 @@ fn format_date_human(date: NaiveDate) -> String {
 
 pub fn entry_timestamp_label(entry: &Entry) -> String {
     entry
-        .created
+        .created_time()
         .map(|timestamp| {
             format!(
                 "{}, {}",
@@ -44,8 +44,7 @@ mod tests {
             journal: "work".to_string(),
             path: PathBuf::from(path),
             encryption_state: journal_core::EntryEncryptionState::Plain,
-            created_at: created_at.map(str::to_string),
-            created: created_at.and_then(parse_entry_timestamp),
+            created_at: created_at.map(journal_core::Timestamp::parse),
             updated_at: None,
             preview: String::new(),
             metadata: journal_core::Metadata::default(),

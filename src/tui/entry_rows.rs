@@ -332,9 +332,7 @@ pub(crate) fn entry_list_lines(
     text_width: u16,
 ) -> Vec<Line<'static>> {
     let time = entry
-        .created_at
-        .as_deref()
-        .and_then(parse_entry_timestamp)
+        .created_time()
         .map(|timestamp| timestamp.format("%H:%M").to_string())
         .unwrap_or_default();
 

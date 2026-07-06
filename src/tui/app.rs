@@ -1280,7 +1280,7 @@ impl App {
             .map(|entry| SearchHit {
                 id: entry.id.clone(),
                 journal: entry.journal.clone(),
-                created_at: entry.created_at.clone(),
+                created_at: entry.created_raw().map(str::to_string),
                 title: entry.display_label(),
                 preview: entry.preview.clone(),
             })

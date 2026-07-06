@@ -57,7 +57,7 @@ pub fn search_loaded_entries(
                 SearchHit {
                     id: entry.id.clone(),
                     journal: entry.journal.clone(),
-                    created_at: entry.created_at.clone(),
+                    created_at: entry.created_raw().map(str::to_string),
                     title: entry.display_label(),
                     preview: entry.preview.clone(),
                 },
@@ -83,7 +83,6 @@ mod tests {
             path: PathBuf::from(format!("{journal}/{id}.md")),
             encryption_state: EntryEncryptionState::Plain,
             created_at: None,
-            created: None,
             updated_at: None,
             preview: String::new(),
             metadata: crate::entry::Metadata::default(),

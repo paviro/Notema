@@ -37,18 +37,35 @@ fn deserialize_mood<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option
         .filter(|value| MOOD_RANGE.contains(value)))
 }
 
+/// An entry's creation time in both forms it is needed: the exact RFC3339
+/// string as written on disk (round-trip fidelity, e.g. for imports) and the
+/// value parsed once at load, so the grouping, label, and stats paths never
+/// re-run `DateTime::parse_from_rfc3339` per call. `parsed` is `None` when the
+/// string is not valid RFC3339 (callers then fall back to the filename date).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Timestamp {
+    pub raw: String,
+    pub parsed: Option<DateTime<Local>>,
+}
+
+impl Timestamp {
+    /// Parse `raw` as RFC3339 once, keeping the original string regardless.
+    pub fn parse(raw: impl Into<String>) -> Self {
+        let raw = raw.into();
+        let parsed = DateTime::parse_from_rfc3339(&raw)
+            .ok()
+            .map(|timestamp| timestamp.with_timezone(&Local));
+        Self { raw, parsed }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub id: String,
     pub journal: String,
     pub path: PathBuf,
     pub encryption_state: EntryEncryptionState,
-    pub created_at: Option<String>,
-    /// `created_at` parsed once at load into a real timestamp, so the grouping,
-    /// label, and stats paths never re-run `DateTime::parse_from_rfc3339` per
-    /// call. `None` when `created_at` is missing or unparseable (callers then
-    /// fall back to the filename date).
-    pub created: Option<DateTime<Local>>,
+    pub created_at: Option<Timestamp>,
     pub updated_at: Option<String>,
     pub preview: String,
     pub metadata: Metadata,
@@ -78,6 +95,20 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// The raw RFC3339 creation string as written on disk, if any.
+    pub fn created_raw(&self) -> Option<&str> {
+        self.created_at
+            .as_ref()
+            .map(|timestamp| timestamp.raw.as_str())
+    }
+
+    /// The creation timestamp parsed once at load, if present and well-formed.
+    pub fn created_time(&self) -> Option<DateTime<Local>> {
+        self.created_at
+            .as_ref()
+            .and_then(|timestamp| timestamp.parsed)
+    }
+
     /// A non-empty label for the entry: the start of the preview, else the
     /// created timestamp, else the id.
     pub fn display_label(&self) -> String {
@@ -85,7 +116,9 @@ impl Entry {
         if !preview.is_empty() {
             return preview.chars().take(80).collect();
         }
-        self.created_at.clone().unwrap_or_else(|| self.id.clone())
+        self.created_raw()
+            .map(str::to_string)
+            .unwrap_or_else(|| self.id.clone())
     }
 
     /// Recompute [`Entry::search_haystack`] from the current body and metadata.
