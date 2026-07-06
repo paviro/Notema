@@ -1,4 +1,4 @@
-use crate::{AppResult, JournalStore, crypto, storage};
+use crate::{AppResult, JournalStore, JournalStorePaths, crypto, storage};
 use chrono::Local;
 use nanoid::nanoid;
 use std::{
@@ -20,7 +20,7 @@ pub struct DecryptSummary {
 
 enum MigrationMode<'a> {
     Encrypt {
-        paths: &'a crypto::EncryptionPaths,
+        paths: &'a JournalStorePaths,
     },
     Decrypt {
         identity: &'a crypto::UnlockedIdentity,
@@ -28,10 +28,10 @@ enum MigrationMode<'a> {
 }
 
 pub fn encrypt_store(store: &JournalStore) -> AppResult<MigrationSummary> {
-    let paths = store.encryption_paths();
+    let paths = store.paths();
     let migrated_files = migrate_store(
-        store.paths().journal_root.as_path(),
-        MigrationMode::Encrypt { paths: &paths },
+        paths.journal_root.as_path(),
+        MigrationMode::Encrypt { paths },
     )?
     .migrated_files;
     Ok(MigrationSummary { migrated_files })
@@ -41,15 +41,15 @@ pub fn decrypt_store(
     store: &JournalStore,
     identity: &crypto::UnlockedIdentity,
 ) -> AppResult<DecryptSummary> {
-    let paths = store.encryption_paths();
+    let paths = store.paths();
     let migration = migrate_store(
-        store.paths().journal_root.as_path(),
+        paths.journal_root.as_path(),
         MigrationMode::Decrypt { identity },
     )?;
     if paths.recipients_file.exists() {
         fs::remove_file(&paths.recipients_file)?;
     }
-    let disabled_identity_file = disable_identity_file(&paths)?;
+    let disabled_identity_file = disable_identity_file(paths)?;
     Ok(DecryptSummary {
         migrated_files: migration.migrated_files,
         backup_path: migration.backup_path,
@@ -167,7 +167,7 @@ fn ensure_no_migration_collisions(files: &[PathBuf], mode: &MigrationMode<'_>) -
     Ok(())
 }
 
-fn encrypt_plain_entry(path: &Path, paths: &crypto::EncryptionPaths) -> AppResult<()> {
+fn encrypt_plain_entry(path: &Path, paths: &JournalStorePaths) -> AppResult<()> {
     let target = path.with_extension("md.age");
     let temp = crate::sibling_temp_path(&target, "tmp.age");
     crypto::encrypt_to_file(paths, &fs::read(path)?, &temp)?;
@@ -238,7 +238,7 @@ fn copy_dir_all(source: &Path, target: &Path) -> AppResult<()> {
     Ok(())
 }
 
-fn disable_identity_file(paths: &crypto::EncryptionPaths) -> AppResult<PathBuf> {
+fn disable_identity_file(paths: &JournalStorePaths) -> AppResult<PathBuf> {
     let target = disabled_identity_path(&paths.identity_file);
     fs::rename(&paths.identity_file, &target)?;
     Ok(target)

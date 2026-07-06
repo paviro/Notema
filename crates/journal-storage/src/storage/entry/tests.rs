@@ -2,7 +2,7 @@ use super::codec::EntryCodec;
 use super::create::create_entry_file;
 use super::paths::entry_path_with_id;
 use super::*;
-use crate::crypto;
+use crate::{JournalStorePaths, crypto};
 use chrono::{DateTime, Local, LocalResult, TimeZone};
 use std::fs;
 use tempfile::tempdir;
@@ -306,7 +306,7 @@ fn scan_entries_marks_encrypted_entry_unlocked_with_identity() {
     let dir = tempdir().unwrap();
     let config = dir.path().join("config.toml");
     let root = dir.path().join("journals");
-    let paths = crypto::EncryptionPaths::for_config(&config, &root).unwrap();
+    let paths = JournalStorePaths::for_config(&config, &root).unwrap();
     crypto::generate_identity_store(&paths, "secret").unwrap();
     let encrypted = create_entry(
         &EntryCodec::new(paths.clone(), None),

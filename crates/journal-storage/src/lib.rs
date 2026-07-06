@@ -101,6 +101,21 @@ pub struct JournalStorePaths {
     pub identity_file: PathBuf,
 }
 
+impl JournalStorePaths {
+    /// Derive the store's file locations from the config file and journal root:
+    /// recipients live in the journal root, the age identity next to the config.
+    pub fn for_config(config_path: &Path, journal_root: &Path) -> AppResult<Self> {
+        let config_dir = config_path
+            .parent()
+            .ok_or("config path has no parent directory")?;
+        Ok(Self {
+            journal_root: journal_root.to_path_buf(),
+            recipients_file: journal_root.join("recipients.txt"),
+            identity_file: config_dir.join("identity.age"),
+        })
+    }
+}
+
 impl JournalStore {
     pub fn new(
         journal_root: impl Into<PathBuf>,
@@ -118,12 +133,10 @@ impl JournalStore {
     }
 
     pub fn for_config(config_path: &Path, journal_root: &Path) -> AppResult<Self> {
-        let paths = crypto::EncryptionPaths::for_config(config_path, journal_root)?;
-        Ok(Self::new(
-            journal_root,
-            paths.recipients_file,
-            paths.identity_file,
-        ))
+        Ok(Self {
+            paths: JournalStorePaths::for_config(config_path, journal_root)?,
+            identity: None,
+        })
     }
 
     pub fn paths(&self) -> &JournalStorePaths {
@@ -135,15 +148,15 @@ impl JournalStore {
     }
 
     pub fn encryption_enabled(&self) -> bool {
-        crypto::has_recipients_file(&self.encryption_paths())
+        crypto::has_recipients_file(&self.paths)
     }
 
     pub fn unlock_available(&self) -> bool {
-        crypto::has_identity_file(&self.encryption_paths())
+        crypto::has_identity_file(&self.paths)
     }
 
     pub fn public_recipient(&self) -> AppResult<String> {
-        crypto::public_recipient(&self.encryption_paths())
+        crypto::public_recipient(&self.paths)
     }
 
     pub fn has_encrypted_entries(&self) -> AppResult<bool> {
@@ -151,17 +164,14 @@ impl JournalStore {
     }
 
     pub fn initialize_encryption(&self, passphrase: &str) -> AppResult<String> {
-        crypto::generate_identity_store(&self.encryption_paths(), passphrase)
+        crypto::generate_identity_store(&self.paths, passphrase)
     }
 
     /// Load the age identity into this store so encrypted entries can be read
     /// and written. After this succeeds, the store transparently handles both
     /// plaintext and encrypted entries.
     pub fn unlock(&mut self, passphrase: &str) -> AppResult<()> {
-        self.identity = Some(crypto::unlock_identity(
-            &self.encryption_paths(),
-            passphrase,
-        )?);
+        self.identity = Some(crypto::unlock_identity(&self.paths, passphrase)?);
         Ok(())
     }
 
@@ -273,7 +283,7 @@ impl JournalStore {
     /// The codec for reading and writing this store's entry files, carrying the
     /// recipients/identity and whether new entries are encrypted.
     fn entry_codec(&self) -> storage::EntryCodec {
-        storage::EntryCodec::new(self.encryption_paths(), self.identity.clone())
+        storage::EntryCodec::new(self.paths.clone(), self.identity.clone())
     }
 
     pub fn delete_journal(
@@ -387,18 +397,5 @@ impl JournalStore {
             .into());
         }
         migrate::encrypt_store(self)
-    }
-
-    fn encryption_paths(&self) -> crypto::EncryptionPaths {
-        crypto::EncryptionPaths {
-            config_dir: self
-                .paths
-                .identity_file
-                .parent()
-                .unwrap_or_else(|| Path::new(""))
-                .to_path_buf(),
-            recipients_file: self.paths.recipients_file.clone(),
-            identity_file: self.paths.identity_file.clone(),
-        }
     }
 }

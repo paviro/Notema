@@ -1,4 +1,4 @@
-use crate::AppResult;
+use crate::{AppResult, JournalStorePaths};
 use age::{
     secrecy::{ExposeSecret, SecretString},
     x25519,
@@ -7,16 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     str::FromStr,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EncryptionPaths {
-    pub config_dir: PathBuf,
-    pub recipients_file: PathBuf,
-    pub identity_file: PathBuf,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -29,33 +22,20 @@ pub struct UnlockedIdentity {
     identity: x25519::Identity,
 }
 
-impl EncryptionPaths {
-    pub fn for_config(config_path: &Path, journal_root: &Path) -> AppResult<Self> {
-        let config_dir = config_path
-            .parent()
-            .ok_or("config path has no parent directory")?;
-        Ok(Self {
-            recipients_file: journal_root.join("recipients.txt"),
-            identity_file: config_dir.join("identity.age"),
-            config_dir: config_dir.to_path_buf(),
-        })
-    }
-}
-
-pub fn has_recipients_file(paths: &EncryptionPaths) -> bool {
+pub fn has_recipients_file(paths: &JournalStorePaths) -> bool {
     paths.recipients_file.exists()
 }
 
-pub fn has_identity_file(paths: &EncryptionPaths) -> bool {
+pub fn has_identity_file(paths: &JournalStorePaths) -> bool {
     paths.identity_file.exists()
 }
 
-pub fn public_recipient(paths: &EncryptionPaths) -> AppResult<String> {
+pub fn public_recipient(paths: &JournalStorePaths) -> AppResult<String> {
     let recipient_text = fs::read_to_string(&paths.recipients_file)?;
     Ok(first_recipient(&recipient_text)?.to_string())
 }
 
-pub fn generate_identity_store(paths: &EncryptionPaths, passphrase: &str) -> AppResult<String> {
+pub fn generate_identity_store(paths: &JournalStorePaths, passphrase: &str) -> AppResult<String> {
     if passphrase.is_empty() {
         return Err("encryption passphrase cannot be empty".into());
     }
@@ -64,7 +44,7 @@ pub fn generate_identity_store(paths: &EncryptionPaths, passphrase: &str) -> App
     write_identity_store(paths, &identity, passphrase)
 }
 
-pub fn unlock_identity(paths: &EncryptionPaths, passphrase: &str) -> AppResult<UnlockedIdentity> {
+pub fn unlock_identity(paths: &JournalStorePaths, passphrase: &str) -> AppResult<UnlockedIdentity> {
     let identity = decrypt_identity(paths, passphrase)?;
 
     let encrypted = encrypt_bytes(paths, b"journal identity check")?;
@@ -76,7 +56,11 @@ pub fn unlock_identity(paths: &EncryptionPaths, passphrase: &str) -> AppResult<U
     Ok(UnlockedIdentity { identity })
 }
 
-pub fn encrypt_to_file(paths: &EncryptionPaths, plaintext: &[u8], output: &Path) -> AppResult<()> {
+pub fn encrypt_to_file(
+    paths: &JournalStorePaths,
+    plaintext: &[u8],
+    output: &Path,
+) -> AppResult<()> {
     fs::write(output, encrypt_bytes(paths, plaintext)?)?;
     Ok(())
 }
@@ -89,7 +73,7 @@ pub fn decrypt_file_bytes(identity: &UnlockedIdentity, input: &Path) -> AppResul
     decrypt_bytes_with_identity(&ciphertext, &identity.identity)
 }
 
-pub fn encrypt_bytes(paths: &EncryptionPaths, plaintext: &[u8]) -> AppResult<Vec<u8>> {
+pub fn encrypt_bytes(paths: &JournalStorePaths, plaintext: &[u8]) -> AppResult<Vec<u8>> {
     let recipient_text = fs::read_to_string(&paths.recipients_file)?;
     let recipient = first_recipient(&recipient_text)?;
     let recipient = x25519::Recipient::from_str(recipient)?;
@@ -104,11 +88,10 @@ fn decrypt_bytes_with_identity(
 }
 
 fn write_identity_store(
-    paths: &EncryptionPaths,
+    paths: &JournalStorePaths,
     identity: &x25519::Identity,
     passphrase: &str,
 ) -> AppResult<String> {
-    fs::create_dir_all(&paths.config_dir)?;
     let recipient = identity.to_public().to_string();
 
     write_public_recipient(paths, &recipient)?;
@@ -132,7 +115,7 @@ fn encrypt_identity(identity: &x25519::Identity, passphrase: &str) -> AppResult<
     )?)
 }
 
-fn decrypt_identity(paths: &EncryptionPaths, passphrase: &str) -> AppResult<x25519::Identity> {
+fn decrypt_identity(paths: &JournalStorePaths, passphrase: &str) -> AppResult<x25519::Identity> {
     let passphrase = SecretString::from(passphrase.to_string());
     let identity = age::scrypt::Identity::new(passphrase);
     let stored = read_stored_identity(&paths.identity_file)?;
@@ -145,7 +128,7 @@ fn read_stored_identity(path: &Path) -> AppResult<StoredIdentity> {
     Ok(toml::from_str(&fs::read_to_string(path)?)?)
 }
 
-fn write_public_recipient(paths: &EncryptionPaths, recipient: &str) -> AppResult<()> {
+fn write_public_recipient(paths: &JournalStorePaths, recipient: &str) -> AppResult<()> {
     if let Some(parent) = paths.recipients_file.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -187,7 +170,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let journal_root = dir.path().join("journals");
         let paths =
-            EncryptionPaths::for_config(&dir.path().join("config.toml"), &journal_root).unwrap();
+            JournalStorePaths::for_config(&dir.path().join("config.toml"), &journal_root).unwrap();
 
         let recipient = generate_identity_store(&paths, "secret").unwrap();
         let unlocked = unlock_identity(&paths, "secret").unwrap();
@@ -212,7 +195,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let journal_root = dir.path().join("journals");
         let paths =
-            EncryptionPaths::for_config(&dir.path().join("config.toml"), &journal_root).unwrap();
+            JournalStorePaths::for_config(&dir.path().join("config.toml"), &journal_root).unwrap();
 
         generate_identity_store(&paths, "secret").unwrap();
         let text = fs::read_to_string(&paths.identity_file).unwrap();

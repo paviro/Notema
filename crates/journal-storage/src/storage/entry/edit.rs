@@ -1,6 +1,6 @@
 use super::codec::EntryCodec;
 use super::paths::entry_assets_dir;
-use crate::{AppResult, crypto};
+use crate::{AppResult, JournalStorePaths, crypto};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -106,7 +106,7 @@ pub(crate) fn write_plain_atomic(path: &Path, content: &str) -> AppResult<()> {
 }
 
 pub(crate) fn write_encrypted_entry_content(
-    paths: &crypto::EncryptionPaths,
+    paths: &JournalStorePaths,
     path: &Path,
     content: &str,
 ) -> AppResult<()> {

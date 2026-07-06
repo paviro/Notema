@@ -1,9 +1,9 @@
 use super::edit::{write_encrypted_entry_content, write_plain_atomic};
 use super::paths::is_encrypted_entry_file;
 use super::read::read_entry_content;
-use crate::AppResult;
-use crate::crypto::{self, EncryptionPaths, UnlockedIdentity};
+use crate::crypto::{self, UnlockedIdentity};
 use crate::markdown;
+use crate::{AppResult, JournalStorePaths};
 use std::path::Path;
 
 /// The crypto material for reading and writing a store's entry files, plus the
@@ -12,7 +12,7 @@ use std::path::Path;
 /// a new entry follows [`encrypts_new_entries`](Self::encrypts_new_entries).
 #[derive(Clone)]
 pub(crate) struct EntryCodec {
-    paths: EncryptionPaths,
+    paths: JournalStorePaths,
     identity: Option<UnlockedIdentity>,
 }
 
@@ -24,7 +24,7 @@ pub(crate) struct OpenEntry {
 }
 
 impl EntryCodec {
-    pub(crate) fn new(paths: EncryptionPaths, identity: Option<UnlockedIdentity>) -> Self {
+    pub(crate) fn new(paths: JournalStorePaths, identity: Option<UnlockedIdentity>) -> Self {
         Self { paths, identity }
     }
 
@@ -32,8 +32,8 @@ impl EntryCodec {
     #[cfg(test)]
     pub(crate) fn plain() -> Self {
         Self {
-            paths: EncryptionPaths {
-                config_dir: std::path::PathBuf::new(),
+            paths: JournalStorePaths {
+                journal_root: std::path::PathBuf::new(),
                 recipients_file: std::path::PathBuf::new(),
                 identity_file: std::path::PathBuf::new(),
             },
@@ -48,8 +48,8 @@ impl EntryCodec {
         crypto::has_recipients_file(&self.paths)
     }
 
-    /// The recipient/identity file locations, for the encrypt side.
-    pub(crate) fn encryption_paths(&self) -> &EncryptionPaths {
+    /// The store's file locations, for the asset-encryption side.
+    pub(crate) fn encryption_paths(&self) -> &JournalStorePaths {
         &self.paths
     }
 
