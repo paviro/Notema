@@ -143,17 +143,17 @@ impl JournalStore {
     pub fn encryption_status(&self) -> EncryptionStatus {
         let paths = self.encryption_paths();
         EncryptionStatus {
-            enabled: crypto::should_encrypt(&paths),
-            unlock_available: crypto::can_decrypt(&paths),
+            enabled: crypto::has_recipients_file(&paths),
+            unlock_available: crypto::has_identity_file(&paths),
         }
     }
 
     pub fn encryption_enabled(&self) -> bool {
-        crypto::should_encrypt(&self.encryption_paths())
+        crypto::has_recipients_file(&self.encryption_paths())
     }
 
     pub fn unlock_available(&self) -> bool {
-        crypto::can_decrypt(&self.encryption_paths())
+        crypto::has_identity_file(&self.encryption_paths())
     }
 
     pub fn public_recipient(&self) -> AppResult<String> {
@@ -318,7 +318,7 @@ impl JournalStore {
     pub fn set_entry_metadata_field(&self, path: &Path, field: MetadataField) -> AppResult<()> {
         let codec = self.entry_codec();
         let content = codec.read(path)?;
-        let Some(new_content) = markdown::set_metadata_field(&content, &field) else {
+        let Some(new_content) = markdown::with_metadata_field(&content, &field) else {
             return Ok(());
         };
         codec.write_existing(path, &new_content)

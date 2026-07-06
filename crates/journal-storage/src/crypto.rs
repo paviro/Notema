@@ -42,11 +42,11 @@ impl EncryptionPaths {
     }
 }
 
-pub fn should_encrypt(paths: &EncryptionPaths) -> bool {
+pub fn has_recipients_file(paths: &EncryptionPaths) -> bool {
     paths.recipients_file.exists()
 }
 
-pub fn can_decrypt(paths: &EncryptionPaths) -> bool {
+pub fn has_identity_file(paths: &EncryptionPaths) -> bool {
     paths.identity_file.exists()
 }
 

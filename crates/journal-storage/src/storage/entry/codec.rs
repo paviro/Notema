@@ -38,7 +38,7 @@ impl EntryCodec {
     /// file exists for this store). Independent of whether the store is unlocked:
     /// encryption only needs the recipient, decryption needs the identity.
     pub(crate) fn encrypts_new_entries(&self) -> bool {
-        crypto::should_encrypt(&self.paths)
+        crypto::has_recipients_file(&self.paths)
     }
 
     /// The recipient/identity file locations, for the encrypt side.

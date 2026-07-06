@@ -121,17 +121,17 @@ fn redact_inline(text: &str) -> String {
 
 /// Parse the front matter, apply `mutate`, and re-render the whole file.
 /// Returns `None` when there is no front matter or it fails to parse.
-fn edit_front_matter(content: &str, mutate: impl FnOnce(&mut FrontMatter)) -> Option<String> {
+fn map_front_matter(content: &str, mutate: impl FnOnce(&mut FrontMatter)) -> Option<String> {
     let (front_matter, body) = split_front_matter(content);
     let mut metadata = parse_front_matter(front_matter?)?;
     mutate(&mut metadata);
     Some(render_entry(&metadata, body))
 }
 
-/// Replace one metadata field in the front matter and refresh `updated_at`.
-/// Returns `None` when there is no front matter.
-pub fn set_metadata_field(content: &str, field: &MetadataField) -> Option<String> {
-    edit_front_matter(content, |fm| {
+/// Return a copy of `content` with one metadata field replaced in the front
+/// matter and `updated_at` refreshed. `None` when there is no front matter.
+pub fn with_metadata_field(content: &str, field: &MetadataField) -> Option<String> {
+    map_front_matter(content, |fm| {
         match field {
             MetadataField::Tags(values) => fm.tags = values.clone(),
             MetadataField::People(values) => fm.people = values.clone(),
@@ -257,16 +257,16 @@ mod tests {
     }
 
     #[test]
-    fn set_metadata_field_writes_and_clears_mood() {
+    fn with_metadata_field_writes_and_clears_mood() {
         let content = "+++\ncreated_at = \"x\"\n+++\n\n# Body\n";
 
-        let with_mood = set_metadata_field(content, &MetadataField::Mood(Some(4))).unwrap();
+        let with_mood = with_metadata_field(content, &MetadataField::Mood(Some(4))).unwrap();
         assert_eq!(
             front_matter_fields(split_front_matter(&with_mood).0.unwrap()).mood,
             Some(4)
         );
 
-        let cleared = set_metadata_field(&with_mood, &MetadataField::Mood(None)).unwrap();
+        let cleared = with_metadata_field(&with_mood, &MetadataField::Mood(None)).unwrap();
         assert_eq!(
             front_matter_fields(split_front_matter(&cleared).0.unwrap()).mood,
             None
@@ -286,11 +286,11 @@ mod tests {
     }
 
     #[test]
-    fn set_metadata_field_replaces_list_without_stale_entries() {
+    fn with_metadata_field_replaces_list_without_stale_entries() {
         let content = "+++\ncreated_at = \"2026-07-01T10:00:00+02:00\"\ntags = [\"old\", \"stale\"]\n+++\n\n# Body\n";
         let tags = vec!["new".to_string(), "next".to_string()];
 
-        let updated = set_metadata_field(content, &MetadataField::Tags(tags)).unwrap();
+        let updated = with_metadata_field(content, &MetadataField::Tags(tags)).unwrap();
 
         let (front_matter, _) = split_front_matter(&updated);
         assert_eq!(
@@ -304,11 +304,11 @@ mod tests {
     }
 
     #[test]
-    fn set_metadata_field_refreshes_updated_at_and_preserves_body() {
+    fn with_metadata_field_refreshes_updated_at_and_preserves_body() {
         let content = "+++\ncreated_at = \"old\"\ntags = []\n+++\n\n# Body\n\nTrailing\n";
 
         let updated =
-            set_metadata_field(content, &MetadataField::Feelings(vec!["calm".to_string()]))
+            with_metadata_field(content, &MetadataField::Feelings(vec!["calm".to_string()]))
                 .unwrap();
 
         assert!(updated.contains("\n+++\n\n# Body\n"));

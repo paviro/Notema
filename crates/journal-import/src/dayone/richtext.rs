@@ -6,7 +6,7 @@
 //! Markdown rendering — code blocks shredded into one fence per line, emphasis
 //! wrapped in zero-width spaces, punctuation backslash-escaped. When `richText`
 //! is present the importer renders from it; otherwise it falls back to cleaning
-//! up `text` (see [`crate::dayone::body`]).
+//! up `text` (see [`crate::dayone::text`]).
 //!
 //! Shape: `{"contents": [Run, ...]}`. A run is either a text run (`text`, with
 //! optional `attributes`) or an embed run (`embeddedObjects`). Lines are
@@ -14,7 +14,7 @@
 //! so line-level attributes (header/list/quote/codeBlock) attach to whichever run
 //! carries the line, while inline attributes (bold/italic/…) wrap a single run.
 //! Photo/audio embeds become `dayone-moment://<id>` references so the existing
-//! [`crate::dayone::body::rewrite_moments`] step resolves them like any other
+//! [`crate::dayone::moments::rewrite_moments`] step resolves them like any other
 //! moment.
 
 use serde::Deserialize;
