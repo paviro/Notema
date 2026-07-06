@@ -17,8 +17,7 @@ pub(crate) fn handle_mouse(
     app: &mut App,
     mouse: MouseEvent,
 ) -> AppResult<bool> {
-    let size = terminal.size()?;
-    let area = Rect::new(0, 0, size.width, size.height);
+    let area = super::terminal_area(terminal)?;
 
     if app.has_overlay() {
         handle_overlay_mouse(Some(terminal), app, mouse, area)?;

@@ -173,18 +173,11 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::TagsSave => {
-            let snapshot = EntryViewSnapshot::capture(app);
-            let tags = app
-                .edit_tag_state()
-                .map(|s| s.selected.clone())
-                .unwrap_or_default();
-            let kind = app
-                .edit_tag_state()
-                .map(|s| s.kind)
-                .unwrap_or(crate::tui::state::MetadataKind::Tags);
-            set_metadata_on_entry(app, kind, &tags)?;
-            restore_entry_view_or_close(app, snapshot);
-            app.close_overlay();
+            let Some((kind, tags)) = app.edit_tag_state().map(|s| (s.kind, s.selected.clone()))
+            else {
+                return Ok(false);
+            };
+            commit_entry_edit(app, |app| set_metadata_on_entry(app, kind, &tags))?;
         }
 
         Action::FeelingsMoveUp => {
@@ -207,14 +200,10 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::FeelingsSave => {
-            let snapshot = EntryViewSnapshot::capture(app);
-            let feelings = app
-                .edit_feeling_state()
-                .map(|s| s.selected.clone())
-                .unwrap_or_default();
-            set_feelings_on_entry(app, &feelings)?;
-            restore_entry_view_or_close(app, snapshot);
-            app.close_overlay();
+            let Some(feelings) = app.edit_feeling_state().map(|s| s.selected.clone()) else {
+                return Ok(false);
+            };
+            commit_entry_edit(app, |app| set_feelings_on_entry(app, &feelings))?;
         }
 
         Action::MoodDecrease => {
@@ -232,20 +221,19 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::MoodSave => {
-            let snapshot = EntryViewSnapshot::capture(app);
-            let mood = app.edit_mood_state().map(|s| s.draft);
-            set_mood_on_entry(app, mood)?;
-            restore_entry_view_or_close(app, snapshot);
-            app.close_overlay();
+            let Some(mood) = app.edit_mood_state().map(|s| s.draft) else {
+                return Ok(false);
+            };
+            commit_entry_edit(app, |app| set_mood_on_entry(app, Some(mood)))?;
         }
         Action::MoodClear => {
-            let snapshot = EntryViewSnapshot::capture(app);
-            let mood = app.edit_mood_state().and_then(|s| s.saved);
-            if mood.is_some() {
-                set_mood_on_entry(app, None)?;
-            }
-            restore_entry_view_or_close(app, snapshot);
-            app.close_overlay();
+            let saved = app.edit_mood_state().and_then(|s| s.saved);
+            commit_entry_edit(app, |app| {
+                if saved.is_some() {
+                    set_mood_on_entry(app, None)?;
+                }
+                Ok(())
+            })?;
         }
 
         Action::OpenImageViewer(index) => app.begin_image_viewer(index),
@@ -315,6 +303,19 @@ fn restore_entry_view_or_close(app: &mut App, snapshot: Option<EntryViewSnapshot
     }
 }
 
+/// Apply an edit-overlay change to the selected entry, then restore the entry
+/// view (the reload reorders entries) and close the overlay.
+fn commit_entry_edit(
+    app: &mut App,
+    edit: impl FnOnce(&mut App) -> AppResult<()>,
+) -> AppResult<()> {
+    let snapshot = EntryViewSnapshot::capture(app);
+    edit(app)?;
+    restore_entry_view_or_close(app, snapshot);
+    app.close_overlay();
+    Ok(())
+}
+
 fn confirm_delete(app: &mut App) -> AppResult<()> {
     let is_journal = matches!(
         &app.overlay,
@@ -335,7 +336,9 @@ fn confirm_delete(app: &mut App) -> AppResult<()> {
     app.refresh()
 }
 
-fn terminal_area(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> AppResult<Rect> {
+pub(super) fn terminal_area(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> AppResult<Rect> {
     let size = terminal.size()?;
     Ok(Rect::new(0, 0, size.width, size.height))
 }

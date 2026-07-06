@@ -1,6 +1,6 @@
 use crate::AppResult;
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 
 use crate::tui::{
@@ -121,11 +121,33 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
     }
 }
 
+/// Actions available on the focused entry view when it holds an actionable
+/// target: edit, delete, the metadata/mood editors, and image shortcuts. Callers
+/// apply the shared focus+target guard once rather than on every key.
+fn entry_view_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Char('e') => Some(Action::EditSelected),
+        KeyCode::Char('d') => Some(Action::BeginDelete),
+        KeyCode::Char('t') => Some(Action::BeginEditTags),
+        KeyCode::Char('p') => Some(Action::BeginEditPeople),
+        KeyCode::Char('a') => Some(Action::BeginEditActivities),
+        KeyCode::Char('f') => Some(Action::BeginEditFeelings),
+        KeyCode::Char('m') => Some(Action::BeginEditMood),
+        KeyCode::Char('i' | '0'..='9') => image_shortcut(app, key),
+        _ => None,
+    }
+}
+
 fn search_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) -> Option<Action> {
-    if app.nav.focus == Focus::EntryView
-        && let Some(action) = scroll_key_to_action(key.code)
-    {
-        return Some(action);
+    if app.nav.focus == Focus::EntryView {
+        if let Some(action) = scroll_key_to_action(key.code) {
+            return Some(action);
+        }
+        if app.has_selected_entry_target()
+            && let Some(action) = entry_view_key_to_action(app, key)
+        {
+            return Some(action);
+        }
     }
     match key.code {
         KeyCode::Esc => Some(Action::ExitSearch),
@@ -152,46 +174,6 @@ fn search_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
             Some(Action::FocusRight)
         }
         KeyCode::Enter if app.can_act_on_selected_entry() => Some(Action::ViewSelected),
-        KeyCode::Char('e')
-            if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
-            Some(Action::EditSelected)
-        }
-        KeyCode::Char('d')
-            if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
-            Some(Action::BeginDelete)
-        }
-        KeyCode::Char('t')
-            if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
-            Some(Action::BeginEditTags)
-        }
-        KeyCode::Char('p')
-            if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
-            Some(Action::BeginEditPeople)
-        }
-        KeyCode::Char('a')
-            if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
-            Some(Action::BeginEditActivities)
-        }
-        KeyCode::Char('f')
-            if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
-            Some(Action::BeginEditFeelings)
-        }
-        KeyCode::Char('m')
-            if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
-            Some(Action::BeginEditMood)
-        }
-        KeyCode::Char('i' | '0'..='9')
-            if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
-        {
-            image_shortcut(app, key)
-        }
         KeyCode::Backspace if app.nav.focus == Focus::Entries => Some(Action::SearchBackspace),
         KeyCode::Char(ch) if app.nav.focus == Focus::Entries => Some(Action::SearchInput(ch)),
         KeyCode::Up => Some(Action::MoveUp),
@@ -304,8 +286,7 @@ pub(super) fn keep_selection_visible(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
 ) -> AppResult<()> {
-    let size = terminal.size()?;
-    let layout = render::tui_layout(Rect::new(0, 0, size.width, size.height), app);
+    let layout = render::tui_layout(super::terminal_area(terminal)?, app);
     if app.nav.focus == Focus::Journals && app.nav.mode == Mode::Browse {
         if let Some(area) = layout.journals {
             app.journal_list_ensure_visible(render::journals_per_page(
