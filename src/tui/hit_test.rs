@@ -76,11 +76,13 @@ pub(crate) fn metadata_at_point(
     [
         (MetadataChip::Feelings, layout.feelings, values.feelings),
         (MetadataChip::People, layout.people, values.people),
-        (MetadataChip::Activities, layout.activities, values.activities),
+        (
+            MetadataChip::Activities,
+            layout.activities,
+            values.activities,
+        ),
         (MetadataChip::Tags, layout.tags, values.tags),
     ]
     .into_iter()
-    .find_map(|(chip, row, items)| {
-        metadata_item_at(row?, x, y, items).map(|value| (chip, value))
-    })
+    .find_map(|(chip, row, items)| metadata_item_at(row?, x, y, items).map(|value| (chip, value)))
 }

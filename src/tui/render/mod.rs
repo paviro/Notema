@@ -42,12 +42,12 @@ pub(crate) use chrome::{
     expanded_footer_text, footer_height, footer_hint_id_at, footer_text, hint_height, hint_id_at,
 };
 use dialogs::{
-    draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_mood_dialog, draw_edit_metadata_dialog,
-    draw_new_journal_input,
+    draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_metadata_dialog,
+    draw_edit_mood_dialog, draw_new_journal_input,
 };
 pub(crate) use dialogs::{
-    feelings_dialog_hints, feelings_dialog_layout, mood_dialog_hints, mood_dialog_layout,
-    metadata_dialog_hints, metadata_dialog_layout,
+    feelings_dialog_hints, feelings_dialog_layout, metadata_dialog_hints, metadata_dialog_layout,
+    mood_dialog_hints, mood_dialog_layout,
 };
 use entries::draw_entry_list;
 use image_viewer::draw_image_viewer;

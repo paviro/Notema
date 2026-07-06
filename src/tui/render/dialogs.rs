@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::tui::state::{
-    DeleteContext, EditFeelingState, EditMoodState, EditMetadataFocus, EditMetadataState, ListNav,
+    DeleteContext, EditFeelingState, EditMetadataFocus, EditMetadataState, EditMoodState, ListNav,
 };
 
 use super::{
@@ -66,7 +66,10 @@ pub(crate) fn mood_dialog_hints() -> &'static [Hint] {
     &MOOD_DIALOG_HINTS
 }
 
-pub(crate) fn metadata_dialog_hints(focus: EditMetadataFocus, input_is_empty: bool) -> &'static [Hint] {
+pub(crate) fn metadata_dialog_hints(
+    focus: EditMetadataFocus,
+    input_is_empty: bool,
+) -> &'static [Hint] {
     match (focus, input_is_empty) {
         (EditMetadataFocus::List, _) => &METADATA_DIALOG_LIST_HINTS,
         (EditMetadataFocus::Input, true) => &METADATA_DIALOG_INPUT_EMPTY_HINTS,
@@ -136,7 +139,10 @@ pub(crate) struct MetadataDialogLayout {
     pub(crate) hints: Rect,
 }
 
-pub(crate) fn metadata_dialog_layout(frame_area: Rect, filtered_len: usize) -> MetadataDialogLayout {
+pub(crate) fn metadata_dialog_layout(
+    frame_area: Rect,
+    filtered_len: usize,
+) -> MetadataDialogLayout {
     let area = metadata_dialog_area(frame_area, filtered_len);
     let inner = super::panel_inner(area);
     let hint_height = tag_dialog_hint_height(frame_area);

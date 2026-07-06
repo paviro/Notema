@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::{
     config::Config,
@@ -626,7 +625,10 @@ fn click_on_tag_input_row_switches_focus_to_input() {
         16,
     );
 
-    assert_eq!(app.edit_metadata_state().unwrap().focus, EditMetadataFocus::Input);
+    assert_eq!(
+        app.edit_metadata_state().unwrap().focus,
+        EditMetadataFocus::Input
+    );
 }
 
 #[test]

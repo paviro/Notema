@@ -173,7 +173,9 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::MetadataSave => {
-            let Some((kind, tags)) = app.edit_metadata_state().map(|s| (s.kind, s.selected.clone()))
+            let Some((kind, tags)) = app
+                .edit_metadata_state()
+                .map(|s| (s.kind, s.selected.clone()))
             else {
                 return Ok(false);
             };
@@ -305,10 +307,7 @@ fn restore_entry_view_or_close(app: &mut App, snapshot: Option<EntryViewSnapshot
 
 /// Apply an edit-overlay change to the selected entry, then restore the entry
 /// view (the reload reorders entries) and close the overlay.
-fn commit_entry_edit(
-    app: &mut App,
-    edit: impl FnOnce(&mut App) -> AppResult<()>,
-) -> AppResult<()> {
+fn commit_entry_edit(app: &mut App, edit: impl FnOnce(&mut App) -> AppResult<()>) -> AppResult<()> {
     let snapshot = EntryViewSnapshot::capture(app);
     edit(app)?;
     restore_entry_view_or_close(app, snapshot);
@@ -347,7 +346,9 @@ fn metadata_dialog_list_height(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &App,
 ) -> AppResult<u16> {
-    let filtered_len = app.edit_metadata_state().map_or(0, |state| state.filtered.len());
+    let filtered_len = app
+        .edit_metadata_state()
+        .map_or(0, |state| state.filtered.len());
     Ok(
         render::metadata_dialog_layout(terminal_area(terminal)?, filtered_len)
             .list

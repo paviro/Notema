@@ -616,7 +616,8 @@ fn edit_tags_dialog_counts_no_matches_row_when_sizing() {
 
 #[test]
 fn edit_metadata_input_hint_saves_when_empty_and_adds_when_not_empty() {
-    let mut empty = EditMetadataState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
+    let mut empty =
+        EditMetadataState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
     empty.focus = EditMetadataFocus::Input;
     let rendered_empty = render_edit_tags_dialog_text(empty, 200, 12);
     assert!(rendered_empty.contains(" save (enter) | list (tab) | cancel (esc)"));
