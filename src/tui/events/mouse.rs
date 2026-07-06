@@ -132,12 +132,19 @@ fn scrollbar_target_at(
 
 /// The scrollbar track rect for `area` if `(column, row)` lands on it and the pane
 /// overflows (`max_scroll > 0`, matching `render_scrollbar_if_needed`'s draw guard).
+/// The grab region is three columns wide — the bar column plus one on each side —
+/// so the one-cell bar is easier to hit. The bar sits on the panel's right border,
+/// so the right-neighbour column is the adjacent panel's left edge; that pane's own
+/// bar is on its far side and never claims this column back, so a click there just
+/// scrolls this pane.
 fn scrollbar_hit(area: Rect, column: u16, row: u16, max_scroll: usize) -> Option<Rect> {
     if max_scroll == 0 {
         return None;
     }
     let bar = crate::tui::scroll::scrollbar_bar_rect(area);
-    (bar.height > 0 && column == bar.x && row >= bar.y && row < bar.y + bar.height).then_some(bar)
+    let on_column =
+        column >= bar.x.saturating_sub(1) && column <= bar.x.saturating_add(1);
+    (bar.height > 0 && on_column && row >= bar.y && row < bar.y + bar.height).then_some(bar)
 }
 
 /// Apply a scroll offset mapped from `row` on `target`'s track to the right pane.

@@ -1106,6 +1106,25 @@ mod tests {
             h,
         );
         assert!(app.scrollbar_drag.is_none());
+
+        // The grab region is three columns wide: one on each side of the bar also
+        // grabs it.
+        for col in [bar_col - 1, bar_col + 1] {
+            mouse_in_area(
+                &mut app,
+                mouse(MouseEventKind::Down(MouseButton::Left), col, bar_bottom),
+                w,
+                h,
+            );
+            assert_eq!(app.scrollbar_drag, Some(ScrollbarDrag::EntryList));
+            assert_eq!(app.entry_list.offset(), max);
+            mouse_in_area(
+                &mut app,
+                mouse(MouseEventKind::Up(MouseButton::Left), col, bar_bottom),
+                w,
+                h,
+            );
+        }
     }
 
     #[test]
