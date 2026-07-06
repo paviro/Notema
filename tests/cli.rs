@@ -393,7 +393,7 @@ fn editor_log_command_creates_no_entry_when_body_is_empty() {
 }
 
 #[test]
-fn bare_text_requires_log_command() {
+fn bare_text_is_rejected() {
     let dir = tempdir().unwrap();
     let root = dir.path().join("journals");
     let config = dir.path().join("config.toml");
@@ -408,7 +408,6 @@ fn bare_text_requires_log_command() {
         .unwrap();
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("journal log"));
     assert!(scan_entries_for(&root, "work").is_empty());
 }
 

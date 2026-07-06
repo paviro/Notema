@@ -39,9 +39,6 @@ struct Cli {
 
     #[command(subcommand)]
     command: Option<CliCommand>,
-
-    #[arg(value_name = "TEXT")]
-    body: Vec<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -119,24 +116,10 @@ pub fn run() -> AppResult<()> {
         return handle_command(&cli, command, stdin_is_pipe);
     }
 
-    if !cli.body.is_empty() {
-        return Err("entry text requires `journal log`; run `journal log <text>`".into());
-    }
+    validate_no_legacy_entry_args(&cli)?;
     if stdin_is_pipe {
         return Err(
             "piped entry text requires `journal log`; run `journal log` with piped stdin".into(),
-        );
-    }
-    if cli.journal.is_some()
-        || !cli.tag.is_empty()
-        || !cli.person.is_empty()
-        || !cli.activity.is_empty()
-        || !cli.feeling.is_empty()
-        || cli.mood.is_some()
-    {
-        return Err(
-            "--journal, --tag, --person, --activity, --feeling, and --mood belong to `journal log`"
-                .into(),
         );
     }
 
@@ -148,31 +131,21 @@ pub fn run() -> AppResult<()> {
 }
 
 fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppResult<()> {
+    validate_no_legacy_entry_args(cli)?;
     match command {
-        CliCommand::Log(args) => {
-            validate_no_legacy_entry_args(cli)?;
-            create_entry_from_log_command(cli, args, stdin_is_pipe)
-        }
-        CliCommand::Use { name } => {
-            validate_no_legacy_entry_args(cli)?;
-            set_default_journal(cli, name)
-        }
+        CliCommand::Log(args) => create_entry_from_log_command(cli, args, stdin_is_pipe),
+        CliCommand::Use { name } => set_default_journal(cli, name),
         CliCommand::Encrypt => {
-            validate_no_legacy_entry_args(cli)?;
             let (config_path, config) = config::load_existing(cli.config.as_deref())?;
             migrate::encrypt_store(&config_path, &config)
         }
         CliCommand::Decrypt => {
-            validate_no_legacy_entry_args(cli)?;
             let (config_path, config) = config::load_existing(cli.config.as_deref())?;
             migrate::decrypt_store(&config_path, &config)
         }
-        CliCommand::Import { source } => {
-            validate_no_legacy_entry_args(cli)?;
-            match source {
-                ImportSource::Dayone(args) => import_dayone_command(cli, args),
-            }
-        }
+        CliCommand::Import { source } => match source {
+            ImportSource::Dayone(args) => import_dayone_command(cli, args),
+        },
     }
 }
 
@@ -261,9 +234,6 @@ fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
 }
 
 fn validate_no_legacy_entry_args(cli: &Cli) -> AppResult<()> {
-    if !cli.body.is_empty() {
-        return Err("entry text requires `journal log`; run `journal log <text>`".into());
-    }
     if cli.journal.is_some() {
         return Err("--journal belongs to `journal log`".into());
     }
@@ -364,9 +334,9 @@ fn asset_report_message(report: &journal_storage::AssetReport) -> String {
     let mut parts = Vec::new();
     if report.stored > 0 {
         parts.push(format!(
-            "{} image{} stored",
+            "{} {} stored",
             report.stored,
-            if report.stored == 1 { "" } else { "s" }
+            plural(report.stored, "image", "images")
         ));
     }
     if report.removed > 0 {
@@ -374,9 +344,9 @@ fn asset_report_message(report: &journal_storage::AssetReport) -> String {
     }
     if !report.failed.is_empty() {
         parts.push(format!(
-            "{} image{} not stored",
+            "{} {} not stored",
             report.failed.len(),
-            if report.failed.len() == 1 { "" } else { "s" }
+            plural(report.failed.len(), "image", "images")
         ));
     }
     parts.join("; ")
