@@ -12,7 +12,7 @@ mod storage;
 pub use error::StorageError;
 pub use journal_core::{
     AppResult, Entry, EntryEncryptionState, EntryPath, MOOD_RANGE, Metadata, MetadataField,
-    SearchHit, SearchScopeFilter, Timestamp, search_loaded_entries,
+    SearchHit, SearchScope, Timestamp, search_loaded_entries,
 };
 pub use migrate::{DecryptSummary, MigrationSummary};
 pub use storage::{

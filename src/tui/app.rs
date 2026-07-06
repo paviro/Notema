@@ -1,7 +1,7 @@
 use crate::{AppResult, config::Config};
 use journal_core::feelings::{FEELINGS, normalize_feeling};
 use journal_storage::{
-    Entry, EntryEncryptionState, EntryPath, Journal, JournalStore, SearchHit, SearchScopeFilter,
+    Entry, EntryEncryptionState, EntryPath, Journal, JournalStore, SearchHit,
     entry_timestamp_label, is_entry_file, search_loaded_entries,
 };
 use std::{
@@ -47,11 +47,7 @@ pub(crate) enum Mode {
     Search,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SearchScope {
-    AllJournals,
-    CurrentJournal(String),
-}
+pub(crate) use journal_storage::SearchScope;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EntryTarget {
@@ -1175,7 +1171,7 @@ impl App {
     /// or all journals when none is selected.
     fn current_journal_scope(&self) -> SearchScope {
         self.selected_journal()
-            .map(|journal| SearchScope::CurrentJournal(journal.name.clone()))
+            .map(|journal| SearchScope::Journal(journal.name.clone()))
             .unwrap_or(SearchScope::AllJournals)
     }
 
@@ -1243,7 +1239,7 @@ impl App {
     pub(crate) fn search_hit_label(&self, hit: &SearchHit) -> String {
         match self.search.scope {
             SearchScope::AllJournals => format!("{}/{}", hit.journal, hit.title),
-            SearchScope::CurrentJournal(_) => hit.title.clone(),
+            SearchScope::Journal(_) => hit.title.clone(),
         }
     }
 
@@ -1257,11 +1253,7 @@ impl App {
         } else if let Some(feeling) = self.search.query.strip_prefix("feelings:") {
             self.search_results_by_feeling(feeling.trim())
         } else {
-            search_loaded_entries(
-                &self.entries,
-                &self.search.query,
-                self.search.scope.filter(),
-            )
+            search_loaded_entries(&self.entries, &self.search.query, &self.search.scope)
         }
     }
 
@@ -1273,7 +1265,7 @@ impl App {
                 entry.encryption_state != EntryEncryptionState::EncryptedLocked
                     && match self.search.scope {
                         SearchScope::AllJournals => true,
-                        SearchScope::CurrentJournal(ref journal) => entry.journal == *journal,
+                        SearchScope::Journal(ref journal) => entry.journal == *journal,
                     }
                     && predicate(entry)
             })
@@ -1339,15 +1331,6 @@ impl App {
 
     pub(crate) fn expire_status(&mut self) -> bool {
         self.status_bar.expire()
-    }
-}
-
-impl SearchScope {
-    fn filter(&self) -> SearchScopeFilter<'_> {
-        match self {
-            SearchScope::AllJournals => SearchScopeFilter::AllJournals,
-            SearchScope::CurrentJournal(journal) => SearchScopeFilter::Journal(journal),
-        }
     }
 }
 
@@ -1563,10 +1546,7 @@ mod tests {
 
         app.begin_search();
 
-        assert_eq!(
-            app.search.scope,
-            SearchScope::CurrentJournal("work".to_string())
-        );
+        assert_eq!(app.search.scope, SearchScope::Journal("work".to_string()));
     }
 
     #[test]

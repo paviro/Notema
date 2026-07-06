@@ -7,6 +7,6 @@ pub mod search;
 
 pub use entry::{
     Entry, EntryEncryptionState, EntryPath, MOOD_RANGE, Metadata, MetadataField, SearchHit,
-    SearchScopeFilter, Timestamp,
+    SearchScope, Timestamp,
 };
 pub use search::search_loaded_entries;

@@ -162,8 +162,11 @@ pub struct SearchHit {
     pub preview: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchScopeFilter<'a> {
+/// Which journals a search covers. Owned so the same value serves as UI state
+/// and as the argument borrowed into [`search_loaded_entries`](crate::search_loaded_entries).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SearchScope {
+    #[default]
     AllJournals,
-    Journal(&'a str),
+    Journal(String),
 }

@@ -1356,7 +1356,7 @@ mod tests {
     #[test]
     fn scoped_search_hit_labels_omit_journal_prefix() {
         let mut app = app_with_entry();
-        app.search.scope = crate::tui::app::SearchScope::CurrentJournal("work".to_string());
+        app.search.scope = crate::tui::app::SearchScope::Journal("work".to_string());
         let hit = SearchHit {
             id: app.entries[0].id.clone(),
             journal: "work".to_string(),

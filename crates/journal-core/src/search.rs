@@ -1,4 +1,4 @@
-use crate::entry::{Entry, EntryEncryptionState, SearchHit, SearchScopeFilter};
+use crate::entry::{Entry, EntryEncryptionState, SearchHit, SearchScope};
 use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo::{Config, Matcher, Utf32Str};
 
@@ -20,7 +20,7 @@ const MIN_SCORE_PER_CHAR: u32 = 12;
 pub fn search_loaded_entries(
     entries: &[Entry],
     query: &str,
-    scope: SearchScopeFilter<'_>,
+    scope: &SearchScope,
 ) -> Vec<SearchHit> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
@@ -40,7 +40,7 @@ pub fn search_loaded_entries(
 
     let mut scored = Vec::new();
     for entry in entries {
-        if matches!(scope, SearchScopeFilter::Journal(journal) if entry.journal != journal) {
+        if matches!(scope, SearchScope::Journal(journal) if &entry.journal != journal) {
             continue;
         }
         if entry.encryption_state == EntryEncryptionState::EncryptedLocked {
@@ -105,7 +105,7 @@ mod tests {
             plain_entry("b", "work", "nothing"),
         ];
 
-        let hits = search_loaded_entries(&entries, "needle", SearchScopeFilter::AllJournals);
+        let hits = search_loaded_entries(&entries, "needle", &SearchScope::AllJournals);
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].journal, "work");
@@ -115,7 +115,7 @@ mod tests {
     fn search_is_case_insensitive() {
         let entries = vec![plain_entry("a", "work", "NEEDLE here")];
 
-        let hits = search_loaded_entries(&entries, "needle", SearchScopeFilter::AllJournals);
+        let hits = search_loaded_entries(&entries, "needle", &SearchScope::AllJournals);
 
         assert_eq!(hits.len(), 1);
     }
@@ -127,7 +127,11 @@ mod tests {
             plain_entry("b", "home", "needle"),
         ];
 
-        let hits = search_loaded_entries(&entries, "needle", SearchScopeFilter::Journal("work"));
+        let hits = search_loaded_entries(
+            &entries,
+            "needle",
+            &SearchScope::Journal("work".to_string()),
+        );
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].journal, "work");
@@ -138,7 +142,7 @@ mod tests {
         let mut entry = plain_entry("a", "work", "needle");
         entry.encryption_state = EntryEncryptionState::EncryptedLocked;
 
-        let hits = search_loaded_entries(&[entry], "needle", SearchScopeFilter::AllJournals);
+        let hits = search_loaded_entries(&[entry], "needle", &SearchScope::AllJournals);
 
         assert!(hits.is_empty());
     }
@@ -185,19 +189,19 @@ mod tests {
         let entries = vec![tagged, person, activity, feeling];
 
         assert_eq!(
-            search_loaded_entries(&entries, "project-x", SearchScopeFilter::AllJournals).len(),
+            search_loaded_entries(&entries, "project-x", &SearchScope::AllJournals).len(),
             1
         );
         assert_eq!(
-            search_loaded_entries(&entries, "alice", SearchScopeFilter::AllJournals).len(),
+            search_loaded_entries(&entries, "alice", &SearchScope::AllJournals).len(),
             1
         );
         assert_eq!(
-            search_loaded_entries(&entries, "running", SearchScopeFilter::AllJournals).len(),
+            search_loaded_entries(&entries, "running", &SearchScope::AllJournals).len(),
             1
         );
         assert_eq!(
-            search_loaded_entries(&entries, "happy", SearchScopeFilter::AllJournals).len(),
+            search_loaded_entries(&entries, "happy", &SearchScope::AllJournals).len(),
             1
         );
     }
@@ -219,19 +223,15 @@ mod tests {
             search_loaded_entries(
                 std::slice::from_ref(&entry),
                 "hello test love",
-                SearchScopeFilter::AllJournals
+                &SearchScope::AllJournals
             )
             .len(),
             1
         );
         // An atom that appears nowhere fails the whole query.
         assert!(
-            search_loaded_entries(
-                &[entry],
-                "hello test missing",
-                SearchScopeFilter::AllJournals
-            )
-            .is_empty()
+            search_loaded_entries(&[entry], "hello test missing", &SearchScope::AllJournals)
+                .is_empty()
         );
     }
 
@@ -241,7 +241,7 @@ mod tests {
 
         // Dropped letter: "quik" is a subsequence of "quick".
         assert_eq!(
-            search_loaded_entries(&entries, "quik brown", SearchScopeFilter::AllJournals).len(),
+            search_loaded_entries(&entries, "quik brown", &SearchScope::AllJournals).len(),
             1
         );
     }
@@ -255,7 +255,7 @@ mod tests {
             plain_entry("b", "work", "project status update"),
         ];
 
-        let hits = search_loaded_entries(&entries, "project", SearchScopeFilter::AllJournals);
+        let hits = search_loaded_entries(&entries, "project", &SearchScope::AllJournals);
 
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].id, "b");
@@ -265,7 +265,7 @@ mod tests {
     fn empty_query_returns_no_hits() {
         let entries = vec![plain_entry("a", "work", "needle")];
 
-        let hits = search_loaded_entries(&entries, "", SearchScopeFilter::AllJournals);
+        let hits = search_loaded_entries(&entries, "", &SearchScope::AllJournals);
 
         assert!(hits.is_empty());
     }
