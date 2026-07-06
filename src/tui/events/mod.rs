@@ -32,7 +32,7 @@ pub(crate) fn dispatch_action(
     app: &mut App,
     action: Action,
 ) -> AppResult<bool> {
-    use crate::tui::state::EditTagFocus;
+    use crate::tui::state::EditMetadataFocus;
 
     match action {
         Action::Quit => return Ok(true),
@@ -116,64 +116,64 @@ pub(crate) fn dispatch_action(
         }
         Action::JournalInputSubmit => submit_new_journal(app)?,
 
-        Action::TagsMoveUp => {
-            let list_height = tag_dialog_list_height(terminal, app)?;
-            if let Some(state) = app.edit_tag_state_mut() {
+        Action::MetadataMoveUp => {
+            let list_height = metadata_dialog_list_height(terminal, app)?;
+            if let Some(state) = app.edit_metadata_state_mut() {
                 state.move_up();
                 state.ensure_selected_visible(list_height);
             }
         }
-        Action::TagsMoveDown => {
-            let list_height = tag_dialog_list_height(terminal, app)?;
-            if let Some(state) = app.edit_tag_state_mut() {
+        Action::MetadataMoveDown => {
+            let list_height = metadata_dialog_list_height(terminal, app)?;
+            if let Some(state) = app.edit_metadata_state_mut() {
                 state.move_down();
                 state.ensure_selected_visible(list_height);
             }
         }
-        Action::TagsToggle => {
-            if let Some(state) = app.edit_tag_state_mut() {
+        Action::MetadataToggle => {
+            if let Some(state) = app.edit_metadata_state_mut() {
                 state.toggle_selected();
             }
         }
-        Action::TagsSwitchFocus => {
-            if let Some(state) = app.edit_tag_state_mut() {
+        Action::MetadataSwitchFocus => {
+            if let Some(state) = app.edit_metadata_state_mut() {
                 state.focus = match state.focus {
-                    EditTagFocus::List => EditTagFocus::Input,
-                    EditTagFocus::Input => EditTagFocus::List,
+                    EditMetadataFocus::List => EditMetadataFocus::Input,
+                    EditMetadataFocus::Input => EditMetadataFocus::List,
                 };
             }
         }
-        Action::TagsInput(ch) => {
-            if let Some(state) = app.edit_tag_state_mut() {
+        Action::MetadataInput(ch) => {
+            if let Some(state) = app.edit_metadata_state_mut() {
                 state.input.push(ch);
                 state.rebuild_filter();
             }
         }
-        Action::TagsBackspace => {
-            if let Some(state) = app.edit_tag_state_mut() {
+        Action::MetadataBackspace => {
+            if let Some(state) = app.edit_metadata_state_mut() {
                 state.input.pop();
                 state.rebuild_filter();
             }
         }
-        Action::TagsAddFromInput => {
-            if let Some(state) = app.edit_tag_state_mut() {
+        Action::MetadataAddFromInput => {
+            if let Some(state) = app.edit_metadata_state_mut() {
                 let tag = state.input.trim().to_lowercase();
                 if !tag.is_empty() && !state.selected.contains(&tag) {
                     state.selected.push(tag.clone());
                     if !state
-                        .all_tags
+                        .all_values
                         .iter()
                         .any(|(t, _)| t.eq_ignore_ascii_case(&tag))
                     {
-                        state.all_tags.push((tag, 0));
+                        state.all_values.push((tag, 0));
                     }
                 }
                 state.input.clear();
                 state.rebuild_filter();
             }
         }
-        Action::TagsSave => {
-            let Some((kind, tags)) = app.edit_tag_state().map(|s| (s.kind, s.selected.clone()))
+        Action::MetadataSave => {
+            let Some((kind, tags)) = app.edit_metadata_state().map(|s| (s.kind, s.selected.clone()))
             else {
                 return Ok(false);
             };
@@ -343,13 +343,13 @@ pub(super) fn terminal_area(
     Ok(Rect::new(0, 0, size.width, size.height))
 }
 
-fn tag_dialog_list_height(
+fn metadata_dialog_list_height(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &App,
 ) -> AppResult<u16> {
-    let filtered_len = app.edit_tag_state().map_or(0, |state| state.filtered.len());
+    let filtered_len = app.edit_metadata_state().map_or(0, |state| state.filtered.len());
     Ok(
-        render::tags_dialog_layout(terminal_area(terminal)?, filtered_len)
+        render::metadata_dialog_layout(terminal_area(terminal)?, filtered_len)
             .list
             .height,
     )

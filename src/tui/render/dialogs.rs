@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::tui::state::{
-    DeleteContext, EditFeelingState, EditMoodState, EditTagFocus, EditTagState, ListNav,
+    DeleteContext, EditFeelingState, EditMoodState, EditMetadataFocus, EditMetadataState, ListNav,
 };
 
 use super::{
@@ -32,22 +32,22 @@ const MOOD_DIALOG_HINTS: [Hint; 5] = [
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
-const TAGS_DIALOG_LIST_HINTS: [Hint; 4] = [
-    Hint::new("toggle", "space", HintId::TagsToggle),
-    Hint::new("input", "tab", HintId::TagsSwitchFocus),
-    Hint::new("save", "enter", HintId::TagsSave),
+const METADATA_DIALOG_LIST_HINTS: [Hint; 4] = [
+    Hint::new("toggle", "space", HintId::MetadataToggle),
+    Hint::new("input", "tab", HintId::MetadataSwitchFocus),
+    Hint::new("save", "enter", HintId::MetadataSave),
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
-const TAGS_DIALOG_INPUT_EMPTY_HINTS: [Hint; 3] = [
-    Hint::new("save", "enter", HintId::TagsSave),
-    Hint::new("list", "tab", HintId::TagsSwitchFocus),
+const METADATA_DIALOG_INPUT_EMPTY_HINTS: [Hint; 3] = [
+    Hint::new("save", "enter", HintId::MetadataSave),
+    Hint::new("list", "tab", HintId::MetadataSwitchFocus),
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
-const TAGS_DIALOG_INPUT_VALUE_HINTS: [Hint; 3] = [
-    Hint::new("add", "enter", HintId::TagsAddFromInput),
-    Hint::new("list", "tab", HintId::TagsSwitchFocus),
+const METADATA_DIALOG_INPUT_VALUE_HINTS: [Hint; 3] = [
+    Hint::new("add", "enter", HintId::MetadataAddFromInput),
+    Hint::new("list", "tab", HintId::MetadataSwitchFocus),
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
@@ -55,7 +55,7 @@ const LIST_DIALOG_WIDTH: u16 = 44;
 const MOOD_DIALOG_WIDTH: u16 = 90;
 const CONFIRM_DIALOG_WIDTH: u16 = 42;
 const NEW_JOURNAL_DIALOG_WIDTH: u16 = 56;
-const TAGS_DIALOG_MAX_VISIBLE_ROWS: u16 = 14;
+const METADATA_DIALOG_MAX_VISIBLE_ROWS: u16 = 14;
 const FEELINGS_DIALOG_MAX_VISIBLE_ROWS: u16 = 16;
 
 pub(crate) fn feelings_dialog_hints() -> &'static [Hint] {
@@ -66,20 +66,20 @@ pub(crate) fn mood_dialog_hints() -> &'static [Hint] {
     &MOOD_DIALOG_HINTS
 }
 
-pub(crate) fn tags_dialog_hints(focus: EditTagFocus, input_is_empty: bool) -> &'static [Hint] {
+pub(crate) fn metadata_dialog_hints(focus: EditMetadataFocus, input_is_empty: bool) -> &'static [Hint] {
     match (focus, input_is_empty) {
-        (EditTagFocus::List, _) => &TAGS_DIALOG_LIST_HINTS,
-        (EditTagFocus::Input, true) => &TAGS_DIALOG_INPUT_EMPTY_HINTS,
-        (EditTagFocus::Input, false) => &TAGS_DIALOG_INPUT_VALUE_HINTS,
+        (EditMetadataFocus::List, _) => &METADATA_DIALOG_LIST_HINTS,
+        (EditMetadataFocus::Input, true) => &METADATA_DIALOG_INPUT_EMPTY_HINTS,
+        (EditMetadataFocus::Input, false) => &METADATA_DIALOG_INPUT_VALUE_HINTS,
     }
 }
 
 // ── Dialog area helpers (re-used by the mouse handler for hit-testing) ───────
 
-pub(crate) fn tags_dialog_area(frame_area: Rect, filtered_len: usize) -> Rect {
+pub(crate) fn metadata_dialog_area(frame_area: Rect, filtered_len: usize) -> Rect {
     const FIXED: u16 = 7;
     let hint_height = tag_dialog_hint_height(frame_area);
-    let visible = (filtered_len as u16).clamp(1, TAGS_DIALOG_MAX_VISIBLE_ROWS);
+    let visible = (filtered_len as u16).clamp(1, METADATA_DIALOG_MAX_VISIBLE_ROWS);
     let h = (FIXED + hint_height + visible).min(frame_area.height.saturating_sub(2));
     super::centered_rect_fixed_size(LIST_DIALOG_WIDTH, h, frame_area)
 }
@@ -109,9 +109,9 @@ fn dialog_hint_width(frame_area: Rect, width: u16) -> u16 {
 
 fn tag_dialog_hint_height(frame_area: Rect) -> u16 {
     let width = dialog_hint_width(frame_area, LIST_DIALOG_WIDTH);
-    hint_height(&TAGS_DIALOG_LIST_HINTS, width)
-        .max(hint_height(&TAGS_DIALOG_INPUT_EMPTY_HINTS, width))
-        .max(hint_height(&TAGS_DIALOG_INPUT_VALUE_HINTS, width))
+    hint_height(&METADATA_DIALOG_LIST_HINTS, width)
+        .max(hint_height(&METADATA_DIALOG_INPUT_EMPTY_HINTS, width))
+        .max(hint_height(&METADATA_DIALOG_INPUT_VALUE_HINTS, width))
 }
 
 fn feelings_dialog_hint_height(frame_area: Rect) -> u16 {
@@ -126,7 +126,7 @@ fn mood_dialog_hint_height(frame_area: Rect) -> u16 {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct TagsDialogLayout {
+pub(crate) struct MetadataDialogLayout {
     pub(crate) area: Rect,
     pub(crate) inner: Rect,
     pub(crate) list_top_separator: Rect,
@@ -136,8 +136,8 @@ pub(crate) struct TagsDialogLayout {
     pub(crate) hints: Rect,
 }
 
-pub(crate) fn tags_dialog_layout(frame_area: Rect, filtered_len: usize) -> TagsDialogLayout {
-    let area = tags_dialog_area(frame_area, filtered_len);
+pub(crate) fn metadata_dialog_layout(frame_area: Rect, filtered_len: usize) -> MetadataDialogLayout {
+    let area = metadata_dialog_area(frame_area, filtered_len);
     let inner = super::panel_inner(area);
     let hint_height = tag_dialog_hint_height(frame_area);
     let list_height = inner.height.saturating_sub(5 + hint_height);
@@ -172,7 +172,7 @@ pub(crate) fn tags_dialog_layout(frame_area: Rect, filtered_len: usize) -> TagsD
         height: hint_height,
     };
 
-    TagsDialogLayout {
+    MetadataDialogLayout {
         area,
         inner,
         list_top_separator,
@@ -405,13 +405,13 @@ pub(super) fn draw_new_journal_input(frame: &mut Frame<'_>, input: &str) {
     frame.render_widget(dialog, area);
 }
 
-pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagState) {
-    let layout = tags_dialog_layout(frame.area(), state.filtered.len());
+pub(super) fn draw_edit_metadata_dialog(frame: &mut Frame<'_>, state: &mut EditMetadataState) {
+    let layout = metadata_dialog_layout(frame.area(), state.filtered.len());
     let title = state.kind.title();
     let value_name = state.kind.value_name();
 
-    let list_focused = state.focus == EditTagFocus::List;
-    let input_focused = state.focus == EditTagFocus::Input;
+    let list_focused = state.focus == EditMetadataFocus::List;
+    let input_focused = state.focus == EditMetadataFocus::Input;
 
     state.normalize_list_state();
     let list_lines = state.filtered.len();
@@ -432,7 +432,7 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
             .filtered
             .iter()
             .map(|idx| {
-                let (tag, freq) = &state.all_tags[*idx];
+                let (tag, freq) = &state.all_values[*idx];
                 let checked = state.selected.iter().any(|t| t.eq_ignore_ascii_case(tag));
                 let marker = if checked { "[x]" } else { "[ ]" };
                 ListItem::new(Line::from(format!("{marker} {tag} ({freq})")))
@@ -485,7 +485,7 @@ pub(super) fn draw_edit_tags_dialog(frame: &mut Frame<'_>, state: &mut EditTagSt
     );
     render_hint_line(
         frame,
-        tags_dialog_hints(state.focus, state.input.trim().is_empty()),
+        metadata_dialog_hints(state.focus, state.input.trim().is_empty()),
         layout.hints,
     );
     render_scrollbar_if_needed(frame, layout.area, list_lines, max_visible, scroll);

@@ -7,7 +7,7 @@ use crate::tui::{
     app::{App, Focus, Mode, entry_view_is_available},
     image::image_for_digit,
     render,
-    state::{EditTagFocus, Overlay},
+    state::{EditMetadataFocus, Overlay},
 };
 
 use super::action::Action;
@@ -38,7 +38,7 @@ pub(super) fn key_to_action(
         Overlay::None => browse_key_to_action(app, key, entry_view_available),
         Overlay::ConfirmDelete(_) => confirm_delete_key_to_action(key),
         Overlay::NewJournal(_) => new_journal_key_to_action(key),
-        Overlay::EditTags(_) => tags_key_to_action(app, key),
+        Overlay::EditMetadata(_) => tags_key_to_action(app, key),
         Overlay::EditFeelings(_) => feelings_key_to_action(key),
         Overlay::EditMood(_) => mood_key_to_action(key),
         Overlay::ImageViewer(_) => image_viewer_key_to_action(key),
@@ -201,19 +201,19 @@ fn new_journal_key_to_action(key: KeyEvent) -> Option<Action> {
 }
 
 fn tags_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
-    let state = app.edit_tag_state()?;
+    let state = app.edit_metadata_state()?;
     let focus = state.focus;
     match key.code {
         KeyCode::Esc => Some(Action::CancelOverlay),
-        KeyCode::Tab => Some(Action::TagsSwitchFocus),
-        KeyCode::Enter if focus == EditTagFocus::List => Some(Action::TagsSave),
-        KeyCode::Enter if state.input.trim().is_empty() => Some(Action::TagsSave),
-        KeyCode::Enter => Some(Action::TagsAddFromInput),
-        KeyCode::Up if focus == EditTagFocus::List => Some(Action::TagsMoveUp),
-        KeyCode::Down if focus == EditTagFocus::List => Some(Action::TagsMoveDown),
-        KeyCode::Char(' ') if focus == EditTagFocus::List => Some(Action::TagsToggle),
-        KeyCode::Backspace if focus == EditTagFocus::Input => Some(Action::TagsBackspace),
-        KeyCode::Char(ch) if focus == EditTagFocus::Input => Some(Action::TagsInput(ch)),
+        KeyCode::Tab => Some(Action::MetadataSwitchFocus),
+        KeyCode::Enter if focus == EditMetadataFocus::List => Some(Action::MetadataSave),
+        KeyCode::Enter if state.input.trim().is_empty() => Some(Action::MetadataSave),
+        KeyCode::Enter => Some(Action::MetadataAddFromInput),
+        KeyCode::Up if focus == EditMetadataFocus::List => Some(Action::MetadataMoveUp),
+        KeyCode::Down if focus == EditMetadataFocus::List => Some(Action::MetadataMoveDown),
+        KeyCode::Char(' ') if focus == EditMetadataFocus::List => Some(Action::MetadataToggle),
+        KeyCode::Backspace if focus == EditMetadataFocus::Input => Some(Action::MetadataBackspace),
+        KeyCode::Char(ch) if focus == EditMetadataFocus::Input => Some(Action::MetadataInput(ch)),
         _ => None,
     }
 }

@@ -150,7 +150,7 @@ impl SelectableList {
 
 /// Keyboard/scroll navigation shared by the overlay list states. An implementor
 /// exposes its [`SelectableList`] and current item count; the navigation methods
-/// come for free, so `EditTagState` and `EditFeelingState` don't each re-forward
+/// come for free, so `EditMetadataState` and `EditFeelingState` don't each re-forward
 /// them with their own length source.
 pub(crate) trait ListNav {
     fn list(&self) -> &SelectableList;
@@ -196,9 +196,9 @@ pub(crate) trait ListNav {
     }
 }
 
-/// Which part of the edit-tags dialog has keyboard focus.
+/// Which part of the metadata edit dialog has keyboard focus.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EditTagFocus {
+pub(crate) enum EditMetadataFocus {
     #[default]
     List,
     Input,
@@ -238,11 +238,11 @@ impl MetadataKind {
 }
 
 /// State for the free-form metadata overlay.
-pub(crate) struct EditTagState {
+pub(crate) struct EditMetadataState {
     pub(crate) kind: MetadataKind,
     /// All values across every entry, sorted by usage count descending.
-    pub(crate) all_tags: Vec<(String, usize)>,
-    /// Indices into `all_tags` that match the current filter input.
+    pub(crate) all_values: Vec<(String, usize)>,
+    /// Indices into `all_values` that match the current filter input.
     pub(crate) filtered: Vec<usize>,
     /// Values currently selected for the entry (lowercased for look-up).
     pub(crate) selected: Vec<String>,
@@ -251,24 +251,24 @@ pub(crate) struct EditTagState {
     /// Text input for filtering values and adding new ones.
     pub(crate) input: String,
     /// Whether keyboard events go to the list or to the input.
-    pub(crate) focus: EditTagFocus,
+    pub(crate) focus: EditMetadataFocus,
 }
 
-impl EditTagState {
+impl EditMetadataState {
     pub(crate) fn new(
         kind: MetadataKind,
-        all_tags: Vec<(String, usize)>,
+        all_values: Vec<(String, usize)>,
         filtered: Vec<usize>,
         selected: Vec<String>,
     ) -> Self {
         let mut state = Self {
             kind,
-            all_tags,
+            all_values,
             filtered,
             selected,
             list: SelectableList::default(),
             input: String::new(),
-            focus: EditTagFocus::List,
+            focus: EditMetadataFocus::List,
         };
         state.normalize_list_state();
         state
@@ -277,7 +277,7 @@ impl EditTagState {
     pub(crate) fn rebuild_filter(&mut self) {
         let query = self.input.to_lowercase();
         self.filtered = self
-            .all_tags
+            .all_values
             .iter()
             .enumerate()
             .filter(|(_, (tag, _))| tag.to_lowercase().contains(&query))
@@ -287,14 +287,14 @@ impl EditTagState {
         self.normalize_list_state();
     }
 
-    pub(crate) fn selected_tag_index(&self) -> Option<usize> {
+    pub(crate) fn selected_value_index(&self) -> Option<usize> {
         self.selected_index()
             .and_then(|index| self.filtered.get(index).copied())
     }
 
     pub(crate) fn toggle_selected(&mut self) {
-        if let Some(tag_idx) = self.selected_tag_index() {
-            let tag = self.all_tags[tag_idx].0.to_lowercase();
+        if let Some(tag_idx) = self.selected_value_index() {
+            let tag = self.all_values[tag_idx].0.to_lowercase();
             if let Some(pos) = self.selected.iter().position(|t| t == &tag) {
                 self.selected.remove(pos);
             } else {
@@ -304,7 +304,7 @@ impl EditTagState {
     }
 }
 
-impl ListNav for EditTagState {
+impl ListNav for EditMetadataState {
     fn list(&self) -> &SelectableList {
         &self.list
     }
@@ -466,7 +466,7 @@ pub(crate) enum Overlay {
     None,
     ConfirmDelete(DeleteContext),
     NewJournal(String),
-    EditTags(EditTagState),
+    EditMetadata(EditMetadataState),
     EditFeelings(EditFeelingState),
     EditMood(EditMoodState),
     ImageViewer(ImageViewerState),
@@ -476,12 +476,12 @@ pub(crate) enum Overlay {
 mod tests {
     use super::*;
 
-    fn tag_state(count: usize) -> EditTagState {
-        let all_tags: Vec<(String, usize)> = (0..count)
+    fn tag_state(count: usize) -> EditMetadataState {
+        let all_values: Vec<(String, usize)> = (0..count)
             .map(|index| (format!("tag-{index:02}"), index))
             .collect();
         let filtered: Vec<usize> = (0..count).collect();
-        EditTagState::new(MetadataKind::Tags, all_tags, filtered, Vec::new())
+        EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new())
     }
 
     #[test]

@@ -5,7 +5,7 @@ use crate::{
     tui::{
         app::{App, Focus, ScrollbarDrag},
         render, scroll,
-        state::{EditTagFocus, ListNav},
+        state::{EditMetadataFocus, ListNav},
     },
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -77,8 +77,8 @@ fn mouse_in_area(app: &mut App, event: MouseEvent, w: u16, h: u16) {
 }
 
 fn set_tag_dialog_items(app: &mut App, count: usize) {
-    let state = app.edit_tag_state_mut().unwrap();
-    state.all_tags = (0..count)
+    let state = app.edit_metadata_state_mut().unwrap();
+    state.all_values = (0..count)
         .map(|index| (format!("tag-{index:02}"), index + 1))
         .collect();
     state.filtered = (0..count).collect();
@@ -173,22 +173,22 @@ fn typed_hint_ids_route_to_actions_without_string_parsing() {
         Some(Action::EditSelected)
     );
     assert_eq!(
-        mouse::hint_id_to_action(&app, render::HintId::TagsToggle),
+        mouse::hint_id_to_action(&app, render::HintId::MetadataToggle),
         None
     );
 
     app.begin_edit_tags();
-    if let Some(state) = app.edit_tag_state_mut() {
-        state.all_tags.push(("work".to_string(), 1));
+    if let Some(state) = app.edit_metadata_state_mut() {
+        state.all_values.push(("work".to_string(), 1));
         state.filtered.push(0);
     }
     assert_eq!(
-        mouse::hint_id_to_action(&app, render::HintId::TagsToggle),
-        Some(Action::TagsToggle)
+        mouse::hint_id_to_action(&app, render::HintId::MetadataToggle),
+        Some(Action::MetadataToggle)
     );
     assert_eq!(
-        mouse::hint_id_to_action(&app, render::HintId::TagsSave),
-        Some(Action::TagsSave)
+        mouse::hint_id_to_action(&app, render::HintId::MetadataSave),
+        Some(Action::MetadataSave)
     );
     assert_eq!(
         mouse::hint_id_to_action(&app, render::HintId::CancelOverlay),
@@ -200,8 +200,8 @@ fn typed_hint_ids_route_to_actions_without_string_parsing() {
 fn enter_in_metadata_input_saves_when_input_is_empty() {
     let mut app = app_with_entries(1);
     app.begin_edit_tags();
-    let state = app.edit_tag_state_mut().unwrap();
-    state.focus = EditTagFocus::Input;
+    let state = app.edit_metadata_state_mut().unwrap();
+    state.focus = EditMetadataFocus::Input;
     state.input.clear();
 
     assert_eq!(
@@ -210,17 +210,17 @@ fn enter_in_metadata_input_saves_when_input_is_empty() {
             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
             true
         ),
-        Some(Action::TagsSave)
+        Some(Action::MetadataSave)
     );
 
-    app.edit_tag_state_mut().unwrap().input = "rust".to_string();
+    app.edit_metadata_state_mut().unwrap().input = "rust".to_string();
     assert_eq!(
         keyboard::key_to_action(
             &app,
             KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
             true
         ),
-        Some(Action::TagsAddFromInput)
+        Some(Action::MetadataAddFromInput)
     );
 }
 
@@ -543,7 +543,7 @@ fn wheel_over_tag_dialog_list_scrolls_without_selection_or_toggle_change() {
     let mut app = app_with_entries(1);
     app.begin_edit_tags();
     set_tag_dialog_items(&mut app, 20);
-    let layout = render::tags_dialog_layout(Rect::new(0, 0, 120, 20), 20);
+    let layout = render::metadata_dialog_layout(Rect::new(0, 0, 120, 20), 20);
 
     mouse_in_area(
         &mut app,
@@ -552,7 +552,7 @@ fn wheel_over_tag_dialog_list_scrolls_without_selection_or_toggle_change() {
         20,
     );
 
-    let state = app.edit_tag_state().unwrap();
+    let state = app.edit_metadata_state().unwrap();
     assert_eq!(state.offset(), 1);
     assert_eq!(state.selected_index(), Some(0));
     assert!(state.selected.is_empty());
@@ -563,7 +563,7 @@ fn click_on_tag_dialog_row_selects_and_toggles_it() {
     let mut app = app_with_entries(1);
     app.begin_edit_tags();
     set_tag_dialog_items(&mut app, 5);
-    let layout = render::tags_dialog_layout(Rect::new(0, 0, 120, 20), 5);
+    let layout = render::metadata_dialog_layout(Rect::new(0, 0, 120, 20), 5);
 
     mouse_in_area(
         &mut app,
@@ -576,7 +576,7 @@ fn click_on_tag_dialog_row_selects_and_toggles_it() {
         20,
     );
 
-    let state = app.edit_tag_state().unwrap();
+    let state = app.edit_metadata_state().unwrap();
     assert_eq!(state.selected_index(), Some(2));
     assert_eq!(state.selected, vec!["tag-02"]);
 }
@@ -585,12 +585,12 @@ fn click_on_tag_dialog_row_selects_and_toggles_it() {
 fn click_on_tag_dialog_placeholder_row_does_not_toggle() {
     let mut app = app_with_entries(1);
     app.begin_edit_tags();
-    let state = app.edit_tag_state_mut().unwrap();
-    state.all_tags = vec![("work".to_string(), 1)];
+    let state = app.edit_metadata_state_mut().unwrap();
+    state.all_values = vec![("work".to_string(), 1)];
     state.filtered.clear();
     state.input = "missing".to_string();
     state.normalize_list_state();
-    let layout = render::tags_dialog_layout(Rect::new(0, 0, 120, 12), 0);
+    let layout = render::metadata_dialog_layout(Rect::new(0, 0, 120, 12), 0);
 
     mouse_in_area(
         &mut app,
@@ -603,7 +603,7 @@ fn click_on_tag_dialog_placeholder_row_does_not_toggle() {
         12,
     );
 
-    let state = app.edit_tag_state().unwrap();
+    let state = app.edit_metadata_state().unwrap();
     assert_eq!(state.selected_index(), None);
     assert!(state.selected.is_empty());
 }
@@ -613,7 +613,7 @@ fn click_on_tag_input_row_switches_focus_to_input() {
     let mut app = app_with_entries(1);
     app.begin_edit_tags();
     set_tag_dialog_items(&mut app, 3);
-    let layout = render::tags_dialog_layout(Rect::new(0, 0, 120, 16), 3);
+    let layout = render::metadata_dialog_layout(Rect::new(0, 0, 120, 16), 3);
 
     mouse_in_area(
         &mut app,
@@ -626,7 +626,7 @@ fn click_on_tag_input_row_switches_focus_to_input() {
         16,
     );
 
-    assert_eq!(app.edit_tag_state().unwrap().focus, EditTagFocus::Input);
+    assert_eq!(app.edit_metadata_state().unwrap().focus, EditMetadataFocus::Input);
 }
 
 #[test]

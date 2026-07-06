@@ -3,7 +3,7 @@ use crate::{
     config::Config,
     tui::{
         app::{Focus, INLINE_ENTRY_VIEW_MIN_WIDTH, Mode},
-        state::{EditTagFocus, EditTagState, MetadataKind},
+        state::{EditMetadataFocus, EditMetadataState, MetadataKind},
     },
 };
 use journal_storage::{Entry, EntryEncryptionState, JournalStore, SearchHit};
@@ -60,12 +60,12 @@ fn render_app(mut app: App, width: u16, height: u16) -> TestBackend {
     terminal.backend().clone()
 }
 
-fn render_edit_tags_dialog_text(mut state: EditTagState, width: u16, height: u16) -> String {
+fn render_edit_tags_dialog_text(mut state: EditMetadataState, width: u16, height: u16) -> String {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
 
     terminal
-        .draw(|frame| dialogs::draw_edit_tags_dialog(frame, &mut state))
+        .draw(|frame| dialogs::draw_edit_metadata_dialog(frame, &mut state))
         .unwrap();
 
     terminal
@@ -530,11 +530,11 @@ fn scrollbar_thumb_none_when_bar_too_short() {
 
 #[test]
 fn list_dialogs_keep_preferred_width_until_they_hit_edges() {
-    let wide_tags = tags_dialog_layout(Rect::new(0, 0, 120, 30), 20);
+    let wide_tags = metadata_dialog_layout(Rect::new(0, 0, 120, 30), 20);
     assert_eq!(wide_tags.area.width, 44);
     assert_eq!(wide_tags.list.height, 14);
 
-    let narrow_tags = tags_dialog_layout(Rect::new(0, 0, 40, 30), 20);
+    let narrow_tags = metadata_dialog_layout(Rect::new(0, 0, 40, 30), 20);
     assert_eq!(narrow_tags.area.x, 0);
     assert_eq!(narrow_tags.area.width, 40);
 
@@ -567,12 +567,12 @@ fn confirm_delete_message_is_centered_in_dialog_body() {
 
 #[test]
 fn edit_tags_dialog_keeps_help_visible_below_spacer() {
-    let all_tags: Vec<(String, usize)> = (0..20)
+    let all_values: Vec<(String, usize)> = (0..20)
         .map(|index| (format!("tag-{index:02}"), index))
         .collect();
-    let filtered: Vec<usize> = (0..all_tags.len()).collect();
+    let filtered: Vec<usize> = (0..all_values.len()).collect();
     let rendered = render_edit_tags_dialog_text(
-        EditTagState::new(MetadataKind::Tags, all_tags, filtered, Vec::new()),
+        EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new()),
         200,
         20,
     );
@@ -586,11 +586,11 @@ fn edit_tags_dialog_keeps_help_visible_below_spacer() {
 
 #[test]
 fn edit_tags_dialog_keeps_list_gutter_when_selection_is_scrolled_out() {
-    let all_tags: Vec<(String, usize)> = (0..20)
+    let all_values: Vec<(String, usize)> = (0..20)
         .map(|index| (format!("tag-{index:02}"), index))
         .collect();
-    let filtered: Vec<usize> = (0..all_tags.len()).collect();
-    let mut state = EditTagState::new(MetadataKind::Tags, all_tags, filtered, Vec::new());
+    let filtered: Vec<usize> = (0..all_values.len()).collect();
+    let mut state = EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new());
     state.list.set_offset(5);
 
     let rendered = render_edit_tags_dialog_text(state, 200, 20);
@@ -600,14 +600,14 @@ fn edit_tags_dialog_keeps_list_gutter_when_selection_is_scrolled_out() {
 
 #[test]
 fn edit_tags_dialog_counts_no_matches_row_when_sizing() {
-    let mut state = EditTagState::new(
+    let mut state = EditMetadataState::new(
         MetadataKind::Tags,
         vec![("work".to_string(), 1)],
         Vec::new(),
         Vec::new(),
     );
     state.input = "missing".to_string();
-    state.focus = EditTagFocus::Input;
+    state.focus = EditMetadataFocus::Input;
     let rendered = render_edit_tags_dialog_text(state, 200, 12);
 
     assert!(rendered.contains(" (no matches)"));
@@ -616,14 +616,14 @@ fn edit_tags_dialog_counts_no_matches_row_when_sizing() {
 
 #[test]
 fn edit_metadata_input_hint_saves_when_empty_and_adds_when_not_empty() {
-    let mut empty = EditTagState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
-    empty.focus = EditTagFocus::Input;
+    let mut empty = EditMetadataState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
+    empty.focus = EditMetadataFocus::Input;
     let rendered_empty = render_edit_tags_dialog_text(empty, 200, 12);
     assert!(rendered_empty.contains(" save (enter) | list (tab) | cancel (esc)"));
 
     let mut with_value =
-        EditTagState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
-    with_value.focus = EditTagFocus::Input;
+        EditMetadataState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
+    with_value.focus = EditMetadataFocus::Input;
     with_value.input = "alex".to_string();
     let rendered_value = render_edit_tags_dialog_text(with_value, 200, 12);
     assert!(rendered_value.contains(" add (enter) | list (tab) | cancel (esc)"));
@@ -1115,27 +1115,27 @@ fn expanded_footer_hint_routing_uses_typed_ids() {
 
 #[test]
 fn dialog_hints_wrap_and_remain_clickable_by_row() {
-    let hints = tags_dialog_hints(EditTagFocus::List, true);
+    let hints = metadata_dialog_hints(EditMetadataFocus::List, true);
 
     assert_eq!(hint_height(hints, 29), 2);
     assert_eq!(
         hint_id_at_wrapped(hints, 10, 5, 29, 10, 6),
-        Some(HintId::TagsSave)
+        Some(HintId::MetadataSave)
     );
 }
 
 #[test]
 fn dialog_hint_routing_uses_typed_ids() {
-    let tags = tags_dialog_hints(EditTagFocus::List, true);
-    assert_eq!(hint_id_at(tags, 10, 11), Some(HintId::TagsToggle));
+    let tags = metadata_dialog_hints(EditMetadataFocus::List, true);
+    assert_eq!(hint_id_at(tags, 10, 11), Some(HintId::MetadataToggle));
 
-    let empty_input = tags_dialog_hints(EditTagFocus::Input, true);
-    assert_eq!(hint_id_at(empty_input, 10, 11), Some(HintId::TagsSave));
+    let empty_input = metadata_dialog_hints(EditMetadataFocus::Input, true);
+    assert_eq!(hint_id_at(empty_input, 10, 11), Some(HintId::MetadataSave));
 
-    let value_input = tags_dialog_hints(EditTagFocus::Input, false);
+    let value_input = metadata_dialog_hints(EditMetadataFocus::Input, false);
     assert_eq!(
         hint_id_at(value_input, 10, 11),
-        Some(HintId::TagsAddFromInput)
+        Some(HintId::MetadataAddFromInput)
     );
 
     let feelings = feelings_dialog_hints();

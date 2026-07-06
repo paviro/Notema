@@ -203,11 +203,11 @@ fn set_pane_scroll(app: &mut App, which: ScrollbarDrag, offset: usize) {
 fn step_pane_scroll(app: &mut App, target: &ScrollbarTarget, delta: i16) {
     match target.which {
         ScrollbarDrag::Journals => {
-            app.journal_list_scroll(delta, target.viewport);
+            app.scroll_journal_list(delta, target.viewport);
             app.nav.focus = Focus::Journals;
         }
         ScrollbarDrag::EntryList => {
-            app.entry_list_scroll(delta, target.content_length, target.viewport);
+            app.scroll_entry_list(delta, target.content_length, target.viewport);
             app.nav.focus = Focus::Entries;
         }
         ScrollbarDrag::EntryView => {
@@ -368,7 +368,7 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
         && render::point_in_rect(area.panel.area, mouse.column, mouse.row)
     {
         let cache = app.entry_rows(area.text_width);
-        app.entry_list_scroll(delta, cache.total_height, area.viewport_height);
+        app.scroll_entry_list(delta, cache.total_height, area.viewport_height);
         return;
     }
 
@@ -376,7 +376,7 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
         && let Some(area) = layout.journals
         && render::point_in_rect(area.area, mouse.column, mouse.row)
     {
-        app.journal_list_scroll(
+        app.scroll_journal_list(
             delta,
             render::journals_per_page(render::journal_list_rect(area.content).height),
         );
@@ -462,14 +462,14 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
     let row = mouse.row;
 
     if let Some((focus, input_is_empty)) = app
-        .edit_tag_state()
+        .edit_metadata_state()
         .map(|s| (s.focus, s.input.trim().is_empty()))
     {
-        let filtered_len = app.edit_tag_state().map_or(0, |s| s.filtered.len());
-        let layout = render::tags_dialog_layout(area, filtered_len);
+        let filtered_len = app.edit_metadata_state().map_or(0, |s| s.filtered.len());
+        let layout = render::metadata_dialog_layout(area, filtered_len);
         if render::point_in_rect(layout.hints, col, row)
             && let Some(id) = render::hint_id_at_wrapped(
-                render::tags_dialog_hints(focus, input_is_empty),
+                render::metadata_dialog_hints(focus, input_is_empty),
                 layout.hints.x + 1,
                 layout.hints.y,
                 layout.hints.width.saturating_sub(1),
@@ -480,8 +480,8 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
             return hint_id_to_action(app, id);
         }
         if render::point_in_rect(layout.list, col, row) {
-            if let Some(state) = app.edit_tag_state_mut() {
-                state.focus = crate::tui::state::EditTagFocus::List;
+            if let Some(state) = app.edit_metadata_state_mut() {
+                state.focus = crate::tui::state::EditMetadataFocus::List;
                 if let Some(index) =
                     list_row_at(layout.list, col, row, state.offset(), filtered_len)
                 {
@@ -492,8 +492,8 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
             return None;
         }
         if render::point_in_rect(layout.input, col, row) {
-            if let Some(state) = app.edit_tag_state_mut() {
-                state.focus = crate::tui::state::EditTagFocus::Input;
+            if let Some(state) = app.edit_metadata_state_mut() {
+                state.focus = crate::tui::state::EditMetadataFocus::Input;
             }
             return None;
         }
@@ -564,11 +564,11 @@ fn handle_overlay_drag(app: &mut App, mouse: MouseEvent, area: Rect) {
 }
 
 fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16) {
-    if app.edit_tag_state().is_some() {
-        let filtered_len = app.edit_tag_state().map_or(0, |s| s.filtered.len());
-        let layout = render::tags_dialog_layout(area, filtered_len);
+    if app.edit_metadata_state().is_some() {
+        let filtered_len = app.edit_metadata_state().map_or(0, |s| s.filtered.len());
+        let layout = render::metadata_dialog_layout(area, filtered_len);
         if render::point_in_rect(layout.list, mouse.column, mouse.row)
-            && let Some(state) = app.edit_tag_state_mut()
+            && let Some(state) = app.edit_metadata_state_mut()
         {
             state.scroll_by(delta, layout.list.height);
         }
@@ -648,16 +648,16 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         }
         render::HintId::ExitSearch => Some(Action::ExitSearch),
         render::HintId::CancelOverlay => Some(Action::CancelOverlay),
-        render::HintId::TagsToggle
+        render::HintId::MetadataToggle
             if app
-                .edit_tag_state()
+                .edit_metadata_state()
                 .is_some_and(|state| !state.filtered.is_empty()) =>
         {
-            Some(Action::TagsToggle)
+            Some(Action::MetadataToggle)
         }
-        render::HintId::TagsSwitchFocus => Some(Action::TagsSwitchFocus),
-        render::HintId::TagsAddFromInput => Some(Action::TagsAddFromInput),
-        render::HintId::TagsSave => Some(Action::TagsSave),
+        render::HintId::MetadataSwitchFocus => Some(Action::MetadataSwitchFocus),
+        render::HintId::MetadataAddFromInput => Some(Action::MetadataAddFromInput),
+        render::HintId::MetadataSave => Some(Action::MetadataSave),
         render::HintId::FeelingsToggle => Some(Action::FeelingsToggle),
         render::HintId::FeelingsSave => Some(Action::FeelingsSave),
         render::HintId::MoodDecrease => Some(Action::MoodDecrease),

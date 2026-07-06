@@ -20,7 +20,7 @@ use ratatui::{
 };
 
 use super::state::{
-    DeleteContext, EditFeelingState, EditMoodState, EditTagState, ImageViewerState, MetadataKind,
+    DeleteContext, EditFeelingState, EditMoodState, EditMetadataState, ImageViewerState, MetadataKind,
     Overlay, ScrollState, SearchState, StatusBar, ensure_selected_visible, move_list_selection,
     normalize_list_state, scroll_list_offset,
 };
@@ -526,7 +526,7 @@ impl App {
         );
     }
 
-    pub(crate) fn journal_list_scroll(&mut self, delta: i16, viewport_height: u16) {
+    pub(crate) fn scroll_journal_list(&mut self, delta: i16, viewport_height: u16) {
         scroll_list_offset(
             &mut self.nav.journal_list,
             delta,
@@ -540,7 +540,7 @@ impl App {
         self.nav.scroll.reset_entry_view();
     }
 
-    pub(crate) fn entry_list_scroll(
+    pub(crate) fn scroll_entry_list(
         &mut self,
         delta: i16,
         total_height: usize,
@@ -845,16 +845,16 @@ impl App {
         }
     }
 
-    pub(crate) fn edit_tag_state(&self) -> Option<&EditTagState> {
+    pub(crate) fn edit_metadata_state(&self) -> Option<&EditMetadataState> {
         match &self.overlay {
-            Overlay::EditTags(state) => Some(state),
+            Overlay::EditMetadata(state) => Some(state),
             _ => None,
         }
     }
 
-    pub(crate) fn edit_tag_state_mut(&mut self) -> Option<&mut EditTagState> {
+    pub(crate) fn edit_metadata_state_mut(&mut self) -> Option<&mut EditMetadataState> {
         match &mut self.overlay {
-            Overlay::EditTags(state) => Some(state),
+            Overlay::EditMetadata(state) => Some(state),
             _ => None,
         }
     }
@@ -1136,14 +1136,14 @@ impl App {
     }
 
     fn begin_edit_metadata(&mut self, kind: MetadataKind) {
-        let all_tags = self.all_metadata_sorted(kind);
-        let filtered: Vec<usize> = (0..all_tags.len()).collect();
+        let all_values = self.all_metadata_sorted(kind);
+        let filtered: Vec<usize> = (0..all_values.len()).collect();
         let entry_tags: Vec<String> = self
             .selected_entry_metadata(kind)
             .into_iter()
             .map(|t| t.to_lowercase())
             .collect();
-        self.overlay = Overlay::EditTags(EditTagState::new(kind, all_tags, filtered, entry_tags));
+        self.overlay = Overlay::EditMetadata(EditMetadataState::new(kind, all_values, filtered, entry_tags));
     }
 
     pub(crate) fn begin_edit_feelings(&mut self) {
@@ -1383,7 +1383,7 @@ impl App {
     }
 }
 
-/// Helper for [`App::all_tags_sorted`]: counts per lowercased tag and per
+/// Helper for [`App::all_metadata_sorted`]: counts per lowercased tag and per
 /// original-casing form so we can consolidate case variants.
 #[derive(Default)]
 struct CasingCount {
