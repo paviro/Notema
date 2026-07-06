@@ -143,7 +143,7 @@ pub fn with_metadata_field(content: &str, field: &MetadataField) -> Option<Strin
     })
 }
 
-fn parse_front_matter(front_matter: &str) -> Option<FrontMatter> {
+pub(crate) fn parse_front_matter(front_matter: &str) -> Option<FrontMatter> {
     toml::from_str(front_matter).ok()
 }
 
