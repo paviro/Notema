@@ -108,15 +108,29 @@ fn run_after_unlock(
         }
     }
 
-    // A device that has an identity but isn't (yet) a store recipient can't
-    // decrypt history — explain why and exit instead of failing to load.
-    if store.unlock_available() && store.encryption_enabled() && !store.is_current_recipient()? {
+    // A device that can't decrypt this encrypted store — no key yet, awaiting
+    // approval, or revoked — can't load history. Explain why and exit instead of
+    // failing to load. (A store recipient unlocked above, so is_current_recipient
+    // is true and this is skipped.)
+    if store.encryption_enabled() && !store.is_current_recipient()? {
         let name = store
             .this_device()?
             .map(|device| device.name)
             .unwrap_or_default();
-        let awaiting = store.self_request_pending()?;
-        return run_pending_notice(terminal, &name, awaiting);
+        if store.self_request_pending()? {
+            // Request still queued for approval — keep the identity.
+            return run_pending_notice(terminal, &name, render::AccessNotice::AwaitingApproval);
+        }
+        // No usable key: either never enrolled, or access was revoked
+        // (denied/removed) leaving a now-dead key. Retire any such key (renamed
+        // aside, recoverable) so the user only has to enroll; `Some` means a key
+        // was actually retired, which the notice calls out.
+        let retired_key = store.retire_revoked_identity()?.is_some();
+        return run_pending_notice(
+            terminal,
+            &name,
+            render::AccessNotice::NeedsEnroll { retired_key },
+        );
     }
 
     if !approve_pending_requests(terminal, &mut store)? {
@@ -189,17 +203,16 @@ fn approve_pending_requests(
     Ok(true)
 }
 
-/// Show why a device that has an identity but isn't a store recipient can't open
-/// the journal, then exit on any key. `awaiting` picks the message: a request
-/// still queued for approval versus a device that isn't authorized and has
-/// nothing pending (denied, removed, or never synced).
+/// Show why a device that can't decrypt this encrypted store can't open the
+/// journal, then exit on any key. `notice` picks the message — see
+/// [`render::AccessNotice`].
 fn run_pending_notice(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     device_name: &str,
-    awaiting: bool,
+    notice: render::AccessNotice,
 ) -> AppResult<()> {
     loop {
-        terminal.draw(|frame| render::draw_pending_notice(frame, device_name, awaiting))?;
+        terminal.draw(|frame| render::draw_pending_notice(frame, device_name, &notice))?;
         if let Event::Key(_) = event::read()? {
             return Ok(());
         }

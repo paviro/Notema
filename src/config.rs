@@ -69,18 +69,16 @@ pub fn save_config(path: &Path, config: &Config) -> AppResult<()> {
     Ok(())
 }
 
-/// What `load_or_setup_with_path` resolved: either a store ready to open in the
-/// TUI, or nothing to open (setup already printed everything the user needs).
-pub enum Startup {
-    Open {
-        config_path: PathBuf,
-        config: Config,
-        store: Box<JournalStore>,
-        /// Set when opening this store just retired local encryption because it
-        /// was disabled on another device — the TUI surfaces this as a notice.
-        encryption_disabled_elsewhere: bool,
-    },
-    Done,
+/// What `load_or_setup_with_path` resolved: a store ready to open in the TUI. An
+/// encrypted store this device can't yet read is opened too — the TUI shows the
+/// enroll/awaiting notice rather than the CLI printing it.
+pub struct Startup {
+    pub config_path: PathBuf,
+    pub config: Config,
+    pub store: Box<JournalStore>,
+    /// Set when opening this store just retired local encryption because it was
+    /// disabled on another device — the TUI surfaces this as a notice.
+    pub encryption_disabled_elsewhere: bool,
 }
 
 pub fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult<Startup> {
@@ -97,27 +95,15 @@ pub fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult<Startu
         (config, store, false)
     };
 
-    // An encrypted store this device has no key for can't be opened; point the
-    // user at enrollment. Covers a fresh device aimed at a synced store and a
-    // bare `journal` relaunch before enrolling. An enrolled-but-unapproved device
-    // has an identity (unlock_available), so the TUI handles that case instead.
-    if store.encryption_enabled() && !store.unlock_available() {
-        print_enroll_hint();
-        return Ok(Startup::Done);
-    }
-
-    Ok(Startup::Open {
+    // An encrypted store this device can't yet read (no key, awaiting approval, or
+    // revoked) is still opened: the TUI shows the enroll/awaiting notice instead
+    // of the CLI printing a hint, so every unreadable-store case looks the same.
+    Ok(Startup {
         config_path,
         config,
         store: Box::new(store),
         encryption_disabled_elsewhere,
     })
-}
-
-fn print_enroll_hint() {
-    println!("This journal is encrypted; this device has no key yet.");
-    println!("Run `journal encryption device enroll` (with the same --config) to request access,");
-    println!("then approve it from a device that can already read this journal.");
 }
 
 pub fn load_existing(path_override: Option<&Path>) -> AppResult<(PathBuf, Config)> {

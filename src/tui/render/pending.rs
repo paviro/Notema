@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Flex, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Gauge, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Gauge, Padding, Paragraph, Wrap},
 };
 
 use journal_storage::PendingRequest;
@@ -22,15 +22,7 @@ pub(crate) fn draw_pending_request(
     request: &PendingRequest,
     progress: Option<(usize, usize)>,
 ) {
-    let area = frame.area();
-    frame.render_widget(Clear, area);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title_top(Line::from(" Device access request "))
-        .title_bottom(Line::from(" y approve · n deny · esc later ").right_aligned());
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = super::draw_modal_frame(frame, "Device access request", "y approve · n deny · esc later");
     if inner.height == 0 || inner.width == 0 {
         return;
     }
@@ -109,18 +101,31 @@ pub(crate) fn draw_pending_request(
     }
 }
 
-/// Draw the full-screen notice a device sees when it has an identity but isn't a
-/// store recipient, so it can't decrypt history. `awaiting` picks the wording: a
-/// request still queued for approval, versus a device that isn't authorized and
-/// has nothing pending (denied, removed, or never synced).
-pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, awaiting: bool) {
-    let area = frame.area();
-    frame.render_widget(Clear, area);
+/// Which unreadable-store situation [`draw_pending_notice`] explains.
+pub(crate) enum AccessNotice {
+    /// A join request is queued — waiting for another device to approve it.
+    AwaitingApproval,
+    /// No usable key, so the user must enroll. `retired_key` is true when this
+    /// launch just renamed a now-dead (revoked) key aside, false for a device
+    /// that was never enrolled and so never had one.
+    NeedsEnroll { retired_key: bool },
+}
 
-    let label = if device_name.is_empty() {
-        "this device".to_string()
+/// Draw the full-screen notice a device sees when it can't decrypt this encrypted
+/// store — either awaiting approval of its join request, or holding no usable key
+/// and needing to enroll. See [`AccessNotice`].
+pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, notice: &AccessNotice) {
+    let area = super::draw_modal_frame(frame, "Journal", "any key to exit");
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    // Reads naturally whether or not this device has a name yet: a keyless device
+    // (never enrolled) has none, so it becomes the sentence subject "This device".
+    let subject = if device_name.is_empty() {
+        "This device".to_string()
     } else {
-        format!("'{device_name}'")
+        format!("Device '{device_name}'")
     };
     let dim = Style::default().add_modifier(Modifier::DIM);
 
@@ -129,23 +134,21 @@ pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, awai
     // here instead of hand-splitting sizes the box to the real line count.
     let text_width = container_width.saturating_sub(6) as usize;
 
-    let (title, intro, instruction, command) = if awaiting {
-        (
+    let (title, intro, instruction, command) = match notice {
+        AccessNotice::AwaitingApproval => (
             " Awaiting approval ",
-            format!("Device {label} has requested access but isn't approved yet."),
+            format!("{subject} has requested access but isn't approved yet."),
             "Approve it from a device that can already read this journal:".to_string(),
             format!("journal encryption device approve {device_name}"),
-        )
-    } else {
-        (
+        ),
+        AccessNotice::NeedsEnroll { .. } => (
             " Not authorized ",
             format!(
-                "Device {label} isn't a recipient of this journal, and no access request \
-                 is queued — it may have been denied or removed, or the request never synced."
+                "{subject} isn't a recipient of this journal, so it can't read any entries."
             ),
-            "To request access again, delete this device's identity and run:".to_string(),
+            "Run this to request access, then approve it from a device that can already read this journal:".to_string(),
             "journal encryption device enroll".to_string(),
-        )
+        ),
     };
 
     let wrapped = |text: &str| {
@@ -155,11 +158,16 @@ pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, awai
             .collect::<Vec<_>>()
     };
     let mut lines = wrapped(&intro);
+    // Only when a real key was just retired — a never-enrolled device had none.
+    if matches!(notice, AccessNotice::NeedsEnroll { retired_key: true }) {
+        lines.push(Line::from(""));
+        lines.extend(wrapped(
+            "This device's old key has been retired (renamed aside, recoverable).",
+        ));
+    }
     lines.push(Line::from(""));
     lines.extend(wrapped(&instruction));
     lines.push(Line::from(Span::styled(format!("  {command}"), dim)));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Press any key to exit.", dim)));
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -184,8 +192,10 @@ pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, awai
 /// device: this device fell back to plaintext and retired its key and trust pins
 /// (renamed aside, not deleted). Dismissed on any key.
 pub(crate) fn draw_disable_notice(frame: &mut Frame<'_>) {
-    let area = frame.area();
-    frame.render_widget(Clear, area);
+    let area = super::draw_modal_frame(frame, "Journal", "any key to continue");
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
 
     let bold = Style::default().add_modifier(Modifier::BOLD);
     let dim = Style::default().add_modifier(Modifier::DIM);
@@ -213,8 +223,6 @@ pub(crate) fn draw_disable_notice(frame: &mut Frame<'_>) {
         Span::styled("journal encryption enable", dim),
         Span::raw("."),
     ]));
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Press any key to continue.", dim)));
 
     let block = Block::default()
         .borders(Borders::ALL)

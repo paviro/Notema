@@ -161,6 +161,13 @@ impl JournalStore {
         Ok(migrate::reconcile_disabled_encryption(self)?.is_some())
     }
 
+    /// Retire this device's identity after its access was revoked; see
+    /// [`migrate::retire_revoked_identity`]. Returns the renamed-aside path, or
+    /// `None` when there was no identity to retire.
+    pub fn retire_revoked_identity(&self) -> AppResult<Option<PathBuf>> {
+        migrate::retire_revoked_identity(self)
+    }
+
     pub fn encryption_enabled(&self) -> bool {
         crypto::has_devices_file(&self.paths.keys)
     }

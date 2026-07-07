@@ -36,7 +36,7 @@ pub(crate) use super::surface::{
     point_in_rect,
 };
 pub(crate) use chrome::{
-    HintId, centered_rect_fixed_size, count_label, expanded_footer_height,
+    HintId, centered_rect_fixed_size, count_label, draw_modal_frame, expanded_footer_height,
     expanded_footer_hint_id_at_point, expanded_footer_lines, footer_hint_id_at_point, footer_lines,
     hint_id_at_wrapped, panel_block, render_centered_notice, render_scrollbar_if_needed,
 };
@@ -58,7 +58,9 @@ use journals::draw_journals;
 pub(crate) use journals::{JOURNAL_BOX_HEIGHT, journal_list_rect, journals_per_page};
 pub(crate) use layout::{TuiLayout, tui_layout};
 use markdown_panel::draw_selected_entry_view;
-pub(crate) use pending::{draw_disable_notice, draw_pending_notice, draw_pending_request};
+pub(crate) use pending::{
+    AccessNotice, draw_disable_notice, draw_pending_notice, draw_pending_request,
+};
 use stats::draw_journal_stats;
 #[cfg(test)]
 pub(crate) use stats::{centered_stats_layout, journal_stats};

@@ -119,6 +119,22 @@ pub fn reconcile_disabled_encryption(
     }))
 }
 
+/// Retire this device's now-dead private key after its store access was revoked
+/// (denied, removed, or a request that never synced): the store is still
+/// encrypted for other devices, so only `identity.age` is renamed aside
+/// (recoverable), letting a fresh `enroll` request access without the user
+/// deleting the file by hand. The roster trust pins are deliberately kept — the
+/// genesis is unchanged, so they still guard a re-enroll against a swapped or
+/// rolled-back roster. Returns the renamed path, or `None` when no identity
+/// exists here.
+pub fn retire_revoked_identity(store: &JournalStore) -> AppResult<Option<PathBuf>> {
+    let paths = &store.paths().keys;
+    if !paths.identity_file.exists() {
+        return Ok(None);
+    }
+    Ok(Some(disable_identity_file(paths)?))
+}
+
 /// Tear down the synced key folder when encryption is disabled: drop the signed
 /// `devices.toml` roster and any leftover `pending-*.toml` join requests (which
 /// would otherwise keep syncing and resurface as phantom approval modals), then

@@ -1359,3 +1359,69 @@ fn unlock_status_wraps_on_a_narrow_terminal() {
     assert!(your_row.is_some() && phrase_row.is_some());
     assert_ne!(your_row, phrase_row);
 }
+
+fn render_pending_notice_text(device_name: &str, notice: &AccessNotice) -> String {
+    let backend = TestBackend::new(72, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| draw_pending_notice(frame, device_name, notice))
+        .unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
+#[test]
+fn pending_notice_wraps_in_the_journal_chrome_frame() {
+    let text =
+        render_pending_notice_text("phone", &AccessNotice::NeedsEnroll { retired_key: false });
+    // Outer journal chrome frame with its dismiss hint, plus the inner state box.
+    assert!(text.contains("Journal"));
+    assert!(text.contains("any key to exit"));
+    assert!(text.contains("Not authorized"));
+    assert!(text.contains("Device 'phone'"));
+    assert!(text.contains("journal encryption device enroll"));
+}
+
+#[test]
+fn pending_notice_only_mentions_a_retired_key_when_one_was_retired() {
+    let retired =
+        render_pending_notice_text("phone", &AccessNotice::NeedsEnroll { retired_key: true });
+    assert!(retired.contains("old key has been retired"));
+
+    // A never-enrolled device never had a key, so the line is omitted.
+    let fresh = render_pending_notice_text("", &AccessNotice::NeedsEnroll { retired_key: false });
+    assert!(!fresh.contains("old key has been retired"));
+    // A keyless device reads as the sentence subject "This device", not a name.
+    assert!(fresh.contains("This device"));
+}
+
+#[test]
+fn pending_notice_awaiting_points_at_approval() {
+    let text = render_pending_notice_text("phone", &AccessNotice::AwaitingApproval);
+    assert!(text.contains("Awaiting approval"));
+    assert!(text.contains("journal encryption device approve phone"));
+    assert!(!text.contains("old key has been retired"));
+}
+
+#[test]
+fn disable_notice_renders_in_the_journal_chrome_frame() {
+    let backend = TestBackend::new(72, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(draw_disable_notice).unwrap();
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(text.contains("Journal"));
+    assert!(text.contains("any key to continue"));
+    assert!(text.contains("Encryption disabled"));
+    assert!(text.contains("journal encryption enable"));
+}

@@ -228,6 +228,70 @@ fn other_device_picks_up_a_remote_disable_and_retires_its_key() {
 }
 
 #[test]
+fn revoked_device_retires_its_identity_but_keeps_trust_pins() {
+    let dir = tempfile::tempdir().unwrap();
+    let journals = dir.path().join("journals");
+
+    // Laptop creates the encrypted store; phone joins, is approved, and pins the
+    // roster locally by unlocking.
+    let mut laptop = JournalStore::new(&journals, dir.path().join("laptop"));
+    laptop.ensure().unwrap();
+    laptop.initialize_encryption("laptop", None).unwrap();
+    laptop.unlock(None).unwrap();
+    laptop.create_journal("diary").unwrap();
+    laptop
+        .create_entry_with_body("diary", "shared body", &Metadata::default())
+        .unwrap();
+
+    let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    let phone_recipient = phone.request_access("phone", None).unwrap();
+    laptop.add_recipient(phone_recipient, |_, _| {}).unwrap();
+    phone.unlock(None).unwrap();
+
+    let phone_identity = dir.path().join("phone").join("identity.age");
+    let phone_trust = dir.path().join("phone").join("devices-trust.toml");
+    assert!(phone_identity.exists());
+    assert!(phone_trust.exists());
+
+    // Laptop removes the phone: the store stays encrypted (for the laptop) but
+    // the phone is no longer a recipient.
+    laptop.remove_recipient("phone", |_, _| {}).unwrap();
+    assert!(journals.join(".age").join("devices.toml").exists());
+
+    // The phone reopens, is not a recipient, and has nothing queued — the caller
+    // retires its now-dead key.
+    let phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    let retired = phone.retire_revoked_identity().unwrap().expect("identity retired");
+    assert!(retired.exists());
+
+    // The identity is renamed aside; the trust pins are deliberately kept so a
+    // re-enroll still validates against the unchanged roster genesis.
+    assert!(!phone_identity.exists(), "phone identity should be retired");
+    assert!(!phone.unlock_available());
+    assert!(phone_trust.exists(), "phone trust pins should be kept");
+
+    let names: Vec<String> = std::fs::read_dir(dir.path().join("phone"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names
+            .iter()
+            .any(|n| n.starts_with("identity.disabled-") && n.ends_with(".age")),
+        "retired identity copy should remain: {names:?}"
+    );
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.starts_with("devices-trust.disabled-")),
+        "trust pins should not be retired: {names:?}"
+    );
+}
+
+#[test]
 fn remote_disable_reconcile_holds_off_while_entries_are_still_encrypted() {
     // A half-synced disable: the roster deletion arrived before the plaintext
     // entry conversions. The device must keep its key to read what's still

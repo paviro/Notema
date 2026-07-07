@@ -4,7 +4,8 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
     },
 };
 use unicode_width::UnicodeWidthStr;
@@ -566,6 +567,26 @@ pub(crate) fn render_centered_notice(frame: &mut Frame<'_>, content: Rect, messa
             .style(Style::default().add_modifier(Modifier::DIM)),
         line,
     );
+}
+
+/// Draw the full-screen "journal chrome" frame shared by the startup modals
+/// (unlock, device-access request, and the enroll/awaiting/disable notices): a
+/// bordered block titled top-left with the screen name and, when `key_hint` is
+/// non-empty, bottom-right with its key hints. Clears the screen first and
+/// returns the inner area to lay the modal's content into.
+pub(crate) fn draw_modal_frame(frame: &mut Frame<'_>, title: &str, key_hint: &str) -> Rect {
+    let area = frame.area();
+    frame.render_widget(Clear, area);
+
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .title_top(Line::from(format!(" {title} ")));
+    if !key_hint.is_empty() {
+        block = block.title_bottom(Line::from(format!(" {key_hint} ")).right_aligned());
+    }
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    inner
 }
 
 pub(crate) fn count_label(count: usize, singular: &str, plural: &str) -> String {

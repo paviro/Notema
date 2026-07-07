@@ -215,17 +215,13 @@ pub fn run() -> AppResult<()> {
         );
     }
 
-    match config::load_or_setup_with_path(cli.config.as_deref())? {
-        config::Startup::Open {
-            config_path,
-            config,
-            store,
-            encryption_disabled_elsewhere,
-        } => tui::run(config_path, config, *store, encryption_disabled_elsewhere),
-        // Setup already printed what the user needs (e.g. enrollment instructions
-        // for an encrypted store this device can't yet read); nothing to open.
-        config::Startup::Done => Ok(()),
-    }
+    let config::Startup {
+        config_path,
+        config,
+        store,
+        encryption_disabled_elsewhere,
+    } = config::load_or_setup_with_path(cli.config.as_deref())?;
+    tui::run(config_path, config, *store, encryption_disabled_elsewhere)
 }
 
 fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppResult<()> {

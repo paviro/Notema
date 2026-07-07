@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Flex, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Padding, Paragraph, Wrap},
 };
 
 use super::caret_style;
@@ -35,16 +35,7 @@ pub(crate) fn draw_unlock(
     error: Option<&str>,
     caret_visible: bool,
 ) {
-    let area = frame.area();
-    frame.render_widget(Clear, area);
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title_top(Line::from(" Unlock Journal "))
-        .title_bottom(Line::from(" enter unlock · esc quit ").right_aligned());
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
+    let inner = super::draw_modal_frame(frame, "Unlock Journal", "enter unlock · esc quit");
     if inner.height == 0 || inner.width == 0 {
         return;
     }
