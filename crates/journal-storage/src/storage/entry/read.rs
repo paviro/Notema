@@ -97,6 +97,8 @@ pub fn read_entry(
     let FrontMatter {
         created_at,
         edited_at,
+        // Capture-only: preserved on disk, not surfaced on the in-memory entry.
+        timezone: _,
         mut metadata,
         import_id,
     } = front_matter.map(front_matter_fields).unwrap_or_default();

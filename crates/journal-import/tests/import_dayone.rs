@@ -88,6 +88,55 @@ fn imports_starred_flag() {
 }
 
 #[test]
+fn imports_zone_into_offset_and_keeps_iana_name() {
+    let (dir, store) = plaintext_store();
+    // 06:30:05 UTC in Europe/Berlin (April = CEST, +02:00) is 08:30:05 local.
+    let json = r#"{
+        "entries": [
+            {
+                "uuid": "BERLIN1",
+                "text": "Guten Morgen",
+                "creationDate": "2021-04-03T06:30:05Z",
+                "timeZone": "Europe/Berlin"
+            }
+        ]
+    }"#;
+
+    import_dayone(&store, "diary", &write_export(&dir, json), false).unwrap();
+
+    let entries = store.scan_entries().unwrap();
+    let entry = &entries[0];
+    // The entry files under its own local date, not the UTC date or the importer's.
+    assert!(entry.path.to_string_lossy().contains("2021/04/03"));
+
+    let raw = std::fs::read_to_string(&entry.path).unwrap();
+    // Offset folded into the timestamp; IANA name kept alongside for fidelity.
+    assert!(raw.contains("created_at = \"2021-04-03T08:30:05+02:00\""));
+    assert!(raw.contains("timezone = \"Europe/Berlin\""));
+}
+
+#[test]
+fn imports_without_zone_fall_back_to_utc_offset() {
+    let (dir, store) = plaintext_store();
+    let json = r#"{
+        "entries": [
+            {
+                "uuid": "NOZONE1",
+                "text": "No zone",
+                "creationDate": "2026-07-01T12:30:00Z"
+            }
+        ]
+    }"#;
+
+    import_dayone(&store, "diary", &write_export(&dir, json), false).unwrap();
+
+    let entry = &store.scan_entries().unwrap()[0];
+    let raw = std::fs::read_to_string(&entry.path).unwrap();
+    assert!(raw.contains("created_at = \"2026-07-01T12:30:00+00:00\""));
+    assert!(!raw.contains("timezone"));
+}
+
+#[test]
 fn re_running_the_same_export_skips_already_imported_entries() {
     let (dir, store) = plaintext_store();
     let json = r#"{

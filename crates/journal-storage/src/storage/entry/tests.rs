@@ -2,17 +2,18 @@ use super::codec::EntryCodec;
 use super::create::create_entry_file;
 use super::paths::entry_path_with_id;
 use super::*;
-use chrono::{DateTime, Local, LocalResult, TimeZone};
+use chrono::{DateTime, FixedOffset, Local, LocalResult, TimeZone};
 use journal_encryption::{self as crypto, KeyPaths};
 use std::fs;
 use tempfile::tempdir;
 
-fn local_time(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<Local> {
-    match Local.with_ymd_and_hms(y, m, d, h, min, 0) {
+fn local_time(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<FixedOffset> {
+    let local = match Local.with_ymd_and_hms(y, m, d, h, min, 0) {
         LocalResult::Single(dt) => dt,
         LocalResult::Ambiguous(dt, _) => dt,
         LocalResult::None => panic!("invalid local test time"),
-    }
+    };
+    local.fixed_offset()
 }
 
 #[test]
@@ -79,6 +80,8 @@ fn create_entry_with_body_writes_body_after_front_matter() {
     assert!(fields.created_at.is_some());
     assert!(fields.edited_at.is_some());
     assert!(fields.metadata.tags.is_empty());
+    // A native entry captures this machine's IANA zone name, when resolvable.
+    assert_eq!(fields.timezone, iana_time_zone::get_timezone().ok());
     assert_eq!(body.trim_start_matches('\n'), "Some text\n");
 }
 

@@ -40,11 +40,13 @@ lines, a blank line, then the Markdown body.
 +++
 created_at = "2026-07-05T14:30:00+02:00"
 edited_at = "2026-07-05T14:30:00+02:00"
+timezone = "Europe/Berlin"
 tags = ["work", "release"]
 people = ["Alice"]
 activities = ["coding"]
 feelings = ["focused", "proud"]
 mood = 3
+starred = true
 +++
 
 # Entry body
@@ -65,11 +67,13 @@ Markdown content here.
 |----------------|-----------------|---------|
 | `created_at`   | RFC 3339 string | When the entry was created. If missing or unparseable, the app falls back to the date in the filename. |
 | `edited_at`    | RFC 3339 string | Last time a human edited the entry (its body or metadata). It is **not** touched by encryption, re-encryption, or asset rewrites — only genuine edits move it. |
+| `timezone`     | string          | IANA zone name where the entry was authored (e.g. `Europe/Berlin`). The wall-clock offset lives in `created_at`; this preserves the zone *name*. Capture-only: recorded on create/import, not surfaced or edited. |
 | `tags`         | array of string | Free-form tags. |
 | `people`       | array of string | Free-form people references. |
 | `activities`   | array of string | Free-form activities. |
 | `feelings`     | array of string | From a fixed vocabulary (below); unknown values are dropped on read. |
 | `mood`         | integer         | Overall mood, clamped to `-5..=5`. Out-of-range or non-integer values are dropped to “no mood” rather than failing the parse. |
+| `starred`      | boolean         | Whether the entry is flagged as a favorite. Omitted when false. |
 | `import_id`    | string          | Provenance of an imported entry, as `source:id` (e.g. `dayone:<UUID>`). Absent for entries created in the app. Used to skip re-importing. |
 
 All list fields are plural; timestamps are RFC 3339 with an offset. There is no

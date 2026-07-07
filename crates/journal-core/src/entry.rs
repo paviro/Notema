@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local};
+use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
@@ -53,16 +53,17 @@ fn deserialize_mood<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Timestamp {
     pub raw: String,
-    pub parsed: Option<DateTime<Local>>,
+    /// The parsed value keeps the RFC3339 offset it was written with rather than
+    /// normalizing to the machine's local zone, so an entry always renders at the
+    /// wall-clock time it was written in — regardless of where it is now read.
+    pub parsed: Option<DateTime<FixedOffset>>,
 }
 
 impl Timestamp {
     /// Parse `raw` as RFC3339 once, keeping the original string regardless.
     pub fn parse(raw: impl Into<String>) -> Self {
         let raw = raw.into();
-        let parsed = DateTime::parse_from_rfc3339(&raw)
-            .ok()
-            .map(|timestamp| timestamp.with_timezone(&Local));
+        let parsed = DateTime::parse_from_rfc3339(&raw).ok();
         Self { raw, parsed }
     }
 }
@@ -100,7 +101,7 @@ impl Entry {
     }
 
     /// The creation timestamp parsed once at load, if present and well-formed.
-    pub fn created_time(&self) -> Option<DateTime<Local>> {
+    pub fn created_time(&self) -> Option<DateTime<FixedOffset>> {
         self.created_at
             .as_ref()
             .and_then(|timestamp| timestamp.parsed)

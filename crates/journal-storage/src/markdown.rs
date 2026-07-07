@@ -10,6 +10,11 @@ pub struct FrontMatter {
     pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edited_at: Option<String>,
+    /// IANA zone name where the entry was authored (e.g. `Europe/Berlin`). The
+    /// offset already lives in `created_at`; this keeps the zone *name*, which
+    /// the offset can't recover. Capture-only — round-tripped, not surfaced.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
     #[serde(flatten)]
     pub metadata: Metadata,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -260,6 +265,21 @@ mod tests {
                 .metadata
                 .mood,
             None
+        );
+    }
+
+    #[test]
+    fn timezone_is_preserved_across_metadata_edits() {
+        let content = "+++\ncreated_at = \"2021-04-03T08:30:05+02:00\"\ntimezone = \"Europe/Berlin\"\n+++\n\n# Body\n";
+
+        // A metadata edit re-renders the whole front matter; the capture-only
+        // timezone must survive untouched, like import_id does.
+        let updated =
+            with_metadata_field(content, &MetadataField::Tags(vec!["x".to_string()])).unwrap();
+
+        assert_eq!(
+            front_matter_fields(split_front_matter(&updated).0.unwrap()).timezone,
+            Some("Europe/Berlin".to_string())
         );
     }
 

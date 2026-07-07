@@ -11,7 +11,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use journal_storage::{AppResult, AssetFailure, JournalStore, Metadata, parse_entry_timestamp};
+use chrono::{DateTime, FixedOffset};
+use journal_storage::{AppResult, AssetFailure, JournalStore, Metadata};
 
 use dayone::model::DayOneExport;
 use dayone::moments::{MediaIndex, rewrite_moments};
@@ -19,6 +20,17 @@ use dayone::richtext;
 use dayone::text::{
     merge_code_fences, normalize_whitespace, recover_html_embeds, unescape_markdown,
 };
+
+/// Re-zone Day One's UTC timestamp into the entry's IANA zone so the stored
+/// RFC3339 carries the offset it was written at (e.g. `+02:00` for a summer
+/// `Europe/Berlin` entry). Falls back to UTC when the zone is missing/unknown.
+fn zoned_timestamp(rfc3339_utc: &str, tz: Option<&str>) -> Option<DateTime<FixedOffset>> {
+    let instant = DateTime::parse_from_rfc3339(rfc3339_utc).ok()?;
+    match tz.and_then(|name| name.parse::<chrono_tz::Tz>().ok()) {
+        Some(zone) => Some(instant.with_timezone(&zone).fixed_offset()),
+        None => Some(instant.fixed_offset()),
+    }
+}
 
 /// Summary of a Day One import, printed to the user.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -80,10 +92,11 @@ pub fn import_dayone(
             continue;
         }
 
+        let tz = entry.time_zone.as_deref();
         let Some(created_at) = entry
             .creation_date
             .as_deref()
-            .and_then(parse_entry_timestamp)
+            .and_then(|value| zoned_timestamp(value, tz))
         else {
             report
                 .failures
@@ -93,7 +106,7 @@ pub fn import_dayone(
         let edited_at = entry
             .modified_date
             .as_deref()
-            .and_then(parse_entry_timestamp)
+            .and_then(|value| zoned_timestamp(value, tz))
             .unwrap_or(created_at);
 
         let media = MediaIndex::build(entry, media_root);
@@ -125,6 +138,7 @@ pub fn import_dayone(
             &metadata,
             created_at,
             edited_at,
+            tz,
             &import_id,
         )?;
         // Replace un-fetchable images with a placeholder only when we actually

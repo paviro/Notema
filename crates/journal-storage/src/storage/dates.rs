@@ -1,11 +1,10 @@
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, FixedOffset, NaiveDate};
 
 use super::{Entry, entry_date_from_path};
 
-pub fn parse_entry_timestamp(value: &str) -> Option<DateTime<Local>> {
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|timestamp| timestamp.with_timezone(&Local))
+/// Parse an RFC3339 timestamp, preserving its original offset.
+pub fn parse_entry_timestamp(value: &str) -> Option<DateTime<FixedOffset>> {
+    DateTime::parse_from_rfc3339(value).ok()
 }
 
 pub fn entry_group_date(entry: &Entry) -> Option<NaiveDate> {

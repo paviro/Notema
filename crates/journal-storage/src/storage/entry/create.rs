@@ -2,7 +2,7 @@ use super::Metadata;
 use super::codec::EntryCodec;
 use super::paths::{ENTRY_ID_LEN, encrypted_entry_path_with_id, entry_path_with_id};
 use crate::AppResult;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, FixedOffset, Local};
 use nanoid::nanoid;
 use std::{
     fs::{self, OpenOptions},
@@ -20,8 +20,10 @@ pub fn create_entry(
     body: &str,
     metadata: &Metadata,
 ) -> AppResult<PathBuf> {
-    let now = Local::now();
-    let content = entry_content(now, now, body, metadata, None);
+    let now = Local::now().fixed_offset();
+    // This machine's IANA zone name, matching what imports store; None if unresolved.
+    let timezone = iana_time_zone::get_timezone().ok();
+    let content = entry_content(now, now, body, metadata, timezone.as_deref(), None);
     create_entry_file(codec, root, journal, now, &content, || {
         nanoid!(ENTRY_ID_LEN)
     })
@@ -38,26 +40,36 @@ pub fn create_imported_entry(
     journal: &str,
     body: &str,
     metadata: &Metadata,
-    created_at: DateTime<Local>,
-    edited_at: DateTime<Local>,
+    created_at: DateTime<FixedOffset>,
+    edited_at: DateTime<FixedOffset>,
+    timezone: Option<&str>,
     import_id: &str,
 ) -> AppResult<PathBuf> {
-    let content = entry_content(created_at, edited_at, body, metadata, Some(import_id));
+    let content = entry_content(
+        created_at,
+        edited_at,
+        body,
+        metadata,
+        timezone,
+        Some(import_id),
+    );
     create_entry_file(codec, root, journal, created_at, &content, || {
         nanoid!(ENTRY_ID_LEN)
     })
 }
 
 fn entry_content(
-    created_at: DateTime<Local>,
-    edited_at: DateTime<Local>,
+    created_at: DateTime<FixedOffset>,
+    edited_at: DateTime<FixedOffset>,
     body: &str,
     metadata: &Metadata,
+    timezone: Option<&str>,
     import_id: Option<&str>,
 ) -> String {
     let front_matter = crate::markdown::FrontMatter {
         created_at: Some(created_at.to_rfc3339()),
         edited_at: Some(edited_at.to_rfc3339()),
+        timezone: timezone.map(str::to_string),
         metadata: metadata.clone(),
         import_id: import_id.map(str::to_string),
     };
@@ -77,7 +89,7 @@ pub(crate) fn create_entry_file(
     codec: &EntryCodec<'_>,
     root: &Path,
     journal: &str,
-    now: DateTime<Local>,
+    now: DateTime<FixedOffset>,
     content: &str,
     mut id_generator: impl FnMut() -> String,
 ) -> AppResult<PathBuf> {

@@ -574,13 +574,15 @@ impl JournalStore {
     /// creation/modification dates and recording an `import_id` provenance
     /// marker in the front matter. Encryption follows the store's setting, like
     /// [`create_entry_with_body`].
+    #[allow(clippy::too_many_arguments)]
     pub fn create_imported_entry(
         &self,
         journal: &str,
         body: &str,
         metadata: &Metadata,
-        created_at: chrono::DateTime<chrono::Local>,
-        edited_at: chrono::DateTime<chrono::Local>,
+        created_at: chrono::DateTime<chrono::FixedOffset>,
+        edited_at: chrono::DateTime<chrono::FixedOffset>,
+        timezone: Option<&str>,
         import_id: &str,
     ) -> AppResult<PathBuf> {
         storage::create_imported_entry(
@@ -591,6 +593,7 @@ impl JournalStore {
             metadata,
             created_at,
             edited_at,
+            timezone,
             import_id,
         )
     }

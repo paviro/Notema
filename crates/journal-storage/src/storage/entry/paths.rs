@@ -1,4 +1,4 @@
-use chrono::{DateTime, Local, NaiveDate};
+use chrono::{DateTime, FixedOffset, NaiveDate};
 #[cfg(test)]
 use nanoid::nanoid;
 use std::{
@@ -9,14 +9,14 @@ use std::{
 pub(crate) const ENTRY_ID_LEN: usize = 12;
 
 #[cfg(test)]
-pub fn entry_path(root: &Path, journal: &str, now: DateTime<Local>) -> PathBuf {
+pub fn entry_path(root: &Path, journal: &str, now: DateTime<FixedOffset>) -> PathBuf {
     entry_path_with_id(root, journal, now, &nanoid!(ENTRY_ID_LEN))
 }
 
 pub(crate) fn entry_path_with_id(
     root: &Path,
     journal: &str,
-    now: DateTime<Local>,
+    now: DateTime<FixedOffset>,
     id: &str,
 ) -> PathBuf {
     root.join(journal)
@@ -29,7 +29,7 @@ pub(crate) fn entry_path_with_id(
 pub(crate) fn encrypted_entry_path_with_id(
     root: &Path,
     journal: &str,
-    now: DateTime<Local>,
+    now: DateTime<FixedOffset>,
     id: &str,
 ) -> PathBuf {
     entry_path_with_id(root, journal, now, id).with_extension("md.age")
