@@ -3,11 +3,10 @@ use clap::{Args, Parser, Subcommand};
 use journal_core::feelings;
 use journal_storage::{JournalStore, MOOD_RANGE, Metadata, SecretString};
 use std::{
-    io::{self, Read},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
 };
 
-#[cfg(not(unix))]
 use std::io::IsTerminal;
 #[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
@@ -71,7 +70,7 @@ enum EncryptionCommand {
     /// Turn on encryption for this device (creating its key if needed) and encrypt every plaintext entry
     Enable(NewIdentityArgs),
     /// Decrypt every encrypted entry, turning encryption off
-    Disable,
+    Disable(ConfirmArgs),
     /// Manage the devices that can read this encrypted journal
     Device {
         #[command(subcommand)]
@@ -89,6 +88,8 @@ enum DeviceCommand {
     Remove {
         #[arg(value_name = "NAME")]
         name: String,
+        #[command(flatten)]
+        confirm: ConfirmArgs,
     },
     /// Rename a device's label (no re-encryption)
     Rename {
@@ -112,6 +113,17 @@ struct PassphraseArgs {
     /// Remove the passphrase, storing the key unprotected
     #[arg(long)]
     remove: bool,
+    #[command(flatten)]
+    confirm: ConfirmArgs,
+}
+
+/// Shared `--yes`/`-y` flag that skips the confirmation prompt on a destructive
+/// operation, for scripting and non-interactive use.
+#[derive(Debug, Args)]
+struct ConfirmArgs {
+    /// Skip the confirmation prompt
+    #[arg(long, short = 'y')]
+    yes: bool,
 }
 
 /// Options for creating a new device identity, shared by `encryption enable`
@@ -239,19 +251,46 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
                 args.no_passphrase,
             )
         }
-        EncryptionCommand::Disable => {
+        EncryptionCommand::Disable(args) => {
             let (config_path, config) = config::load_existing(cli.config.as_deref())?;
+            if !confirm(
+                "Decrypt every entry and turn encryption off for this journal?",
+                args.yes,
+            )? {
+                println!("Aborted.");
+                return Ok(());
+            }
             migrate::decrypt_store(&config_path, &config)
         }
         EncryptionCommand::Device { command } => handle_device_command(cli, command),
     }
 }
 
+/// Ask the user to confirm a destructive encryption operation, returning `true`
+/// to proceed. `skip` (from `--yes`) bypasses the prompt. Without a terminal to
+/// answer on, it refuses rather than blocking, pointing at `--yes`.
+fn confirm(prompt: &str, skip: bool) -> AppResult<bool> {
+    if skip {
+        return Ok(true);
+    }
+    if !io::stdin().is_terminal() {
+        return Err(format!(
+            "{prompt}\nrefusing to continue without a terminal to confirm; re-run with --yes to proceed"
+        )
+        .into());
+    }
+    print!("{prompt} [y/N]: ");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(matches!(input.trim(), "y" | "Y" | "yes" | "YES" | "Yes"))
+}
+
 fn handle_device_command(cli: &Cli, command: &DeviceCommand) -> AppResult<()> {
     match command {
         DeviceCommand::Enroll(args) => device_enroll_command(cli, args),
         DeviceCommand::List => device_list_command(cli),
-        DeviceCommand::Remove { name } => device_remove_command(cli, name),
+        DeviceCommand::Remove { name, confirm } => device_remove_command(cli, name, confirm.yes),
         DeviceCommand::Rename { old, new } => device_rename_command(cli, old, new),
         DeviceCommand::Approve(args) => device_approve_command(cli, args),
         DeviceCommand::Reject(args) => device_reject_command(cli, args),
@@ -299,6 +338,16 @@ fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> 
                 .into(),
         );
     };
+
+    if args.remove
+        && !confirm(
+            "Remove the passphrase, storing this device's key unprotected?",
+            args.confirm.yes,
+        )?
+    {
+        println!("Aborted.");
+        return Ok(());
+    }
 
     let current = if info.passphrase_protected {
         Some(migrate::prompt_unlock_passphrase()?)
@@ -424,7 +473,14 @@ fn device_list_command(cli: &Cli) -> AppResult<()> {
     Ok(())
 }
 
-fn device_remove_command(cli: &Cli, name: &str) -> AppResult<()> {
+fn device_remove_command(cli: &Cli, name: &str, skip_confirm: bool) -> AppResult<()> {
+    if !confirm(
+        &format!("Remove '{name}' and re-encrypt all entries to exclude it?"),
+        skip_confirm,
+    )? {
+        println!("Aborted.");
+        return Ok(());
+    }
     let store = open_unlocked_store(cli)?;
     let summary = store.remove_recipient(name, migrate::cli_progress())?;
     println!(
