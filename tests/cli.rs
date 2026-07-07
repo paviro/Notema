@@ -17,7 +17,7 @@ fn write_config(path: &Path, root: &Path, default_journal: Option<&str>) {
 
 fn write_config_with_editor(path: &Path, root: &Path, default_journal: Option<&str>, editor: &str) {
     let mut config = journal::config::Config::new(root.to_path_buf(), editor);
-    config.default_journal = default_journal.map(str::to_string);
+    config.journal.default = default_journal.map(str::to_string);
     journal::config::save_config(path, &config).unwrap();
 }
 
@@ -461,7 +461,7 @@ fn set_default_journal_persists_to_config() {
 
     assert!(output.status.success());
     let config = journal::config::load_config(&config_path).unwrap();
-    assert_eq!(config.default_journal.as_deref(), Some("work"));
+    assert_eq!(config.journal.default.as_deref(), Some("work"));
 }
 
 #[test]

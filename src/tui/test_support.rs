@@ -6,13 +6,22 @@ use std::fs;
 use tempfile::tempdir;
 
 use super::app::App;
-use crate::config::Config;
+use crate::config::{Config, State};
 use journal_storage::JournalStore;
 
 /// Build an `App` over the given config's journal root (no entries loaded yet).
 pub(crate) fn new_app(config: Config) -> App {
-    let config_path = config.journal_root.join("config.toml");
-    let store = JournalStore::for_config(&config_path, &config.journal_root).unwrap();
+    let config_path = config.journal.path.join("config.toml");
+    let store = JournalStore::for_config(&config_path, &config.journal.path).unwrap();
+    App::new(config_path, config, store).unwrap()
+}
+
+/// Like [`new_app`], but persists `state` to `state.toml` first so `App::new`
+/// picks it up through the normal load path (e.g. to launch with journals hidden).
+pub(crate) fn new_app_with_state(config: Config, state: State) -> App {
+    let config_path = config.journal.path.join("config.toml");
+    crate::config::save_state(&config_path, &state).unwrap();
+    let store = JournalStore::for_config(&config_path, &config.journal.path).unwrap();
     App::new(config_path, config, store).unwrap()
 }
 

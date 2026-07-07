@@ -97,19 +97,26 @@ options stay backward-compatible.
 `config.toml` — user-authored settings:
 
 ```toml
-journal_root = "~/Journals"       # tilde is expanded on load
-editor = "nano"
-default_journal = "work"          # optional
-show_hints = true
-show_journals = true
+[journal]
+path = "~/Journals"               # tilde is expanded on load
+default = "work"                  # optional
+
+[editor]
+command = "nano"
+
+[attachments]
 download_remote_images = true
 ```
 
 `state.toml` — machine-written session state (kept separate so it never clutters
-your settings):
+your settings), including UI toggles flipped from inside the TUI:
 
 ```toml
 last_journal = "personal"         # journal reselected on next launch
+
+[ui]
+show_hints = true
+show_journals = true
 ```
 
 ## Encryption files

@@ -263,7 +263,7 @@ pub(super) fn move_focus_left(app: &mut App) {
         Focus::EntryView => Focus::Entries,
         // When the journal list is hidden, Left stops at Entries so focus never
         // lands on a pane that isn't rendered — use `j` to bring the list back.
-        Focus::Entries if app.config.show_journals => Focus::Journals,
+        Focus::Entries if app.state.ui.show_journals => Focus::Journals,
         Focus::Entries | Focus::Journals => app.nav.focus,
     };
 }

@@ -9,31 +9,73 @@ use std::{
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Config {
-    pub journal_root: PathBuf,
-    pub editor: String,
+    pub journal: JournalSection,
     #[serde(default)]
-    pub default_journal: Option<String>,
-    #[serde(default = "default_true")]
-    pub show_hints: bool,
-    #[serde(default = "default_true")]
-    pub show_journals: bool,
+    pub editor: EditorSection,
+    #[serde(default)]
+    pub attachments: AttachmentsSection,
+}
+
+/// Which journals to open and where they live on disk.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JournalSection {
+    /// Directory holding every journal.
+    pub path: PathBuf,
+    /// Journal selected on startup when the previous session didn't record one.
+    #[serde(default)]
+    pub default: Option<String>,
+}
+
+/// The external editor launched to write entries.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EditorSection {
+    #[serde(default = "default_editor")]
+    pub command: String,
+}
+
+/// How entry attachments are handled.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AttachmentsSection {
+    /// Fetch images referenced by remote URLs into local attachments on import.
     #[serde(default = "default_true")]
     pub download_remote_images: bool,
+}
+
+impl Default for EditorSection {
+    fn default() -> Self {
+        Self {
+            command: default_editor(),
+        }
+    }
+}
+
+impl Default for AttachmentsSection {
+    fn default() -> Self {
+        Self {
+            download_remote_images: true,
+        }
+    }
 }
 
 fn default_true() -> bool {
     true
 }
 
+fn default_editor() -> String {
+    "nano".to_string()
+}
+
 impl Config {
     pub fn new(journal_root: PathBuf, editor: impl Into<String>) -> Self {
         Self {
-            journal_root: expand_tilde(journal_root),
-            editor: editor.into(),
-            default_journal: None,
-            show_hints: true,
-            show_journals: true,
-            download_remote_images: true,
+            journal: JournalSection {
+                path: expand_tilde(journal_root),
+                default: None,
+            },
+            editor: EditorSection {
+                command: editor.into(),
+            },
+            attachments: AttachmentsSection::default(),
         }
     }
 }
@@ -47,6 +89,29 @@ pub struct State {
     /// The journal selected when the TUI last exited, restored on next launch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_journal: Option<String>,
+    #[serde(default)]
+    pub ui: UiState,
+}
+
+/// Toggle states for optional TUI chrome, flipped by keybindings and remembered
+/// across launches.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UiState {
+    /// Whether the footer keybinding hints are shown.
+    #[serde(default = "default_true")]
+    pub show_hints: bool,
+    /// Whether the journals panel is shown.
+    #[serde(default = "default_true")]
+    pub show_journals: bool,
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            show_hints: true,
+            show_journals: true,
+        }
+    }
 }
 
 pub fn default_config_path() -> AppResult<PathBuf> {
@@ -63,7 +128,7 @@ pub fn default_config_path() -> AppResult<PathBuf> {
 pub fn load_config(path: &Path) -> AppResult<Config> {
     let text = fs::read_to_string(path)?;
     let mut config: Config = toml::from_str(&text)?;
-    config.journal_root = expand_tilde(config.journal_root);
+    config.journal.path = expand_tilde(config.journal.path);
     Ok(config)
 }
 
@@ -120,7 +185,7 @@ pub fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult<Startu
     // which must run it before probing for a lock.
     let (config, store) = if config_path.exists() {
         let config = load_config(&config_path)?;
-        let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+        let store = JournalStore::for_config(&config_path, &config.journal.path)?;
         store.ensure()?;
         (config, store)
     } else {
@@ -145,7 +210,7 @@ pub fn load_existing(path_override: Option<&Path>) -> AppResult<(PathBuf, Config
     }
 
     let config = load_config(&config_path)?;
-    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
     if store.reconcile_disabled_encryption()? {
         eprintln!(
@@ -210,7 +275,7 @@ fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
     };
 
     let config = Config::new(journal_root, editor);
-    let store = JournalStore::for_config(config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(config_path, &config.journal.path)?;
     store.ensure()?;
 
     if should_offer_encryption(&store)? {
@@ -221,7 +286,7 @@ fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
         writeln!(
             stdout,
             "Using existing journal at {}. Encryption is off; run `journal encryption enable` to turn it on.",
-            config.journal_root.display()
+            config.journal.path.display()
         )?;
     }
 
@@ -329,13 +394,13 @@ mod tests {
     fn save_and_load_config_expands_tilde_root() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        fs::write(&path, "journal_root = \"~/Journals\"\neditor = \"nano\"\n").unwrap();
+        fs::write(&path, "[journal]\npath = \"~/Journals\"\n").unwrap();
 
         let config = load_config(&path).unwrap();
 
-        assert!(config.journal_root.ends_with("Journals"));
-        assert_eq!(config.editor, "nano");
-        assert_eq!(config.default_journal, None);
+        assert!(config.journal.path.ends_with("Journals"));
+        assert_eq!(config.editor.command, "nano");
+        assert_eq!(config.journal.default, None);
     }
 
     #[test]
@@ -344,9 +409,8 @@ mod tests {
         // A nested path also exercises that save creates missing parent dirs.
         let path = dir.path().join("nested").join("config.toml");
         let mut config = Config::new(dir.path().join("root"), "vim");
-        config.default_journal = Some("work".to_string());
-        config.show_journals = false;
-        config.download_remote_images = false;
+        config.journal.default = Some("work".to_string());
+        config.attachments.download_remote_images = false;
 
         save_config(&path, &config).unwrap();
         let loaded = load_config(&path).unwrap();
@@ -358,12 +422,12 @@ mod tests {
     fn missing_optional_fields_use_defaults() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        fs::write(&path, "journal_root = \"~/Journals\"\neditor = \"nano\"\n").unwrap();
+        fs::write(&path, "[journal]\npath = \"~/Journals\"\n").unwrap();
 
         let config = load_config(&path).unwrap();
 
-        assert!(config.show_journals);
-        assert!(config.download_remote_images);
+        assert_eq!(config.editor.command, "nano");
+        assert!(config.attachments.download_remote_images);
     }
 
     #[test]
@@ -371,11 +435,18 @@ mod tests {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("config.toml");
 
-        // Missing state.toml loads as the default (no journal remembered).
-        assert_eq!(load_state(&config_path).unwrap(), State::default());
+        // Missing state.toml loads as the default: no journal remembered, chrome shown.
+        let default = load_state(&config_path).unwrap();
+        assert_eq!(default, State::default());
+        assert!(default.ui.show_hints);
+        assert!(default.ui.show_journals);
 
         let state = State {
             last_journal: Some("home".to_string()),
+            ui: UiState {
+                show_hints: false,
+                show_journals: true,
+            },
         };
         save_state(&config_path, &state).unwrap();
 

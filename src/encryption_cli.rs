@@ -33,7 +33,7 @@ pub fn encrypt_store(
     device_name: Option<&str>,
     no_passphrase: bool,
 ) -> AppResult<()> {
-    let store = JournalStore::for_config(config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(config_path, &config.journal.path)?;
     let mut bootstrapped_without_passphrase = false;
     let recipient = if store.encryption_enabled() {
         if !store.unlock_available() {
@@ -63,7 +63,7 @@ pub fn encrypt_store(
     store.encrypt_store(cli_progress())?;
     println!(
         "Encrypted journal store at {}",
-        config.journal_root.display()
+        config.journal.path.display()
     );
     println!(
         "Encryption recipient: {recipient}. Identity file: {}. Back it up; without it encrypted journal files cannot be decrypted.",
@@ -76,7 +76,7 @@ pub fn encrypt_store(
 }
 
 pub fn decrypt_store(config_path: &Path, config: &Config) -> AppResult<()> {
-    let mut store = JournalStore::for_config(config_path, &config.journal_root)?;
+    let mut store = JournalStore::for_config(config_path, &config.journal.path)?;
     if !store.unlock_available() {
         return Err(format!(
             "age identity not found at {}; encrypted entries cannot be decrypted on this machine",
@@ -93,7 +93,7 @@ pub fn decrypt_store(config_path: &Path, config: &Config) -> AppResult<()> {
     let summary = store.decrypt_store(cli_progress())?;
     println!(
         "Decrypted journal store at {}",
-        config.journal_root.display()
+        config.journal.path.display()
     );
     if let Some(backup) = summary.backup_path {
         println!("Backup written to {}", backup.display());

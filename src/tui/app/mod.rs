@@ -383,7 +383,7 @@ impl App {
             *app.nav.journal_list.offset_mut() = app.journal_row_top(index);
         }
         // Don't start focused on the journal list if it's been hidden.
-        if !app.config.show_journals {
+        if !app.state.ui.show_journals {
             app.nav.focus = Focus::Entries;
         }
         Ok(app)
@@ -397,8 +397,8 @@ impl App {
         old_name: &str,
         new_name: &str,
     ) -> AppResult<()> {
-        if self.config.default_journal.as_deref() == Some(old_name) {
-            self.config.default_journal = Some(new_name.to_string());
+        if self.config.journal.default.as_deref() == Some(old_name) {
+            self.config.journal.default = Some(new_name.to_string());
             crate::config::save_config(&self.config_path, &self.config)?;
         }
         if self.state.last_journal.as_deref() == Some(old_name) {

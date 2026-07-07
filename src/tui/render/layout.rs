@@ -29,7 +29,7 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
     let footer = root[1];
     let inline_entry_view_visible = inline_entry_view_is_visible(content.width);
     let single_panel = single_panel_is_active(content.width);
-    let show_journals = app.config.show_journals;
+    let show_journals = app.state.ui.show_journals;
 
     let mut layout = TuiLayout {
         content,

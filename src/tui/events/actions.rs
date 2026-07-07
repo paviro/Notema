@@ -60,7 +60,7 @@ fn new_entry(terminal: &mut Term, app: &mut App) -> AppResult<Option<PathBuf>> {
         return Ok(None);
     };
 
-    let editor_cmd = app.config.editor.clone();
+    let editor_cmd = app.config.editor.command.clone();
     let journal_name = journal.name;
     let created = suspend_terminal(terminal, || {
         app.store.create_entry_via_editor(
@@ -72,7 +72,7 @@ fn new_entry(terminal: &mut Term, app: &mut App) -> AppResult<Option<PathBuf>> {
     if let Some(path) = &created {
         let report =
             app.store
-                .process_entry_assets(path, app.config.download_remote_images, false)?;
+                .process_entry_assets(path, app.config.attachments.download_remote_images, false)?;
         app.set_status(save_status("Entry saved", &report));
     }
     app.refresh()?;
@@ -124,12 +124,12 @@ pub(super) fn edit_selected(terminal: &mut Term, app: &mut App) -> AppResult<()>
         return Ok(());
     }
 
-    let editor = app.config.editor.clone();
+    let editor = app.config.editor.command.clone();
     let kept = edit_entry_at(terminal, app, &target.path, &editor)?;
     if kept {
         let report = app.store.process_entry_assets(
             &target.path,
-            app.config.download_remote_images,
+            app.config.attachments.download_remote_images,
             false,
         )?;
         app.set_status(save_status(&format!("Edited {}", target.title), &report));
@@ -287,8 +287,8 @@ mod tests {
     use tempfile::tempdir;
 
     fn new_app(config: Config) -> App {
-        let config_path = config.journal_root.join("config.toml");
-        let store = JournalStore::for_config(&config_path, &config.journal_root).unwrap();
+        let config_path = config.journal.path.join("config.toml");
+        let store = JournalStore::for_config(&config_path, &config.journal.path).unwrap();
         App::new(config_path, config, store).unwrap()
     }
 

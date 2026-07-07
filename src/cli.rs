@@ -281,7 +281,7 @@ fn open_unlocked_store_with_passphrase(
     cli: &Cli,
 ) -> AppResult<(JournalStore, Option<SecretString>)> {
     let (config_path, config) = config::load_existing(cli.config.as_deref())?;
-    let mut store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    let mut store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
     if !store.unlock_available() {
         return Err(format!(
@@ -305,7 +305,7 @@ fn open_unlocked_store(cli: &Cli) -> AppResult<JournalStore> {
 
 fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> {
     let (config_path, config) = config::load_existing(cli.config.as_deref())?;
-    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
     let Some(info) = store.this_device()? else {
         return Err(format!(
@@ -360,7 +360,7 @@ fn device_rotate_command(cli: &Cli) -> AppResult<()> {
 
 fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
     let (config_path, config) = config::load_existing(cli.config.as_deref())?;
-    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
     if !store.encryption_enabled() {
         return Err(
@@ -410,7 +410,7 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
 
 fn device_list_command(cli: &Cli) -> AppResult<()> {
     let (config_path, config) = config::load_existing(cli.config.as_deref())?;
-    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
 
     let recipients = store.recipients()?;
@@ -520,7 +520,7 @@ fn device_approve_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<(
 fn device_reject_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<()> {
     // Rejecting only deletes the request file, so no unlock/re-encryption needed.
     let (config_path, config) = config::load_existing(cli.config.as_deref())?;
-    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
     let pending = store.pending_requests()?;
     if pending.is_empty() {
@@ -540,12 +540,12 @@ fn import_dayone_command(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
     let journal = args
         .journal
         .as_deref()
-        .or(config.default_journal.as_deref())
+        .or(config.journal.default.as_deref())
         .ok_or("no journal specified; pass --journal or set one with `journal use <name>`")?;
     // Validate the name only — the importer creates the journal if it's missing.
     let journal = JournalStore::validate_journal_name(journal)?;
 
-    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
 
     let report = journal_import::import_dayone(&store, &journal, &args.path, args.download_images)?;
@@ -643,8 +643,8 @@ fn validate_no_legacy_entry_args(cli: &Cli) -> AppResult<()> {
 
 fn set_default_journal(cli: &Cli, journal: &str) -> AppResult<()> {
     let (path, mut config) = config::load_existing(cli.config.as_deref())?;
-    validate_existing_journal(&config.journal_root, journal)?;
-    config.default_journal = Some(journal.to_string());
+    validate_existing_journal(&config.journal.path, journal)?;
+    config.journal.default = Some(journal.to_string());
     config::save_config(&path, &config)?;
     println!("Default journal set to {journal}");
     Ok(())
@@ -660,9 +660,9 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
     let journal = args
         .journal
         .as_deref()
-        .or(config.default_journal.as_deref())
+        .or(config.journal.default.as_deref())
         .ok_or("no journal specified; pass --journal or set one with `journal use <name>`")?;
-    validate_existing_journal(&config.journal_root, journal)?;
+    validate_existing_journal(&config.journal.path, journal)?;
     let tags = comma_separated_values(&args.tag);
     let people = comma_separated_values(&args.person);
     let activities = comma_separated_values(&args.activity);
@@ -694,7 +694,7 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
         mood,
     };
 
-    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+    let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     let path = if body_from_args || stdin_is_pipe {
         let body = if body_from_args {
             args.body.join(" ")
@@ -706,13 +706,13 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
 
         Some(store.create_entry_with_body(journal, &body, &metadata)?)
     } else {
-        let editor_cmd = config.editor.clone();
+        let editor_cmd = config.editor.command.clone();
         store.create_entry_via_editor(journal, &metadata, |body| {
             editor::edit_body(&editor_cmd, body)
         })?
     };
     if let Some(path) = path {
-        let report = store.process_entry_assets(&path, config.download_remote_images, false)?;
+        let report = store.process_entry_assets(&path, config.attachments.download_remote_images, false)?;
         if !report.is_noop() {
             eprintln!("{}", asset_report_message(&report));
         }

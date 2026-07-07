@@ -264,13 +264,19 @@ skip the prompt in scripts.
 `~/.config/journal/config.toml`:
 
 ```toml
-journal_root = "~/Journals"     # point at a synced folder for multi-device use
-editor = "nano"
-default_journal = "personal"
+[journal]
+path = "~/Journals"             # point at a synced folder for multi-device use
+default = "personal"            # optional
+
+[editor]
+command = "nano"
+
+[attachments]
 download_remote_images = true   # fetch remote image links referenced in entries
-show_hints = true
-show_journals = true
 ```
+
+UI toggles (`show_hints`, `show_journals`) aren't set here — they're flipped from
+inside the TUI and remembered per-device in `state.toml` next to `config.toml`.
 
 Use `--config <DIR>` to run against an alternate config directory (it must be a
 directory, not a file).

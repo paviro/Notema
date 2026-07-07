@@ -1,5 +1,5 @@
 use super::*;
-use crate::tui::test_support::{app_with_journals, new_app};
+use crate::tui::test_support::{app_with_journals, new_app, new_app_with_state};
 use std::fs;
 use tempfile::tempdir;
 
@@ -55,9 +55,10 @@ fn hidden_journals_launch_focuses_entries_with_stats_preview() {
     fs::create_dir_all(&entry_dir).unwrap();
     fs::write(entry_dir.join("a.md"), "+++\ntags = []\n+++\n\n# A\n").unwrap();
 
-    let mut config = Config::new(dir.path().to_path_buf(), "true");
-    config.show_journals = false;
-    let app = new_app(config);
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut state = crate::config::State::default();
+    state.ui.show_journals = false;
+    let app = new_app_with_state(config, state);
 
     assert_eq!(app.nav.focus, Focus::Entries);
     assert_eq!(app.nav.selected_entry_index, None);

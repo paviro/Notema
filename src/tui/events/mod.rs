@@ -252,20 +252,20 @@ pub(crate) fn dispatch_action(
         Action::SearchCursorRight => app.search_cursor_right(),
 
         Action::ToggleHints => {
-            app.config.show_hints = !app.config.show_hints;
-            crate::config::save_config(&app.config_path, &app.config)?;
+            app.state.ui.show_hints = !app.state.ui.show_hints;
+            crate::config::save_state(&app.config_path, &app.state)?;
         }
 
         Action::ToggleJournals => {
-            app.config.show_journals = !app.config.show_journals;
-            if app.config.show_journals {
+            app.state.ui.show_journals = !app.state.ui.show_journals;
+            if app.state.ui.show_journals {
                 // Focus the column so narrow/medium layouts actually reveal it.
                 app.nav.focus = Focus::Journals;
             } else if app.nav.focus == Focus::Journals {
                 // Don't leave focus on a now-hidden pane.
                 app.nav.focus = Focus::Entries;
             }
-            crate::config::save_config(&app.config_path, &app.config)?;
+            crate::config::save_state(&app.config_path, &app.state)?;
         }
     }
 

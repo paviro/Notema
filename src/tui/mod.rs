@@ -332,7 +332,7 @@ fn restore_terminal(output: &mut impl Write) -> AppResult<()> {
 }
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) -> AppResult<()> {
-    let watcher = watcher::FileWatcher::start(&app.config.journal_root);
+    let watcher = watcher::FileWatcher::start(&app.config.journal.path);
 
     terminal.draw(|frame| render::draw(frame, &mut app))?;
     let mut overlay_was_visible = app.has_overlay();

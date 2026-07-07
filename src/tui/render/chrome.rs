@@ -180,7 +180,7 @@ pub(crate) fn footer_lines(app: &App, width: u16) -> Text<'static> {
     if !app.status().is_empty() {
         return Text::from(app.status().to_string());
     }
-    if !app.config.show_hints {
+    if !app.state.ui.show_hints {
         return Text::default();
     }
 
@@ -195,7 +195,7 @@ pub(crate) fn footer_height(app: &App, width: u16) -> u16 {
     if !app.status().is_empty() {
         return 1;
     }
-    if !app.config.show_hints {
+    if !app.state.ui.show_hints {
         return 0;
     }
 
@@ -225,7 +225,7 @@ pub(crate) fn footer_hint_id_at_point(
     col: u16,
     row: u16,
 ) -> Option<HintId> {
-    if !app.status().is_empty() || !app.config.show_hints {
+    if !app.status().is_empty() || !app.state.ui.show_hints {
         return None;
     }
 
@@ -245,7 +245,7 @@ pub(crate) fn expanded_footer_text(app: &App) -> String {
 }
 
 pub(crate) fn expanded_footer_lines(app: &App, width: u16) -> Text<'static> {
-    if !app.config.show_hints {
+    if !app.state.ui.show_hints {
         return Text::default();
     }
     Text::from(hint_lines(
@@ -255,7 +255,7 @@ pub(crate) fn expanded_footer_lines(app: &App, width: u16) -> Text<'static> {
 }
 
 pub(crate) fn expanded_footer_height(app: &App, width: u16) -> u16 {
-    if !app.config.show_hints {
+    if !app.state.ui.show_hints {
         return 0;
     }
     hint_height(&expanded_footer_hints(app), width.saturating_sub(1))
@@ -269,7 +269,7 @@ pub(crate) fn expanded_footer_hint_id_at_point(
     col: u16,
     row: u16,
 ) -> Option<HintId> {
-    if !app.config.show_hints {
+    if !app.state.ui.show_hints {
         return None;
     }
     hint_id_at_wrapped(
@@ -496,7 +496,7 @@ fn archive_hint(app: &App) -> Option<Hint> {
 }
 
 fn journals_hint(app: &App) -> Hint {
-    let label = if app.config.show_journals {
+    let label = if app.state.ui.show_journals {
         "hide journals"
     } else {
         "journals"
