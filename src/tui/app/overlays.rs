@@ -53,6 +53,11 @@ impl App {
             .and_then(|entry| entry.metadata.mood)
     }
 
+    pub(crate) fn selected_entry_starred(&self) -> bool {
+        self.resolved_selected_entry()
+            .is_some_and(|entry| entry.metadata.starred)
+    }
+
     pub(crate) fn begin_edit_mood(&mut self) {
         let saved = self.selected_entry_mood();
         let draft = saved.unwrap_or(0);

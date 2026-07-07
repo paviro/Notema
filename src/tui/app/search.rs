@@ -125,6 +125,13 @@ impl App {
             self.search_results_by_metadata(MetadataKind::Activities, activity.trim())
         } else if let Some(feeling) = self.search.query.strip_prefix("feelings:") {
             self.search_results_by_feeling(feeling.trim())
+        } else if let Some(value) = self.search.query.strip_prefix("star:") {
+            match parse_starred_value(value) {
+                Some(want) => self.search_results_by_starred(want),
+                // An unparseable flag (e.g. `star:maybe`) matches nothing,
+                // mirroring how an unknown `feelings:` value yields no hits.
+                None => Vec::new(),
+            }
         } else {
             search_loaded_entries(
                 &self.library.entries,
@@ -175,5 +182,21 @@ impl App {
                 .iter()
                 .any(|entry_feeling| entry_feeling == &feeling)
         })
+    }
+
+    pub(super) fn search_results_by_starred(&self, want: bool) -> Vec<SearchHit> {
+        self.search_results_matching(|entry| entry.metadata.starred == want)
+    }
+}
+
+/// Parse the value of a `star:` query. An empty value is the friendlier
+/// `true` (the common intent when filtering for favorites); `true`/`1` and
+/// `false`/`0` are accepted case-insensitively; anything else is `None` (no
+/// match).
+fn parse_starred_value(value: &str) -> Option<bool> {
+    match value.trim().to_lowercase().as_str() {
+        "" | "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => None,
     }
 }

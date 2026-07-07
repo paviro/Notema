@@ -692,6 +692,7 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
         activities,
         feelings,
         mood,
+        starred: false,
     };
 
     let store = JournalStore::for_config(&config_path, &config.journal.path)?;

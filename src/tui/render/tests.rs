@@ -1071,6 +1071,7 @@ fn search_results_footer_shows_escape_and_entry_actions() {
         created_at: None,
         title: "A".to_string(),
         preview: "Body".to_string(),
+        starred: false,
     }];
 
     let text = footer_text(&app);
@@ -1195,6 +1196,7 @@ fn scoped_search_hit_labels_omit_journal_prefix() {
         created_at: None,
         title: "A".to_string(),
         preview: "Body".to_string(),
+        starred: false,
     };
 
     assert_eq!(app.search_hit_label(&hit), "A");
@@ -1209,6 +1211,7 @@ fn global_search_hit_labels_include_journal_prefix() {
         created_at: None,
         title: "A".to_string(),
         preview: "Body".to_string(),
+        starred: false,
     };
 
     assert_eq!(app.search_hit_label(&hit), "work/A");

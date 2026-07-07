@@ -26,6 +26,7 @@ pub(crate) enum Action {
     BeginEditActivities,
     BeginEditFeelings,
     BeginEditMood,
+    ToggleStarred,
     NewEntry,
     NewJournal,
     ToggleArchiveJournal,

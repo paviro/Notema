@@ -27,6 +27,7 @@ pub(crate) enum HintId {
     BeginEditActivities,
     BeginEditFeelings,
     BeginEditMood,
+    ToggleStarred,
     ExitSearch,
     CancelOverlay,
     MetadataToggle,
@@ -531,6 +532,7 @@ fn expanded_footer_hints(app: &App) -> Vec<Hint> {
         hints.push(Hint::new("act", "a", HintId::BeginEditActivities));
         hints.push(Hint::new("feel", "f", HintId::BeginEditFeelings));
         hints.push(Hint::new("mood", "m", HintId::BeginEditMood));
+        hints.push(Hint::new("star", "s", HintId::ToggleStarred));
         hints.extend(image_hint(app));
     } else {
         hints.push(Hint::new("close", "enter/esc", HintId::CancelOverlay));

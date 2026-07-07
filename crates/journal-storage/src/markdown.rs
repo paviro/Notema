@@ -117,6 +117,7 @@ pub fn with_metadata_field(content: &str, field: &MetadataField) -> Option<Strin
             MetadataField::Activities(values) => fm.metadata.activities = values.clone(),
             MetadataField::Feelings(values) => fm.metadata.feelings = values.clone(),
             MetadataField::Mood(mood) => fm.metadata.mood = *mood,
+            MetadataField::Starred(starred) => fm.metadata.starred = *starred,
         }
         fm.edited_at = Some(chrono::Local::now().to_rfc3339());
     })
@@ -259,6 +260,28 @@ mod tests {
                 .metadata
                 .mood,
             None
+        );
+    }
+
+    #[test]
+    fn starred_round_trips_and_omits_when_false() {
+        let content = "+++\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\n# Body\n";
+
+        let starred = with_metadata_field(content, &MetadataField::Starred(true)).unwrap();
+        assert!(starred.contains("starred = true"));
+        assert!(
+            front_matter_fields(split_front_matter(&starred).0.unwrap())
+                .metadata
+                .starred
+        );
+
+        let unstarred = with_metadata_field(&starred, &MetadataField::Starred(false)).unwrap();
+        // A false flag leaves no key behind.
+        assert!(!unstarred.contains("starred"));
+        assert!(
+            !front_matter_fields(split_front_matter(&unstarred).0.unwrap())
+                .metadata
+                .starred
         );
     }
 

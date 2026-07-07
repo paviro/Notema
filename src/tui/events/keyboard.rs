@@ -115,6 +115,7 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Char('a') if app.can_act_on_selected_entry() => Some(Action::BeginEditActivities),
         KeyCode::Char('f') if app.can_act_on_selected_entry() => Some(Action::BeginEditFeelings),
         KeyCode::Char('m') if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
+        KeyCode::Char('s') if app.can_act_on_selected_entry() => Some(Action::ToggleStarred),
         KeyCode::Char('i' | '0'..='9')
             if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
         {
@@ -138,6 +139,7 @@ fn entry_view_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
         KeyCode::Char('a') => Some(Action::BeginEditActivities),
         KeyCode::Char('f') => Some(Action::BeginEditFeelings),
         KeyCode::Char('m') => Some(Action::BeginEditMood),
+        KeyCode::Char('s') => Some(Action::ToggleStarred),
         KeyCode::Char('i' | '0'..='9') => image_shortcut(app, key),
         _ => None,
     }

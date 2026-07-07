@@ -26,6 +26,14 @@ pub struct Metadata {
         skip_serializing_if = "Option::is_none"
     )]
     pub mood: Option<i8>,
+    /// Whether the user flagged this entry as a favorite. Omitted from front
+    /// matter when false so existing files stay byte-stable.
+    #[serde(default, skip_serializing_if = "is_unstarred")]
+    pub starred: bool,
+}
+
+fn is_unstarred(starred: &bool) -> bool {
+    !*starred
 }
 
 /// Read `mood` as an integer and clamp it to [`MOOD_RANGE`], dropping
@@ -146,6 +154,7 @@ pub enum MetadataField {
     Activities(Vec<String>),
     Feelings(Vec<String>),
     Mood(Option<i8>),
+    Starred(bool),
 }
 
 pub struct EntryPath {
@@ -160,6 +169,7 @@ pub struct SearchHit {
     pub created_at: Option<String>,
     pub title: String,
     pub preview: String,
+    pub starred: bool,
 }
 
 impl SearchHit {
@@ -170,6 +180,7 @@ impl SearchHit {
             created_at: entry.created_raw().map(str::to_string),
             title: entry.display_label(),
             preview: entry.preview.clone(),
+            starred: entry.metadata.starred,
         }
     }
 }

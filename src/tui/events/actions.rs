@@ -280,6 +280,24 @@ pub(super) fn set_mood_on_entry(app: &mut App, mood: Option<i8>) -> AppResult<()
     Ok(())
 }
 
+pub(super) fn toggle_starred_on_entry(app: &mut App) -> AppResult<()> {
+    let Some(target) = app.selected_entry_target() else {
+        return Ok(());
+    };
+
+    if !reject_if_locked(app, &target) {
+        return Ok(());
+    }
+
+    let starred = !app.selected_entry_starred();
+    app.store
+        .set_entry_metadata_field(&target.path, MetadataField::Starred(starred))?;
+
+    app.set_status(if starred { "Starred" } else { "Unstarred" });
+    app.refresh()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

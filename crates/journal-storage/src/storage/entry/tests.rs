@@ -180,6 +180,7 @@ fn create_entry_with_body_and_metadata_writes_metadata() {
             activities: activities.clone(),
             feelings: feelings.clone(),
             mood: None,
+            starred: false,
         },
     )
     .unwrap();

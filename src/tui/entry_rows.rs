@@ -149,7 +149,10 @@ fn search_hit_lines(hit: &SearchHit, text_width: u16) -> Vec<Line<'static>> {
         date.as_deref(),
         &time,
         &hit.preview,
-        Some(journal_storage::journal_display_name(&hit.journal)),
+        Some(&footer_left_label(
+            journal_storage::journal_display_name(&hit.journal).to_string(),
+            hit.starred,
+        )),
         archived.then_some("Archived"),
         text_width,
     )
@@ -417,10 +420,23 @@ pub(crate) fn entry_list_lines(
         day,
         &time,
         &entry.preview,
-        Some(&word_count_label(entry.word_count)),
+        Some(&footer_left_label(
+            word_count_label(entry.word_count),
+            entry.metadata.starred,
+        )),
         None,
         text_width,
     )
+}
+
+/// The bottom-left label with a trailing `★` when starred. Keeping the star on
+/// the left leaves the bottom-right slot free for the search-result "Archived"
+/// flag, and reads consistently across the browse and search box views.
+fn footer_left_label(mut label: String, starred: bool) -> String {
+    if starred {
+        label.push_str(" ★");
+    }
+    label
 }
 
 fn word_count_label(count: usize) -> String {
@@ -633,6 +649,30 @@ mod tests {
 
         assert_eq!(scroll, 100_000 - 20);
         assert!(scroll > u16::MAX as usize);
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn starred_glyph_follows_bottom_left_label() {
+        // The star rides the bottom-left label (just after the word count), so it
+        // never collides with a bottom-right label like the search "Archived" flag.
+        let starred = footer_left_label("2 words".to_string(), true);
+        let lines = entry_box_lines(None, "14:30", "hi", Some(&starred), Some("Archived"), 30);
+        let bottom = line_text(lines.last().unwrap());
+        assert!(bottom.starts_with("└ 2 words ★ "));
+        assert!(bottom.ends_with(" Archived ┘"));
+
+        // Unstarred: the label is untouched and no star appears.
+        let plain = footer_left_label("2 words".to_string(), false);
+        assert_eq!(plain, "2 words");
+        let plain_lines = entry_box_lines(None, "14:30", "hi", Some(&plain), None, 30);
+        assert!(!line_text(plain_lines.last().unwrap()).contains('★'));
     }
 
     #[test]

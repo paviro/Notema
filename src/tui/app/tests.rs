@@ -197,6 +197,50 @@ fn feelings_search_matches_exact_known_label() {
 }
 
 #[test]
+fn starred_search_filters_by_flag() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\nstarred = true\n+++\n\n# Fav\n",
+    )
+    .unwrap();
+    fs::write(entry_dir.join("b.md"), "+++\n+++\n\n# Plain\n").unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.begin_search();
+
+    app.search.query = "star:true".to_string();
+    app.update_search_results();
+    assert_eq!(app.search.hits.len(), 1);
+    assert_eq!(app.search.hits[0].title, "Fav");
+
+    app.search.query = "star:false".to_string();
+    app.update_search_results();
+    assert_eq!(app.search.hits.len(), 1);
+    assert_eq!(app.search.hits[0].title, "Plain");
+
+    // 1/0 are accepted as boolean aliases.
+    app.search.query = "star:1".to_string();
+    app.update_search_results();
+    assert_eq!(app.search.hits.len(), 1);
+    assert_eq!(app.search.hits[0].title, "Fav");
+
+    app.search.query = "star:0".to_string();
+    app.update_search_results();
+    assert_eq!(app.search.hits.len(), 1);
+    assert_eq!(app.search.hits[0].title, "Plain");
+
+    // An unparseable flag matches nothing.
+    app.search.query = "star:maybe".to_string();
+    app.update_search_results();
+    assert!(app.search.hits.is_empty());
+}
+
+#[test]
 fn begin_edit_feelings_uses_fixed_list_and_selected_entry_values() {
     let dir = tempdir().unwrap();
     let entry_dir = dir.path().join("work").join("2026-07-01");

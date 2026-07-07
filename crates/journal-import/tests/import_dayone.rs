@@ -54,6 +54,40 @@ fn imports_entry_with_body_tags_and_provenance() {
 }
 
 #[test]
+fn imports_starred_flag() {
+    let (dir, store) = plaintext_store();
+    let json = r#"{
+        "entries": [
+            {
+                "uuid": "STAR1",
+                "text": "A favorite",
+                "creationDate": "2026-07-01T10:00:00Z",
+                "starred": true
+            },
+            {
+                "uuid": "PLAIN1",
+                "text": "Not a favorite",
+                "creationDate": "2026-07-01T11:00:00Z"
+            }
+        ]
+    }"#;
+
+    import_dayone(&store, "diary", &write_export(&dir, json), false).unwrap();
+
+    let entries = store.scan_entries().unwrap();
+    let starred = entries
+        .iter()
+        .find(|e| e.import_id.as_deref() == Some("dayone:STAR1"))
+        .unwrap();
+    let plain = entries
+        .iter()
+        .find(|e| e.import_id.as_deref() == Some("dayone:PLAIN1"))
+        .unwrap();
+    assert!(starred.metadata.starred);
+    assert!(!plain.metadata.starred);
+}
+
+#[test]
 fn re_running_the_same_export_skips_already_imported_entries() {
     let (dir, store) = plaintext_store();
     let json = r#"{

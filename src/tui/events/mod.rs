@@ -20,7 +20,7 @@ use action::Action;
 use actions::{
     create_entry_in_selected_journal, delete_selected, delete_selected_journal, edit_selected,
     set_feelings_on_entry, set_metadata_on_entry, set_mood_on_entry, submit_new_journal,
-    toggle_archive_selected_journal, view_selected,
+    toggle_archive_selected_journal, toggle_starred_on_entry, view_selected,
 };
 use keyboard::{keep_selection_visible, move_focus_left, move_focus_right};
 
@@ -83,6 +83,7 @@ pub(crate) fn dispatch_action(
         Action::BeginEditActivities => app.begin_edit_activities(),
         Action::BeginEditFeelings => app.begin_edit_feelings(),
         Action::BeginEditMood => app.begin_edit_mood(),
+        Action::ToggleStarred => commit_entry_edit(app, toggle_starred_on_entry)?,
         Action::NewEntry => {
             let snapshot = EntryViewSnapshot::capture(app);
             let restore_to_viewer = snapshot

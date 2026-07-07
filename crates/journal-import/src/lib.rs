@@ -115,6 +115,7 @@ pub fn import_dayone(
 
         let metadata = Metadata {
             tags: entry.tags.clone(),
+            starred: entry.starred,
             ..Metadata::default()
         };
 
