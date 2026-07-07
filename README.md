@@ -273,10 +273,15 @@ command = "nano"
 
 [attachments]
 download_remote_images = true   # fetch remote image links referenced in entries
+
+[ui.layout.entry_viewer]
+body_center_vertically = true   # center a short entry in the viewer when it fits
+body_max_width = 100            # cap the entry body width in cells (0 = no cap)
 ```
 
-UI toggles (`show_hints`, `show_journals`) aren't set here — they're flipped from
-inside the TUI and remembered per-device in `state.toml` next to `config.toml`.
+Runtime chrome toggles (`show_hints`, `show_journals`) aren't set here — they're
+flipped from inside the TUI and remembered per-device in `state.toml` next to
+`config.toml`.
 
 Use `--config <DIR>` to run against an alternate config directory (it must be a
 directory, not a file).

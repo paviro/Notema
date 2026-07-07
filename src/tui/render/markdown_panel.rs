@@ -33,11 +33,6 @@ use crate::tui::{
 
 const SCROLLING_METADATA_ENTRY_VIEW_HEIGHT_CUTOFF: u16 = 20;
 
-/// The entry body is capped at this width and centered within the panel; wider
-/// panels gutter the sides so long-form text stays readable. Metadata rows keep
-/// the full panel width.
-const MAX_ENTRY_BODY_WIDTH: u16 = 100;
-
 pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     if let Some((title, content)) = app.selected_entry_view() {
         let tags = app.selected_entry_tags();
@@ -127,7 +122,10 @@ fn draw_markdown_panel(
     let body_rect = if metadata_scrolls {
         content_rect
     } else {
-        centered_body_rect(content_rect)
+        centered_body_rect(
+            content_rect,
+            app.config.ui.layout.entry_viewer.body_max_width,
+        )
     };
 
     let width = body_rect.width.saturating_sub(1).max(1) as usize;
@@ -147,7 +145,11 @@ fn draw_markdown_panel(
     let line_count = lines.len();
     let scroll = viewer_scroll(requested_scroll, line_count, body_rect.height);
     // When the whole entry fits (no scrollbar), float it in the vertical middle.
-    let body_rect = center_body_vertically(body_rect, line_count, scroll);
+    let body_rect = if app.config.ui.layout.entry_viewer.body_center_vertically {
+        center_body_vertically(body_rect, line_count, scroll)
+    } else {
+        body_rect
+    };
 
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), body_rect);
@@ -165,16 +167,16 @@ fn metadata_scrolls_with_body(area: Rect) -> bool {
     area.height < SCROLLING_METADATA_ENTRY_VIEW_HEIGHT_CUTOFF
 }
 
-/// Cap `rect` at [`MAX_ENTRY_BODY_WIDTH`] and center it horizontally, leaving the
-/// height and narrower panels untouched.
-fn centered_body_rect(rect: Rect) -> Rect {
-    if rect.width <= MAX_ENTRY_BODY_WIDTH {
+/// Cap `rect` at `max_width` and center it horizontally, leaving the height and
+/// narrower panels untouched. A `max_width` of 0 means no cap.
+fn centered_body_rect(rect: Rect, max_width: u16) -> Rect {
+    if max_width == 0 || rect.width <= max_width {
         return rect;
     }
-    let x = rect.x + (rect.width - MAX_ENTRY_BODY_WIDTH) / 2;
+    let x = rect.x + (rect.width - max_width) / 2;
     Rect {
         x,
-        width: MAX_ENTRY_BODY_WIDTH,
+        width: max_width,
         ..rect
     }
 }

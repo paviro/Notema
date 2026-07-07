@@ -14,6 +14,8 @@ pub struct Config {
     pub editor: EditorSection,
     #[serde(default)]
     pub attachments: AttachmentsSection,
+    #[serde(default)]
+    pub ui: UiSection,
 }
 
 /// Which journals to open and where they live on disk.
@@ -41,6 +43,34 @@ pub struct AttachmentsSection {
     pub download_remote_images: bool,
 }
 
+/// TUI presentation preferences.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UiSection {
+    #[serde(default)]
+    pub layout: LayoutSection,
+}
+
+/// Layout geometry: how the panels and their contents are sized. Column-width and
+/// breakpoint knobs would live directly here; entry-viewer settings sit in their
+/// own sub-table to keep the two concerns separate.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LayoutSection {
+    #[serde(default)]
+    pub entry_viewer: EntryViewerSection,
+}
+
+/// How the entry-viewer pane presents an entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EntryViewerSection {
+    /// Vertically center the body in the viewer when it fits without scrolling.
+    #[serde(default = "default_true")]
+    pub body_center_vertically: bool,
+    /// Max width, in cells, of the entry body; wider panels gutter the sides so
+    /// long-form text stays readable. Metadata keeps the full width.
+    #[serde(default = "default_body_max_width")]
+    pub body_max_width: u16,
+}
+
 impl Default for EditorSection {
     fn default() -> Self {
         Self {
@@ -57,8 +87,21 @@ impl Default for AttachmentsSection {
     }
 }
 
+impl Default for EntryViewerSection {
+    fn default() -> Self {
+        Self {
+            body_center_vertically: true,
+            body_max_width: default_body_max_width(),
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
+}
+
+fn default_body_max_width() -> u16 {
+    100
 }
 
 fn default_editor() -> String {
@@ -76,6 +119,7 @@ impl Config {
                 command: editor.into(),
             },
             attachments: AttachmentsSection::default(),
+            ui: UiSection::default(),
         }
     }
 }
@@ -411,6 +455,8 @@ mod tests {
         let mut config = Config::new(dir.path().join("root"), "vim");
         config.journal.default = Some("work".to_string());
         config.attachments.download_remote_images = false;
+        config.ui.layout.entry_viewer.body_center_vertically = false;
+        config.ui.layout.entry_viewer.body_max_width = 80;
 
         save_config(&path, &config).unwrap();
         let loaded = load_config(&path).unwrap();
@@ -428,6 +474,8 @@ mod tests {
 
         assert_eq!(config.editor.command, "nano");
         assert!(config.attachments.download_remote_images);
+        assert!(config.ui.layout.entry_viewer.body_center_vertically);
+        assert_eq!(config.ui.layout.entry_viewer.body_max_width, 100);
     }
 
     #[test]

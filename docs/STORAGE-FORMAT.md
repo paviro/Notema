@@ -106,6 +106,10 @@ command = "nano"
 
 [attachments]
 download_remote_images = true
+
+[ui.layout.entry_viewer]
+body_center_vertically = true     # center a short entry when it fits, no scrollbar
+body_max_width = 100              # cap the body width in cells (0 = no cap)
 ```
 
 `state.toml` — machine-written session state (kept separate so it never clutters
