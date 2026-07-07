@@ -2,9 +2,10 @@ use super::paths::{entry_id, is_assets_dir, is_encrypted_entry_file, is_entry_fi
 use super::{Entry, EntryEncryptionState, EntryPath, Metadata, Timestamp};
 use crate::storage::{journals::is_hidden_name, list_journals};
 use crate::{
-    AppResult, crypto,
+    AppResult,
     markdown::{FrontMatter, display_preview, front_matter_fields, split_front_matter},
 };
+use journal_encryption as crypto;
 use journal_core::entry::build_search_haystack;
 use journal_core::feelings::normalize_feelings;
 use rayon::prelude::*;
@@ -146,7 +147,7 @@ pub fn read_entry_content(
     identity: Option<&crypto::UnlockedIdentity>,
 ) -> AppResult<String> {
     if is_encrypted_entry_file(path) {
-        let identity = identity.ok_or(crate::StorageError::LockedIdentity { context: "entry" })?;
+        let identity = identity.ok_or(crate::EncryptionError::Locked { context: "entry" })?;
         Ok(String::from_utf8(crypto::decrypt_file_bytes(
             identity, path,
         )?)?)

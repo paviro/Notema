@@ -4,7 +4,7 @@ version = "2026.7.1"
 edition = "2024"
 
 [workspace]
-members = ["crates/journal-core", "crates/journal-storage", "crates/journal-import"]
+members = ["crates/journal-core", "crates/journal-encryption", "crates/journal-storage", "crates/journal-import"]
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }

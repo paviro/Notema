@@ -31,7 +31,7 @@
 //!    pin to compare against (trust on first use) — which is why the genesis
 //!    fingerprint is confirmed out of band when a device joins.
 
-use crate::{AppResult, StorageError, crypto::Recipient};
+use crate::{EncryptionError, Recipient, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::Path};
@@ -137,9 +137,9 @@ pub struct Verified {
 }
 
 /// Replay and authenticate the whole log against the local pins. Returns the
-/// current recipient set on success, or [`StorageError::RosterUnverified`] on any
+/// current recipient set on success, or [`EncryptionError::RosterUnverified`] on any
 /// failure — callers must treat that as "do not encrypt/decrypt".
-pub fn verify(ops: &[RosterOp], pins: &TrustPins) -> AppResult<Verified> {
+pub fn verify(ops: &[RosterOp], pins: &TrustPins) -> Result<Verified> {
     let Some(genesis_op) = ops.first() else {
         return Err(unverified("the roster is empty"));
     };
@@ -232,7 +232,7 @@ pub fn append(
     sign: &str,
     signer_pub: &str,
     sign_bytes: impl FnOnce(&[u8]) -> String,
-) -> AppResult<RosterOp> {
+) -> Result<RosterOp> {
     let ops = read_ops(path)?;
     let (seq, prev) = match ops.last() {
         Some(last) => (last.seq + 1, last.hash()),
@@ -270,7 +270,7 @@ struct RosterFileRef<'a> {
 }
 
 /// The raw ops in file order, or empty when the store isn't encrypted.
-pub fn read_ops(path: &Path) -> AppResult<Vec<RosterOp>> {
+pub fn read_ops(path: &Path) -> Result<Vec<RosterOp>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -278,13 +278,13 @@ pub fn read_ops(path: &Path) -> AppResult<Vec<RosterOp>> {
     Ok(toml::from_str::<RosterFile>(&text)?.ops)
 }
 
-fn write_ops(path: &Path, ops: &[RosterOp]) -> AppResult<()> {
+fn write_ops(path: &Path, ops: &[RosterOp]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let document = RosterFileRef { op: ops };
     let body = format!("{DEVICES_HEADER}\n{}", toml::to_string_pretty(&document)?);
-    crate::crypto::atomic_write(path, body.as_bytes())
+    crate::atomic_write(path, body.as_bytes())
 }
 
 // --- local trust pins -------------------------------------------------------
@@ -298,7 +298,7 @@ struct PinsFile {
     head: Option<String>,
 }
 
-pub fn read_pins(path: &Path) -> AppResult<TrustPins> {
+pub fn read_pins(path: &Path) -> Result<TrustPins> {
     if !path.exists() {
         return Ok(TrustPins::default());
     }
@@ -309,12 +309,12 @@ pub fn read_pins(path: &Path) -> AppResult<TrustPins> {
     })
 }
 
-pub fn write_pins(path: &Path, genesis: &str, head: &str) -> AppResult<()> {
+pub fn write_pins(path: &Path, genesis: &str, head: &str) -> Result<()> {
     let document = PinsFile {
         genesis: Some(genesis.to_string()),
         head: Some(head.to_string()),
     };
-    crate::crypto::atomic_write(path, toml::to_string_pretty(&document)?.as_bytes())
+    crate::atomic_write(path, toml::to_string_pretty(&document)?.as_bytes())
 }
 
 /// A short, human-comparable fingerprint of a device, covering *both* its
@@ -335,17 +335,16 @@ pub fn fingerprint(key: &str, sign: &str) -> String {
         .join("-")
 }
 
-fn verify_op_sig(op: &RosterOp) -> AppResult<()> {
-    if crate::crypto::verify_signature(&op.signer, &op.signing_bytes(), &op.sig) {
+fn verify_op_sig(op: &RosterOp) -> Result<()> {
+    if crate::verify_signature(&op.signer, &op.signing_bytes(), &op.sig) {
         Ok(())
     } else {
         Err(unverified(&format!("op #{} has an invalid signature", op.seq)))
     }
 }
 
-fn unverified(detail: &str) -> Box<dyn std::error::Error + Send + Sync> {
-    StorageError::RosterUnverified {
+fn unverified(detail: &str) -> EncryptionError {
+    EncryptionError::RosterUnverified {
         detail: detail.to_string(),
     }
-    .into()
 }

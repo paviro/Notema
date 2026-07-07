@@ -343,7 +343,7 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
              If you're waiting for approval, run `journal encryption device list` to see the \
              request, or approve it from a device that can already read this journal.\n\
              To start over, delete that identity file and re-run enroll.",
-            store.paths().identity_file.display()
+            store.paths().keys.identity_file.display()
         )
         .into());
     }
@@ -366,7 +366,7 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
     println!("  journal encryption device approve {name}");
     println!(
         "Age identity: {}. Back it up; without it encrypted entries cannot be decrypted.",
-        store.paths().identity_file.display()
+        store.paths().keys.identity_file.display()
     );
     if passphrase.is_none() {
         println!("This key has no passphrase — keep this device and its backups secure.");

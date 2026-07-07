@@ -1,17 +1,107 @@
-use crate::{AppResult, JournalStorePaths, roster};
-use age::{
-    secrecy::{ExposeSecret, SecretString},
-    x25519,
-};
+//! Journal's encryption layer: per-device age keypairs, a signed append-only
+//! device roster, passphrase-wrapped identities, and the helpers that turn
+//! journal bytes into age ciphertext and back.
+//!
+//! It owns all of the app's cryptography and knows nothing about how entries or
+//! assets are laid out on disk: it works on a [`KeyPaths`] and byte buffers, and
+//! the storage layer decides which files those bytes belong to.
+
+mod roster;
+
+pub use age::secrecy::{ExposeSecret, SecretString};
+use age::x25519;
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     str::FromStr,
 };
+use thiserror::Error;
 use zeroize::Zeroizing;
+
+/// A unique hidden sibling temp path next to `target`, for atomic
+/// write-then-rename. Named `.journal-<pid>-<rand>.<suffix>` in the target's
+/// directory so it lands on the same filesystem as the eventual rename target.
+pub(crate) fn sibling_temp_path(target: &Path, suffix: &str) -> PathBuf {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let mut noise = [0u8; 8];
+    let _ = getrandom::getrandom(&mut noise);
+    parent.join(format!(
+        ".journal-{}-{}.{suffix}",
+        std::process::id(),
+        hex::encode(noise),
+    ))
+}
+
+pub type Result<T> = std::result::Result<T, EncryptionError>;
+
+/// The first three variants are meaningful to callers (prompt for a passphrase,
+/// refuse to continue); the rest wrap an underlying failure typed rather than
+/// boxed.
+#[derive(Debug, Error)]
+pub enum EncryptionError {
+    /// An encrypted item was accessed without an unlocked identity. `context`
+    /// names what was being read (e.g. `"entry"`, `"asset"`, `"store"`).
+    #[error("encrypted {context} requires an unlocked journal encryption identity")]
+    Locked { context: &'static str },
+
+    /// Encrypted entries exist but the signed device roster needed to encrypt
+    /// more is gone — continuing could leave the store partially encrypted.
+    #[error(
+        "encrypted entries already exist but the device roster is missing at {}; cannot safely continue encryption",
+        .path.display()
+    )]
+    RecipientsMissing { path: PathBuf },
+
+    /// The signed device roster failed verification: a forged/unauthorized op, a
+    /// broken signature chain, a changed genesis, or a rolled-back history. The
+    /// store refuses to encrypt or decrypt to an untrusted recipient set rather
+    /// than silently trusting the tampered file. `detail` explains which check
+    /// failed.
+    #[error("device roster failed verification: {detail}")]
+    RosterUnverified { detail: String },
+
+    /// A precondition or input the encryption layer rejected: a duplicate or
+    /// unknown recipient, an empty name or passphrase, malformed key material, or
+    /// a missing passphrase. Carries a human-facing message.
+    #[error("{0}")]
+    Invalid(String),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error("age encryption failed: {0}")]
+    Encrypt(#[from] age::EncryptError),
+
+    #[error("age decryption failed: {0}")]
+    Decrypt(#[from] age::DecryptError),
+
+    #[error("malformed encryption metadata: {0}")]
+    TomlRead(#[from] toml::de::Error),
+
+    #[error("could not serialize encryption metadata: {0}")]
+    TomlWrite(#[from] toml::ser::Error),
+
+    #[error("invalid hex encoding: {0}")]
+    Hex(#[from] hex::FromHexError),
+
+    #[error("invalid UTF-8 in key material: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+}
+
+impl From<String> for EncryptionError {
+    fn from(message: String) -> Self {
+        Self::Invalid(message)
+    }
+}
+
+impl From<&str> for EncryptionError {
+    fn from(message: &str) -> Self {
+        Self::Invalid(message.to_string())
+    }
+}
 
 /// A device that entries are encrypted to: its age public key, its Ed25519
 /// signing key (which authorizes and is authorized by roster ops), and the
@@ -115,19 +205,61 @@ impl UnlockedIdentity {
     }
 }
 
-pub fn has_devices_file(paths: &JournalStorePaths) -> bool {
+/// The file locations of a store's key material — everything the encryption
+/// layer reads or writes, and nothing about the journal's entries. Public key
+/// material lives in the synced `<root>/.age/` folder; the private identity and
+/// the roster trust pins live next to the config and are never synced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyPaths {
+    /// The hidden, synced key folder holding the signed `devices.toml` roster and
+    /// any `pending-<id>.toml` join requests.
+    pub age_dir: PathBuf,
+    /// The signed, append-only device roster (`<root>/.age/devices.toml`).
+    pub devices_file: PathBuf,
+    /// This device's private age identity (`identity.age`), never synced.
+    pub identity_file: PathBuf,
+    /// This device's local trust pins for the roster (genesis + last-seen head).
+    /// Sits next to the identity, never synced, so a sync-folder attacker can't
+    /// reach it.
+    pub trust_file: PathBuf,
+}
+
+impl KeyPaths {
+    /// Derive the key locations from the journal root and the config directory.
+    pub fn new(journal_root: impl AsRef<Path>, config_dir: impl AsRef<Path>) -> Self {
+        let age_dir = journal_root.as_ref().join(".age");
+        let config_dir = config_dir.as_ref();
+        Self {
+            devices_file: age_dir.join("devices.toml"),
+            identity_file: config_dir.join("identity.age"),
+            trust_file: config_dir.join("devices-trust.toml"),
+            age_dir,
+        }
+    }
+
+    /// Like [`new`](Self::new), taking the config *file* and reading its parent
+    /// directory for the identity location.
+    pub fn for_config(config_path: &Path, journal_root: &Path) -> Result<Self> {
+        let config_dir = config_path
+            .parent()
+            .ok_or("config path has no parent directory")?;
+        Ok(Self::new(journal_root, config_dir))
+    }
+}
+
+pub fn has_devices_file(paths: &KeyPaths) -> bool {
     paths.devices_file.exists()
 }
 
-pub fn has_identity_file(paths: &JournalStorePaths) -> bool {
+pub fn has_identity_file(paths: &KeyPaths) -> bool {
     paths.identity_file.exists()
 }
 
 /// The store's current recipients, obtained by **verifying** the signed roster
 /// against this device's local trust pins. Empty when the store isn't encrypted.
-/// Returns [`crate::StorageError::RosterUnverified`] — and so refuses to hand back
+/// Returns [`EncryptionError::RosterUnverified`] — and so refuses to hand back
 /// any recipient set — if the roster was tampered with or rolled back.
-pub fn read_recipients(paths: &JournalStorePaths) -> AppResult<Vec<Recipient>> {
+pub fn read_recipients(paths: &KeyPaths) -> Result<Vec<Recipient>> {
     if !paths.devices_file.exists() {
         return Ok(Vec::new());
     }
@@ -136,7 +268,7 @@ pub fn read_recipients(paths: &JournalStorePaths) -> AppResult<Vec<Recipient>> {
 
 /// Verify the signed roster against the local pins, returning the current
 /// recipient set plus the genesis/head hashes to pin.
-fn verified_roster(paths: &JournalStorePaths) -> AppResult<roster::Verified> {
+fn verified_roster(paths: &KeyPaths) -> Result<roster::Verified> {
     let ops = roster::read_ops(&paths.devices_file)?;
     let pins = roster::read_pins(&paths.trust_file)?;
     roster::verify(&ops, &pins)
@@ -145,7 +277,7 @@ fn verified_roster(paths: &JournalStorePaths) -> AppResult<roster::Verified> {
 /// Advance this device's trust pins to the roster's current, verified head (also
 /// recording the genesis on first sight). Called after a change this device made
 /// or observed, so a later rollback below this point is detectable.
-pub(crate) fn advance_trust_pins(paths: &JournalStorePaths) -> AppResult<()> {
+pub fn advance_trust_pins(paths: &KeyPaths) -> Result<()> {
     let verified = verified_roster(paths)?;
     roster::write_pins(&paths.trust_file, &verified.genesis, &verified.head)
 }
@@ -154,7 +286,7 @@ pub(crate) fn advance_trust_pins(paths: &JournalStorePaths) -> AppResult<()> {
 /// first use, e.g. a freshly joined device) and advances the head afterwards.
 /// Silently does nothing when the store isn't encrypted or the roster doesn't
 /// verify — the failing read path is where tampering is surfaced.
-fn refresh_trust_pins(paths: &JournalStorePaths) {
+fn refresh_trust_pins(paths: &KeyPaths) {
     if paths.devices_file.exists()
         && let Ok(verified) = verified_roster(paths)
     {
@@ -163,7 +295,7 @@ fn refresh_trust_pins(paths: &JournalStorePaths) {
 }
 
 /// The first recipient's public key, for display (e.g. after `journal encryption enable`).
-pub fn public_recipient(paths: &JournalStorePaths) -> AppResult<String> {
+pub fn public_recipient(paths: &KeyPaths) -> Result<String> {
     read_recipients(paths)?
         .into_iter()
         .next()
@@ -173,7 +305,7 @@ pub fn public_recipient(paths: &JournalStorePaths) -> AppResult<String> {
 
 /// This device's stored identity label and whether it is passphrase-protected,
 /// without decrypting anything. `None` when no identity file exists here.
-pub fn device_identity_info(paths: &JournalStorePaths) -> AppResult<Option<DeviceIdentityInfo>> {
+pub fn device_identity_info(paths: &KeyPaths) -> Result<Option<DeviceIdentityInfo>> {
     if !paths.identity_file.exists() {
         return Ok(None);
     }
@@ -189,10 +321,10 @@ pub fn device_identity_info(paths: &JournalStorePaths) -> AppResult<Option<Devic
 /// signed roster with a self-signed genesis op naming this device and pin it
 /// locally. Used by the device that creates the store.
 pub fn initialize_store_identity(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     name: &str,
     passphrase: Option<&SecretString>,
-) -> AppResult<Recipient> {
+) -> Result<Recipient> {
     let (recipient, identity) = create_device_identity(paths, name, passphrase)?;
     append_op(paths, &identity, roster::GENESIS, &recipient)?;
     advance_trust_pins(paths)?;
@@ -204,10 +336,10 @@ pub fn initialize_store_identity(
 /// folder. Does not touch the roster — a device that can decrypt approves the
 /// request by appending a signed `add` op.
 pub fn request_store_access(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     name: &str,
     passphrase: Option<&SecretString>,
-) -> AppResult<Recipient> {
+) -> Result<Recipient> {
     let (recipient, identity) = create_device_identity(paths, name, passphrase)?;
     write_pending(paths, &recipient, &identity)?;
     Ok(recipient)
@@ -217,9 +349,9 @@ pub fn request_store_access(
 /// `passphrase` must be `Some` for a passphrase-protected identity and is
 /// ignored for a plaintext one.
 pub fn unlock_identity(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     passphrase: Option<&SecretString>,
-) -> AppResult<UnlockedIdentity> {
+) -> Result<UnlockedIdentity> {
     let unlocked = decrypt_identity(paths, passphrase)?;
 
     // Validate via a self round-trip (encrypt to our own public key, decrypt with
@@ -240,10 +372,10 @@ pub fn unlock_identity(
 }
 
 pub fn encrypt_to_file(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     plaintext: &[u8],
     output: &Path,
-) -> AppResult<()> {
+) -> Result<()> {
     fs::write(output, encrypt_bytes(paths, plaintext)?)?;
     Ok(())
 }
@@ -251,13 +383,13 @@ pub fn encrypt_to_file(
 /// Decrypt an encrypted file into memory. Used both for reading encrypted entry
 /// text and for viewing encrypted binary assets (e.g. images) without ever
 /// writing a plaintext copy to disk.
-pub fn decrypt_file_bytes(identity: &UnlockedIdentity, input: &Path) -> AppResult<Vec<u8>> {
+pub fn decrypt_file_bytes(identity: &UnlockedIdentity, input: &Path) -> Result<Vec<u8>> {
     let ciphertext = fs::read(input)?;
     decrypt_bytes_with_identity(&ciphertext, &identity.identity)
 }
 
 /// Encrypt bytes to every store recipient.
-pub fn encrypt_bytes(paths: &JournalStorePaths, plaintext: &[u8]) -> AppResult<Vec<u8>> {
+pub fn encrypt_bytes(paths: &KeyPaths, plaintext: &[u8]) -> Result<Vec<u8>> {
     let recipients = recipient_keys(&read_recipients(paths)?)?;
     encrypt_to_recipients(&recipients, plaintext)
 }
@@ -266,10 +398,10 @@ pub fn encrypt_bytes(paths: &JournalStorePaths, plaintext: &[u8]) -> AppResult<V
 /// own key when unlocked — so the authoring device can always re-read what it
 /// wrote, even a joining device whose key isn't yet an approved recipient.
 pub fn encrypt_new_entry(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     plaintext: &[u8],
     identity: Option<&UnlockedIdentity>,
-) -> AppResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     let mut recipients = recipient_keys(&read_recipients(paths)?)?;
     if let Some(identity) = identity {
         let own = identity.recipient();
@@ -284,10 +416,10 @@ pub fn encrypt_new_entry(
 /// must already be a trusted recipient). Rejects a key or name that already
 /// exists so a device can't be added twice or shadow another's label.
 pub fn add_recipient(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     signer: &UnlockedIdentity,
     recipient: &Recipient,
-) -> AppResult<()> {
+) -> Result<()> {
     validate_recipient(recipient)?;
     let recipients = read_recipients(paths)?;
     if recipients.iter().any(|r| r.key == recipient.key) {
@@ -307,10 +439,10 @@ pub fn add_recipient(
 /// `signer`. Refuses to remove the last recipient, which would leave the store
 /// impossible to re-encrypt.
 pub fn remove_recipient(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     signer: &UnlockedIdentity,
     name: &str,
-) -> AppResult<()> {
+) -> Result<()> {
     let recipients = read_recipients(paths)?;
     let Some(target) = recipients.iter().find(|r| r.name == name) else {
         return Err(format!("no recipient named '{name}'").into());
@@ -324,11 +456,11 @@ pub fn remove_recipient(
 /// Append a signed `rename` op relabelling a recipient, authorized by `signer`.
 /// No re-encryption needed — the keys don't change.
 pub fn rename_recipient(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     signer: &UnlockedIdentity,
     old: &str,
     new: &str,
-) -> AppResult<()> {
+) -> Result<()> {
     if new.trim().is_empty() {
         return Err("new recipient name cannot be empty".into());
     }
@@ -351,9 +483,9 @@ pub fn rename_recipient(
 /// i.e. this device can already decrypt the store, and so is allowed to
 /// re-encrypt it (and sign roster ops) when approving or removing another device.
 pub fn identity_is_recipient(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     identity: &UnlockedIdentity,
-) -> AppResult<bool> {
+) -> Result<bool> {
     let own = identity.public_key();
     Ok(read_recipients(paths)?
         .iter()
@@ -361,7 +493,7 @@ pub fn identity_is_recipient(
 }
 
 /// The pending join requests in the shared `.age/` folder, sorted by name.
-pub fn read_pending(paths: &JournalStorePaths) -> AppResult<Vec<PendingRequest>> {
+pub fn read_pending(paths: &KeyPaths) -> Result<Vec<PendingRequest>> {
     let mut requests = Vec::new();
     if !paths.age_dir.exists() {
         return Ok(requests);
@@ -398,7 +530,7 @@ pub fn read_pending(paths: &JournalStorePaths) -> AppResult<Vec<PendingRequest>>
 }
 
 /// Delete a processed join request. A no-op if it's already gone.
-pub fn remove_pending(paths: &JournalStorePaths, id: &str) -> AppResult<()> {
+pub fn remove_pending(paths: &KeyPaths, id: &str) -> Result<()> {
     let path = paths.age_dir.join(format!("pending-{id}.toml"));
     if path.exists() {
         fs::remove_file(path)?;
@@ -411,10 +543,10 @@ pub fn remove_pending(paths: &JournalStorePaths, id: &str) -> AppResult<()> {
 /// forward (`Some` = scrypt-wrapped, `None` = plaintext mode-0600). Only rewrites
 /// the local identity file; the keypair and all entries are untouched.
 pub fn set_identity_passphrase(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     current: Option<&SecretString>,
     new: Option<&SecretString>,
-) -> AppResult<()> {
+) -> Result<()> {
     if matches!(new, Some(passphrase) if passphrase.expose_secret().is_empty()) {
         return Err("encryption passphrase cannot be empty".into());
     }
@@ -442,9 +574,9 @@ fn pending_signing_bytes(recipient: &Recipient) -> Vec<u8> {
 /// recipient until [`drop_old_recipient`], so re-encryption during a rotation
 /// can't lock this device out mid-way.
 pub fn rotate_add_new_key(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     old: &UnlockedIdentity,
-) -> AppResult<(Recipient, UnlockedIdentity)> {
+) -> Result<(Recipient, UnlockedIdentity)> {
     let old_key = old.public_key();
     let recipients = read_recipients(paths)?;
     let Some(existing) = recipients.iter().find(|recipient| recipient.key == old_key) else {
@@ -468,11 +600,11 @@ pub fn rotate_add_new_key(
 /// Persist the rotated identity as this device's key file, preserving its
 /// passphrase state (`passphrase` re-wraps it, `None` stores it plaintext).
 pub fn commit_rotated_identity(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     recipient: &Recipient,
     identity: &UnlockedIdentity,
     passphrase: Option<&SecretString>,
-) -> AppResult<()> {
+) -> Result<()> {
     write_stored_identity(paths, &recipient.name, identity, passphrase)
 }
 
@@ -480,10 +612,10 @@ pub fn commit_rotated_identity(
 /// rotation, after every entry has been re-encrypted to the new key). Authorized
 /// by `signer` — the freshly rotated identity, which is now a trusted recipient.
 pub fn drop_old_recipient(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     signer: &UnlockedIdentity,
     old_key: &str,
-) -> AppResult<()> {
+) -> Result<()> {
     let recipients = read_recipients(paths)?;
     let Some(target) = recipients.iter().find(|recipient| recipient.key == old_key) else {
         return Ok(());
@@ -492,10 +624,10 @@ pub fn drop_old_recipient(
 }
 
 fn create_device_identity(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     name: &str,
     passphrase: Option<&SecretString>,
-) -> AppResult<(Recipient, UnlockedIdentity)> {
+) -> Result<(Recipient, UnlockedIdentity)> {
     if name.trim().is_empty() {
         return Err("device name cannot be empty".into());
     }
@@ -515,7 +647,7 @@ fn create_device_identity(
 
 /// Validate that a recipient carries a well-formed age recipient and Ed25519
 /// signing key before it's admitted to the roster.
-fn validate_recipient(recipient: &Recipient) -> AppResult<()> {
+fn validate_recipient(recipient: &Recipient) -> Result<()> {
     if x25519::Recipient::from_str(&recipient.key).is_err() {
         return Err(format!("'{}' is not a valid age recipient", recipient.key).into());
     }
@@ -528,11 +660,11 @@ fn validate_recipient(recipient: &Recipient) -> AppResult<()> {
 /// Append a signed roster op describing `subject`, authorized by `signer` (whose
 /// signing key must already be trusted for a non-genesis op).
 fn append_op(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     signer: &UnlockedIdentity,
     kind: &str,
     subject: &Recipient,
-) -> AppResult<()> {
+) -> Result<()> {
     let signer_pub = signer.signing_public();
     roster::append(
         &paths.devices_file,
@@ -551,11 +683,11 @@ fn append_op(
 /// Both the age key and the Ed25519 signing seed are bundled together so the same
 /// passphrase choice protects both.
 fn write_stored_identity(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     name: &str,
     identity: &UnlockedIdentity,
     passphrase: Option<&SecretString>,
-) -> AppResult<()> {
+) -> Result<()> {
     if matches!(passphrase, Some(passphrase) if passphrase.expose_secret().is_empty()) {
         return Err("encryption passphrase cannot be empty".into());
     }
@@ -583,18 +715,18 @@ fn write_stored_identity(
 
 /// Read this device's identity file verbatim, for snapshotting before a rotation
 /// so it can be put back byte-for-byte if the rotation fails.
-pub fn read_identity_file_bytes(paths: &JournalStorePaths) -> AppResult<Vec<u8>> {
+pub fn read_identity_file_bytes(paths: &KeyPaths) -> Result<Vec<u8>> {
     Ok(fs::read(&paths.identity_file)?)
 }
 
 /// Restore this device's identity file from bytes captured by
 /// [`read_identity_file_bytes`], preserving the private-file mode (0600).
-pub fn restore_identity_file(paths: &JournalStorePaths, bytes: &[u8]) -> AppResult<()> {
+pub fn restore_identity_file(paths: &KeyPaths, bytes: &[u8]) -> Result<()> {
     write_private_file(&paths.identity_file, bytes)
 }
 
 /// Generate a fresh Ed25519 signing keypair from OS randomness.
-fn generate_signing_key() -> AppResult<SigningKey> {
+fn generate_signing_key() -> Result<SigningKey> {
     let mut seed = Zeroizing::new([0u8; 32]);
     getrandom::getrandom(&mut seed[..])
         .map_err(|error| format!("failed to gather randomness for signing key: {error}"))?;
@@ -638,7 +770,7 @@ pub(crate) fn verify_signature(signer: &str, msg: &[u8], sig_hex: &str) -> bool 
         .is_ok()
 }
 
-fn recipient_keys(recipients: &[Recipient]) -> AppResult<Vec<x25519::Recipient>> {
+fn recipient_keys(recipients: &[Recipient]) -> Result<Vec<x25519::Recipient>> {
     if recipients.is_empty() {
         return Err("journal encryption recipients file is empty".into());
     }
@@ -648,7 +780,7 @@ fn recipient_keys(recipients: &[Recipient]) -> AppResult<Vec<x25519::Recipient>>
         .collect()
 }
 
-fn encrypt_to_recipients(recipients: &[x25519::Recipient], plaintext: &[u8]) -> AppResult<Vec<u8>> {
+fn encrypt_to_recipients(recipients: &[x25519::Recipient], plaintext: &[u8]) -> Result<Vec<u8>> {
     let refs: Vec<&dyn age::Recipient> = recipients
         .iter()
         .map(|recipient| recipient as &dyn age::Recipient)
@@ -664,19 +796,19 @@ fn encrypt_to_recipients(recipients: &[x25519::Recipient], plaintext: &[u8]) -> 
 fn decrypt_bytes_with_identity(
     ciphertext: &[u8],
     identity: &x25519::Identity,
-) -> AppResult<Vec<u8>> {
+) -> Result<Vec<u8>> {
     Ok(age::decrypt(identity, ciphertext)?)
 }
 
-fn encrypt_secret(plaintext: &[u8], passphrase: &SecretString) -> AppResult<Vec<u8>> {
+fn encrypt_secret(plaintext: &[u8], passphrase: &SecretString) -> Result<Vec<u8>> {
     let recipient = age::scrypt::Recipient::new(passphrase.clone());
     Ok(age::encrypt(&recipient, plaintext)?)
 }
 
 fn decrypt_identity(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     passphrase: Option<&SecretString>,
-) -> AppResult<UnlockedIdentity> {
+) -> Result<UnlockedIdentity> {
     let stored = read_stored_identity(&paths.identity_file)?;
     // The decrypted secret bundle lives in this string; zeroize it on drop so it
     // doesn't linger in freed heap after we parse it into keys.
@@ -701,15 +833,15 @@ fn decrypt_identity(
     })
 }
 
-fn read_stored_identity(path: &Path) -> AppResult<StoredIdentity> {
+fn read_stored_identity(path: &Path) -> Result<StoredIdentity> {
     Ok(toml::from_str(&fs::read_to_string(path)?)?)
 }
 
 fn write_pending(
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     recipient: &Recipient,
     identity: &UnlockedIdentity,
-) -> AppResult<()> {
+) -> Result<()> {
     fs::create_dir_all(&paths.age_dir)?;
     let sig = sign_bytes(&identity.signing, &pending_signing_bytes(recipient));
     let document = PendingFileRef {
@@ -723,7 +855,7 @@ fn write_pending(
 /// Write `content` to `path` via a sibling temp file plus rename, so a crash
 /// mid-write can't truncate an existing file (which would strand every device)
 /// or leave a half-written join request behind.
-pub(crate) fn atomic_write(path: &Path, content: &[u8]) -> AppResult<()> {
+pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
     let temp = crate::sibling_temp_path(path, "tmp");
     fs::write(&temp, content)?;
     fs::rename(&temp, path)?;
@@ -743,7 +875,7 @@ fn pending_file_name(key: &str) -> String {
     format!("pending-{id}.toml")
 }
 
-fn write_private_file(path: &Path, content: &[u8]) -> AppResult<()> {
+fn write_private_file(path: &Path, content: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -764,8 +896,8 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn paths_in(dir: &Path) -> JournalStorePaths {
-        JournalStorePaths::for_config(&dir.join("config.toml"), &dir.join("journals")).unwrap()
+    fn paths_in(dir: &Path) -> KeyPaths {
+        KeyPaths::for_config(&dir.join("config.toml"), &dir.join("journals")).unwrap()
     }
 
     #[test]
@@ -805,7 +937,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let laptop = paths_in(dir.path());
         // A second device with its own identity file but the same shared store.
-        let phone = JournalStorePaths::for_config(
+        let phone = KeyPaths::for_config(
             &dir.path().join("phone").join("config.toml"),
             &dir.path().join("journals"),
         )
@@ -834,7 +966,7 @@ mod tests {
     fn pending_request_round_trips_and_clears() {
         let dir = tempdir().unwrap();
         let laptop = paths_in(dir.path());
-        let phone = JournalStorePaths::for_config(
+        let phone = KeyPaths::for_config(
             &dir.path().join("phone").join("config.toml"),
             &dir.path().join("journals"),
         )
@@ -945,7 +1077,7 @@ mod tests {
     fn decrypt_file_bytes_from(
         identity: &UnlockedIdentity,
         ciphertext: &[u8],
-    ) -> AppResult<Vec<u8>> {
+    ) -> Result<Vec<u8>> {
         decrypt_bytes_with_identity(ciphertext, &identity.identity)
     }
 }

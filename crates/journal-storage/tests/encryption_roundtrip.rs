@@ -65,8 +65,8 @@ fn decrypt_store_requires_an_unlocked_identity() {
     let error = store.decrypt_store(|_, _| {}).unwrap_err();
     assert!(
         error
-            .downcast_ref::<journal_storage::StorageError>()
-            .is_some_and(|e| matches!(e, journal_storage::StorageError::LockedIdentity { .. }))
+            .downcast_ref::<journal_storage::EncryptionError>()
+            .is_some_and(|e| matches!(e, journal_storage::EncryptionError::Locked { .. }))
     );
 }
 

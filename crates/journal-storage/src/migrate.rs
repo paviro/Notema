@@ -1,4 +1,5 @@
-use crate::{AppResult, JournalStore, JournalStorePaths, crypto, storage};
+use crate::{AppResult, JournalStore, storage};
+use journal_encryption::{self as crypto, KeyPaths};
 use chrono::Local;
 use nanoid::nanoid;
 use std::{
@@ -21,7 +22,7 @@ pub struct DecryptSummary {
 
 enum MigrationMode<'a> {
     Encrypt {
-        paths: &'a JournalStorePaths,
+        paths: &'a KeyPaths,
     },
     Decrypt {
         identity: &'a crypto::UnlockedIdentity,
@@ -39,7 +40,9 @@ pub fn encrypt_store(
     let paths = store.paths();
     let migrated_files = migrate_store(
         paths.journal_root.as_path(),
-        MigrationMode::Encrypt { paths },
+        MigrationMode::Encrypt {
+            paths: &paths.keys,
+        },
         progress,
     )?
     .migrated_files;
@@ -57,8 +60,8 @@ pub fn decrypt_store(
         MigrationMode::Decrypt { identity },
         progress,
     )?;
-    clear_age_dir(paths)?;
-    let disabled_identity_file = disable_identity_file(paths)?;
+    clear_age_dir(&paths.keys)?;
+    let disabled_identity_file = disable_identity_file(&paths.keys)?;
     Ok(DecryptSummary {
         migrated_files: migration.migrated_files,
         backup_path: migration.backup_path,
@@ -72,7 +75,7 @@ pub fn decrypt_store(
 /// remove the `.age` folder itself if nothing else is left in it. Also clears
 /// this device's local trust pins, which are meaningless once the roster is gone
 /// and would otherwise reject a freshly re-enabled store as a "changed genesis".
-fn clear_age_dir(paths: &JournalStorePaths) -> AppResult<()> {
+fn clear_age_dir(paths: &KeyPaths) -> AppResult<()> {
     if paths.devices_file.exists() {
         fs::remove_file(&paths.devices_file)?;
     }
@@ -122,7 +125,7 @@ pub fn reencrypt_store(
 
     progress(0, files.len());
     for (done, path) in files.iter().enumerate() {
-        reencrypt_file(path, paths, identity)?;
+        reencrypt_file(path, &paths.keys, identity)?;
         progress(done + 1, files.len());
     }
     Ok(MigrationSummary {
@@ -132,7 +135,7 @@ pub fn reencrypt_store(
 
 fn reencrypt_file(
     path: &Path,
-    paths: &JournalStorePaths,
+    paths: &KeyPaths,
     identity: &crypto::UnlockedIdentity,
 ) -> AppResult<()> {
     let plaintext = crypto::decrypt_file_bytes(identity, path)?;
@@ -360,7 +363,7 @@ fn ensure_no_asset_collisions(files: &[PathBuf], mode: &MigrationMode<'_>) -> Ap
     Ok(())
 }
 
-fn encrypt_plain_entry(path: &Path, paths: &JournalStorePaths) -> AppResult<()> {
+fn encrypt_plain_entry(path: &Path, paths: &KeyPaths) -> AppResult<()> {
     let target = path.with_extension("md.age");
     let temp = crate::sibling_temp_path(&target, "tmp.age");
     crypto::encrypt_to_file(paths, &fs::read(path)?, &temp)?;
@@ -471,7 +474,7 @@ fn copy_dir_all(source: &Path, target: &Path) -> AppResult<()> {
     Ok(())
 }
 
-fn disable_identity_file(paths: &JournalStorePaths) -> AppResult<PathBuf> {
+fn disable_identity_file(paths: &KeyPaths) -> AppResult<PathBuf> {
     let target = disabled_identity_path(&paths.identity_file);
     fs::rename(&paths.identity_file, &target)?;
     Ok(target)

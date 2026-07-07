@@ -592,18 +592,19 @@ fn encrypt_command_converts_store_and_entry_command_writes_encrypted_files() {
     assert_eq!(
         store
             .paths()
+            .keys
             .devices_file
             .file_name()
             .and_then(|name| name.to_str()),
         Some("devices.toml")
     );
     assert_eq!(
-        store.paths().devices_file,
+        store.paths().keys.devices_file,
         root.join(".age").join("devices.toml")
     );
-    assert_eq!(store.paths().identity_file, dir.path().join("identity.age"));
-    assert!(store.paths().devices_file.exists());
-    assert!(store.paths().identity_file.exists());
+    assert_eq!(store.paths().keys.identity_file, dir.path().join("identity.age"));
+    assert!(store.paths().keys.devices_file.exists());
+    assert!(store.paths().keys.identity_file.exists());
     assert!(!dir.path().join("encryption").exists());
     assert!(!fs::read_dir(dir.path()).unwrap().any(|entry| {
         entry
@@ -766,7 +767,7 @@ fn encrypt_command_fails_when_encrypted_entries_exist_without_device_roster() {
     let encrypted = store
         .create_entry_with_body("work", "# Secret", &Metadata::default())
         .unwrap();
-    fs::remove_file(&store.paths().devices_file).unwrap();
+    fs::remove_file(&store.paths().keys.devices_file).unwrap();
     write_config(&config, &root, Some("work"));
 
     let output = Command::new(journal_bin())
@@ -779,7 +780,7 @@ fn encrypt_command_fails_when_encrypted_entries_exist_without_device_roster() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("device roster is missing"));
     assert!(encrypted.exists());
-    assert!(!store.paths().devices_file.exists());
+    assert!(!store.paths().keys.devices_file.exists());
 }
 
 #[test]
@@ -789,7 +790,7 @@ fn encrypt_command_fails_when_recipients_exist_but_device_has_no_identity() {
     let config = dir.path().join("config.toml");
     // Recipients synced from another device, but this one never enrolled.
     let (store, _recipient) = generate_identity_store(&config, &root, "secret");
-    fs::remove_file(&store.paths().identity_file).unwrap();
+    fs::remove_file(&store.paths().keys.identity_file).unwrap();
     write_config(&config, &root, Some("work"));
 
     let output = Command::new(journal_bin())
@@ -810,7 +811,7 @@ fn encrypted_entry_command_writes_age_files_without_unlocking() {
     let config = dir.path().join("config.toml");
     let (mut store, _recipient) = generate_identity_store(&config, &root, "secret");
     store.unlock(Some(&SecretString::from("secret"))).unwrap();
-    fs::remove_file(&store.paths().identity_file).unwrap();
+    fs::remove_file(&store.paths().keys.identity_file).unwrap();
     fs::create_dir_all(root.join("work")).unwrap();
     write_config(&config, &root, Some("work"));
 
@@ -849,7 +850,7 @@ fn encrypted_editor_log_command_writes_age_files_without_unlocking() {
     let config = dir.path().join("config.toml");
     let (mut store, _recipient) = generate_identity_store(&config, &root, "secret");
     store.unlock(Some(&SecretString::from("secret"))).unwrap();
-    fs::remove_file(&store.paths().identity_file).unwrap();
+    fs::remove_file(&store.paths().keys.identity_file).unwrap();
     fs::create_dir_all(root.join("work")).unwrap();
 
     let script = dir.path().join("fake-editor.sh");
@@ -924,7 +925,7 @@ fn encrypted_entries_can_be_decrypted_with_age_cli() {
     let encrypted = Path::new(std::str::from_utf8(&output.stdout).unwrap().trim()).to_path_buf();
 
     let identity = dir.path().join("age-identity.txt");
-    let secret = extract_age_secret(&fs::read_to_string(&store.paths().identity_file).unwrap());
+    let secret = extract_age_secret(&fs::read_to_string(&store.paths().keys.identity_file).unwrap());
     fs::write(&identity, format!("{secret}\n")).unwrap();
 
     let output = Command::new("age")

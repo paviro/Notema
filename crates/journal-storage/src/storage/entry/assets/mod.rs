@@ -13,7 +13,8 @@
 mod net;
 
 use super::paths::{entry_assets_dir, entry_assets_dir_name};
-use crate::{AppResult, JournalStorePaths, crypto};
+use crate::AppResult;
+use journal_encryption::{self as crypto, KeyPaths};
 use nanoid::nanoid;
 use net::{FetchError, fetch_source};
 use std::{
@@ -69,7 +70,7 @@ impl AssetReport {
 pub(crate) fn ingest_and_cleanup(
     entry_path: &Path,
     body: &str,
-    encryption: Option<&JournalStorePaths>,
+    encryption: Option<&KeyPaths>,
     download_remote: bool,
 ) -> AppResult<(Option<String>, AssetReport)> {
     ingest_and_cleanup_opts(entry_path, body, encryption, download_remote, false)
@@ -82,7 +83,7 @@ pub(crate) fn ingest_and_cleanup(
 pub(crate) fn ingest_and_cleanup_opts(
     entry_path: &Path,
     body: &str,
-    encryption: Option<&JournalStorePaths>,
+    encryption: Option<&KeyPaths>,
     download_remote: bool,
     replace_offline: bool,
 ) -> AppResult<(Option<String>, AssetReport)> {
@@ -115,7 +116,7 @@ pub(crate) fn ingest_and_cleanup_opts(
 struct IngestContext<'a> {
     assets_dir: &'a Path,
     dir_name: &'a str,
-    encryption: Option<&'a JournalStorePaths>,
+    encryption: Option<&'a KeyPaths>,
     download_remote: bool,
     replace_offline: bool,
     stored_sources: HashMap<String, String>,
@@ -275,7 +276,7 @@ fn markdown_image(alt: &str, dir_name: &str, file_name: &str) -> String {
 /// entry bodies.
 fn write_asset(
     assets_dir: &Path,
-    encryption: Option<&JournalStorePaths>,
+    encryption: Option<&KeyPaths>,
     bytes: &[u8],
     ext: &str,
 ) -> AppResult<String> {
@@ -983,7 +984,7 @@ mod tests {
             .path()
             .join("work/2026/07/05/2026-07-05T14-30-00-abc123.md.age");
         fs::create_dir_all(entry.parent().unwrap()).unwrap();
-        let paths = JournalStorePaths::for_config(
+        let paths = KeyPaths::for_config(
             &dir.path().join("config.toml"),
             &dir.path().join("journals"),
         )

@@ -150,7 +150,7 @@ fn interactive_setup(config_path: &Path) -> AppResult<Config> {
         writeln!(
             stdout,
             "Age identity: {}. Back it up; without it encrypted journal files cannot be decrypted.",
-            store.paths().identity_file.display()
+            store.paths().keys.identity_file.display()
         )?;
         if passphrase.is_none() {
             writeln!(

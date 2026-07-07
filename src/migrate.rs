@@ -58,7 +58,7 @@ pub fn encrypt_store(
         if !store.unlock_available() {
             return Err(format!(
                 "this journal is already encrypted for other devices, but this one has no key at {}; run `journal encryption device enroll` to request access instead",
-                store.paths().identity_file.display()
+                store.paths().keys.identity_file.display()
             )
             .into());
         }
@@ -66,7 +66,7 @@ pub fn encrypt_store(
     } else if store.has_encrypted_entries()? {
         return Err(format!(
             "encrypted entries already exist but the device roster is missing at {}; cannot safely continue encryption",
-            store.paths().devices_file.display()
+            store.paths().keys.devices_file.display()
         )
         .into());
     } else {
@@ -84,7 +84,7 @@ pub fn encrypt_store(
     );
     println!(
         "Encryption recipient: {recipient}. Age identity: {}. Back it up; without it encrypted journal files cannot be decrypted.",
-        store.paths().identity_file.display()
+        store.paths().keys.identity_file.display()
     );
     if bootstrapped_without_passphrase {
         println!("This key has no passphrase — keep this device and its backups secure.");
@@ -97,7 +97,7 @@ pub fn decrypt_store(config_path: &Path, config: &Config) -> AppResult<()> {
     if !store.unlock_available() {
         return Err(format!(
             "age identity not found at {}; encrypted entries cannot be decrypted on this machine",
-            store.paths().identity_file.display()
+            store.paths().keys.identity_file.display()
         )
         .into());
     }

@@ -1,9 +1,9 @@
 use super::edit::{write_encrypted_entry_content, write_plain_atomic};
 use super::paths::is_encrypted_entry_file;
 use super::read::read_entry_content;
-use crate::crypto::{self, UnlockedIdentity};
 use crate::markdown;
-use crate::{AppResult, JournalStorePaths};
+use crate::AppResult;
+use journal_encryption::{self as crypto, KeyPaths, UnlockedIdentity};
 use std::path::Path;
 
 /// The crypto material for reading and writing a store's entry files, plus the
@@ -12,7 +12,7 @@ use std::path::Path;
 /// a new entry follows [`encrypts_new_entries`](Self::encrypts_new_entries).
 #[derive(Clone)]
 pub(crate) struct EntryCodec {
-    paths: JournalStorePaths,
+    paths: KeyPaths,
     identity: Option<UnlockedIdentity>,
 }
 
@@ -24,7 +24,7 @@ pub(crate) struct OpenEntry {
 }
 
 impl EntryCodec {
-    pub(crate) fn new(paths: JournalStorePaths, identity: Option<UnlockedIdentity>) -> Self {
+    pub(crate) fn new(paths: KeyPaths, identity: Option<UnlockedIdentity>) -> Self {
         Self { paths, identity }
     }
 
@@ -32,8 +32,7 @@ impl EntryCodec {
     #[cfg(test)]
     pub(crate) fn plain() -> Self {
         Self {
-            paths: JournalStorePaths {
-                journal_root: std::path::PathBuf::new(),
+            paths: KeyPaths {
                 age_dir: std::path::PathBuf::new(),
                 devices_file: std::path::PathBuf::new(),
                 identity_file: std::path::PathBuf::new(),
@@ -50,8 +49,8 @@ impl EntryCodec {
         crypto::has_devices_file(&self.paths)
     }
 
-    /// The store's file locations, for the asset-encryption side.
-    pub(crate) fn encryption_paths(&self) -> &JournalStorePaths {
+    /// The store's key-material locations, for the asset-encryption side.
+    pub(crate) fn encryption_paths(&self) -> &KeyPaths {
         &self.paths
     }
 
@@ -62,7 +61,11 @@ impl EntryCodec {
     /// [`encrypts_new_entries`]: Self::encrypts_new_entries
     pub(crate) fn encode_new(&self, content: &str) -> AppResult<Vec<u8>> {
         if self.encrypts_new_entries() {
-            crypto::encrypt_new_entry(&self.paths, content.as_bytes(), self.identity.as_ref())
+            Ok(crypto::encrypt_new_entry(
+                &self.paths,
+                content.as_bytes(),
+                self.identity.as_ref(),
+            )?)
         } else {
             Ok(content.as_bytes().to_vec())
         }
