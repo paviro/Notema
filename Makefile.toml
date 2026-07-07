@@ -67,8 +67,13 @@ fi
 
 if [ -x "${TOOLCHAIN_BIN}/llvm-ar" ]; then
     export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="${TOOLCHAIN_BIN}/llvm-ar"
+    export AR_aarch64_linux_android="${TOOLCHAIN_BIN}/llvm-ar"
 fi
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$LINKER"
+# cc-rs (used by ring and other -sys crates) defaults to a non-existent
+# aarch64-linux-android-clang; point it at the API-versioned NDK clang.
+export CC_aarch64_linux_android="$LINKER"
+export CXX_aarch64_linux_android="${TOOLCHAIN_BIN}/aarch64-linux-android${API}-clang++"
 cargo build --release --target "$TARGET"
 '''
 
