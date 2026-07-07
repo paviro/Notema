@@ -325,6 +325,9 @@ pub fn initialize_store_identity(
     name: &str,
     passphrase: Option<&SecretString>,
 ) -> Result<Recipient> {
+    if has_devices_file(paths) {
+        return Err("device roster already exists; use request_store_access to join instead".into());
+    }
     let (recipient, identity) = create_device_identity(paths, name, passphrase)?;
     append_op(paths, &identity, roster::GENESIS, &recipient)?;
     advance_trust_pins(paths)?;
@@ -913,6 +916,17 @@ mod tests {
             decrypt_file_bytes_from(&unlocked, &ciphertext).unwrap(),
             b"hello journal"
         );
+    }
+
+    #[test]
+    fn initialize_store_identity_refuses_an_existing_roster() {
+        let dir = tempdir().unwrap();
+        let paths = paths_in(dir.path());
+
+        initialize_store_identity(&paths, "laptop", None).unwrap();
+        // A second genesis on the same roster would brick decryption; it must error.
+        let err = initialize_store_identity(&paths, "laptop-again", None).unwrap_err();
+        assert!(err.to_string().contains("already exists"));
     }
 
     #[test]

@@ -69,17 +69,49 @@ pub fn save_config(path: &Path, config: &Config) -> AppResult<()> {
     Ok(())
 }
 
-pub fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult<(PathBuf, Config)> {
+/// What `load_or_setup_with_path` resolved: either a store ready to open in the
+/// TUI, or nothing to open (setup already printed everything the user needs).
+pub enum Startup {
+    Open {
+        config_path: PathBuf,
+        config: Config,
+        store: Box<JournalStore>,
+    },
+    Done,
+}
+
+pub fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult<Startup> {
     let config_path = config_path(path_override)?;
 
-    if config_path.exists() {
+    let (config, store) = if config_path.exists() {
         let config = load_config(&config_path)?;
-        JournalStore::for_config(&config_path, &config.journal_root)?.ensure()?;
-        return Ok((config_path, config));
+        let store = JournalStore::for_config(&config_path, &config.journal_root)?;
+        store.ensure()?;
+        (config, store)
+    } else {
+        interactive_setup(&config_path)?
+    };
+
+    // An encrypted store this device has no key for can't be opened; point the
+    // user at enrollment. Covers a fresh device aimed at a synced store and a
+    // bare `journal` relaunch before enrolling. An enrolled-but-unapproved device
+    // has an identity (unlock_available), so the TUI handles that case instead.
+    if store.encryption_enabled() && !store.unlock_available() {
+        print_enroll_hint();
+        return Ok(Startup::Done);
     }
 
-    let config = interactive_setup(&config_path)?;
-    Ok((config_path, config))
+    Ok(Startup::Open {
+        config_path,
+        config,
+        store: Box::new(store),
+    })
+}
+
+fn print_enroll_hint() {
+    println!("This journal is encrypted; this device has no key yet.");
+    println!("Run `journal encryption device enroll` (with the same --config) to request access,");
+    println!("then approve it from a device that can already read this journal.");
 }
 
 pub fn load_existing(path_override: Option<&Path>) -> AppResult<(PathBuf, Config)> {
@@ -102,12 +134,24 @@ pub fn load_existing(path_override: Option<&Path>) -> AppResult<(PathBuf, Config
 /// encryption key; without one we fall back to the XDG default.
 fn config_path(path_override: Option<&Path>) -> AppResult<PathBuf> {
     match path_override {
-        Some(dir) => Ok(dir.join("config.toml")),
+        Some(dir) => {
+            // `--config` names the directory, not the file. Passing a file (a
+            // stale `.../config.toml`) would silently nest into
+            // `.../config.toml/config.toml` and trigger a bogus first-run setup.
+            if dir.is_file() || dir.file_name() == Some(std::ffi::OsStr::new("config.toml")) {
+                return Err(format!(
+                    "--config takes a directory, not a file; pass {} instead",
+                    dir.parent().unwrap_or(dir).display()
+                )
+                .into());
+            }
+            Ok(dir.join("config.toml"))
+        }
         None => default_config_path(),
     }
 }
 
-fn interactive_setup(config_path: &Path) -> AppResult<Config> {
+fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
     let mut stdout = io::stdout();
     let default_root = dirs::home_dir()
         .map(|home| home.join("Journals"))
@@ -139,43 +183,64 @@ fn interactive_setup(config_path: &Path) -> AppResult<Config> {
         editor_input.trim().to_string()
     };
 
+    let config = Config::new(journal_root, editor);
+    let store = JournalStore::for_config(config_path, &config.journal_root)?;
+    store.ensure()?;
+
+    if should_offer_encryption(&store)? {
+        offer_encryption(&mut stdout, &store)?;
+    } else if !store.encryption_enabled() {
+        // An existing plaintext journal is registered as-is; encryption stays a
+        // deliberate later step rather than a first-run prompt.
+        writeln!(
+            stdout,
+            "Using existing journal at {}. Encryption is off; run `journal encryption enable` to turn it on.",
+            config.journal_root.display()
+        )?;
+    }
+
+    save_config(config_path, &config)?;
+    Ok((config, store))
+}
+
+/// First-run offers to enable encryption only for a brand-new, empty root — never
+/// for a journal that already has entries or is already encrypted. Those are just
+/// registered; encryption is managed with the `journal encryption …` commands.
+fn should_offer_encryption(store: &JournalStore) -> AppResult<bool> {
+    Ok(!store.encryption_enabled() && store.list_journals()?.is_empty())
+}
+
+/// Prompt to enable encryption on a fresh store and, if accepted, generate this
+/// device's identity. Holds for a keypress afterward because the TUI's alternate
+/// screen would otherwise wipe the identity-backup warning.
+fn offer_encryption(stdout: &mut impl Write, store: &JournalStore) -> AppResult<()> {
     write!(stdout, "Enable encryption? [y/N]: ")?;
     stdout.flush()?;
     let mut encryption_input = String::new();
     io::stdin().read_line(&mut encryption_input)?;
+    if !matches!(encryption_input.trim(), "y" | "Y" | "yes" | "YES" | "Yes") {
+        return Ok(());
+    }
 
-    let config = Config::new(journal_root, editor);
-    let encryption_enabled = matches!(encryption_input.trim(), "y" | "Y" | "yes" | "YES" | "Yes");
-    if encryption_enabled {
-        let (device_name, passphrase) = resolve_new_identity_options(None, false)?;
-        let store = JournalStore::for_config(config_path, &config.journal_root)?;
-        store.initialize_encryption(&device_name, passphrase.as_ref())?;
+    let (device_name, passphrase) = resolve_new_identity_options(None, false)?;
+    store.initialize_encryption(&device_name, passphrase.as_ref())?;
+    writeln!(
+        stdout,
+        "Age identity: {}. Back it up; without it encrypted journal files cannot be decrypted.",
+        store.paths().keys.identity_file.display()
+    )?;
+    if passphrase.is_none() {
         writeln!(
             stdout,
-            "Age identity: {}. Back it up; without it encrypted journal files cannot be decrypted.",
-            store.paths().keys.identity_file.display()
+            "This key has no passphrase, so anyone with this file can read the journal — keep the device and its backups secure."
         )?;
-        if passphrase.is_none() {
-            writeln!(
-                stdout,
-                "This key has no passphrase, so anyone with this file can read the journal — keep the device and its backups secure."
-            )?;
-        }
     }
 
-    save_config(config_path, &config)?;
-    JournalStore::for_config(config_path, &config.journal_root)?.ensure()?;
-
-    // The TUI enters the alternate screen and wipes this output, so hold here
-    // until the user has read the identity-backup warning before opening it.
-    if encryption_enabled {
-        write!(stdout, "\nPress Enter to open your journal…")?;
-        stdout.flush()?;
-        let mut ack = String::new();
-        io::stdin().read_line(&mut ack)?;
-    }
-
-    Ok(config)
+    write!(stdout, "\nPress Enter to open your journal…")?;
+    stdout.flush()?;
+    let mut ack = String::new();
+    io::stdin().read_line(&mut ack)?;
+    Ok(())
 }
 
 /// Prompt for this device's name (used to label its key), defaulting to the
@@ -256,6 +321,42 @@ pub fn expand_tilde(path: PathBuf) -> PathBuf {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    fn store_in(dir: &Path) -> JournalStore {
+        let store = JournalStore::for_config(&dir.join("config.toml"), &dir.join("journals"))
+            .unwrap();
+        store.ensure().unwrap();
+        store
+    }
+
+    #[test]
+    fn offers_encryption_only_for_an_empty_new_root() {
+        let dir = tempdir().unwrap();
+        let store = store_in(dir.path());
+        assert!(should_offer_encryption(&store).unwrap());
+    }
+
+    #[test]
+    fn skips_encryption_prompt_for_an_existing_plaintext_journal() {
+        let dir = tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.create_journal("work").unwrap();
+        assert!(!should_offer_encryption(&store).unwrap());
+    }
+
+    #[test]
+    fn skips_encryption_prompt_for_an_already_encrypted_store() {
+        let dir = tempdir().unwrap();
+        let store = store_in(dir.path());
+        store.initialize_encryption("laptop", None).unwrap();
+        assert!(!should_offer_encryption(&store).unwrap());
+    }
+
+    #[test]
+    fn config_path_rejects_a_file_argument() {
+        let err = config_path(Some(Path::new("/some/dir/config.toml"))).unwrap_err();
+        assert!(err.to_string().contains("takes a directory"));
+    }
 
     #[test]
     fn save_and_load_config_expands_tilde_root() {

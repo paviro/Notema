@@ -17,8 +17,9 @@ use std::os::unix::fs::FileTypeExt;
 #[command(about = "Markdown terminal journal")]
 struct Cli {
     /// Config directory holding config.toml and this device's encryption key;
-    /// defaults to $XDG_CONFIG_HOME/journal (or ~/.config/journal)
-    #[arg(long, value_name = "DIR")]
+    /// defaults to $XDG_CONFIG_HOME/journal (or ~/.config/journal). Global, so it
+    /// works before or after a subcommand.
+    #[arg(long, value_name = "DIR", global = true)]
     config: Option<PathBuf>,
 
     #[arg(long, value_name = "NAME", hide = true)]
@@ -202,11 +203,16 @@ pub fn run() -> AppResult<()> {
         );
     }
 
-    let (config_path, config) = config::load_or_setup_with_path(cli.config.as_deref())?;
-    let store = JournalStore::for_config(&config_path, &config.journal_root)?;
-    store.ensure()?;
-
-    tui::run(config_path, config, store)
+    match config::load_or_setup_with_path(cli.config.as_deref())? {
+        config::Startup::Open {
+            config_path,
+            config,
+            store,
+        } => tui::run(config_path, config, *store),
+        // Setup already printed what the user needs (e.g. enrollment instructions
+        // for an encrypted store this device can't yet read); nothing to open.
+        config::Startup::Done => Ok(()),
+    }
 }
 
 fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppResult<()> {
