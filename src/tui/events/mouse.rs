@@ -126,12 +126,12 @@ fn pane_target(
                 return None;
             }
             let area = layout.journals?;
-            let per_page =
-                render::journals_per_page(render::journal_list_rect(area.content).height);
+            let (_, meta, list_area) = app.journal_rows(area.content);
+            let total_height = crate::tui::entry_rows::total_row_height(&meta);
             (
                 area.area,
-                app.library.journals.len(),
-                per_page,
+                total_height,
+                list_area.height,
                 app.nav.journal_list.offset(),
             )
         }
@@ -203,7 +203,7 @@ fn set_pane_scroll(app: &mut App, which: ScrollbarDrag, offset: usize) {
 fn step_pane_scroll(app: &mut App, target: &ScrollbarTarget, delta: i16) {
     match target.which {
         ScrollbarDrag::Journals => {
-            app.scroll_journal_list(delta, target.viewport);
+            app.scroll_journal_list(delta, target.content_length, target.viewport);
             app.nav.focus = Focus::Journals;
         }
         ScrollbarDrag::EntryList => {
@@ -288,11 +288,13 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
         } else {
             Focus::Journals
         };
-        if let Some(index) = journal_box_at(
+        let (_, meta, _) = app.journal_rows(area.content);
+        if let Some(index) = render::journal_index_at(
             area.content,
+            mouse.column,
             mouse.row,
             app.nav.journal_list.offset(),
-            app.library.journals.len(),
+            &meta,
         ) {
             app.select_journal(index);
         }
@@ -375,10 +377,9 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
         && let Some(area) = layout.journals
         && render::point_in_rect(area.area, mouse.column, mouse.row)
     {
-        app.scroll_journal_list(
-            delta,
-            render::journals_per_page(render::journal_list_rect(area.content).height),
-        );
+        let (_, meta, list_area) = app.journal_rows(area.content);
+        let total_height = crate::tui::entry_rows::total_row_height(&meta);
+        app.scroll_journal_list(delta, total_height, list_area.height);
     }
 }
 
@@ -585,18 +586,6 @@ fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16
     }
 }
 
-/// Maps a click row inside the journal panel content to a journal index,
-/// accounting for the leading offset and each journal's multi-row bordered box.
-fn journal_box_at(content: Rect, row: u16, offset: usize, len: usize) -> Option<usize> {
-    let list = render::journal_list_rect(content);
-    let relative_row = row.checked_sub(list.y)?;
-    if relative_row >= list.height {
-        return None;
-    }
-    let index = offset.saturating_add((relative_row / render::JOURNAL_BOX_HEIGHT) as usize);
-    (index < len).then_some(index)
-}
-
 fn list_row_at(list: Rect, _col: u16, row: u16, offset: usize, len: usize) -> Option<usize> {
     let relative_row = row.checked_sub(list.y)? as usize;
     if relative_row >= list.height as usize {
@@ -620,6 +609,11 @@ fn mood_score_at(bar: Rect, column: u16) -> i8 {
 pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action> {
     match id {
         render::HintId::NewJournal => Some(Action::NewJournal),
+        render::HintId::ToggleArchiveJournal
+            if app.nav.focus == Focus::Journals && app.selected_journal().is_some() =>
+        {
+            Some(Action::ToggleArchiveJournal)
+        }
         render::HintId::NewEntry => Some(Action::NewEntry),
         render::HintId::BeginSearch => Some(Action::BeginSearch),
         render::HintId::Quit => Some(Action::Quit),

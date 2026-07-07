@@ -28,6 +28,7 @@ pub(crate) enum Action {
     BeginEditMood,
     NewEntry,
     NewJournal,
+    ToggleArchiveJournal,
     // New-journal input overlay
     JournalInputChar(char),
     JournalInputBackspace,

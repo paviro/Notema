@@ -24,10 +24,9 @@ use ratatui::{
 
 use super::state::{
     DeleteContext, EditFeelingState, EditMetadataState, EditMoodState, ImageViewerState,
-    MetadataKind, Overlay, ScrollState, SearchState, StatusBar, ensure_selected_visible,
-    move_list_selection, normalize_list_state, scroll_list_offset,
+    MetadataKind, Overlay, ScrollState, SearchState, StatusBar, move_list_selection,
 };
-use crate::tui::entry_rows::{EntryRowCache, EntryRowMeta, build_entry_row_cache};
+use crate::tui::entry_rows::{EntryRowCache, RowMeta, build_entry_row_cache};
 use crate::tui::image::{ImageAsset, ImageRuntime, entry_images, viewer_image_size};
 use crate::tui::render::stats::JournalStats;
 
@@ -381,13 +380,32 @@ impl App {
                 .position(|journal| journal.name == name)
         {
             app.nav.journal_list.select(Some(index));
-            *app.nav.journal_list.offset_mut() = index;
+            *app.nav.journal_list.offset_mut() = app.journal_row_top(index);
         }
         // Don't start focused on the journal list if it's been hidden.
         if !app.config.show_journals {
             app.nav.focus = Focus::Entries;
         }
         Ok(app)
+    }
+
+    /// A journal rename (archive/unarchive) changes its identity, so any config
+    /// or per-device state pointing at the old name must follow it — otherwise the
+    /// remembered default/last journal silently stops resolving.
+    pub(crate) fn retarget_journal_in_config(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) -> AppResult<()> {
+        if self.config.default_journal.as_deref() == Some(old_name) {
+            self.config.default_journal = Some(new_name.to_string());
+            crate::config::save_config(&self.config_path, &self.config)?;
+        }
+        if self.state.last_journal.as_deref() == Some(old_name) {
+            self.state.last_journal = Some(new_name.to_string());
+            crate::config::save_state(&self.config_path, &self.state)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn refresh(&mut self) -> AppResult<()> {
@@ -404,7 +422,7 @@ impl App {
     fn load_entries(&mut self, entry_paths: Vec<EntryPath>) -> AppResult<()> {
         self.library.journals = self.store.list_journals()?;
         self.library.entries = self.store.read_entries(entry_paths)?;
-        normalize_list_state(&mut self.nav.journal_list, self.library.journals.len());
+        self.normalize_journal_selection();
         self.after_entries_changed();
         Ok(())
     }
@@ -589,12 +607,32 @@ impl App {
     }
 }
 
-/// Helper for [`App::all_metadata_sorted`]: counts per lowercased tag and per
+/// Helper for [`App::metadata_partitioned`]: counts per lowercased tag and per
 /// original-casing form so we can consolidate case variants.
 #[derive(Default)]
 struct CasingCount {
     total: usize,
     forms: std::collections::BTreeMap<String, usize>,
+}
+
+/// Consolidate a lowercased-key → [`CasingCount`] map into `(display, count)`
+/// pairs sorted by count descending then alphabetically. The displayed casing is
+/// the most frequent form (ties → first alphabetically).
+fn sort_casing(map: std::collections::BTreeMap<String, CasingCount>) -> Vec<(String, usize)> {
+    let mut pairs: Vec<_> = map
+        .into_values()
+        .map(|cc| {
+            let display = cc
+                .forms
+                .into_iter()
+                .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+                .map(|(form, _)| form)
+                .unwrap_or_default();
+            (display, cc.total)
+        })
+        .collect();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    pairs
 }
 
 /// The journal owning `path`: the first path component beneath `root`. `None`

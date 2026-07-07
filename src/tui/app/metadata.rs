@@ -1,37 +1,40 @@
 use super::*;
 
+/// A list of `(display value, usage count)` pairs, sorted by count descending.
+pub(crate) type MetadataCounts = Vec<(String, usize)>;
+
 impl App {
-    /// Collect metadata values across every loaded entry, sorted by usage count
-    /// (most frequent first) and then alphabetically. Values differing only in
-    /// case are consolidated: the most common casing wins (ties go to the
-    /// first alphabetically).
-    pub(crate) fn all_metadata_sorted(&self, kind: MetadataKind) -> Vec<(String, usize)> {
-        // First pass — count per lowercased key, track casing frequency.
-        let mut lower_to_casing: std::collections::BTreeMap<String, CasingCount> =
-            std::collections::BTreeMap::new();
+    /// Split metadata values into `(active, archived_only)`. Archived journals
+    /// don't contribute to the offered list or usage counts, so `active` counts
+    /// only non-archived entries. `archived_only` holds values that appear *solely*
+    /// in archived journals (with their archived usage counts) — surfaced in the
+    /// picker when the user's filter matches, so they don't recreate a variant of
+    /// an existing tag.
+    pub(crate) fn metadata_partitioned(
+        &self,
+        kind: MetadataKind,
+    ) -> (MetadataCounts, MetadataCounts) {
+        use std::collections::BTreeMap;
+
+        let mut active: BTreeMap<String, CasingCount> = BTreeMap::new();
+        let mut archived: BTreeMap<String, CasingCount> = BTreeMap::new();
         for entry in &self.library.entries {
+            let target = if journal_storage::is_archived_name(&entry.journal) {
+                &mut archived
+            } else {
+                &mut active
+            };
             for value in metadata_values(entry, kind) {
                 let lower = value.to_lowercase();
-                let entry = lower_to_casing.entry(lower).or_default();
-                entry.total += 1;
-                *entry.forms.entry(value.clone()).or_default() += 1;
+                let cc = target.entry(lower).or_default();
+                cc.total += 1;
+                *cc.forms.entry(value.clone()).or_default() += 1;
             }
         }
-        let mut pairs: Vec<_> = lower_to_casing
-            .into_values()
-            .map(|cc| {
-                // Pick the casing form with the highest frequency; ties → first alphabetically.
-                let display = cc
-                    .forms
-                    .into_iter()
-                    .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
-                    .map(|(form, _)| form)
-                    .unwrap_or_default();
-                (display, cc.total)
-            })
-            .collect();
-        pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        pairs
+
+        // Keep only archived values whose key never appears in an active journal.
+        archived.retain(|key, _| !active.contains_key(key));
+        (sort_casing(active), sort_casing(archived))
     }
 
     pub(crate) fn begin_edit_tags(&mut self) {
@@ -47,15 +50,20 @@ impl App {
     }
 
     fn begin_edit_metadata(&mut self, kind: MetadataKind) {
-        let all_values = self.all_metadata_sorted(kind);
-        let filtered: Vec<usize> = (0..all_values.len()).collect();
+        let (active_values, archived_only) = self.metadata_partitioned(kind);
+        let active_len = active_values.len();
+        // Archived-only values live after the active ones; they stay hidden until
+        // the user's filter matches them (see `EditMetadataState::rebuild_filter`).
+        let all_values: Vec<(String, usize)> =
+            active_values.into_iter().chain(archived_only).collect();
+        let filtered: Vec<usize> = (0..active_len).collect();
         let entry_tags: Vec<String> = self
             .selected_entry_metadata(kind)
             .into_iter()
             .map(|t| t.to_lowercase())
             .collect();
         self.overlay = Overlay::EditMetadata(EditMetadataState::new(
-            kind, all_values, filtered, entry_tags,
+            kind, all_values, filtered, entry_tags, active_len,
         ));
     }
 

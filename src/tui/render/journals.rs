@@ -2,17 +2,16 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Modifier, Style},
-    text::Line,
-    widgets::{HighlightSpacing, List, ListItem},
+    widgets::{HighlightSpacing, List},
 };
 
 use crate::tui::{
     app::{App, Focus, Mode, SearchScope},
-    entry_rows::{border_line, box_inner_line},
+    entry_rows::{total_row_height, visible_box_items},
     render::{
-        PanelGeometry, count_label, list_state_for_render, panel_block, render_scrollbar_if_needed,
+        PanelGeometry, clamp_scroll, count_label, list_state_for_render, panel_block,
+        render_scrollbar_if_needed,
     },
-    state::normalize_list_state,
 };
 
 /// Rows occupied by one journal's bordered box (top border, name, bottom border).
@@ -32,12 +31,6 @@ pub(crate) fn journal_list_rect(content: Rect) -> Rect {
     }
 }
 
-/// How many journal boxes fit in a list of the given content height (at least one,
-/// so navigation never stalls in a very short viewport).
-pub(crate) fn journals_per_page(content_height: u16) -> u16 {
-    (content_height / JOURNAL_BOX_HEIGHT).max(1)
-}
-
 pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app: &mut App) {
     let focused = app.nav.focus == Focus::Journals;
     // An all-journals search covers everything, so highlight every journal
@@ -45,6 +38,8 @@ pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app:
     // search keeps the single highlight.
     let select_all = app.nav.mode == Mode::Search && app.search.scope == SearchScope::AllJournals;
     let highlight_active = !select_all;
+    // Archived journals are still journals, so the panel count includes them; the
+    // "Archived" divider marks the split within the list.
     let block = panel_block(
         "Journals",
         focused,
@@ -54,60 +49,55 @@ pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app:
             "journals",
         )),
     );
-    let list_area = journal_list_rect(geometry.content);
-    let per_page = journals_per_page(list_area.height);
+    app.normalize_journal_selection();
 
-    normalize_list_state(&mut app.nav.journal_list, app.library.journals.len());
-    let max_offset = app.library.journals.len().saturating_sub(per_page as usize);
-    let offset = app.nav.journal_list.offset().min(max_offset);
-    *app.nav.journal_list.offset_mut() = offset;
+    let (rows, meta, list_area) = app.journal_rows(geometry.content);
+    let viewport_height = list_area.height;
+    let total_height = total_row_height(&meta);
+    let pixel_offset = clamp_scroll(app.nav.journal_list.offset(), total_height, viewport_height);
+    *app.nav.journal_list.offset_mut() = pixel_offset;
 
-    let inner_width = list_area.width.saturating_sub(4) as usize;
     let highlight_style = Style::default().add_modifier(Modifier::REVERSED);
-    let items: Vec<ListItem> = app
-        .library
-        .journals
-        .iter()
-        .map(|journal| {
-            let item = ListItem::new(journal_box_lines(&journal.name, inner_width));
-            if select_all {
-                item.style(highlight_style)
-            } else {
-                item
-            }
-        })
-        .collect();
+    let (items, selected_visible, item_indices) = visible_box_items(
+        &rows,
+        pixel_offset,
+        viewport_height,
+        app.nav.journal_list.selected(),
+        highlight_active,
+    );
+    // An all-journals search highlights every journal box to signal the wide
+    // scope (the single-selection highlight is suppressed via `highlight_active`).
+    // The "Archived" divider isn't a journal, so it's left unhighlighted.
+    let items: Vec<_> = if select_all {
+        items
+            .into_iter()
+            .zip(&item_indices)
+            .map(|(item, index)| {
+                if index.is_some() {
+                    item.style(highlight_style)
+                } else {
+                    item
+                }
+            })
+            .collect()
+    } else {
+        items
+    };
 
     let list = List::new(items)
         .highlight_style(highlight_style)
         .highlight_spacing(HighlightSpacing::Never);
 
-    let mut render_state = list_state_for_render(
-        app.nav.journal_list.selected(),
-        offset,
-        per_page,
-        highlight_active,
-    );
+    let mut render_state =
+        list_state_for_render(selected_visible, 0, viewport_height, highlight_active);
 
     frame.render_widget(block, geometry.area);
     frame.render_stateful_widget(list, list_area, &mut render_state);
     render_scrollbar_if_needed(
         frame,
         geometry.area,
-        app.library.journals.len(),
-        per_page,
-        offset,
+        total_height,
+        viewport_height,
+        pixel_offset,
     );
-}
-
-/// One journal rendered as a bordered box with the name inside, mirroring the
-/// entry list. Shares the entry list's box primitives so the shape stays in sync;
-/// journals carry no border labels. The name is truncated to fit the inner width.
-fn journal_box_lines(name: &str, inner_width: usize) -> Vec<Line<'static>> {
-    let box_width = inner_width + 4;
-    vec![
-        border_line('┌', '┐', box_width, None, None),
-        box_inner_line(name.to_string(), inner_width),
-        border_line('└', '┘', box_width, None, None),
-    ]
 }

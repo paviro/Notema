@@ -20,7 +20,7 @@ use action::Action;
 use actions::{
     create_entry_in_selected_journal, delete_selected, delete_selected_journal, edit_selected,
     set_feelings_on_entry, set_metadata_on_entry, set_mood_on_entry, submit_new_journal,
-    view_selected,
+    toggle_archive_selected_journal, view_selected,
 };
 use keyboard::{keep_selection_visible, move_focus_left, move_focus_right};
 
@@ -103,6 +103,10 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::NewJournal => app.begin_new_journal_input(),
+        Action::ToggleArchiveJournal => {
+            toggle_archive_selected_journal(app)?;
+            keep_selection_visible(terminal, app)?;
+        }
 
         Action::JournalInputChar(ch) => {
             if let Some(input) = app.new_journal_input_mut() {

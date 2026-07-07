@@ -112,6 +112,8 @@ pub(crate) struct JournalStats {
 }
 
 pub(crate) fn journal_stats(app: &App) -> Option<JournalStats> {
+    // The raw name (with any `.archived` suffix) keys the cache and entry lookup;
+    // the header shows the stripped display name.
     let name = app.selected_journal()?.name.clone();
     // Memoized per (journal, data version): the active-days and year-range passes
     // scan every entry in the journal (with a date parse each), which would
@@ -119,7 +121,7 @@ pub(crate) fn journal_stats(app: &App) -> Option<JournalStats> {
     let stats = app.cached_journal_stats(&name, || {
         let entries = app.selected_entries();
         JournalStats {
-            name: name.clone(),
+            name: journal_storage::journal_display_name(&name).to_string(),
             entry_count: entries.len(),
             active_days: active_day_count(&entries),
             year_range: journal_year_range(&entries)

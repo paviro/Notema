@@ -15,6 +15,7 @@ use crate::tui::app::{App, Focus, Mode};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HintId {
     NewJournal,
+    ToggleArchiveJournal,
     NewEntry,
     BeginSearch,
     Quit,
@@ -430,13 +431,15 @@ fn search_footer_line(app: &App) -> HintLine {
 
 fn browse_footer_line(app: &App) -> HintLine {
     let hints = match app.nav.focus {
-        Focus::Journals => vec![
-            Hint::new("new journal", "n", HintId::NewJournal),
-            Hint::new("search", "/", HintId::BeginSearch),
-            journals_hint(app),
-            Hint::new("hints", "h", HintId::HintsToggle),
-            Hint::new("quit", "q", HintId::Quit),
-        ],
+        Focus::Journals => {
+            let mut hints = vec![Hint::new("new journal", "n", HintId::NewJournal)];
+            hints.extend(archive_hint(app));
+            hints.push(Hint::new("search", "/", HintId::BeginSearch));
+            hints.push(journals_hint(app));
+            hints.push(Hint::new("hints", "h", HintId::HintsToggle));
+            hints.push(Hint::new("quit", "q", HintId::Quit));
+            hints
+        }
         Focus::Entries => {
             let mut hints = vec![Hint::new("new entry", "n", HintId::NewEntry)];
             if app.has_selected_entry_target() {
@@ -477,6 +480,19 @@ fn image_hint(app: &App) -> Option<Hint> {
         "i",
         HintId::OpenImageViewer,
     ))
+}
+
+/// The `archive`/`unarchive (a)` hint, shown only when a journal is selected. The
+/// label reflects the selected journal's current state.
+fn archive_hint(app: &App) -> Option<Hint> {
+    app.selected_journal().map(|journal| {
+        let label = if journal.archived {
+            "unarchive"
+        } else {
+            "archive"
+        };
+        Hint::new(label, "a", HintId::ToggleArchiveJournal)
+    })
 }
 
 fn journals_hint(app: &App) -> Hint {

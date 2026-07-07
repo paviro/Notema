@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::tui::{
     app::{App, Focus, Mode},
-    entry_rows::visible_entry_items,
+    entry_rows::visible_box_items,
     render::{
         EntryListGeometry, caret_style, clamp_scroll, count_label, list_state_for_render,
         panel_block, render_centered_notice, render_scrollbar_if_needed,
@@ -53,7 +53,7 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
     }
 
     let highlight_active = app.entries_highlighted();
-    let (items, selected_visible) = visible_entry_items(
+    let (items, selected_visible, _) = visible_box_items(
         &cache.rows,
         pixel_offset,
         viewport_height,

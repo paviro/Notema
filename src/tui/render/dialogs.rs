@@ -368,7 +368,8 @@ pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext) {
                 (t, 0) => format!("{t} entries moved to trash  y/n"),
                 (t, d) => format!("{t} entries → trash, {d} deleted  y/n"),
             };
-            (6, format!("Delete journal '{name}'?\n{line2}"))
+            let display = journal_storage::journal_display_name(name);
+            (6, format!("Delete journal '{display}'?\n{line2}"))
         }
     };
 

@@ -4,7 +4,7 @@ use crate::{
     tui::{
         app::{Focus, INLINE_ENTRY_VIEW_MIN_WIDTH, Mode},
         state::{EditMetadataFocus, EditMetadataState, MetadataKind},
-        test_support::{app_with_entry, new_app},
+        test_support::{app_with_entry, app_with_journals, new_app},
     },
 };
 use journal_storage::{Entry, EntryEncryptionState, SearchHit};
@@ -209,29 +209,76 @@ fn panel_content_rect_defines_selectable_rows_not_padding() {
     app.nav.focus = Focus::Journals;
     let layout = tui_layout(Rect::new(0, 0, 120, 20), &app);
     let journals = layout.journals.unwrap();
+    let list_area = journal_list_rect(journals.content);
+    let inner_width = list_area.width.saturating_sub(4) as usize;
+    let rows = crate::tui::entry_rows::journal_list_rows(&app, inner_width);
+    let meta = crate::tui::entry_rows::rows_meta(&rows);
 
     // The first journal box sits one row below the content top (the leading
     // offset that aligns it with the entry list's first box).
     assert_eq!(
         journal_index_at(
-            journals,
+            journals.content,
             journals.content.x,
             journals.content.y + 1,
-            app.nav.journal_list.offset() as u16,
-            app.library.journals.len()
+            app.nav.journal_list.offset(),
+            &meta,
         ),
         Some(0)
     );
     assert_eq!(
         journal_index_at(
-            journals,
+            journals.content,
             panel_inner(journals.area).x,
             panel_inner(journals.area).y,
-            app.nav.journal_list.offset() as u16,
-            app.library.journals.len()
+            app.nav.journal_list.offset(),
+            &meta,
         ),
         None
     );
+}
+
+#[test]
+fn journal_column_inserts_archived_divider_between_sections() {
+    let app = app_with_journals(&["work", "zeta", "old.archived"]);
+    let rows = crate::tui::entry_rows::journal_list_rows(&app, 16);
+    let meta = crate::tui::entry_rows::rows_meta(&rows);
+
+    // Two active journals, then a non-selectable divider row, then the archived one.
+    let indices: Vec<Option<usize>> = meta.iter().map(|m| m.item_index).collect();
+    assert_eq!(indices, vec![Some(0), Some(1), None, Some(2)]);
+
+    // The rendered column carries the "Archived" divider and the archived
+    // journal's display name (no ".archived" suffix leaks into the UI).
+    let text = render_text(app, 120, 24);
+    assert!(text.contains("Archived"));
+    assert!(!text.contains(".archived"));
+    // The panel count includes the archived journal (2 active + 1 archived).
+    assert!(text.contains("3 journals"));
+}
+
+#[test]
+fn journal_column_has_no_divider_without_archived_journals() {
+    let app = app_with_journals(&["work", "zeta"]);
+    let rows = crate::tui::entry_rows::journal_list_rows(&app, 16);
+    let meta = crate::tui::entry_rows::rows_meta(&rows);
+    assert!(meta.iter().all(|m| m.item_index.is_some()));
+}
+
+#[test]
+fn search_hit_box_flags_archived_journal_bottom_right() {
+    let rendered = rendered_lines(&entry_box_lines(
+        Some("Sun 05 Jul 2026"),
+        "14:30",
+        "hit body",
+        Some("personal"),
+        Some("Archived"),
+        40,
+    ));
+    let bottom = rendered.last().unwrap();
+    // Journal display name on the left, the `Archived` flag on the right.
+    assert!(bottom.starts_with("└ personal "));
+    assert!(bottom.ends_with("Archived ┘"));
 }
 
 #[test]
@@ -538,8 +585,15 @@ fn edit_tags_dialog_keeps_help_visible_below_spacer() {
         .map(|index| (format!("tag-{index:02}"), index))
         .collect();
     let filtered: Vec<usize> = (0..all_values.len()).collect();
+    let active_len = all_values.len();
     let rendered = render_edit_tags_dialog_text(
-        EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new()),
+        EditMetadataState::new(
+            MetadataKind::Tags,
+            all_values,
+            filtered,
+            Vec::new(),
+            active_len,
+        ),
         200,
         20,
     );
@@ -557,7 +611,14 @@ fn edit_tags_dialog_keeps_list_gutter_when_selection_is_scrolled_out() {
         .map(|index| (format!("tag-{index:02}"), index))
         .collect();
     let filtered: Vec<usize> = (0..all_values.len()).collect();
-    let mut state = EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new());
+    let active_len = all_values.len();
+    let mut state = EditMetadataState::new(
+        MetadataKind::Tags,
+        all_values,
+        filtered,
+        Vec::new(),
+        active_len,
+    );
     state.list.set_offset(5);
 
     let rendered = render_edit_tags_dialog_text(state, 200, 20);
@@ -572,6 +633,7 @@ fn edit_tags_dialog_counts_no_matches_row_when_sizing() {
         vec![("work".to_string(), 1)],
         Vec::new(),
         Vec::new(),
+        1,
     );
     state.input = "missing".to_string();
     state.focus = EditMetadataFocus::Input;
@@ -584,13 +646,13 @@ fn edit_tags_dialog_counts_no_matches_row_when_sizing() {
 #[test]
 fn edit_metadata_input_hint_saves_when_empty_and_adds_when_not_empty() {
     let mut empty =
-        EditMetadataState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
+        EditMetadataState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new(), 0);
     empty.focus = EditMetadataFocus::Input;
     let rendered_empty = render_edit_tags_dialog_text(empty, 200, 12);
     assert!(rendered_empty.contains(" save (enter) | list (tab) | cancel (esc)"));
 
     let mut with_value =
-        EditMetadataState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new());
+        EditMetadataState::new(MetadataKind::People, Vec::new(), Vec::new(), Vec::new(), 0);
     with_value.focus = EditMetadataFocus::Input;
     with_value.input = "alex".to_string();
     let rendered_value = render_edit_tags_dialog_text(with_value, 200, 12);
@@ -625,20 +687,20 @@ fn entry_hit_testing_ignores_month_divider_and_maps_boxed_entries() {
     assert_eq!(
         rows,
         vec![
-            EntryRowMeta {
-                entry_index: None,
+            RowMeta {
+                item_index: None,
                 height: 1,
             },
-            EntryRowMeta {
-                entry_index: Some(0),
+            RowMeta {
+                item_index: Some(0),
                 height: 4,
             },
-            EntryRowMeta {
-                entry_index: None,
+            RowMeta {
+                item_index: None,
                 height: 1,
             },
-            EntryRowMeta {
-                entry_index: Some(1),
+            RowMeta {
+                item_index: Some(1),
                 height: 4,
             },
         ]
@@ -1211,7 +1273,7 @@ fn entry_list_lines_put_day_left_and_time_right() {
 
 #[test]
 fn entry_box_lines_without_timestamp_render_plain_top_border() {
-    let rendered = rendered_lines(&entry_box_lines(None, "", "just a preview", None, 30));
+    let rendered = rendered_lines(&entry_box_lines(None, "", "just a preview", None, None, 30));
 
     assert_eq!(rendered[0], format!("┌{}┐", "─".repeat(32)));
     assert!(rendered[1].starts_with("│ just a preview"));
@@ -1224,6 +1286,7 @@ fn search_hit_box_shows_date_time_and_journal() {
         "14:30",
         "hit body",
         Some("work"),
+        None,
         30,
     ));
 

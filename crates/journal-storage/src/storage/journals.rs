@@ -1,13 +1,37 @@
-use crate::AppResult;
+use crate::{AppResult, StorageError};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
+/// A journal is archived by suffixing its directory name with this. The suffix
+/// stays part of the journal's identity (`Journal::name`, `entry.journal`) so
+/// entry lookups keep working; it is stripped only for display.
+pub const ARCHIVED_SUFFIX: &str = ".archived";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Journal {
+    /// The raw directory name, including the `.archived` suffix when archived.
     pub name: String,
     pub path: PathBuf,
+    pub archived: bool,
+}
+
+impl Journal {
+    /// The name to show the user: the raw name with any `.archived` suffix removed.
+    pub fn display_name(&self) -> &str {
+        journal_display_name(&self.name)
+    }
+}
+
+/// The raw journal name with any `.archived` suffix stripped, for display.
+pub fn journal_display_name(name: &str) -> &str {
+    name.strip_suffix(ARCHIVED_SUFFIX).unwrap_or(name)
+}
+
+/// Whether a raw journal name denotes an archived journal.
+pub fn is_archived_name(name: &str) -> bool {
+    name.ends_with(ARCHIVED_SUFFIX)
 }
 
 pub fn list_journals(root: &Path) -> AppResult<Vec<Journal>> {
@@ -27,21 +51,77 @@ pub fn list_journals(root: &Path) -> AppResult<Vec<Journal>> {
             continue;
         }
 
+        let archived = is_archived_name(&name);
         journals.push(Journal {
             name,
             path: entry.path(),
+            archived,
         });
     }
 
-    journals.sort_by(|a, b| a.name.cmp(&b.name));
+    // Active journals first (alphabetical), then archived (alphabetical) so the
+    // Vec's index order is the display order and the active/archived boundary is
+    // a single split point.
+    journals.sort_by(|a, b| {
+        a.archived
+            .cmp(&b.archived)
+            .then_with(|| a.display_name().cmp(b.display_name()))
+    });
     Ok(journals)
+}
+
+/// Archive or unarchive a journal by renaming its directory to add or strip the
+/// [`ARCHIVED_SUFFIX`]. Returns the journal in its new state. Errors if the
+/// target directory already exists.
+pub fn set_journal_archived(root: &Path, name: &str, archived: bool) -> AppResult<Journal> {
+    let display = journal_display_name(name);
+    let target_name = if archived {
+        format!("{display}{ARCHIVED_SUFFIX}")
+    } else {
+        display.to_string()
+    };
+
+    let source = root.join(name);
+    let target = root.join(&target_name);
+    if target_name == name {
+        // Already in the requested state; nothing to do.
+        return Ok(Journal {
+            name: target_name,
+            path: target,
+            archived,
+        });
+    }
+    if target.exists() {
+        return Err(StorageError::TargetExists {
+            what: "journal archive destination",
+            path: target,
+        }
+        .into());
+    }
+
+    fs::rename(&source, &target)?;
+    Ok(Journal {
+        name: target_name,
+        path: target,
+        archived,
+    })
 }
 
 pub fn create_journal(root: &Path, name: &str) -> AppResult<Journal> {
     let name = validate_journal_name(name)?;
+    // The archived marker is a reserved suffix — never let a user create a journal
+    // that would masquerade as archived. (Validation itself accepts the suffix so
+    // that resolving an already-archived journal by name still works.)
+    if is_archived_name(&name) {
+        return Err(format!("'{ARCHIVED_SUFFIX}' is a reserved journal-name suffix").into());
+    }
     let path = root.join(&name);
     fs::create_dir_all(&path)?;
-    Ok(Journal { name, path })
+    Ok(Journal {
+        name,
+        path,
+        archived: false,
+    })
 }
 
 pub fn validate_journal_name(name: &str) -> AppResult<String> {
@@ -88,6 +168,7 @@ mod tests {
         assert!(create_journal(dir.path(), "nested/name").is_err());
         assert!(create_journal(dir.path(), "../outside").is_err());
         assert!(create_journal(dir.path(), "").is_err());
+        assert!(create_journal(dir.path(), "personal.archived").is_err());
     }
 
     #[test]
@@ -102,5 +183,62 @@ mod tests {
 
         assert_eq!(journals.len(), 1);
         assert_eq!(journals[0].name, "work");
+        assert!(!journals[0].archived);
+    }
+
+    #[test]
+    fn list_journals_orders_active_before_archived_and_marks_them() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("work")).unwrap();
+        fs::create_dir_all(dir.path().join("personal")).unwrap();
+        fs::create_dir_all(dir.path().join("old.archived")).unwrap();
+        fs::create_dir_all(dir.path().join("ancient.archived")).unwrap();
+
+        let journals = list_journals(dir.path()).unwrap();
+        let summary: Vec<(&str, bool)> = journals
+            .iter()
+            .map(|j| (j.name.as_str(), j.archived))
+            .collect();
+
+        // Active first (alphabetical), then archived (alphabetical by display name).
+        assert_eq!(
+            summary,
+            vec![
+                ("personal", false),
+                ("work", false),
+                ("ancient.archived", true),
+                ("old.archived", true),
+            ]
+        );
+        assert_eq!(journals[2].display_name(), "ancient");
+    }
+
+    #[test]
+    fn set_journal_archived_renames_both_ways() {
+        let dir = tempdir().unwrap();
+        create_journal(dir.path(), "personal").unwrap();
+
+        let archived = set_journal_archived(dir.path(), "personal", true).unwrap();
+        assert_eq!(archived.name, "personal.archived");
+        assert!(archived.archived);
+        assert!(dir.path().join("personal.archived").is_dir());
+        assert!(!dir.path().join("personal").exists());
+
+        let restored = set_journal_archived(dir.path(), "personal.archived", false).unwrap();
+        assert_eq!(restored.name, "personal");
+        assert!(!restored.archived);
+        assert!(dir.path().join("personal").is_dir());
+        assert!(!dir.path().join("personal.archived").exists());
+    }
+
+    #[test]
+    fn set_journal_archived_errors_when_target_exists() {
+        let dir = tempdir().unwrap();
+        create_journal(dir.path(), "personal").unwrap();
+        fs::create_dir_all(dir.path().join("personal.archived")).unwrap();
+
+        assert!(set_journal_archived(dir.path(), "personal", true).is_err());
+        // The source is left untouched on error.
+        assert!(dir.path().join("personal").is_dir());
     }
 }

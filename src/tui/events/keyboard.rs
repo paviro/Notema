@@ -105,6 +105,11 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
             Some(Action::BeginDelete)
         }
         KeyCode::Char('d') if app.can_act_on_selected_entry() => Some(Action::BeginDelete),
+        KeyCode::Char('a')
+            if app.nav.focus == Focus::Journals && app.selected_journal().is_some() =>
+        {
+            Some(Action::ToggleArchiveJournal)
+        }
         KeyCode::Char('t') if app.can_act_on_selected_entry() => Some(Action::BeginEditTags),
         KeyCode::Char('p') if app.can_act_on_selected_entry() => Some(Action::BeginEditPeople),
         KeyCode::Char('a') if app.can_act_on_selected_entry() => Some(Action::BeginEditActivities),
@@ -289,9 +294,8 @@ pub(super) fn keep_selection_visible(
     let layout = render::tui_layout(super::terminal_area(terminal)?, app);
     if app.nav.focus == Focus::Journals && app.nav.mode == Mode::Browse {
         if let Some(area) = layout.journals {
-            app.journal_list_ensure_visible(render::journals_per_page(
-                render::journal_list_rect(area.content).height,
-            ));
+            let (_, meta, list_area) = app.journal_rows(area.content);
+            app.journal_list_ensure_visible(&meta, list_area.height);
         }
     } else if let Some(area) = layout.entries {
         let cache = app.entry_rows(area.text_width);

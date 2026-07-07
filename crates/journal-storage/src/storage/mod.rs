@@ -19,7 +19,10 @@ pub(crate) use entry::{
     is_plain_entry_file, move_entry_to_trash, read_entries, read_entry, read_entry_content,
     resolve_entry_asset_path, scan_entries,
 };
-pub use journals::{Journal, create_journal, list_journals, validate_journal_name};
+pub use journals::{
+    ARCHIVED_SUFFIX, Journal, create_journal, is_archived_name, journal_display_name,
+    list_journals, set_journal_archived, validate_journal_name,
+};
 
 pub fn ensure_store(root: &Path) -> AppResult<()> {
     fs::create_dir_all(root)?;

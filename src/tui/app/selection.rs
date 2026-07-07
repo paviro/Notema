@@ -1,5 +1,18 @@
 use super::*;
 
+/// Adjust a list's pixel scroll offset so the row for `selected` is in view, given
+/// the rows' `meta`. Shared by the entry list and journal column.
+fn ensure_pixel_row_visible(
+    list: &mut ratatui::widgets::ListState,
+    meta: &[RowMeta],
+    selected: Option<usize>,
+    viewport_height: u16,
+) {
+    let mut scroll = list.offset();
+    crate::tui::entry_rows::ensure_row_visible(&mut scroll, meta, selected, viewport_height);
+    *list.offset_mut() = scroll;
+}
+
 impl App {
     pub(crate) fn selected_journal_index(&self) -> usize {
         self.nav.journal_list.selected().unwrap_or(0)
@@ -7,6 +20,31 @@ impl App {
 
     pub(crate) fn selected_journal(&self) -> Option<&Journal> {
         self.library.journals.get(self.selected_journal_index())
+    }
+
+    /// Number of active (non-archived) journals. Because `library.journals` is
+    /// ordered active-first, this is also the index of the first archived journal
+    /// — the split point where the "Archived" divider sits.
+    pub(crate) fn active_journal_count(&self) -> usize {
+        self.library
+            .journals
+            .iter()
+            .filter(|journal| !journal.archived)
+            .count()
+    }
+
+    pub(crate) fn has_archived_journals(&self) -> bool {
+        self.active_journal_count() < self.library.journals.len()
+    }
+
+    /// Pixel offset that puts journal `index`'s box at the top of the list. The
+    /// journal column's rows are a uniform [`JOURNAL_BOX_HEIGHT`] tall — boxes and
+    /// the "Archived" divider alike — so this is a plain multiply without building
+    /// the rows.
+    pub(super) fn journal_row_top(&self, index: usize) -> usize {
+        let divider_before =
+            usize::from(self.has_archived_journals() && index >= self.active_journal_count());
+        (index + divider_before) * crate::tui::render::JOURNAL_BOX_HEIGHT as usize
     }
 
     /// The preview pane shows journal stats (instead of an entry) when browsing
@@ -20,19 +58,56 @@ impl App {
         self.nav.focus != Focus::Journals && self.nav.selected_entry_index.is_some()
     }
 
-    pub(crate) fn journal_list_ensure_visible(&mut self, viewport_height: u16) {
-        ensure_selected_visible(
-            &mut self.nav.journal_list,
-            self.library.journals.len(),
-            viewport_height,
-        );
+    /// Clamp only the journal list's *selection* index into `[0, len)`. The offset
+    /// is tracked in pixels and clamped separately at render (via `clamp_scroll`),
+    /// so — unlike [`normalize_list_state`](crate::tui::state::normalize_list_state)
+    /// — this must not touch it.
+    pub(crate) fn normalize_journal_selection(&mut self) {
+        let len = self.library.journals.len();
+        let state = &mut self.nav.journal_list;
+        if len == 0 {
+            state.select(None);
+        } else {
+            state.select(Some(state.selected().unwrap_or(0).min(len - 1)));
+        }
     }
 
-    pub(crate) fn scroll_journal_list(&mut self, delta: i16, viewport_height: u16) {
-        scroll_list_offset(
-            &mut self.nav.journal_list,
+    /// The journal column's rows and their per-row scroll metadata, paired with the
+    /// content-relative list rect they lay out in. Shared by the render, click,
+    /// wheel, and scrollbar paths so they all agree with what `draw_journals` drew.
+    pub(crate) fn journal_rows(
+        &self,
+        content: ratatui::layout::Rect,
+    ) -> (
+        Vec<crate::tui::entry_rows::BoxRow>,
+        Vec<RowMeta>,
+        ratatui::layout::Rect,
+    ) {
+        let list_area = crate::tui::render::journal_list_rect(content);
+        let inner_width = list_area.width.saturating_sub(4) as usize;
+        let rows = crate::tui::entry_rows::journal_list_rows(self, inner_width);
+        let meta = crate::tui::entry_rows::rows_meta(&rows);
+        (rows, meta, list_area)
+    }
+
+    /// Scroll the journal list so the selected journal's box is in view. The
+    /// journal column uses the same pixel-row model as the entry list, so `meta`
+    /// carries per-row heights (including the "Archived" divider row).
+    pub(crate) fn journal_list_ensure_visible(&mut self, meta: &[RowMeta], viewport_height: u16) {
+        let selected = self.nav.journal_list.selected();
+        ensure_pixel_row_visible(&mut self.nav.journal_list, meta, selected, viewport_height);
+    }
+
+    pub(crate) fn scroll_journal_list(
+        &mut self,
+        delta: i16,
+        total_height: usize,
+        viewport_height: u16,
+    ) {
+        *self.nav.journal_list.offset_mut() = crate::tui::render::scroll_pixels(
+            self.nav.journal_list.offset(),
             delta,
-            self.library.journals.len(),
+            total_height,
             viewport_height,
         );
     }
@@ -48,31 +123,17 @@ impl App {
         total_height: usize,
         viewport_height: u16,
     ) {
-        let max = total_height.saturating_sub(viewport_height as usize);
-        let offset = if delta < 0 {
-            self.nav
-                .entry_list
-                .offset()
-                .saturating_sub(delta.unsigned_abs() as usize)
-        } else {
-            self.nav.entry_list.offset().saturating_add(delta as usize)
-        };
-        *self.nav.entry_list.offset_mut() = offset.min(max);
-    }
-
-    pub(crate) fn entry_list_ensure_visible(
-        &mut self,
-        rows: &[EntryRowMeta],
-        viewport_height: u16,
-    ) {
-        let mut scroll = self.nav.entry_list.offset();
-        crate::tui::entry_rows::ensure_entry_visible(
-            &mut scroll,
-            rows,
-            self.nav.selected_entry_index,
+        *self.nav.entry_list.offset_mut() = crate::tui::render::scroll_pixels(
+            self.nav.entry_list.offset(),
+            delta,
+            total_height,
             viewport_height,
         );
-        *self.nav.entry_list.offset_mut() = scroll;
+    }
+
+    pub(crate) fn entry_list_ensure_visible(&mut self, rows: &[RowMeta], viewport_height: u16) {
+        let selected = self.nav.selected_entry_index;
+        ensure_pixel_row_visible(&mut self.nav.entry_list, rows, selected, viewport_height);
     }
 
     /// Contiguous index range into `entries` for the selected journal, or `None`
@@ -286,7 +347,7 @@ impl App {
             .position(|journal| journal.name == name)
         {
             self.nav.journal_list.select(Some(index));
-            *self.nav.journal_list.offset_mut() = index;
+            *self.nav.journal_list.offset_mut() = self.journal_row_top(index);
             self.nav.selected_entry_index = Some(0);
             self.reset_entry_scroll();
             self.nav.focus = Focus::Entries;

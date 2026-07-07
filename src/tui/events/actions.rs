@@ -188,9 +188,34 @@ pub(super) fn delete_selected_journal(app: &mut App) -> AppResult<()> {
         .map(|e| (e.path.clone(), !e.content.trim().is_empty()))
         .collect();
 
+    let display = journal_storage::journal_display_name(&journal_name).to_string();
     app.store
         .delete_journal(&journal_name, &journal_path, &entries)?;
-    app.set_status(format!("Deleted journal {journal_name}"));
+    app.set_status(format!("Deleted journal {display}"));
+    Ok(())
+}
+
+pub(super) fn toggle_archive_selected_journal(app: &mut App) -> AppResult<()> {
+    let Some(journal) = app.selected_journal() else {
+        return Ok(());
+    };
+    let old_name = journal.name.clone();
+    let archive = !journal.archived;
+    let display = journal.display_name().to_string();
+
+    let new_journal = app.store.set_journal_archived(&old_name, archive)?;
+    // The rename changes the journal's identity, so config keys pointing at the
+    // old name would go stale (CLI resolution, next-launch reselect). Retarget
+    // them before reloading.
+    app.retarget_journal_in_config(&old_name, &new_journal.name)?;
+    app.refresh()?;
+    app.select_journal_by_name(&new_journal.name);
+    // Keep focus on the journals column so the user can keep managing journals.
+    app.nav.focus = Focus::Journals;
+    app.set_status(format!(
+        "{} journal {display}",
+        if archive { "Archived" } else { "Unarchived" }
+    ));
     Ok(())
 }
 

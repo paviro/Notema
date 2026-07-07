@@ -32,31 +32,51 @@ fn take_width(s: &str, max: usize) -> (String, usize) {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EntryRowMeta {
-    pub(crate) entry_index: Option<usize>,
+pub(crate) struct RowMeta {
+    pub(crate) item_index: Option<usize>,
     pub(crate) height: u16,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct EntryListRow {
-    pub(crate) entry_index: Option<usize>,
+pub(crate) struct BoxRow {
+    pub(crate) item_index: Option<usize>,
     lines: Vec<Line<'static>>,
 }
 
-impl EntryListRow {
+impl BoxRow {
+    /// A row carrying `index` (the entry or journal index it represents, or
+    /// `None` for a non-selectable divider/spacer row) and its rendered lines.
+    pub(crate) fn new(index: Option<usize>, lines: Vec<Line<'static>>) -> Self {
+        Self {
+            item_index: index,
+            lines,
+        }
+    }
+
     fn height(&self) -> u16 {
         self.lines.len().min(u16::MAX as usize) as u16
     }
+}
+
+/// The per-row metadata (index + height) for a built row list, used by the
+/// scroll/hit-test helpers.
+pub(crate) fn rows_meta(rows: &[BoxRow]) -> Vec<RowMeta> {
+    rows.iter()
+        .map(|row| RowMeta {
+            item_index: row.item_index,
+            height: row.height(),
+        })
+        .collect()
 }
 
 /// The fully-built entry list for one `(data version, mode, journal, text_width)`
 /// combination. [`App`](super::app::App) memoizes this so a frame that only
 /// scrolled or moved the selection reuses it instead of rebuilding every row
 /// (see `App::entry_rows`). Rows are independent of the scroll offset and the
-/// selected index — both are applied downstream in [`visible_entry_items`].
+/// selected index — both are applied downstream in [`visible_box_items`].
 pub(crate) struct EntryRowCache {
-    pub(crate) rows: Vec<EntryListRow>,
-    pub(crate) meta: Vec<EntryRowMeta>,
+    pub(crate) rows: Vec<BoxRow>,
+    pub(crate) meta: Vec<RowMeta>,
     /// Row offset → month label, for the sticky section header. Empty outside
     /// browse mode.
     pub(crate) month_sections: Vec<(usize, String)>,
@@ -68,10 +88,10 @@ pub(crate) struct EntryRowCache {
 /// than several times per frame.
 pub(crate) fn build_entry_row_cache(app: &App, text_width: u16) -> EntryRowCache {
     let rows = entry_list_rows(app, text_width);
-    let meta: Vec<EntryRowMeta> = rows
+    let meta: Vec<RowMeta> = rows
         .iter()
-        .map(|row| EntryRowMeta {
-            entry_index: row.entry_index,
+        .map(|row| RowMeta {
+            item_index: row.item_index,
             height: row.height(),
         })
         .collect();
@@ -85,7 +105,7 @@ pub(crate) fn build_entry_row_cache(app: &App, text_width: u16) -> EntryRowCache
     }
 }
 
-pub(crate) fn entry_list_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
+pub(crate) fn entry_list_rows(app: &App, text_width: u16) -> Vec<BoxRow> {
     match app.nav.mode {
         Mode::Search => {
             let mut rows = Vec::new();
@@ -93,8 +113,8 @@ pub(crate) fn entry_list_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
                 if index > 0 {
                     rows.push(spacer_row());
                 }
-                rows.push(EntryListRow {
-                    entry_index: Some(index),
+                rows.push(BoxRow {
+                    item_index: Some(index),
                     lines: search_hit_lines(hit, text_width),
                 });
             }
@@ -105,9 +125,9 @@ pub(crate) fn entry_list_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
 }
 
 /// A one-line blank gap between entries.
-fn spacer_row() -> EntryListRow {
-    EntryListRow {
-        entry_index: None,
+fn spacer_row() -> BoxRow {
+    BoxRow {
+        item_index: None,
         lines: vec![Line::from(String::new())],
     }
 }
@@ -122,16 +142,20 @@ fn search_hit_lines(hit: &SearchHit, text_width: u16) -> Vec<Line<'static>> {
         ),
         None => (None, String::new()),
     };
+    // Archived journals still show up in search; flag them on the bottom-right and
+    // show the plain (un-suffixed) journal name on the bottom-left.
+    let archived = journal_storage::is_archived_name(&hit.journal);
     entry_box_lines(
         date.as_deref(),
         &time,
         &hit.preview,
-        Some(&hit.journal),
+        Some(journal_storage::journal_display_name(&hit.journal)),
+        archived.then_some("Archived"),
         text_width,
     )
 }
 
-fn browse_entry_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
+fn browse_entry_rows(app: &App, text_width: u16) -> Vec<BoxRow> {
     let box_width = text_width as usize + 4;
     let mut rows = Vec::new();
     let mut current_month = None;
@@ -154,9 +178,9 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
                     rows.push(spacer_row());
                 } else {
                     rows.push(spacer_row());
-                    rows.push(EntryListRow {
-                        entry_index: None,
-                        lines: vec![month_divider(box_width, &month)],
+                    rows.push(BoxRow {
+                        item_index: None,
+                        lines: vec![section_divider(box_width, &month, DividerAlign::Right)],
                     });
                     rows.push(spacer_row());
                 }
@@ -179,8 +203,8 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<EntryListRow> {
             None
         };
 
-        rows.push(EntryListRow {
-            entry_index: Some(index),
+        rows.push(BoxRow {
+            item_index: Some(index),
             lines: entry_list_lines(entry, day_label.as_deref(), text_width),
         });
         prev_was_entry = true;
@@ -244,42 +268,97 @@ pub(crate) fn entry_month_sections(app: &App, text_width: u16) -> Vec<(usize, St
     sections
 }
 
-/// A month separator with the label pinned to the right edge over a heavy rule:
-/// `━━━━━━━━━━━━━━━━━━━━━ July 2026`.
-fn month_divider(box_width: usize, month: &str) -> Line<'static> {
-    let fill = box_width.saturating_sub(text_width(month) + 1);
-    Line::from(vec![
-        Span::styled(format!("{} ", "━".repeat(fill)), border_style()),
-        Span::styled(
-            month.to_string(),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
-    ])
+/// A section separator with the label pinned to the right edge over a heavy rule:
+/// `━━━━━━━━━━━━━━━━━━━━━ July 2026`. Shared by the entry list's month headers and
+/// the journal column's "Archived" divider.
+/// Which edge a [`section_divider`] label is pinned to. The entry list's month
+/// headers read best right-aligned; the journal column's "Archived" divider left.
+pub(crate) enum DividerAlign {
+    Left,
+    Right,
+}
+
+pub(crate) fn section_divider(box_width: usize, label: &str, align: DividerAlign) -> Line<'static> {
+    let fill = "━".repeat(box_width.saturating_sub(text_width(label) + 1));
+    let label = Span::styled(
+        label.to_string(),
+        Style::default().add_modifier(Modifier::BOLD),
+    );
+    let spans = match align {
+        DividerAlign::Left => vec![label, Span::styled(format!(" {fill}"), border_style())],
+        DividerAlign::Right => vec![Span::styled(format!("{fill} "), border_style()), label],
+    };
+    Line::from(spans)
+}
+
+/// One journal rendered as a bordered box with its name inside, mirroring the
+/// entry list. Journals carry no border labels; the name is truncated to fit.
+pub(crate) fn journal_box_lines(name: &str, inner_width: usize) -> Vec<Line<'static>> {
+    let box_width = inner_width + 4;
+    vec![
+        border_line('┌', '┐', box_width, None, None),
+        box_inner_line(name.to_string(), inner_width),
+        border_line('└', '┘', box_width, None, None),
+    ]
+}
+
+/// The journal column's rows: active journals first, then an "Archived" divider,
+/// then the archived journals. Each journal row carries its index into
+/// `app.library.journals` (the selection index); the divider row carries `None`
+/// so it is never selectable. The divider appears only when there are both active
+/// and archived journals.
+pub(crate) fn journal_list_rows(app: &App, inner_width: usize) -> Vec<BoxRow> {
+    let box_width = inner_width + 4;
+    let active = app.active_journal_count();
+    let show_divider = active > 0 && active < app.library.journals.len();
+
+    let mut rows = Vec::new();
+    for (index, journal) in app.library.journals.iter().enumerate() {
+        if show_divider && index == active {
+            rows.push(BoxRow::new(
+                None,
+                vec![
+                    Line::from(String::new()),
+                    section_divider(box_width, "Archived", DividerAlign::Left),
+                    Line::from(String::new()),
+                ],
+            ));
+        }
+        rows.push(BoxRow::new(
+            Some(index),
+            journal_box_lines(journal.display_name(), inner_width),
+        ));
+    }
+    rows
 }
 
 #[cfg(test)]
-pub(crate) fn entry_row_metadata(app: &App, text_width: u16) -> Vec<EntryRowMeta> {
+pub(crate) fn entry_row_metadata(app: &App, text_width: u16) -> Vec<RowMeta> {
     entry_list_rows(app, text_width)
         .into_iter()
-        .map(|row| EntryRowMeta {
-            entry_index: row.entry_index,
+        .map(|row| RowMeta {
+            item_index: row.item_index,
             height: row.height(),
         })
         .collect()
 }
 
-/// Returns visible `ListItem`s and the 0-based index of the selected entry
-/// within those items (`None` if not visible or `!selection_visible`).
-pub(crate) fn visible_entry_items(
-    rows: &[EntryListRow],
+/// Returns the visible `ListItem`s, the 0-based index of the selected item within
+/// them (`None` if not visible or `!selection_visible`), and each produced item's
+/// row index (`None` for divider/spacer rows). The row-index list lets callers
+/// style items by kind — e.g. the journal column highlighting every journal box
+/// but not the "Archived" divider.
+pub(crate) fn visible_box_items(
+    rows: &[BoxRow],
     scroll: usize,
     viewport_height: u16,
-    selected_entry_index: Option<usize>,
+    selected_index: Option<usize>,
     selection_visible: bool,
-) -> (Vec<ListItem<'static>>, Option<usize>) {
+) -> (Vec<ListItem<'static>>, Option<usize>, Vec<Option<usize>>) {
     let mut remaining_skip = scroll;
     let mut remaining_height = viewport_height;
     let mut items = Vec::new();
+    let mut indices = Vec::new();
     let mut selected_visible_idx: Option<usize> = None;
 
     for row in rows {
@@ -300,16 +379,14 @@ pub(crate) fn visible_entry_items(
         let lines = row.lines[start..end].to_vec();
         remaining_height = remaining_height.saturating_sub(visible_height);
 
-        if selection_visible
-            && selected_visible_idx.is_none()
-            && row.entry_index == selected_entry_index
-        {
+        if selection_visible && selected_visible_idx.is_none() && row.item_index == selected_index {
             selected_visible_idx = Some(items.len());
         }
         items.push(ListItem::new(lines));
+        indices.push(row.item_index);
     }
 
-    (items, selected_visible_idx)
+    (items, selected_visible_idx, indices)
 }
 
 pub(crate) fn entry_month_label(entry: &Entry) -> Option<String> {
@@ -341,6 +418,7 @@ pub(crate) fn entry_list_lines(
         &time,
         &entry.preview,
         Some(&word_count_label(entry.word_count)),
+        None,
         text_width,
     )
 }
@@ -354,12 +432,14 @@ fn word_count_label(count: usize) -> String {
 
 /// The shared box shape: a `date … time` top border (date left, time right) over
 /// wrapped preview lines, closed by a bottom border that may carry a footer label
-/// on its left (used to show the journal for search hits).
+/// on its left (the journal for search hits, or the word count) and one on its
+/// right (the `archived` flag for search hits).
 pub(crate) fn entry_box_lines(
     date_label: Option<&str>,
     time: &str,
     preview: &str,
-    footer_label: Option<&str>,
+    footer_left: Option<&str>,
+    footer_right: Option<&str>,
     text_width: u16,
 ) -> Vec<Line<'static>> {
     let inner_width = text_width as usize;
@@ -373,7 +453,7 @@ pub(crate) fn entry_box_lines(
     for text in wrap_text(preview, inner_width, ENTRY_BOX_PREVIEW_LINES) {
         lines.push(box_inner_line(text, inner_width));
     }
-    lines.push(border_line('└', '┘', box_width, footer_label, None));
+    lines.push(border_line('└', '┘', box_width, footer_left, footer_right));
     lines
 }
 
@@ -485,19 +565,19 @@ fn truncate_ellipsis(text: &str, max: usize) -> String {
     truncated
 }
 
-pub(crate) fn ensure_entry_visible(
+pub(crate) fn ensure_row_visible(
     scroll: &mut usize,
-    rows: &[EntryRowMeta],
+    rows: &[RowMeta],
     selected_entry_index: Option<usize>,
     viewport_height: u16,
 ) {
     let Some((row_start, row_height)) = selected_entry_row_span(rows, selected_entry_index) else {
-        *scroll = clamp_scroll(*scroll, total_entry_row_height(rows), viewport_height);
+        *scroll = clamp_scroll(*scroll, total_row_height(rows), viewport_height);
         return;
     };
 
     if viewport_height == 0 {
-        *scroll = clamp_scroll(*scroll, total_entry_row_height(rows), viewport_height);
+        *scroll = clamp_scroll(*scroll, total_row_height(rows), viewport_height);
         return;
     }
 
@@ -510,17 +590,17 @@ pub(crate) fn ensure_entry_visible(
             *scroll = row_end.saturating_sub(viewport_height as usize);
         }
     }
-    *scroll = clamp_scroll(*scroll, total_entry_row_height(rows), viewport_height);
+    *scroll = clamp_scroll(*scroll, total_row_height(rows), viewport_height);
 }
 
 pub(crate) fn selected_entry_row_span(
-    rows: &[EntryRowMeta],
+    rows: &[RowMeta],
     selected_entry_index: Option<usize>,
 ) -> Option<(usize, u16)> {
     selected_entry_index?;
     let mut y = 0usize;
     for row in rows {
-        if row.entry_index == selected_entry_index {
+        if row.item_index == selected_entry_index {
             return Some((y, row.height));
         }
         y = y.saturating_add(row.height as usize);
@@ -528,7 +608,7 @@ pub(crate) fn selected_entry_row_span(
     None
 }
 
-pub(crate) fn total_entry_row_height(rows: &[EntryRowMeta]) -> usize {
+pub(crate) fn total_row_height(rows: &[RowMeta]) -> usize {
     rows.iter().map(|row| row.height as usize).sum()
 }
 
@@ -537,19 +617,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ensure_entry_visible_scrolls_past_u16_max_for_tall_lists() {
+    fn ensure_row_visible_scrolls_past_u16_max_for_tall_lists() {
         // 100 boxes of 1000 rows each → 100_000 px total, far beyond u16::MAX
         // (65535). Selecting the last one must scroll to the very bottom rather
         // than clamping short — the "can't scroll to the end" regression.
-        let rows: Vec<EntryRowMeta> = (0..100)
-            .map(|index| EntryRowMeta {
-                entry_index: Some(index),
+        let rows: Vec<RowMeta> = (0..100)
+            .map(|index| RowMeta {
+                item_index: Some(index),
                 height: 1000,
             })
             .collect();
 
         let mut scroll = 0usize;
-        ensure_entry_visible(&mut scroll, &rows, Some(99), 20);
+        ensure_row_visible(&mut scroll, &rows, Some(99), 20);
 
         assert_eq!(scroll, 100_000 - 20);
         assert!(scroll > u16::MAX as usize);

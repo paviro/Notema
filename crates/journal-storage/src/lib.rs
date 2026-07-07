@@ -20,8 +20,9 @@ pub use journal_encryption::{
 };
 pub use migrate::{DecryptSummary, MigrationSummary};
 pub use storage::{
-    AssetFailure, AssetReport, Journal, entry_group_date, entry_id, entry_timestamp_label,
-    is_entry_file, parse_entry_timestamp, sole_stored_image, stored_image_reference,
+    ARCHIVED_SUFFIX, AssetFailure, AssetReport, Journal, entry_group_date, entry_id,
+    entry_timestamp_label, is_archived_name, is_entry_file, journal_display_name,
+    parse_entry_timestamp, sole_stored_image, stored_image_reference,
 };
 
 /// Decode image bytes to a displayable sRGB image with EXIF orientation baked
@@ -522,6 +523,12 @@ impl JournalStore {
 
     pub fn create_journal(&self, name: &str) -> AppResult<Journal> {
         storage::create_journal(&self.paths.journal_root, name)
+    }
+
+    /// Archive or unarchive a journal by renaming its directory. Returns the
+    /// journal in its new state.
+    pub fn set_journal_archived(&self, name: &str, archived: bool) -> AppResult<Journal> {
+        storage::set_journal_archived(&self.paths.journal_root, name, archived)
     }
 
     pub fn validate_journal_name(name: &str) -> AppResult<String> {

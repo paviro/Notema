@@ -94,3 +94,20 @@ pub(crate) fn clamp_scroll(requested: usize, total_height: usize, viewport_heigh
     let max_scroll = total_height.saturating_sub(viewport_height as usize);
     requested.min(max_scroll)
 }
+
+/// Apply a signed pixel `delta` to a pixel scroll `offset`, clamped to the valid
+/// range. Shared by the entry list and journal column, which both scroll in the
+/// same pixel-row model.
+pub(crate) fn scroll_pixels(
+    offset: usize,
+    delta: i16,
+    total_height: usize,
+    viewport_height: u16,
+) -> usize {
+    let offset = if delta < 0 {
+        offset.saturating_sub(delta.unsigned_abs() as usize)
+    } else {
+        offset.saturating_add(delta as usize)
+    };
+    clamp_scroll(offset, total_height, viewport_height)
+}

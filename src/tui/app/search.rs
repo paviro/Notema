@@ -107,7 +107,11 @@ impl App {
 
     pub(crate) fn search_hit_label(&self, hit: &SearchHit) -> String {
         match self.search.scope {
-            SearchScope::AllJournals => format!("{}/{}", hit.journal, hit.title),
+            SearchScope::AllJournals => format!(
+                "{}/{}",
+                journal_storage::journal_display_name(&hit.journal),
+                hit.title
+            ),
             SearchScope::Journal(_) => hit.title.clone(),
         }
     }

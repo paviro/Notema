@@ -1,31 +1,36 @@
 use ratatui::layout::Rect;
 
-use super::entry_rows::EntryRowMeta;
-#[cfg(test)]
-use super::surface::PanelGeometry;
+use super::entry_rows::RowMeta;
 use super::surface::{
     EntryListGeometry, EntryMetadataValues, entry_metadata_layout, metadata_item_at, point_in_rect,
 };
 
-#[cfg(test)]
+/// Maps a point in the journal panel's content to the journal index under it, or
+/// `None` for the leading offset, the "Archived" divider row, or empty space. The
+/// journal column uses the same pixel-row model as the entry list, so `meta`
+/// carries per-row heights and `scroll` is a pixel offset.
 pub(crate) fn journal_index_at(
-    geometry: PanelGeometry,
+    content: Rect,
     x: u16,
     y: u16,
-    scroll: u16,
-    journal_count: usize,
+    scroll: usize,
+    meta: &[RowMeta],
 ) -> Option<usize> {
-    if !point_in_rect(geometry.content, x, y) {
+    let list = super::render::journal_list_rect(content);
+    if !point_in_rect(list, x, y) {
         return None;
     }
 
-    let list = super::render::journal_list_rect(geometry.content);
-    let relative = y.checked_sub(list.y)?;
-    if relative >= list.height {
-        return None;
+    let target_y = scroll + y.saturating_sub(list.y) as usize;
+    let mut row_y = 0usize;
+    for row in meta {
+        let next_y = row_y.saturating_add(row.height as usize);
+        if target_y < next_y {
+            return row.item_index;
+        }
+        row_y = next_y;
     }
-    let index = scroll as usize + (relative / super::render::JOURNAL_BOX_HEIGHT) as usize;
-    (index < journal_count).then_some(index)
+    None
 }
 
 pub(crate) fn entry_index_at(
@@ -33,7 +38,7 @@ pub(crate) fn entry_index_at(
     x: u16,
     y: u16,
     scroll: usize,
-    rows: &[EntryRowMeta],
+    rows: &[RowMeta],
 ) -> Option<usize> {
     if !point_in_rect(geometry.panel.content, x, y) {
         return None;
@@ -44,7 +49,7 @@ pub(crate) fn entry_index_at(
     for row in rows {
         let next_y = row_y.saturating_add(row.height as usize);
         if target_y < next_y {
-            return row.entry_index;
+            return row.item_index;
         }
         row_y = next_y;
     }

@@ -307,7 +307,7 @@ fn entry_click_selects_row_without_opening_viewer_when_entry_view_is_visible() {
     let rows = render::entry_row_metadata(&app, geo.text_width);
     let y_off: u16 = rows
         .iter()
-        .take_while(|row| row.entry_index != Some(1))
+        .take_while(|row| row.item_index != Some(1))
         .map(|row| row.height)
         .sum();
 
@@ -789,8 +789,11 @@ fn scrollbar_track_press_scrolls_journals() {
         .journals
         .expect("journals panel");
     let bar = scroll::scrollbar_bar_rect(journals.area);
-    let per_page = render::journals_per_page(render::journal_list_rect(journals.content).height);
-    let max = app.library.journals.len().saturating_sub(per_page as usize);
+    // The journal list uses the same pixel-row model as entries: each box is
+    // JOURNAL_BOX_HEIGHT tall, so the total content height is journals × that.
+    let list_area = render::journal_list_rect(journals.content);
+    let total_height = app.library.journals.len() * render::JOURNAL_BOX_HEIGHT as usize;
+    let max = total_height.saturating_sub(list_area.height as usize);
     assert!(max > 0, "journals list should overflow so a bar is drawn");
 
     // Press the bottom track row → thumb jumps down.

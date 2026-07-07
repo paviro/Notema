@@ -21,14 +21,14 @@ use super::app::{App, EntryViewImageHits, Focus, single_panel_is_active};
 pub(crate) use super::entry_rows::entry_row_metadata;
 #[cfg(test)]
 pub(crate) use super::entry_rows::{
-    EntryRowMeta, entry_box_lines, entry_day_label, entry_list_lines, entry_month_label,
+    RowMeta, entry_box_lines, entry_day_label, entry_list_lines, entry_month_label,
+};
+pub(crate) use super::hit_test::{
+    MetadataChip, entry_index_at, journal_index_at, metadata_at_point,
 };
 #[cfg(test)]
-pub(crate) use super::hit_test::journal_index_at;
-pub(crate) use super::hit_test::{MetadataChip, entry_index_at, metadata_at_point};
-#[cfg(test)]
 pub(crate) use super::scroll::scrollbar_position;
-pub(crate) use super::scroll::{clamp_scroll, viewer_scroll};
+pub(crate) use super::scroll::{clamp_scroll, scroll_pixels, viewer_scroll};
 #[cfg(test)]
 use super::scroll::{scroll_from_thumb_top, scrollbar_bar_rect, scrollbar_thumb};
 pub(crate) use super::surface::{
@@ -55,7 +55,7 @@ pub(crate) use dialogs::{
 use entries::draw_entry_list;
 use image_viewer::draw_image_viewer;
 use journals::draw_journals;
-pub(crate) use journals::{JOURNAL_BOX_HEIGHT, journal_list_rect, journals_per_page};
+pub(crate) use journals::{JOURNAL_BOX_HEIGHT, journal_list_rect};
 pub(crate) use layout::{TuiLayout, tui_layout};
 use markdown_panel::draw_selected_entry_view;
 pub(crate) use pending::{

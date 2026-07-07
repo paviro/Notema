@@ -240,8 +240,12 @@ impl MetadataKind {
 /// State for the free-form metadata overlay.
 pub(crate) struct EditMetadataState {
     pub(crate) kind: MetadataKind,
-    /// All values across every entry, sorted by usage count descending.
+    /// The offerable values: active-journal values first (indices `0..active_len`),
+    /// then archived-only values, each sorted by usage count descending.
     pub(crate) all_values: Vec<(String, usize)>,
+    /// How many leading `all_values` come from active journals. Archived-only
+    /// values (the rest) are shown only when the filter query matches them.
+    pub(crate) active_len: usize,
     /// Indices into `all_values` that match the current filter input.
     pub(crate) filtered: Vec<usize>,
     /// Values currently selected for the entry (lowercased for look-up).
@@ -260,10 +264,12 @@ impl EditMetadataState {
         all_values: Vec<(String, usize)>,
         filtered: Vec<usize>,
         selected: Vec<String>,
+        active_len: usize,
     ) -> Self {
         let mut state = Self {
             kind,
             all_values,
+            active_len,
             filtered,
             selected,
             list: SelectableList::default(),
@@ -276,12 +282,16 @@ impl EditMetadataState {
 
     pub(crate) fn rebuild_filter(&mut self) {
         let query = self.input.to_lowercase();
-        self.filtered = self
-            .all_values
-            .iter()
-            .enumerate()
-            .filter(|(_, (tag, _))| tag.to_lowercase().contains(&query))
-            .map(|(i, _)| i)
+        // With no query, offer only the active-journal values. Once the user types,
+        // match across everything — including archived-only values — so they can
+        // reuse an existing archived tag instead of creating a near-duplicate.
+        let search_range = if query.is_empty() {
+            0..self.active_len
+        } else {
+            0..self.all_values.len()
+        };
+        self.filtered = search_range
+            .filter(|&i| self.all_values[i].0.to_lowercase().contains(&query))
             .collect();
         self.list.set_offset(0);
         self.normalize_list_state();
@@ -399,14 +409,10 @@ pub(crate) fn scroll_list_offset(
         *state.offset_mut() = 0;
         return;
     }
-
-    let max_offset = len.saturating_sub(viewport_height as usize);
-    let offset = if delta < 0 {
-        state.offset().saturating_sub(delta.unsigned_abs() as usize)
-    } else {
-        state.offset().saturating_add(delta as usize)
-    };
-    *state.offset_mut() = offset.min(max_offset);
+    // Item-index space here (`len` items, one row each), but the clamp is the same
+    // shape as the pixel lists', so share it.
+    *state.offset_mut() =
+        crate::tui::scroll::scroll_pixels(state.offset(), delta, len, viewport_height);
 }
 
 pub(crate) fn ensure_selected_visible(state: &mut ListState, len: usize, viewport_height: u16) {
@@ -481,7 +487,7 @@ mod tests {
             .map(|index| (format!("tag-{index:02}"), index))
             .collect();
         let filtered: Vec<usize> = (0..count).collect();
-        EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new())
+        EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new(), count)
     }
 
     #[test]
@@ -508,5 +514,27 @@ mod tests {
 
         assert_eq!(state.selected_index(), Some(4));
         assert_eq!(state.offset(), 4);
+    }
+
+    #[test]
+    fn filter_hides_archived_only_values_until_query_matches() {
+        // One active value (index 0) and one archived-only value (index 1).
+        let all_values = vec![("berlin".to_string(), 3), ("wanderlust".to_string(), 5)];
+        let mut state =
+            EditMetadataState::new(MetadataKind::Tags, all_values, vec![0], Vec::new(), 1);
+
+        // With no query only the active value is offered.
+        assert_eq!(state.filtered, vec![0]);
+
+        // Typing part of the archived-only value surfaces it (so the user reuses
+        // it instead of creating a near-duplicate).
+        state.input = "wan".to_string();
+        state.rebuild_filter();
+        assert_eq!(state.filtered, vec![1]);
+
+        // Clearing the query hides it again.
+        state.input.clear();
+        state.rebuild_filter();
+        assert_eq!(state.filtered, vec![0]);
     }
 }
