@@ -144,8 +144,20 @@ pub fn import_dayone(
             });
         let rewrite = rewrite_moments(&body, &media);
 
+        // Day One's Core Motion activity (dropping stepCount). "Stationary" means
+        // the device wasn't moving — not a real activity — so it's skipped.
+        let activities: Vec<String> = entry
+            .user_activity
+            .as_ref()
+            .and_then(|ua| ua.activity_name.as_deref())
+            .map(|name| name.trim().to_lowercase())
+            .filter(|name| !name.is_empty() && name != "stationary")
+            .into_iter()
+            .collect();
+
         let metadata = Metadata {
             tags: entry.tags.clone(),
+            activities,
             starred: entry.starred,
             ..Metadata::default()
         };

@@ -171,8 +171,8 @@ pub fn default_config_path() -> AppResult<PathBuf> {
 }
 
 pub fn load_config(path: &Path) -> AppResult<Config> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("reading config {}", path.display()))?;
+    let text =
+        fs::read_to_string(path).with_context(|| format!("reading config {}", path.display()))?;
     let mut config: Config =
         toml::from_str(&text).with_context(|| format!("parsing config {}", path.display()))?;
     config.journal.path = expand_tilde(config.journal.path);

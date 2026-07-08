@@ -62,6 +62,48 @@ fn imports_entry_with_body_tags_and_provenance() {
 }
 
 #[test]
+fn imports_activity_lowercased_dropping_step_count_and_stationary() {
+    let (dir, store) = plaintext_store();
+    let json = r#"{
+        "entries": [
+            {
+                "uuid": "WALK",
+                "text": "A walk",
+                "creationDate": "2026-07-01T10:00:00Z",
+                "userActivity": { "activityName": "Walking", "stepCount": 1000 }
+            },
+            {
+                "uuid": "SIT",
+                "text": "Sitting",
+                "creationDate": "2026-07-01T11:00:00Z",
+                "userActivity": { "activityName": "Stationary", "stepCount": 50 }
+            },
+            {
+                "uuid": "PLAIN",
+                "text": "No activity",
+                "creationDate": "2026-07-01T12:00:00Z"
+            }
+        ]
+    }"#;
+
+    import_dayone(&store, "diary", &write_export(&dir, json), false).unwrap();
+    let entries = store.scan_entries().unwrap();
+    let activities = |uuid: &str| -> Vec<String> {
+        let entry = entries
+            .iter()
+            .find(|e| e.import.as_ref() == Some(&dayone(uuid)))
+            .unwrap();
+        entry.metadata.activities.clone()
+    };
+
+    // Mapped and lowercased; the step count is never read.
+    assert_eq!(activities("WALK"), vec!["walking".to_string()]);
+    // "Stationary" is filtered out, and a missing activity yields none.
+    assert!(activities("SIT").is_empty());
+    assert!(activities("PLAIN").is_empty());
+}
+
+#[test]
 fn imports_starred_flag() {
     let (dir, store) = plaintext_store();
     let json = r#"{
