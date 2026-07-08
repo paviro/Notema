@@ -859,7 +859,7 @@ pub(super) fn draw_edit_location_dialog(frame: &mut Frame<'_>, state: &mut EditL
     render_search_field(
         frame,
         layout.query,
-        "Address / coords: ",
+        "Place / address / coords: ",
         &state.query,
         state.focus == EditLocationFocus::Query,
     );
@@ -877,7 +877,7 @@ pub(super) fn draw_edit_location_dialog(frame: &mut Frame<'_>, state: &mut EditL
             match state.resolved.as_ref().and_then(|l| l.display_label()) {
                 Some(label) => Line::from(vec![Span::raw("  "), Span::styled(label, dim)]),
                 None => Line::from(Span::styled(
-                    "  Enter an address or \"lat, lon\", then press enter",
+                    "  Enter a place, address, or \"lat, lon\", then press enter",
                     dim,
                 )),
             }
