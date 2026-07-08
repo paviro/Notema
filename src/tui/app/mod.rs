@@ -2,7 +2,7 @@ use crate::{
     AppResult,
     config::{Config, State},
 };
-use journal_core::feelings::{FEELINGS, normalize_feeling};
+use journal_core::feelings::{FEELING_GROUPS, normalize_feeling};
 use journal_storage::{
     Entry, EntryEncryptionState, EntryPath, Journal, JournalStore, SearchHit, entry_group_date,
     entry_timestamp_label, is_entry_file, search_loaded_entries,

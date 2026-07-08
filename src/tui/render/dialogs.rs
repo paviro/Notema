@@ -6,8 +6,11 @@ use ratatui::{
     widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph, Wrap},
 };
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::tui::state::{
-    DeleteContext, EditFeelingState, EditMetadataFocus, EditMetadataState, EditMoodState, ListNav,
+    DeleteContext, EditFeelingState, EditMetadataFocus, EditMetadataState, EditMoodState,
+    FeelingRow, ListNav,
 };
 
 use super::{
@@ -18,11 +21,47 @@ use super::{
 
 // ── Hint text constants and helpers ──────────────────────────────────────────
 
-const FEELINGS_DIALOG_HINTS: [Hint; 3] = [
+const FEELINGS_DIALOG_LIST_HINTS: [Hint; 6] = [
+    Hint::new("open", "→", HintId::FeelingsExpand),
+    Hint::new("close", "←", HintId::FeelingsCollapse),
     Hint::new("toggle", "space", HintId::FeelingsToggle),
+    Hint::new("search", "tab", HintId::FeelingsSwitchFocus),
     Hint::new("save", "enter", HintId::FeelingsSave),
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
+
+const FEELINGS_DIALOG_INPUT_HINTS: [Hint; 3] = [
+    Hint::new("list", "tab", HintId::FeelingsSwitchFocus),
+    Hint::new("save", "enter", HintId::FeelingsSave),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
+/// The "Selected: …" footer, word-wrapped to the dialog's inner width. Returns at
+/// least one line ("Selected: none" when nothing is picked). Used both to size the
+/// dialog and to render it, so the reserved height always matches the drawn lines.
+pub(crate) fn feelings_selected_lines(selected: &[String]) -> Vec<String> {
+    let width = LIST_DIALOG_WIDTH.saturating_sub(2).max(1) as usize;
+    if selected.is_empty() {
+        return vec!["Selected: none".to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut line = "Selected: ".to_string();
+    let mut has_item = false;
+    for feeling in selected {
+        let sep = if has_item { " | " } else { "" };
+        let addition = sep.chars().count() + feeling.chars().count();
+        if has_item && line.chars().count() + addition > width {
+            lines.push(std::mem::take(&mut line));
+            line.push_str(feeling);
+        } else {
+            line.push_str(sep);
+            line.push_str(feeling);
+        }
+        has_item = true;
+    }
+    lines.push(line);
+    lines
+}
 
 const MOOD_DIALOG_HINTS: [Hint; 5] = [
     Hint::new("decrease", "←", HintId::MoodDecrease),
@@ -58,8 +97,11 @@ const NEW_JOURNAL_DIALOG_WIDTH: u16 = 56;
 const METADATA_DIALOG_MAX_VISIBLE_ROWS: u16 = 14;
 const FEELINGS_DIALOG_MAX_VISIBLE_ROWS: u16 = 16;
 
-pub(crate) fn feelings_dialog_hints() -> &'static [Hint] {
-    &FEELINGS_DIALOG_HINTS
+pub(crate) fn feelings_dialog_hints(focus: EditMetadataFocus) -> &'static [Hint] {
+    match focus {
+        EditMetadataFocus::List => &FEELINGS_DIALOG_LIST_HINTS,
+        EditMetadataFocus::Input => &FEELINGS_DIALOG_INPUT_HINTS,
+    }
 }
 
 pub(crate) fn mood_dialog_hints() -> &'static [Hint] {
@@ -87,11 +129,20 @@ pub(crate) fn metadata_dialog_area(frame_area: Rect, filtered_len: usize) -> Rec
     super::centered_rect_fixed_size(LIST_DIALOG_WIDTH, h, frame_area)
 }
 
-pub(crate) fn feelings_dialog_area(frame_area: Rect, all_len: usize) -> Rect {
-    const FIXED: u16 = 5;
+pub(crate) fn feelings_dialog_area(
+    frame_area: Rect,
+    all_len: usize,
+    selected_lines: usize,
+) -> Rect {
+    // borders + title + two separators + search input + two blank spacers
+    // (one above the selected summary, one below it).
+    const FIXED: u16 = 5 + 1 + 1 + 1;
     let hint_height = feelings_dialog_hint_height(frame_area);
-    let visible = (all_len as u16).min(FEELINGS_DIALOG_MAX_VISIBLE_ROWS);
-    let h = (FIXED + hint_height + visible).min(frame_area.height.saturating_sub(2));
+    // Clamp to at least one row so the "(no matches)" line has somewhere to render
+    // when a filter matches nothing, matching the metadata dialog.
+    let visible = (all_len as u16).clamp(1, FEELINGS_DIALOG_MAX_VISIBLE_ROWS);
+    let h = (FIXED + selected_lines as u16 + hint_height + visible)
+        .min(frame_area.height.saturating_sub(2));
     super::centered_rect_fixed_size(LIST_DIALOG_WIDTH, h, frame_area)
 }
 
@@ -118,10 +169,10 @@ fn tag_dialog_hint_height(frame_area: Rect) -> u16 {
 }
 
 fn feelings_dialog_hint_height(frame_area: Rect) -> u16 {
-    hint_height(
-        &FEELINGS_DIALOG_HINTS,
-        dialog_hint_width(frame_area, LIST_DIALOG_WIDTH),
-    )
+    // Reserve the taller of the two focus states so the layout stays put as the
+    // user tabs between the list and the search input.
+    let width = dialog_hint_width(frame_area, LIST_DIALOG_WIDTH);
+    hint_height(&FEELINGS_DIALOG_LIST_HINTS, width).max(hint_height(&FEELINGS_DIALOG_INPUT_HINTS, width))
 }
 
 fn mood_dialog_hint_height(frame_area: Rect) -> u16 {
@@ -196,18 +247,28 @@ pub(crate) struct FeelingsDialogLayout {
     pub(crate) list_top_separator: Rect,
     pub(crate) list: Rect,
     pub(crate) list_bottom_separator: Rect,
+    pub(crate) input: Rect,
+    pub(crate) selected: Rect,
     pub(crate) hints: Rect,
 }
 
-pub(crate) fn feelings_dialog_layout(frame_area: Rect, all_len: usize) -> FeelingsDialogLayout {
-    let area = feelings_dialog_area(frame_area, all_len);
+pub(crate) fn feelings_dialog_layout(
+    frame_area: Rect,
+    all_len: usize,
+    selected_lines: usize,
+) -> FeelingsDialogLayout {
+    let area = feelings_dialog_area(frame_area, all_len, selected_lines);
     let inner = super::panel_inner(area);
     let hint_height = feelings_dialog_hint_height(frame_area);
+    let selected_h = selected_lines as u16;
+    // Rows besides the list: title, both separators, search input, a blank spacer,
+    // the selected summary, another blank spacer, and the hint block.
+    let chrome = 3 + 1 + 1 + selected_h + 1 + hint_height;
     let list = Rect {
         x: inner.x,
         y: inner.y + 2,
         width: inner.width,
-        height: inner.height.saturating_sub(3 + hint_height),
+        height: inner.height.saturating_sub(chrome),
     };
     let list_top_separator = Rect {
         x: inner.x,
@@ -221,6 +282,20 @@ pub(crate) fn feelings_dialog_layout(frame_area: Rect, all_len: usize) -> Feelin
         width: inner.width,
         height: 1,
     };
+    let input = Rect {
+        x: inner.x,
+        y: list_bottom_separator.y + 1,
+        width: inner.width,
+        height: 1,
+    };
+    // A blank spacer line sits between the search input and the summary.
+    let selected = Rect {
+        x: inner.x,
+        y: input.y + 2,
+        width: inner.width,
+        height: selected_h,
+    };
+    // A blank spacer line sits between `selected` and `hints`.
     let hints = Rect {
         x: inner.x,
         y: inner.y + inner.height.saturating_sub(hint_height),
@@ -234,6 +309,8 @@ pub(crate) fn feelings_dialog_layout(frame_area: Rect, all_len: usize) -> Feelin
         list_top_separator,
         list,
         list_bottom_separator,
+        input,
+        selected,
         hints,
     }
 }
@@ -297,6 +374,39 @@ pub(crate) fn mood_dialog_layout(frame_area: Rect) -> MoodDialogLayout {
 }
 
 // ── Shared render helpers ─────────────────────────────────────────────────────
+
+/// Render a single-line search/filter input styled as a form field: a normal
+/// label followed by an underlined value area that spans the rest of the row, so
+/// it reads as an editable field whether or not text has been entered. The active
+/// field is also reversed for a clear focus cue.
+fn render_search_field(frame: &mut Frame<'_>, rect: Rect, label: &str, value: &str, focused: bool) {
+    let prefix = format!("{}{label}", if focused { ">" } else { " " });
+    let prefix_w = UnicodeWidthStr::width(prefix.as_str());
+    // Leave one blank column before the dialog border so the underlined field
+    // doesn't run flush against it.
+    let field_w = (rect.width as usize).saturating_sub(prefix_w).saturating_sub(1);
+
+    // Pad (or clip) the value so the underline always fills the field width.
+    let value_w = UnicodeWidthStr::width(value);
+    let field = if value_w < field_w {
+        format!("{value}{}", " ".repeat(field_w - value_w))
+    } else {
+        value.chars().rev().take(field_w).collect::<Vec<_>>().into_iter().rev().collect()
+    };
+
+    let mut field_style = Style::default().add_modifier(Modifier::UNDERLINED);
+    if focused {
+        field_style = field_style.add_modifier(Modifier::REVERSED);
+    }
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::raw(prefix),
+            Span::styled(field, field_style),
+        ])),
+        rect,
+    );
+}
 
 fn render_lines_in_area<'a>(
     frame: &mut Frame<'_>,
@@ -447,17 +557,6 @@ pub(super) fn draw_edit_metadata_dialog(frame: &mut Frame<'_>, state: &mut EditM
             .collect()
     };
 
-    let input_text = format!(
-        "{}Search / new {value_name}: {}",
-        if input_focused { ">" } else { " " },
-        state.input
-    );
-    let input_style = if input_focused {
-        Style::default().add_modifier(Modifier::REVERSED)
-    } else {
-        Style::default()
-    };
-
     frame.render_widget(Clear, layout.area);
     frame.render_widget(
         Block::default()
@@ -486,9 +585,12 @@ pub(super) fn draw_edit_metadata_dialog(frame: &mut Frame<'_>, state: &mut EditM
     );
     frame.render_stateful_widget(list, layout.list, &mut render_state);
     render_separator(frame, layout.list_bottom_separator);
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(input_text, input_style))),
+    render_search_field(
+        frame,
         layout.input,
+        &format!("Search / new {value_name}: "),
+        &state.input,
+        input_focused,
     );
     render_hint_line(
         frame,
@@ -561,24 +663,57 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
 }
 
 pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditFeelingState) {
-    let layout = feelings_dialog_layout(frame.area(), state.all_feelings.len());
+    let rows = state.visible_rows();
+    let selected_lines = feelings_selected_lines(&state.selected);
+    let layout = feelings_dialog_layout(frame.area(), rows.len(), selected_lines.len());
+    let filtering = state.is_filtering();
+    let list_focused = state.focus == EditMetadataFocus::List;
+    let input_focused = state.focus == EditMetadataFocus::Input;
 
     state.normalize_list_state();
-    let list_lines = state.all_feelings.len();
+    let list_lines = rows.len();
     let max_visible = layout.list.height;
     let max_offset = list_lines.saturating_sub(max_visible as usize);
     let scroll = state.offset().min(max_offset);
     state.list.set_offset(scroll);
 
-    let items: Vec<ListItem<'_>> = state
-        .all_feelings
-        .iter()
-        .map(|feeling| {
-            let checked = state.selected.iter().any(|value| value == feeling);
-            let marker = if checked { "[x]" } else { "[ ]" };
-            ListItem::new(Line::from(format!("{marker} {feeling}")))
-        })
-        .collect();
+    let items: Vec<ListItem<'_>> = if rows.is_empty() {
+        vec![ListItem::new(Line::from(" (no matches)"))]
+    } else {
+        rows.iter()
+            .map(|row| match *row {
+                FeelingRow::Header { group } => {
+                    let g = &state.groups[group];
+                    let bold = Style::default().add_modifier(Modifier::BOLD);
+                    // Disclosure marker trails the name so it never collides with the
+                    // list's leading `>` selection cursor. ▾ open, ▸ collapsed.
+                    let disclosure = if state.expanded[group] { '▾' } else { '▸' };
+                    let mut spans = vec![Span::styled(g.name, bold)];
+                    // The selected-count badge is lighter than the category name.
+                    let selected = state.group_selected_count(group);
+                    if selected > 0 {
+                        spans.push(Span::raw(format!(" ({selected})")));
+                    }
+                    spans.push(Span::styled(format!(" {disclosure}"), bold));
+                    ListItem::new(Line::from(spans))
+                }
+                FeelingRow::Feeling { group, feeling } => {
+                    let g = &state.groups[group];
+                    let name = g.feelings[feeling].name;
+                    let checked = state.selected.iter().any(|value| value == name);
+                    let marker = if checked { "[x]" } else { "[ ]" };
+                    // While filtering the headers are hidden, so tag each match with
+                    // its group for context.
+                    let text = if filtering {
+                        format!("{marker} {name}  ({})", g.name)
+                    } else {
+                        format!("   {marker} {name}")
+                    };
+                    ListItem::new(Line::from(text))
+                }
+            })
+            .collect()
+    };
 
     frame.render_widget(Clear, layout.area);
     frame.render_widget(
@@ -600,10 +735,36 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">")
         .highlight_spacing(HighlightSpacing::Always);
-    let mut render_state =
-        list_state_for_render(state.selected_index(), scroll, layout.list.height, true);
+    let mut render_state = list_state_for_render(
+        state.selected_index(),
+        scroll,
+        layout.list.height,
+        list_focused && !rows.is_empty(),
+    );
     frame.render_stateful_widget(list, layout.list, &mut render_state);
     render_separator(frame, layout.list_bottom_separator);
-    render_hint_line(frame, feelings_dialog_hints(), layout.hints);
+    render_search_field(frame, layout.input, "Search: ", &state.input, input_focused);
+
+    // The summary lines get a leading pad space; the "Selected:" label is bold and
+    // its continuation lines align under the first.
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let summary: Vec<Line<'_>> = selected_lines
+        .iter()
+        .enumerate()
+        .map(|(index, text)| {
+            if index == 0 {
+                let rest = text.strip_prefix("Selected:").unwrap_or(text);
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled("Selected:", bold),
+                    Span::raw(rest.to_string()),
+                ])
+            } else {
+                Line::from(format!(" {text}"))
+            }
+        })
+        .collect();
+    render_lines_in_area(frame, summary, layout.selected);
+    render_hint_line(frame, feelings_dialog_hints(state.focus), layout.hints);
     render_scrollbar_if_needed(frame, layout.area, list_lines, max_visible, scroll);
 }

@@ -219,8 +219,41 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::FeelingsToggle => {
+            let list_height = feelings_dialog_list_height(terminal, app)?;
             if let Some(state) = app.edit_feeling_state_mut() {
                 state.toggle_selected();
+                state.ensure_selected_visible(list_height);
+            }
+        }
+        Action::FeelingsExpand => {
+            let list_height = feelings_dialog_list_height(terminal, app)?;
+            if let Some(state) = app.edit_feeling_state_mut() {
+                state.expand_selected();
+                state.ensure_selected_visible(list_height);
+            }
+        }
+        Action::FeelingsCollapse => {
+            let list_height = feelings_dialog_list_height(terminal, app)?;
+            if let Some(state) = app.edit_feeling_state_mut() {
+                state.collapse_selected();
+                state.ensure_selected_visible(list_height);
+            }
+        }
+        Action::FeelingsSwitchFocus => {
+            if let Some(state) = app.edit_feeling_state_mut() {
+                state.switch_focus();
+            }
+        }
+        Action::FeelingsInput(ch) => {
+            if let Some(state) = app.edit_feeling_state_mut() {
+                state.input.push(ch);
+                state.rebuild_filter();
+            }
+        }
+        Action::FeelingsBackspace => {
+            if let Some(state) = app.edit_feeling_state_mut() {
+                state.input.pop();
+                state.rebuild_filter();
             }
         }
         Action::FeelingsSave => {
@@ -385,11 +418,14 @@ fn feelings_dialog_list_height(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &App,
 ) -> AppResult<u16> {
-    let all_len = app
-        .edit_feeling_state()
-        .map_or(0, |state| state.all_feelings.len());
+    let (all_len, selected_lines) = app.edit_feeling_state().map_or((0, 1), |state| {
+        (
+            state.item_count(),
+            render::feelings_selected_lines(&state.selected).len(),
+        )
+    });
     Ok(
-        render::feelings_dialog_layout(terminal_area(terminal)?, all_len)
+        render::feelings_dialog_layout(terminal_area(terminal)?, all_len, selected_lines)
             .list
             .height,
     )

@@ -69,10 +69,7 @@ impl App {
 
     pub(crate) fn begin_edit_feelings(&mut self) {
         let selected = self.selected_entry_feelings();
-        self.overlay = Overlay::EditFeelings(EditFeelingState::new(
-            FEELINGS.iter().map(|feeling| feeling.to_string()).collect(),
-            selected,
-        ));
+        self.overlay = Overlay::EditFeelings(EditFeelingState::new(FEELING_GROUPS, selected));
     }
 
     pub(crate) fn begin_tag_search(&mut self, tag: &str) {

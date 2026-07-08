@@ -40,7 +40,7 @@ pub(super) fn key_to_action(
         Overlay::ConfirmDelete(_) => confirm_delete_key_to_action(key),
         Overlay::NewJournal(_) => new_journal_key_to_action(key),
         Overlay::EditMetadata(_) => tags_key_to_action(app, key),
-        Overlay::EditFeelings(_) => feelings_key_to_action(key),
+        Overlay::EditFeelings(_) => feelings_key_to_action(app, key),
         Overlay::EditMood(_) => mood_key_to_action(key),
         Overlay::ImageViewer(_) => image_viewer_key_to_action(key),
     }
@@ -318,13 +318,19 @@ fn tags_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
     }
 }
 
-fn feelings_key_to_action(key: KeyEvent) -> Option<Action> {
+fn feelings_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
+    let focus = app.edit_feeling_state()?.focus;
     match key.code {
         KeyCode::Esc => Some(Action::CancelOverlay),
+        KeyCode::Tab => Some(Action::FeelingsSwitchFocus),
         KeyCode::Enter => Some(Action::FeelingsSave),
-        KeyCode::Up => Some(Action::FeelingsMoveUp),
-        KeyCode::Down => Some(Action::FeelingsMoveDown),
-        KeyCode::Char(' ') => Some(Action::FeelingsToggle),
+        KeyCode::Up if focus == EditMetadataFocus::List => Some(Action::FeelingsMoveUp),
+        KeyCode::Down if focus == EditMetadataFocus::List => Some(Action::FeelingsMoveDown),
+        KeyCode::Right if focus == EditMetadataFocus::List => Some(Action::FeelingsExpand),
+        KeyCode::Left if focus == EditMetadataFocus::List => Some(Action::FeelingsCollapse),
+        KeyCode::Char(' ') if focus == EditMetadataFocus::List => Some(Action::FeelingsToggle),
+        KeyCode::Backspace if focus == EditMetadataFocus::Input => Some(Action::FeelingsBackspace),
+        KeyCode::Char(ch) if focus == EditMetadataFocus::Input => Some(Action::FeelingsInput(ch)),
         _ => None,
     }
 }

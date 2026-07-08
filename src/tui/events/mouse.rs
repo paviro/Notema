@@ -549,12 +549,14 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         return None;
     }
 
-    if app.edit_feeling_state().is_some() {
-        let all_len = app.edit_feeling_state().map_or(0, |s| s.all_feelings.len());
-        let layout = render::feelings_dialog_layout(area, all_len);
+    if let Some(focus) = app.edit_feeling_state().map(|s| s.focus) {
+        let (all_len, selected_lines) = app.edit_feeling_state().map_or((0, 1), |s| {
+            (s.item_count(), render::feelings_selected_lines(&s.selected).len())
+        });
+        let layout = render::feelings_dialog_layout(area, all_len, selected_lines);
         if render::point_in_rect(layout.hints, col, row)
             && let Some(id) = render::hint_id_at_wrapped(
-                render::feelings_dialog_hints(),
+                render::feelings_dialog_hints(focus),
                 layout.hints.x + 1,
                 layout.hints.y,
                 layout.hints.width.saturating_sub(1),
@@ -564,12 +566,23 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         {
             return hint_id_to_action(app, id);
         }
-        if render::point_in_rect(layout.list, col, row)
-            && let Some(state) = app.edit_feeling_state_mut()
-            && let Some(index) = list_row_at(layout.list, col, row, state.offset(), all_len)
-        {
-            state.select_index(index);
-            state.toggle_selected();
+        if render::point_in_rect(layout.list, col, row) {
+            if let Some(state) = app.edit_feeling_state_mut() {
+                state.focus = crate::tui::state::EditMetadataFocus::List;
+                if let Some(index) = list_row_at(layout.list, col, row, state.offset(), all_len)
+                    && index < state.item_count()
+                {
+                    // Clicking a header folds it; clicking a feeling toggles it.
+                    state.select_index(index);
+                    state.toggle_selected();
+                }
+            }
+            return None;
+        }
+        if render::point_in_rect(layout.input, col, row) {
+            if let Some(state) = app.edit_feeling_state_mut() {
+                state.focus = crate::tui::state::EditMetadataFocus::Input;
+            }
             return None;
         }
         return None;
@@ -625,8 +638,10 @@ fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16
     }
 
     if app.edit_feeling_state().is_some() {
-        let all_len = app.edit_feeling_state().map_or(0, |s| s.all_feelings.len());
-        let layout = render::feelings_dialog_layout(area, all_len);
+        let (all_len, selected_lines) = app.edit_feeling_state().map_or((0, 1), |s| {
+            (s.item_count(), render::feelings_selected_lines(&s.selected).len())
+        });
+        let layout = render::feelings_dialog_layout(area, all_len, selected_lines);
         if render::point_in_rect(layout.list, mouse.column, mouse.row)
             && let Some(state) = app.edit_feeling_state_mut()
         {
@@ -708,6 +723,9 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::MetadataAddFromInput => Some(Action::MetadataAddFromInput),
         render::HintId::MetadataSave => Some(Action::MetadataSave),
         render::HintId::FeelingsToggle => Some(Action::FeelingsToggle),
+        render::HintId::FeelingsExpand => Some(Action::FeelingsExpand),
+        render::HintId::FeelingsCollapse => Some(Action::FeelingsCollapse),
+        render::HintId::FeelingsSwitchFocus => Some(Action::FeelingsSwitchFocus),
         render::HintId::FeelingsSave => Some(Action::FeelingsSave),
         render::HintId::MoodDecrease => Some(Action::MoodDecrease),
         render::HintId::MoodIncrease => Some(Action::MoodIncrease),

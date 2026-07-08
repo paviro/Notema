@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::state::FeelingRow;
 use crate::tui::test_support::{app_with_journals, new_app, new_app_with_state};
 use std::fs;
 use tempfile::tempdir;
@@ -298,7 +299,7 @@ fn begin_edit_feelings_uses_fixed_list_and_selected_entry_values() {
     fs::create_dir_all(&entry_dir).unwrap();
     fs::write(
         entry_dir.join("a.md"),
-        "+++\nfeelings = [\"calm\", \"focused\"]\n+++\n\n# A\n",
+        "+++\nfeelings = [\"calm\", \"excited\"]\n+++\n\n# A\n",
     )
     .unwrap();
 
@@ -309,8 +310,14 @@ fn begin_edit_feelings_uses_fixed_list_and_selected_entry_values() {
     app.begin_edit_feelings();
 
     let state = app.edit_feeling_state().unwrap();
-    assert_eq!(state.all_feelings[0], "calm");
-    assert_eq!(state.selected, vec!["calm", "focused"]);
+    // Groups start collapsed: only headers are visible and the cursor rests on the
+    // first one. The entry's stored feelings are preselected regardless.
+    let rows = state.visible_rows();
+    assert_eq!(rows.len(), FEELING_GROUPS.len());
+    assert!(matches!(rows[0], FeelingRow::Header { group: 0 }));
+    assert!(matches!(&state.groups[0], g if g.name == "Joy & Delight"));
+    assert_eq!(state.list.selected(), Some(0));
+    assert_eq!(state.selected, vec!["calm", "excited"]);
 }
 
 #[test]

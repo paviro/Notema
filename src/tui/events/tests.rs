@@ -6,7 +6,7 @@ use crate::{
         render,
         render::insights::{InsightsTab, InsightsTimeframe},
         scroll,
-        state::{EditMetadataFocus, ListNav},
+        state::{EditMetadataFocus, FeelingRow, ListNav},
         test_support::{app_with_entries, app_with_journals, new_app},
     },
 };
@@ -816,12 +816,33 @@ fn click_on_tag_input_row_switches_focus_to_input() {
 }
 
 #[test]
-fn click_on_feeling_dialog_row_selects_and_toggles_it() {
+fn click_on_feeling_dialog_header_expands_then_feeling_toggles() {
     let mut app = app_with_entries(1);
     app.begin_edit_feelings();
-    let all_len = app.edit_feeling_state().unwrap().all_feelings.len();
-    let layout = render::feelings_dialog_layout(Rect::new(0, 0, 120, 20), all_len);
 
+    let feelings_layout = |app: &App| {
+        let state = app.edit_feeling_state().unwrap();
+        let all_len = state.item_count();
+        let selected_lines = render::feelings_selected_lines(&state.selected).len();
+        render::feelings_dialog_layout(Rect::new(0, 0, 120, 20), all_len, selected_lines)
+    };
+
+    // Clicking the first (header) row folds that group open.
+    let layout = feelings_layout(&app);
+    mouse_in_area(
+        &mut app,
+        mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            layout.list.x,
+            layout.list.y,
+        ),
+        120,
+        20,
+    );
+    assert!(app.edit_feeling_state().unwrap().expanded[0]);
+
+    // The first feeling now sits directly below the header; clicking it selects it.
+    let layout = feelings_layout(&app);
     mouse_in_area(
         &mut app,
         mouse(
@@ -834,8 +855,11 @@ fn click_on_feeling_dialog_row_selects_and_toggles_it() {
     );
 
     let state = app.edit_feeling_state().unwrap();
-    assert_eq!(state.selected_index(), Some(1));
-    assert_eq!(state.selected, vec![state.all_feelings[1].clone()]);
+    let FeelingRow::Feeling { group, feeling } = state.visible_rows()[1] else {
+        panic!("row 1 should be a feeling");
+    };
+    let word = state.groups[group].feelings[feeling].name;
+    assert_eq!(state.selected, vec![word.to_string()]);
 }
 
 #[test]

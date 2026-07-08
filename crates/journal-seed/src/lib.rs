@@ -5,7 +5,7 @@
 //! self-identifying and never mistaken for hand-written history.
 
 use chrono::{Duration, Local};
-use journal_core::feelings::FEELINGS;
+use journal_core::feelings;
 use journal_storage::{AppResult, ImportSource, JournalStore, MOOD_RANGE, Metadata};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
@@ -146,11 +146,12 @@ fn ensure_journal(store: &JournalStore, name: &str) -> AppResult<()> {
 }
 
 fn random_metadata(rng: &mut StdRng) -> Metadata {
+    let feelings: Vec<&str> = feelings::feelings().collect();
     Metadata {
         tags: sample(rng, TAGS, 0, 3),
         people: sample(rng, PEOPLE, 0, 2),
         activities: sample(rng, ACTIVITIES, 0, 2),
-        feelings: sample(rng, FEELINGS, 0, 3),
+        feelings: sample(rng, &feelings, 0, 3),
         mood: rng
             .random_bool(0.7)
             .then(|| rng.random_range(*MOOD_RANGE.start()..=*MOOD_RANGE.end())),

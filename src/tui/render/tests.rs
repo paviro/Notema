@@ -585,7 +585,8 @@ fn list_dialogs_keep_preferred_width_until_they_hit_edges() {
     assert_eq!(narrow_tags.area.x, 0);
     assert_eq!(narrow_tags.area.width, 40);
 
-    let wide_feelings = feelings_dialog_layout(Rect::new(0, 0, 120, 30), 24);
+    // 15 group headers + 155 feelings = 170 rows; the list caps at its max visible rows.
+    let wide_feelings = feelings_dialog_layout(Rect::new(0, 0, 120, 30), 170, 1);
     assert_eq!(wide_feelings.area.width, 44);
     assert_eq!(wide_feelings.list.height, 16);
 
@@ -595,6 +596,83 @@ fn list_dialogs_keep_preferred_width_until_they_hit_edges() {
     let narrow_mood = mood_dialog_layout(Rect::new(0, 0, 80, 30));
     assert_eq!(narrow_mood.area.x, 0);
     assert_eq!(narrow_mood.area.width, 80);
+}
+
+#[test]
+fn feelings_dialog_folds_groups_and_marks_disclosure() {
+    use crate::tui::state::EditFeelingState;
+    use journal_core::feelings::{Feeling, FeelingGroup};
+
+    static GROUPS: &[FeelingGroup] = &[
+        FeelingGroup {
+            name: "Peaceful",
+            feelings: &[
+                Feeling {
+                    name: "calm",
+                    search_aliases: &[],
+                },
+                Feeling {
+                    name: "content",
+                    search_aliases: &[],
+                },
+            ],
+        },
+        FeelingGroup {
+            name: "Joyful",
+            feelings: &[Feeling {
+                name: "happy",
+                search_aliases: &[],
+            }],
+        },
+    ];
+    let mut state = EditFeelingState::new(GROUPS, vec!["calm".into()]);
+    state.expanded[1] = true;
+    let rows = render_to_rows(60, 24, |frame| {
+        dialogs::draw_edit_feelings_dialog(frame, &mut state)
+    });
+
+    // Collapsed group: header keeps its stored casing (no all-caps), carries a
+    // trailing ▸ and a selected count, and its feelings are hidden.
+    let collapsed = rows.iter().find(|row| row.contains("Peaceful")).unwrap();
+    assert!(!collapsed.contains('['), "header must not render a checkbox");
+    assert!(collapsed.contains('▸'), "collapsed header shows ▸");
+    assert!(collapsed.contains("(1)"), "collapsed header shows selected count");
+    // "calm" appears in the selected summary; it must NOT appear as a list row.
+    assert!(!rows.iter().any(|row| row.contains("[x] calm")));
+
+    // Expanded group: ▾ marker and its feelings render with checkboxes.
+    let expanded = rows.iter().find(|row| row.contains("Joyful")).unwrap();
+    assert!(expanded.contains('▾'), "expanded header shows ▾");
+    assert!(rows.iter().any(|row| row.contains("[ ] happy")));
+
+    // The selected-feelings summary lists picks from any group.
+    assert!(rows.iter().any(|row| row.contains("Selected: calm")));
+}
+
+#[test]
+fn feelings_dialog_shows_no_matches_when_filter_is_empty() {
+    use crate::tui::state::EditFeelingState;
+    use journal_core::feelings::{Feeling, FeelingGroup};
+
+    static GROUPS: &[FeelingGroup] = &[FeelingGroup {
+        name: "Peaceful",
+        feelings: &[Feeling {
+            name: "calm",
+            search_aliases: &["composed"],
+        }],
+    }];
+    let mut state = EditFeelingState::new(GROUPS, Vec::new());
+    // A query matching neither the feeling nor its alias collapses the list.
+    state.input = "zzz-nope".into();
+    state.rebuild_filter();
+
+    let rows = render_to_rows(60, 24, |frame| {
+        dialogs::draw_edit_feelings_dialog(frame, &mut state)
+    });
+    assert!(
+        rows.iter().any(|row| row.contains("(no matches)")),
+        "an empty filter must still surface the no-matches line"
+    );
 }
 
 #[test]
@@ -1515,9 +1593,14 @@ fn dialog_hint_routing_uses_typed_ids() {
         Some(HintId::MetadataAddFromInput)
     );
 
-    let feelings = feelings_dialog_hints();
+    let feelings = feelings_dialog_hints(EditMetadataFocus::List);
     assert_eq!(
-        hint_id_at(feelings, 20, 20 + "toggle (space) | ".len() as u16),
+        hint_id_at(
+            feelings,
+            20,
+            20 + UnicodeWidthStr::width("open (→) | close (←) | toggle (space) | search (tab) | ")
+                as u16
+        ),
         Some(HintId::FeelingsSave)
     );
 

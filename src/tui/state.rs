@@ -3,6 +3,7 @@
 
 use std::time::{Duration, Instant};
 
+use journal_core::feelings::FeelingGroup;
 use journal_storage::SearchHit;
 use ratatui::widgets::ListState;
 
@@ -337,35 +338,165 @@ impl ListNav for EditMetadataState {
     }
 }
 
-/// State for the edit-feelings overlay.
+/// One visible row in the feelings picker: a group heading or a feeling under an
+/// expanded group. Both carry indices back into [`EditFeelingState::groups`].
+pub(crate) enum FeelingRow {
+    Header { group: usize },
+    Feeling { group: usize, feeling: usize },
+}
+
+/// State for the edit-feelings overlay. The vocabulary is the borrowed `'static`
+/// [`FeelingGroup`] table; only expansion, selection, and the search box are
+/// per-session. Groups collapse/expand, so the set of visible rows (and thus the
+/// navigable list) changes as the user opens groups. A search box filters across
+/// every group into a flat list of matches.
 pub(crate) struct EditFeelingState {
-    /// Fixed feelings vocabulary in display order.
-    pub(crate) all_feelings: Vec<String>,
-    /// Feelings currently selected for the entry.
+    /// The canonical vocabulary, borrowed from `journal_core::feelings::FEELING_GROUPS`.
+    pub(crate) groups: &'static [FeelingGroup],
+    /// Whether each group is expanded, parallel to `groups`. Groups start collapsed.
+    pub(crate) expanded: Vec<bool>,
+    /// Feelings currently selected for the entry (lowercased).
     pub(crate) selected: Vec<String>,
-    /// Stateful list selection and scroll offset.
+    /// Stateful selection and scroll offset over the *visible* rows.
     pub(crate) list: SelectableList,
+    /// Text filtering the vocabulary; empty shows the grouped view.
+    pub(crate) input: String,
+    /// Whether keyboard events go to the list or the search input.
+    pub(crate) focus: EditMetadataFocus,
 }
 
 impl EditFeelingState {
-    pub(crate) fn new(all_feelings: Vec<String>, selected: Vec<String>) -> Self {
+    pub(crate) fn new(groups: &'static [FeelingGroup], selected: Vec<String>) -> Self {
         let mut state = Self {
-            all_feelings,
+            expanded: vec![false; groups.len()],
+            groups,
             selected,
             list: SelectableList::default(),
+            input: String::new(),
+            focus: EditMetadataFocus::List,
         };
         state.normalize_list_state();
+        state.select_index(0);
         state
     }
 
-    pub(crate) fn toggle_selected(&mut self) {
-        if let Some(index) = self.selected_index() {
-            let feeling = self.all_feelings[index].clone();
-            if let Some(pos) = self.selected.iter().position(|v| v == &feeling) {
-                self.selected.remove(pos);
-            } else {
-                self.selected.push(feeling);
+    /// Whether a search query is narrowing the list.
+    pub(crate) fn is_filtering(&self) -> bool {
+        !self.input.trim().is_empty()
+    }
+
+    /// The rows currently shown. With no query: every header, plus the feelings of
+    /// expanded groups. While filtering: a flat list of matching feelings (no
+    /// headers), so a match is reachable without opening its group first.
+    pub(crate) fn visible_rows(&self) -> Vec<FeelingRow> {
+        let mut rows = Vec::new();
+        if self.is_filtering() {
+            let query = self.input.trim().to_lowercase();
+            for (group, g) in self.groups.iter().enumerate() {
+                for (feeling, item) in g.feelings.iter().enumerate() {
+                    let alias_match = item.search_aliases.iter().any(|alias| alias.contains(&query));
+                    if item.name.contains(&query) || alias_match {
+                        rows.push(FeelingRow::Feeling { group, feeling });
+                    }
+                }
             }
+            return rows;
+        }
+        for (group, g) in self.groups.iter().enumerate() {
+            rows.push(FeelingRow::Header { group });
+            if self.expanded[group] {
+                for feeling in 0..g.feelings.len() {
+                    rows.push(FeelingRow::Feeling { group, feeling });
+                }
+            }
+        }
+        rows
+    }
+
+    /// Toggle keyboard focus between the list and the search input.
+    pub(crate) fn switch_focus(&mut self) {
+        self.focus = match self.focus {
+            EditMetadataFocus::List => EditMetadataFocus::Input,
+            EditMetadataFocus::Input => EditMetadataFocus::List,
+        };
+    }
+
+    /// Re-run the filter after the query changed: reset the scroll and land the
+    /// cursor on the first match.
+    pub(crate) fn rebuild_filter(&mut self) {
+        self.list.set_offset(0);
+        self.normalize_list_state();
+        self.select_index(0);
+    }
+
+    /// Whether any feeling in `group` is currently selected.
+    pub(crate) fn group_selected_count(&self, group: usize) -> usize {
+        self.groups[group]
+            .feelings
+            .iter()
+            .filter(|item| self.selected.iter().any(|value| value.as_str() == item.name))
+            .count()
+    }
+
+    /// Visible-row index of `group`'s header.
+    fn header_index(&self, group: usize) -> usize {
+        (0..group)
+            .map(|g| 1 + if self.expanded[g] { self.groups[g].feelings.len() } else { 0 })
+            .sum()
+    }
+
+    /// Space/click on the current row: toggle a feeling's selection, or fold the
+    /// group open/closed when the row is a header.
+    pub(crate) fn toggle_selected(&mut self) {
+        let rows = self.visible_rows();
+        let Some(row) = self.selected_index().and_then(|index| rows.get(index)) else {
+            return;
+        };
+        match *row {
+            FeelingRow::Header { group } => self.expanded[group] = !self.expanded[group],
+            FeelingRow::Feeling { group, feeling } => {
+                let name = self.groups[group].feelings[feeling].name;
+                if let Some(pos) = self.selected.iter().position(|v| v.as_str() == name) {
+                    self.selected.remove(pos);
+                } else {
+                    self.selected.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    /// Right arrow: open the group under the cursor (a header, or the group a
+    /// feeling belongs to — already open in that case). No-op while filtering,
+    /// where the flat match list has no groups to fold.
+    pub(crate) fn expand_selected(&mut self) {
+        if self.is_filtering() {
+            return;
+        }
+        let rows = self.visible_rows();
+        if let Some(FeelingRow::Header { group }) =
+            self.selected_index().and_then(|index| rows.get(index))
+        {
+            self.expanded[*group] = true;
+        }
+    }
+
+    /// Left arrow: close the group under the cursor. When a feeling is focused,
+    /// collapse its parent group and move the cursor up to that header. No-op
+    /// while filtering.
+    pub(crate) fn collapse_selected(&mut self) {
+        if self.is_filtering() {
+            return;
+        }
+        let rows = self.visible_rows();
+        match self.selected_index().and_then(|index| rows.get(index)) {
+            Some(FeelingRow::Header { group }) => self.expanded[*group] = false,
+            Some(FeelingRow::Feeling { group, .. }) => {
+                let group = *group;
+                self.expanded[group] = false;
+                let header = self.header_index(group);
+                self.select_index(header);
+            }
+            None => {}
         }
     }
 }
@@ -380,7 +511,7 @@ impl ListNav for EditFeelingState {
     }
 
     fn item_count(&self) -> usize {
-        self.all_feelings.len()
+        self.visible_rows().len()
     }
 }
 
@@ -490,6 +621,7 @@ pub(crate) enum Overlay {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use journal_core::feelings::Feeling;
 
     fn tag_state(count: usize) -> EditMetadataState {
         let all_values: Vec<(String, usize)> = (0..count)
@@ -497,6 +629,128 @@ mod tests {
             .collect();
         let filtered: Vec<usize> = (0..count).collect();
         EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new(), count)
+    }
+
+    static FEELING_FIXTURE: &[FeelingGroup] = &[
+        FeelingGroup {
+            name: "Peace",
+            feelings: &[
+                Feeling {
+                    name: "calm",
+                    search_aliases: &["composed"],
+                },
+                Feeling {
+                    name: "content",
+                    search_aliases: &[],
+                },
+            ],
+        },
+        FeelingGroup {
+            name: "Joy",
+            feelings: &[Feeling {
+                name: "joyful",
+                search_aliases: &[],
+            }],
+        },
+    ];
+
+    fn feeling_state() -> EditFeelingState {
+        EditFeelingState::new(FEELING_FIXTURE, Vec::new())
+    }
+
+    #[test]
+    fn feelings_start_collapsed_showing_only_headers() {
+        let state = feeling_state();
+        assert_eq!(state.item_count(), 2);
+        assert_eq!(state.selected_index(), Some(0));
+        assert!(matches!(
+            state.visible_rows()[0],
+            FeelingRow::Header { group: 0 }
+        ));
+    }
+
+    #[test]
+    fn feelings_expand_and_collapse_change_visible_rows() {
+        let mut state = feeling_state();
+        state.expand_selected(); // open "Peace" (2 feelings)
+        assert_eq!(state.item_count(), 4); // header + 2 feelings + header
+        state.move_down();
+        state.move_down(); // now on "content"
+        assert!(matches!(
+            state.visible_rows()[state.selected_index().unwrap()],
+            FeelingRow::Feeling { group: 0, feeling: 1 }
+        ));
+        // Collapsing from inside the group returns the cursor to its header.
+        state.collapse_selected();
+        assert_eq!(state.item_count(), 2);
+        assert_eq!(state.selected_index(), Some(0));
+    }
+
+    #[test]
+    fn feelings_toggle_selects_feelings_and_folds_headers() {
+        let mut state = feeling_state();
+        // Space on a header expands it rather than selecting anything.
+        state.toggle_selected();
+        assert!(state.selected.is_empty());
+        assert!(state.expanded[0]);
+        // Space on a feeling toggles selection.
+        state.move_down();
+        state.toggle_selected();
+        assert_eq!(state.selected, vec!["calm".to_string()]);
+        assert_eq!(state.group_selected_count(0), 1);
+    }
+
+    #[test]
+    fn feelings_search_flattens_matches_across_groups() {
+        let mut state = feeling_state();
+        state.input = "cont".to_string(); // matches "content" only
+        state.rebuild_filter();
+
+        assert!(state.is_filtering());
+        let rows = state.visible_rows();
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(
+            rows[0],
+            FeelingRow::Feeling { group: 0, feeling: 1 } // content
+        ));
+        // Toggling the sole match selects it.
+        state.toggle_selected();
+        assert_eq!(state.selected, vec!["content".to_string()]);
+
+        // Expand/collapse are inert while filtering.
+        state.expand_selected();
+        state.collapse_selected();
+        assert!(!state.expanded[0]);
+    }
+
+    #[test]
+    fn feelings_search_matches_aliases_and_selects_canonical() {
+        let mut state = feeling_state();
+        state.input = "composed".to_string(); // alias of "calm"
+        state.rebuild_filter();
+
+        let rows = state.visible_rows();
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(
+            rows[0],
+            FeelingRow::Feeling { group: 0, feeling: 0 } // calm
+        ));
+        // Toggling the alias match selects the canonical feeling, not the alias.
+        state.toggle_selected();
+        assert_eq!(state.selected, vec!["calm".to_string()]);
+    }
+
+    #[test]
+    fn feelings_clearing_search_restores_grouped_view() {
+        let mut state = feeling_state();
+        state.input = "happy-nope".to_string();
+        state.rebuild_filter();
+        assert!(state.visible_rows().is_empty());
+
+        state.input.clear();
+        state.rebuild_filter();
+        // Back to one row per (collapsed) group header.
+        assert_eq!(state.item_count(), state.groups.len());
     }
 
     #[test]

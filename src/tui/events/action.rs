@@ -61,6 +61,11 @@ pub(crate) enum Action {
     FeelingsMoveUp,
     FeelingsMoveDown,
     FeelingsToggle,
+    FeelingsExpand,
+    FeelingsCollapse,
+    FeelingsSwitchFocus,
+    FeelingsInput(char),
+    FeelingsBackspace,
     FeelingsSave,
     // Mood overlay
     MoodDecrease,
