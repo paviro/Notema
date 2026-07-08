@@ -44,11 +44,11 @@ pub(crate) enum HintId {
     OpenImageViewer,
     HintsToggle,
     ToggleJournals,
-    StatsTab,
-    StatsScope,
-    StatsTimeframe,
-    ExpandStats,
-    CloseStats,
+    InsightsTab,
+    InsightsScope,
+    InsightsTimeframe,
+    ExpandInsights,
+    CloseInsights,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -447,18 +447,18 @@ fn browse_footer_line(app: &App) -> HintLine {
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
         }
-        Focus::Stats => {
+        Focus::Insights => {
             let mut hints = vec![
-                Hint::new("tabs", "←/→", HintId::StatsTab),
-                Hint::new("scope", "g", HintId::StatsScope),
+                Hint::new("tabs", "←/→", HintId::InsightsTab),
+                Hint::new("scope", "g", HintId::InsightsScope),
             ];
-            if app.nav.stats_tab.uses_timeframe() {
-                hints.push(Hint::new("window", "w", HintId::StatsTimeframe));
+            if app.nav.insights_tab.uses_timeframe() {
+                hints.push(Hint::new("window", "w", HintId::InsightsTimeframe));
             }
-            if app.nav.stats_fullscreen {
-                hints.push(Hint::new("close", "enter/esc", HintId::CloseStats));
+            if app.nav.insights_fullscreen {
+                hints.push(Hint::new("close", "enter/esc", HintId::CloseInsights));
             } else {
-                hints.push(Hint::new("expand", "enter", HintId::ExpandStats));
+                hints.push(Hint::new("expand", "enter", HintId::ExpandInsights));
             }
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
             hints.push(journals_hint(app));

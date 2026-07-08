@@ -15,7 +15,7 @@ pub(crate) struct TuiLayout {
     pub(crate) journals: Option<PanelGeometry>,
     pub(crate) entries: Option<EntryListGeometry>,
     pub(crate) entry_view: Option<PanelGeometry>,
-    pub(crate) stats: Option<PanelGeometry>,
+    pub(crate) insights: Option<PanelGeometry>,
     pub(crate) single_panel: bool,
 }
 
@@ -37,7 +37,7 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
         journals: None,
         entries: None,
         entry_view: None,
-        stats: None,
+        insights: None,
         single_panel,
     };
 
@@ -51,8 +51,8 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
     // Likewise for an expanded insights panel: hand it the whole content area and
     // let its responsive renderer pick a larger, multi-column layout from the
     // bigger `Rect` — no fullscreen flag reaches the render code.
-    if app.stats_is_fullscreen(content.width) {
-        layout.stats = Some(PanelGeometry::new(content));
+    if app.insights_is_fullscreen(content.width) {
+        layout.insights = Some(PanelGeometry::new(content));
         return layout;
     }
 
@@ -62,9 +62,9 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
                 layout.journals = Some(PanelGeometry::new(content))
             }
             Focus::EntryView => layout.entry_view = Some(PanelGeometry::new(content)),
-            // Stats isn't reachable at single-panel width, but a resize can strand
+            // Insights isn't reachable at single-panel width, but a resize can strand
             // focus here — show the panel full-width so it stays visible.
-            Focus::Stats => layout.stats = Some(PanelGeometry::new(content)),
+            Focus::Insights => layout.insights = Some(PanelGeometry::new(content)),
             Focus::Journals | Focus::Entries => {
                 layout.entries = Some(EntryListGeometry::new(content))
             }
@@ -85,10 +85,10 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
             layout.journals = Some(PanelGeometry::new(body[0]));
             layout.entries = Some(EntryListGeometry::new(body[1]));
             // The right column is the insights panel whenever no entry is
-            // previewed (Journals/Entries/Stats focus with nothing selected), and
+            // previewed (Journals/Entries/Insights focus with nothing selected), and
             // the entry viewer once an entry is selected.
-            if app.show_journal_stats_preview() {
-                layout.stats = Some(PanelGeometry::new(body[2]));
+            if app.show_journal_insights_preview() {
+                layout.insights = Some(PanelGeometry::new(body[2]));
             } else {
                 layout.entry_view = Some(PanelGeometry::new(body[2]));
             }

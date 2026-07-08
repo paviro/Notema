@@ -23,7 +23,7 @@ fn changing_selected_entry_resets_entry_view_scroll() {
 }
 
 #[test]
-fn scrolling_up_past_first_entry_deselects_and_shows_stats() {
+fn scrolling_up_past_first_entry_deselects_and_shows_insights() {
     let dir = tempdir().unwrap();
     let entry_dir = dir.path().join("work").join("2026-07-01");
     fs::create_dir_all(&entry_dir).unwrap();
@@ -35,21 +35,21 @@ fn scrolling_up_past_first_entry_deselects_and_shows_stats() {
     app.select_journal_by_name("work");
     assert_eq!(app.nav.selected_entry_index, Some(0));
 
-    // Up from the first entry deselects, revealing the journal stats preview.
+    // Up from the first entry deselects, revealing the journal insights preview.
     app.move_selection(-1);
     assert_eq!(app.nav.selected_entry_index, None);
-    assert!(app.show_journal_stats_preview());
+    assert!(app.show_journal_insights_preview());
     assert!(!app.entries_highlighted());
     assert!(app.selected_entry_target().is_none());
 
     // Down reselects the first entry.
     app.move_selection(1);
     assert_eq!(app.nav.selected_entry_index, Some(0));
-    assert!(!app.show_journal_stats_preview());
+    assert!(!app.show_journal_insights_preview());
 }
 
 #[test]
-fn focusing_journals_shows_stats_even_with_a_lingering_entry_selection() {
+fn focusing_journals_shows_insights_even_with_a_lingering_entry_selection() {
     let dir = tempdir().unwrap();
     let entry_dir = dir.path().join("work").join("2026-07-01");
     fs::create_dir_all(&entry_dir).unwrap();
@@ -61,21 +61,21 @@ fn focusing_journals_shows_stats_even_with_a_lingering_entry_selection() {
     app.select_entry_index(0);
     app.nav.focus = Focus::Entries;
     // Focused on the entry, its preview shows and its row is highlighted.
-    assert!(!app.show_journal_stats_preview());
+    assert!(!app.show_journal_insights_preview());
     assert!(app.entries_highlighted());
 
     // Moving focus back to the journal column (e.g. clicking the already-selected
     // journal, or Left from the entry) leaves the selection index untouched, but the
-    // right column must revert to stats and the row must lose its highlight — the two
+    // right column must revert to insights and the row must lose its highlight — the two
     // never disagree.
     app.nav.focus = Focus::Journals;
     assert_eq!(app.nav.selected_entry_index, Some(0));
-    assert!(app.show_journal_stats_preview());
+    assert!(app.show_journal_insights_preview());
     assert!(!app.entries_highlighted());
 }
 
 #[test]
-fn hidden_journals_launch_focuses_entries_with_stats_preview() {
+fn hidden_journals_launch_focuses_entries_with_insights_preview() {
     let dir = tempdir().unwrap();
     let entry_dir = dir.path().join("work").join("2026-07-01");
     fs::create_dir_all(&entry_dir).unwrap();
@@ -88,7 +88,7 @@ fn hidden_journals_launch_focuses_entries_with_stats_preview() {
 
     assert_eq!(app.nav.focus, Focus::Entries);
     assert_eq!(app.nav.selected_entry_index, None);
-    assert!(app.show_journal_stats_preview());
+    assert!(app.show_journal_insights_preview());
 }
 
 #[test]

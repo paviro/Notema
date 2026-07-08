@@ -90,7 +90,7 @@ fn layout_places_hit_targets_in_three_columns() {
 
     assert!(!layout.single_panel);
     assert!(layout.entry_view.is_some());
-    assert!(layout.stats.is_none());
+    assert!(layout.insights.is_none());
     assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 27, 19));
     assert_eq!(layout.entries.unwrap().panel.area, Rect::new(27, 0, 47, 19));
     assert_eq!(layout.entry_view.unwrap().area, Rect::new(74, 0, 66, 19));
@@ -106,7 +106,7 @@ fn layout_keeps_three_columns_at_minimum_inline_width() {
 
     assert!(!layout.single_panel);
     assert!(layout.entry_view.is_some());
-    assert!(layout.stats.is_none());
+    assert!(layout.insights.is_none());
     let ch = 20 - footer_height(&app, INLINE_ENTRY_VIEW_MIN_WIDTH);
     assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 27, ch));
     assert_eq!(layout.entries.unwrap().panel.area, Rect::new(27, 0, 47, ch));
@@ -122,7 +122,7 @@ fn layout_places_hit_targets_in_two_columns_without_inline_entry_view() {
 
     assert!(!layout.single_panel);
     assert!(layout.entry_view.is_none());
-    assert!(layout.stats.is_none());
+    assert!(layout.insights.is_none());
     let ch = 20 - footer_height(&app, 90);
     assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 27, ch));
     assert_eq!(layout.entries.unwrap().panel.area, Rect::new(27, 0, 63, ch));
@@ -137,7 +137,7 @@ fn layout_shifts_two_columns_to_entries_and_preview_when_entries_are_active() {
 
     assert!(!layout.single_panel);
     assert!(layout.entry_view.is_some());
-    assert!(layout.stats.is_none());
+    assert!(layout.insights.is_none());
     assert!(layout.journals.is_none());
     let content_height = 20 - footer_height(&app, 90);
     assert_eq!(
@@ -984,7 +984,7 @@ fn selected_entry_is_not_reversed_when_journals_are_focused() {
 
 /// An `App` with a `work` journal holding one entry carrying mood, feelings, and
 /// a person, with `work` selected and the Journals column focused (so the tabbed
-/// stats panel is the visible right pane).
+/// insights panel is the visible right pane).
 fn app_with_metadata_entry() -> App {
     let dir = tempdir().unwrap();
     let entry_dir = dir.path().join("work").join("2026-07-01");
@@ -1003,16 +1003,16 @@ fn app_with_metadata_entry() -> App {
 
 /// Put `app` into the state where the insights panel is the visible, focused
 /// right pane: browsing with the panel focused and no entry selected.
-fn focus_insights(app: &mut App, tab: insights::StatsTab) {
+fn focus_insights(app: &mut App, tab: insights::InsightsTab) {
     app.nav.selected_entry_index = None;
-    app.nav.focus = Focus::Stats;
-    app.nav.stats_tab = tab;
+    app.nav.focus = Focus::Insights;
+    app.nav.insights_tab = tab;
 }
 
 #[test]
-fn stats_panel_shows_all_tabs_in_its_border() {
+fn insights_panel_shows_all_tabs_in_its_border() {
     let mut app = app_with_entry();
-    focus_insights(&mut app, insights::StatsTab::Overview);
+    focus_insights(&mut app, insights::InsightsTab::Overview);
     // Wide enough that the strip uses full titles rather than short/initials.
     let text = render_text(app, 170, 20);
 
@@ -1022,9 +1022,9 @@ fn stats_panel_shows_all_tabs_in_its_border() {
 }
 
 #[test]
-fn stats_overview_tab_shows_journal_summary() {
+fn insights_overview_tab_shows_journal_summary() {
     let mut app = app_with_entry();
-    focus_insights(&mut app, insights::StatsTab::Overview);
+    focus_insights(&mut app, insights::InsightsTab::Overview);
     let text = render_text(app, 140, 20);
 
     // The paired cards plus the totals in the title box.
@@ -1036,9 +1036,9 @@ fn stats_overview_tab_shows_journal_summary() {
 }
 
 #[test]
-fn stats_switching_tab_changes_the_body() {
+fn insights_switching_tab_changes_the_body() {
     let mut app = app_with_entry();
-    focus_insights(&mut app, insights::StatsTab::Feelings);
+    focus_insights(&mut app, insights::InsightsTab::Feelings);
 
     let text = render_text(app, 140, 20);
 
@@ -1049,9 +1049,9 @@ fn stats_switching_tab_changes_the_body() {
 }
 
 #[test]
-fn stats_feelings_tab_renders_frequency_bar() {
+fn insights_feelings_tab_renders_frequency_bar() {
     let mut app = app_with_metadata_entry();
-    focus_insights(&mut app, insights::StatsTab::Feelings);
+    focus_insights(&mut app, insights::InsightsTab::Feelings);
 
     let text = render_text(app, 140, 20);
 
@@ -1092,9 +1092,9 @@ fn app_with_drivers() -> App {
 }
 
 #[test]
-fn stats_drivers_tab_ranks_lifts_and_drains() {
+fn insights_drivers_tab_ranks_lifts_and_drains() {
     let mut app = app_with_drivers();
-    focus_insights(&mut app, insights::StatsTab::Drivers);
+    focus_insights(&mut app, insights::InsightsTab::Drivers);
 
     let text = render_text(app, 140, 20);
 
@@ -1104,16 +1104,19 @@ fn stats_drivers_tab_ranks_lifts_and_drains() {
 }
 
 #[test]
-fn stats_drivers_tab_renders_headed_table_with_mood_bar() {
+fn insights_drivers_tab_renders_headed_table_with_mood_bar() {
     let mut app = app_with_drivers();
-    focus_insights(&mut app, insights::StatsTab::Drivers);
+    focus_insights(&mut app, insights::InsightsTab::Drivers);
     // Expanded to full screen — the "bigger screen" case with room for the bar.
-    app.nav.stats_fullscreen = true;
+    app.nav.insights_fullscreen = true;
 
     let text = render_text(app, 140, 20);
 
     assert!(text.contains("Count"), "table header missing: {text}");
-    assert!(text.contains("Drains / lifts"), "bar column missing: {text}");
+    assert!(
+        text.contains("Drains / lifts"),
+        "bar column missing: {text}"
+    );
     assert!(text.contains('│'), "bar centre marker missing: {text}");
 }
 
@@ -1160,12 +1163,12 @@ fn app_with_many_drivers(count: usize) -> App {
 }
 
 #[test]
-fn stats_list_scrolls_to_reveal_later_rows() {
+fn insights_list_scrolls_to_reveal_later_rows() {
     let focused_drivers = |scroll: u16| {
         let mut app = app_with_many_drivers(30);
-        focus_insights(&mut app, insights::StatsTab::Drivers);
-        app.nav.stats_fullscreen = true;
-        app.nav.scroll.stats = scroll;
+        focus_insights(&mut app, insights::InsightsTab::Drivers);
+        app.nav.insights_fullscreen = true;
+        app.nav.scroll.insights = scroll;
         render_text(app, 120, 12)
     };
 
@@ -1177,31 +1180,46 @@ fn stats_list_scrolls_to_reveal_later_rows() {
     // Jumping to the end (like the End key) reveals the last row and drops the first;
     // the render clamps the saturated offset to the final page.
     let bottom = focused_drivers(u16::MAX);
-    assert!(bottom.contains("p29"), "last row should scroll into view: {bottom}");
-    assert!(!bottom.contains("p00"), "first row should scroll away: {bottom}");
+    assert!(
+        bottom.contains("p29"),
+        "last row should scroll into view: {bottom}"
+    );
+    assert!(
+        !bottom.contains("p00"),
+        "first row should scroll away: {bottom}"
+    );
 }
 
 #[test]
-fn stats_feelings_tab_shows_balance_and_feeling_table() {
+fn insights_feelings_tab_shows_balance_and_feeling_table() {
     let mut app = app_with_metadata_entry();
-    focus_insights(&mut app, insights::StatsTab::Feelings);
+    focus_insights(&mut app, insights::InsightsTab::Feelings);
 
     let text = render_text(app, 140, 30);
 
-    assert!(text.contains("Balance"), "feelings tab missing balance: {text}");
-    assert!(text.contains("calm"), "feelings table missing the feeling: {text}");
+    assert!(
+        text.contains("Balance"),
+        "feelings tab missing balance: {text}"
+    );
+    assert!(
+        text.contains("calm"),
+        "feelings table missing the feeling: {text}"
+    );
 }
 
 #[test]
-fn stats_writing_tab_renders_habit_sections() {
+fn insights_writing_tab_renders_habit_sections() {
     let mut app = app_with_metadata_entry();
-    focus_insights(&mut app, insights::StatsTab::Writing);
+    focus_insights(&mut app, insights::InsightsTab::Writing);
     // Wide + full screen so the weekday/hour charts sit side by side.
-    app.nav.stats_fullscreen = true;
+    app.nav.insights_fullscreen = true;
 
     let text = render_text(app, 140, 20);
 
-    assert!(text.contains("Streak"), "writing tab missing streak: {text}");
+    assert!(
+        text.contains("Streak"),
+        "writing tab missing streak: {text}"
+    );
     assert!(
         text.contains("By weekday") && text.contains("By hour"),
         "writing tab missing side-by-side histograms: {text}"
@@ -1209,9 +1227,9 @@ fn stats_writing_tab_renders_habit_sections() {
 }
 
 #[test]
-fn stats_mood_tab_renders_temporal_sections() {
+fn insights_mood_tab_renders_temporal_sections() {
     let mut app = app_with_metadata_entry();
-    focus_insights(&mut app, insights::StatsTab::Mood);
+    focus_insights(&mut app, insights::InsightsTab::Mood);
 
     let text = render_text(app, 140, 20);
 
@@ -1220,60 +1238,75 @@ fn stats_mood_tab_renders_temporal_sections() {
         text.contains("Mood over time"),
         "mood tab missing time series: {text}"
     );
-    assert!(text.contains("By weekday"), "mood tab missing weekday: {text}");
-    assert!(!text.contains("Distribution"), "distribution should be gone: {text}");
+    assert!(
+        text.contains("By weekday"),
+        "mood tab missing weekday: {text}"
+    );
+    assert!(
+        !text.contains("Distribution"),
+        "distribution should be gone: {text}"
+    );
 }
 
 #[test]
-fn stats_tab_hit_test_maps_border_columns_to_tabs() {
+fn insights_tab_hit_test_maps_border_columns_to_tabs() {
     // Inner width 47 fits all five full labels: " Overview · Writing · Mood ·
     // Feelings · Drivers", the title starting one past the corner at 75.
     let area = Rect::new(74, 0, 49, 19);
     assert_eq!(
-        stats_tab_at(area, 78, 0),
-        Some(insights::StatsTab::Overview) // 76..84
+        insights_tab_at(area, 78, 0),
+        Some(insights::InsightsTab::Overview) // 76..84
     );
-    assert_eq!(stats_tab_at(area, 90, 0), Some(insights::StatsTab::Writing)); // 87..94
-    assert_eq!(stats_tab_at(area, 98, 0), Some(insights::StatsTab::Mood)); // 97..101
     assert_eq!(
-        stats_tab_at(area, 107, 0),
-        Some(insights::StatsTab::Feelings) // 104..112
+        insights_tab_at(area, 90, 0),
+        Some(insights::InsightsTab::Writing)
+    ); // 87..94
+    assert_eq!(
+        insights_tab_at(area, 98, 0),
+        Some(insights::InsightsTab::Mood)
+    ); // 97..101
+    assert_eq!(
+        insights_tab_at(area, 107, 0),
+        Some(insights::InsightsTab::Feelings) // 104..112
     );
-    assert_eq!(stats_tab_at(area, 117, 0), Some(insights::StatsTab::Drivers)); // 115..122
+    assert_eq!(
+        insights_tab_at(area, 117, 0),
+        Some(insights::InsightsTab::Drivers)
+    ); // 115..122
     // The corner, the gaps, and other rows are not tabs.
-    assert_eq!(stats_tab_at(area, 74, 0), None);
-    assert_eq!(stats_tab_at(area, 85, 0), None);
-    assert_eq!(stats_tab_at(area, 78, 1), None);
+    assert_eq!(insights_tab_at(area, 74, 0), None);
+    assert_eq!(insights_tab_at(area, 85, 0), None);
+    assert_eq!(insights_tab_at(area, 78, 1), None);
 }
 
 #[test]
-fn stats_active_tab_inverts_only_when_panel_is_focused() {
+fn insights_active_tab_inverts_only_when_panel_is_focused() {
     // Focused: the active tab in the border uses the reversed style.
     let mut focused = app_with_entry();
-    focus_insights(&mut focused, insights::StatsTab::Overview);
+    focus_insights(&mut focused, insights::InsightsTab::Overview);
     let backend = render_app(focused, 140, 20);
     assert!(
-        stats_border_has_reversed_text(&backend, 140),
+        insights_border_has_reversed_text(&backend, 140),
         "focused panel should invert its active tab"
     );
 
     // Unfocused (Journals): the active tab is bold, not reversed. A focused
-    // Journals panel reverses its own title, so the check is scoped to the stats
+    // Journals panel reverses its own title, so the check is scoped to the insights
     // column to ignore that.
     let mut unfocused = app_with_entry();
     unfocused.nav.selected_entry_index = None;
     unfocused.nav.focus = Focus::Journals;
     let backend = render_app(unfocused, 140, 20);
     assert!(
-        !stats_border_has_reversed_text(&backend, 140),
+        !insights_border_has_reversed_text(&backend, 140),
         "unfocused panel must not invert its active tab"
     );
 }
 
-/// Whether any non-blank cell in the stats panel's top border row is reversed —
-/// the mark of the focused active tab. Scoped to the right-hand stats column
+/// Whether any non-blank cell in the insights panel's top border row is reversed —
+/// the mark of the focused active tab. Scoped to the right-hand insights column
 /// (past the journal + entry columns) so a focused Journals title doesn't count.
-fn stats_border_has_reversed_text(backend: &TestBackend, width: u16) -> bool {
+fn insights_border_has_reversed_text(backend: &TestBackend, width: u16) -> bool {
     const STATS_COLUMN_X: usize = 74;
     backend
         .buffer()

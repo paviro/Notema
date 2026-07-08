@@ -7,7 +7,7 @@ use crate::tui::{
     app::{App, Focus, Mode, entry_view_is_available},
     image::image_for_digit,
     render,
-    render::insights::StatsTab,
+    render::insights::InsightsTab,
     state::{EditMetadataFocus, Overlay},
 };
 
@@ -74,15 +74,15 @@ fn scroll_key_to_action(key: KeyCode) -> Option<Action> {
 }
 
 /// Vertical-scroll keys for the focused insights list tabs, mirroring
-/// [`scroll_key_to_action`] but driving the stats offset.
-fn stats_scroll_key_to_action(key: KeyCode) -> Option<Action> {
+/// [`scroll_key_to_action`] but driving the insights offset.
+fn insights_scroll_key_to_action(key: KeyCode) -> Option<Action> {
     match key {
-        KeyCode::Up => Some(Action::ScrollStats(-1)),
-        KeyCode::Down => Some(Action::ScrollStats(1)),
-        KeyCode::PageUp => Some(Action::PageStats(-1)),
-        KeyCode::PageDown => Some(Action::PageStats(1)),
-        KeyCode::Home => Some(Action::ScrollStatsToStart),
-        KeyCode::End => Some(Action::ScrollStatsToEnd),
+        KeyCode::Up => Some(Action::ScrollInsights(-1)),
+        KeyCode::Down => Some(Action::ScrollInsights(1)),
+        KeyCode::PageUp => Some(Action::PageInsights(-1)),
+        KeyCode::PageDown => Some(Action::PageInsights(1)),
+        KeyCode::Home => Some(Action::ScrollInsightsToStart),
+        KeyCode::End => Some(Action::ScrollInsightsToEnd),
         _ => None,
     }
 }
@@ -95,9 +95,9 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
     }
     // On a focused list tab, the arrow/page keys scroll the table rather than
     // moving a selection (the panel has none).
-    if app.nav.focus == Focus::Stats
-        && app.nav.stats_tab.is_list()
-        && let Some(action) = stats_scroll_key_to_action(key.code)
+    if app.nav.focus == Focus::Insights
+        && app.nav.insights_tab.is_list()
+        && let Some(action) = insights_scroll_key_to_action(key.code)
     {
         return Some(action);
     }
@@ -144,12 +144,12 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Esc if app.nav.focus == Focus::EntryView => Some(Action::FocusLeft),
         // Enter expands the focused insights panel to full screen; a second Enter
         // (or Esc) collapses it. Left/Right keep cycling tabs either way.
-        KeyCode::Enter if app.nav.focus == Focus::Stats && !app.nav.stats_fullscreen => {
-            Some(Action::ExpandStats)
+        KeyCode::Enter if app.nav.focus == Focus::Insights && !app.nav.insights_fullscreen => {
+            Some(Action::ExpandInsights)
         }
-        KeyCode::Enter if app.nav.focus == Focus::Stats => Some(Action::CollapseStats),
-        KeyCode::Esc if app.nav.focus == Focus::Stats && app.nav.stats_fullscreen => {
-            Some(Action::CollapseStats)
+        KeyCode::Enter if app.nav.focus == Focus::Insights => Some(Action::CollapseInsights),
+        KeyCode::Esc if app.nav.focus == Focus::Insights && app.nav.insights_fullscreen => {
+            Some(Action::CollapseInsights)
         }
         KeyCode::Enter if app.nav.focus == Focus::Journals => Some(Action::FocusRight),
         KeyCode::Enter if app.can_act_on_selected_entry() => Some(Action::ViewSelected),
@@ -158,10 +158,12 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Char('e') if app.can_act_on_selected_entry() => Some(Action::EditSelected),
         // Toggle the insights scope while its panel is focused (its tabs switch
         // with Left/Right, handled through FocusLeft/FocusRight).
-        KeyCode::Char('g') if app.nav.focus == Focus::Stats => Some(Action::ToggleStatsScope),
+        KeyCode::Char('g') if app.nav.focus == Focus::Insights => Some(Action::ToggleInsightsScope),
         // Cycle the rolling window on the mood-driver tabs; inert elsewhere.
-        KeyCode::Char('w') if app.nav.focus == Focus::Stats && app.nav.stats_tab.uses_timeframe() => {
-            Some(Action::CycleStatsTimeframe)
+        KeyCode::Char('w')
+            if app.nav.focus == Focus::Insights && app.nav.insights_tab.uses_timeframe() =>
+        {
+            Some(Action::CycleInsightsTimeframe)
         }
         KeyCode::Char('n') if app.nav.focus == Focus::Journals => Some(Action::NewJournal),
         KeyCode::Char('n') => Some(Action::NewEntry),
@@ -359,14 +361,14 @@ pub(super) fn move_focus_left(app: &mut App) {
         // Left steps back through the insights tabs (staying expanded if it was);
         // from the first tab it leaves the panel back to the entries column, which
         // drops full-screen so re-entering starts collapsed.
-        Focus::Stats if app.nav.stats_tab.index() == 0 => {
-            app.nav.stats_fullscreen = false;
+        Focus::Insights if app.nav.insights_tab.index() == 0 => {
+            app.nav.insights_fullscreen = false;
             Focus::Entries
         }
-        Focus::Stats => {
-            app.nav.stats_tab = app.nav.stats_tab.prev();
-            app.nav.scroll.reset_stats();
-            Focus::Stats
+        Focus::Insights => {
+            app.nav.insights_tab = app.nav.insights_tab.prev();
+            app.nav.scroll.reset_insights();
+            Focus::Insights
         }
         Focus::EntryView => Focus::Entries,
         // When the journal list is hidden, Left stops at Entries so focus never
@@ -390,14 +392,16 @@ pub(super) fn move_focus_right(app: &mut App, entry_view_available: bool) {
         }
         // With no entry to preview, the right column is the insights panel; Right
         // focuses it (landing on the first tab).
-        Focus::Entries if entry_view_available && app.show_journal_stats_preview() => Focus::Stats,
+        Focus::Entries if entry_view_available && app.show_journal_insights_preview() => {
+            Focus::Insights
+        }
         // Right steps forward through the tabs, stopping at the last.
-        Focus::Stats => {
-            if app.nav.stats_tab.index() + 1 < StatsTab::ALL.len() {
-                app.nav.stats_tab = app.nav.stats_tab.next();
-                app.nav.scroll.reset_stats();
+        Focus::Insights => {
+            if app.nav.insights_tab.index() + 1 < InsightsTab::ALL.len() {
+                app.nav.insights_tab = app.nav.insights_tab.next();
+                app.nav.scroll.reset_insights();
             }
-            Focus::Stats
+            Focus::Insights
         }
         Focus::Entries | Focus::EntryView => app.nav.focus,
     };

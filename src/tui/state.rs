@@ -17,7 +17,7 @@ const STATUS_DURATION: Duration = Duration::from_secs(3);
 pub(crate) struct ScrollState {
     pub(crate) entry_view: u16,
     /// First visible row of the insights list tabs, in row units (not pixels).
-    pub(crate) stats: u16,
+    pub(crate) insights: u16,
 }
 
 impl ScrollState {
@@ -28,8 +28,8 @@ impl ScrollState {
 
     /// Reset the insights list scroll — called when the tab, scope, or journal
     /// changes so a new list starts at the top.
-    pub(crate) fn reset_stats(&mut self) {
-        self.stats = 0;
+    pub(crate) fn reset_insights(&mut self) {
+        self.insights = 0;
     }
 }
 

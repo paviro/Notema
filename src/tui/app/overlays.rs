@@ -88,9 +88,11 @@ impl App {
     pub(crate) fn begin_confirm_delete(&mut self) {
         match self.nav.focus {
             Focus::Journals => self.begin_confirm_delete_journal(),
-            // Stats never holds a delete target (its `d` stays unbound), but the
+            // Insights never holds a delete target (its `d` stays unbound), but the
             // match must stay total.
-            Focus::Entries | Focus::EntryView | Focus::Stats => self.begin_confirm_delete_entry(),
+            Focus::Entries | Focus::EntryView | Focus::Insights => {
+                self.begin_confirm_delete_entry()
+            }
         }
     }
 

@@ -104,8 +104,16 @@ pub(crate) fn heading(frame: &mut Frame<'_>, area: Rect, text: &str) -> Rect {
     }
     let title_y = if area.height >= 2 { area.y + 1 } else { area.y };
     frame.render_widget(
-        Paragraph::new(section_divider(area.width as usize, text, DividerAlign::Left)),
-        Rect { y: title_y, height: 1, ..area },
+        Paragraph::new(section_divider(
+            area.width as usize,
+            text,
+            DividerAlign::Left,
+        )),
+        Rect {
+            y: title_y,
+            height: 1,
+            ..area
+        },
     );
     let used = title_y + 1 - area.y;
     Rect {
@@ -292,7 +300,10 @@ pub(crate) fn draw_bars(frame: &mut Frame<'_>, area: Rect, bars: &[Bar]) {
         .map(|bar| {
             let filled = ((bar.fill.clamp(0.0, 1.0) * bar_w as f32).round() as usize).min(bar_w);
             Line::from(vec![
-                Span::raw(format!("{:<label_w$}", truncate_ellipsis(&bar.label, label_w))),
+                Span::raw(format!(
+                    "{:<label_w$}",
+                    truncate_ellipsis(&bar.label, label_w)
+                )),
                 Span::raw(" "),
                 // `▓` (dark shade) shares the airy texture of the `░` empty track
                 // rather than reading as a heavy solid slab.
@@ -324,7 +335,11 @@ pub(crate) fn list_regions(area: Rect, total: usize) -> (Rect, usize, Option<(Re
         height: 1,
         ..area
     };
-    (rows, shown, Some((footer, format!("+{} more", total - shown))))
+    (
+        rows,
+        shown,
+        Some((footer, format!("+{} more", total - shown))),
+    )
 }
 
 pub(crate) fn draw_more_note(frame: &mut Frame<'_>, more: Option<(Rect, String)>) {
@@ -368,7 +383,10 @@ pub(crate) fn draw_histogram(frame: &mut Frame<'_>, area: Rect, values: &[usize]
             }
             let filled = (value as f32 / max as f32 * eighths_per as f32).round() as usize;
             let cell = filled.saturating_sub(lower).min(8);
-            spans.push(Span::styled(ramp_cell(cell).to_string(), theme().bar_fill()));
+            spans.push(Span::styled(
+                ramp_cell(cell).to_string(),
+                theme().bar_fill(),
+            ));
         }
         lines.push(Line::from(spans));
     }
@@ -447,7 +465,11 @@ mod tests {
     #[test]
     fn sentiment_segments_fill_exactly_and_split_by_share() {
         let line = sentiment_segments(3, 0, 1, 8);
-        let width: usize = line.spans.iter().map(|span| span.content.chars().count()).sum();
+        let width: usize = line
+            .spans
+            .iter()
+            .map(|span| span.content.chars().count())
+            .sum();
         assert_eq!(width, 8);
         // 3:0:1 over 8 cells → 6 positive, 0 neutral, 2 negative.
         assert_eq!(line.spans[0].content.chars().count(), 6);

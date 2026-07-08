@@ -1,4 +1,4 @@
-//! The tabbed insights panel. [`draw_journal_stats`] frames the panel with the
+//! The tabbed insights panel. [`draw_journal_insights`] frames the panel with the
 //! tab strip in its top border, resolves the memoized [`Analytics`] once, and
 //! dispatches to one of the five tab renderers. The tab renderers (in the
 //! sibling modules) are pure `(Rect, &Analytics) -> buffer` functions with no
@@ -11,8 +11,11 @@ mod correlate;
 mod drivers;
 mod feelings;
 mod mood;
+mod nav;
 mod overview;
 mod widgets;
+
+pub(crate) use nav::{InsightsScope, InsightsTab, InsightsTimeframe};
 
 use std::ops::Range;
 
@@ -27,19 +30,18 @@ use ratatui::{
 use journal_analytics::Correlate;
 use journal_storage::journal_display_name;
 
-use crate::tui::app::{App, StatsScrollGeometry};
+use crate::tui::app::{App, InsightsScrollGeometry};
 use crate::tui::entry_rows::text_width;
-use crate::tui::render::insights::{StatsScope, StatsTab};
 use crate::tui::render::{render_centered_notice, render_scrollbar_if_needed};
 use crate::tui::surface::panel_content_inner;
 use crate::tui::theme::theme;
 
-pub(crate) fn draw_journal_stats(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
+pub(crate) fn draw_journal_insights(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
     // Cleared each frame; the list tabs repopulate it so a stale scrollbar target
     // can't outlive the tab that drew it.
-    app.stats_scroll = StatsScrollGeometry::default();
-    let focused = app.stats_panel_focused();
-    let tab = app.nav.stats_tab;
+    app.insights_scroll = InsightsScrollGeometry::default();
+    let focused = app.insights_panel_focused();
+    let tab = app.nav.insights_tab;
     // The tabs live in the panel's top border. Scope only differentiates the
     // analytic tabs, so Overview leaves the bottom border unlabeled.
     let inner_width = area.width.saturating_sub(2);
@@ -51,14 +53,15 @@ pub(crate) fn draw_journal_stats(frame: &mut Frame<'_>, area: Rect, app: &mut Ap
             .border_type(BorderType::Thick)
             .border_style(Style::default().add_modifier(Modifier::BOLD));
     }
-    if tab != StatsTab::Overview {
-        block = block
-            .title_bottom(Line::from(format!(" {} ", app.nav.stats_scope.label())).right_aligned());
+    if tab != InsightsTab::Overview {
+        block = block.title_bottom(
+            Line::from(format!(" {} ", app.nav.insights_scope.label())).right_aligned(),
+        );
     }
     // The rolling window sits opposite the scope on tabs that respond to it.
     if tab.uses_timeframe() {
         block = block.title_bottom(
-            Line::from(format!(" {} ", app.nav.stats_timeframe.label())).left_aligned(),
+            Line::from(format!(" {} ", app.nav.insights_timeframe.label())).left_aligned(),
         );
     }
     let content = block.inner(area);
@@ -90,8 +93,8 @@ pub(crate) fn draw_journal_stats(frame: &mut Frame<'_>, area: Rect, app: &mut Ap
     };
 
     match tab {
-        StatsTab::Overview => {
-            let title = if app.nav.stats_scope == StatsScope::All {
+        InsightsTab::Overview => {
+            let title = if app.nav.insights_scope == InsightsScope::All {
                 "All journals".to_string()
             } else {
                 app.selected_journal()
@@ -100,10 +103,10 @@ pub(crate) fn draw_journal_stats(frame: &mut Frame<'_>, area: Rect, app: &mut Ap
             };
             overview::draw(frame, content, &analytics, &title);
         }
-        StatsTab::Writing => cadence::draw(frame, content, &analytics),
-        StatsTab::Mood => mood::draw(frame, content, &analytics),
-        StatsTab::Feelings => draw_feelings(frame, area, content, app, &analytics),
-        StatsTab::Drivers => {
+        InsightsTab::Writing => cadence::draw(frame, content, &analytics),
+        InsightsTab::Mood => mood::draw(frame, content, &analytics),
+        InsightsTab::Feelings => draw_feelings(frame, area, content, app, &analytics),
+        InsightsTab::Drivers => {
             // Merge people/activities/tags for the selected window into one
             // lift/drain ranking; the Rc is dropped before the `&mut app` call.
             let rows = app
@@ -125,9 +128,9 @@ fn draw_feelings(
     app: &mut App,
     analytics: &journal_analytics::Analytics,
 ) {
-    let mut scroll = app.nav.scroll.stats;
+    let mut scroll = app.nav.scroll.insights;
     let metrics = feelings::draw(frame, content, analytics, &mut scroll);
-    app.nav.scroll.stats = scroll;
+    app.nav.scroll.insights = scroll;
     render_scrollbar_if_needed(
         frame,
         panel,
@@ -135,7 +138,7 @@ fn draw_feelings(
         metrics.viewport as u16,
         scroll as usize,
     );
-    app.stats_scroll = StatsScrollGeometry {
+    app.insights_scroll = InsightsScrollGeometry {
         area: panel,
         total: metrics.total,
         viewport: metrics.viewport as u16,
@@ -152,10 +155,10 @@ fn draw_correlate_list(
     items: &[Correlate],
     empty_msg: &str,
 ) {
-    let mut scroll = app.nav.scroll.stats;
+    let mut scroll = app.nav.scroll.insights;
     // On Drivers the trailing column is the feelings that ride with each driver.
     let metrics = correlate::draw(frame, content, items, empty_msg, "Feelings", &mut scroll);
-    app.nav.scroll.stats = scroll;
+    app.nav.scroll.insights = scroll;
     render_scrollbar_if_needed(
         frame,
         panel,
@@ -163,7 +166,7 @@ fn draw_correlate_list(
         metrics.viewport as u16,
         scroll as usize,
     );
-    app.stats_scroll = StatsScrollGeometry {
+    app.insights_scroll = InsightsScrollGeometry {
         area: panel,
         total: metrics.total,
         viewport: metrics.viewport as u16,
@@ -180,18 +183,21 @@ enum StripLevel {
 
 /// Total strip width for a label function: a leading space, every label, and a
 /// 3-cell ` · ` between each.
-fn strip_width(label: impl Fn(StatsTab) -> &'static str) -> usize {
-    let labels: usize = StatsTab::ALL.iter().map(|tab| text_width(label(*tab))).sum();
-    1 + labels + 3 * (StatsTab::ALL.len() - 1)
+fn strip_width(label: impl Fn(InsightsTab) -> &'static str) -> usize {
+    let labels: usize = InsightsTab::ALL
+        .iter()
+        .map(|tab| text_width(label(*tab)))
+        .sum();
+    1 + labels + 3 * (InsightsTab::ALL.len() - 1)
 }
 
 /// Pick the widest label set that fits `width`: full titles, then short titles,
 /// then single-letter initials (which always fit).
 fn strip_level(width: u16) -> StripLevel {
     let width = width as usize;
-    if strip_width(StatsTab::title) <= width {
+    if strip_width(InsightsTab::title) <= width {
         StripLevel::Full
-    } else if strip_width(StatsTab::short_title) <= width {
+    } else if strip_width(InsightsTab::short_title) <= width {
         StripLevel::Short
     } else {
         StripLevel::Initial
@@ -199,7 +205,7 @@ fn strip_level(width: u16) -> StripLevel {
 }
 
 /// The label for `tab` at the strip's current fit level.
-fn tab_label(tab: StatsTab, width: u16) -> &'static str {
+fn tab_label(tab: InsightsTab, width: u16) -> &'static str {
     match strip_level(width) {
         StripLevel::Full => tab.title(),
         StripLevel::Short => tab.short_title(),
@@ -210,11 +216,11 @@ fn tab_label(tab: StatsTab, width: u16) -> &'static str {
 /// The column range each tab label occupies within a border title of `width`,
 /// measured from the title's start (a leading space, then labels with a 3-cell
 /// ` · ` between). The one source of truth shared by [`tabs_title_line`] and
-/// [`stats_tab_at`] so drawing and hit-testing never drift.
-fn tab_strip_segments(width: u16) -> Vec<(StatsTab, Range<u16>)> {
-    let mut segments = Vec::with_capacity(StatsTab::ALL.len());
+/// [`insights_tab_at`] so drawing and hit-testing never drift.
+fn tab_strip_segments(width: u16) -> Vec<(InsightsTab, Range<u16>)> {
+    let mut segments = Vec::with_capacity(InsightsTab::ALL.len());
     let mut x: u16 = 1; // leading space
-    for (index, tab) in StatsTab::ALL.iter().enumerate() {
+    for (index, tab) in InsightsTab::ALL.iter().enumerate() {
         if index > 0 {
             x += 3; // " · "
         }
@@ -228,9 +234,9 @@ fn tab_strip_segments(width: u16) -> Vec<(StatsTab, Range<u16>)> {
 /// The tab bar as a border title: `Overview · Cadence · Mood · Feelings · People`
 /// (short labels when they won't fit). The active tab is inverted while focused,
 /// otherwise just bold; the rest stay dim.
-fn tabs_title_line(active: StatsTab, focused: bool, width: u16) -> Line<'static> {
+fn tabs_title_line(active: InsightsTab, focused: bool, width: u16) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
-    for (index, tab) in StatsTab::ALL.iter().enumerate() {
+    for (index, tab) in InsightsTab::ALL.iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(" · ", theme().muted()));
         }
@@ -246,7 +252,7 @@ fn tabs_title_line(active: StatsTab, focused: bool, width: u16) -> Line<'static>
 
 /// The tab whose border-title label covers `(column, row)`, or `None`. The strip
 /// is the top border row; its title starts one cell past the corner.
-pub(crate) fn stats_tab_at(area: Rect, column: u16, row: u16) -> Option<StatsTab> {
+pub(crate) fn insights_tab_at(area: Rect, column: u16, row: u16) -> Option<InsightsTab> {
     if row != area.y {
         return None;
     }

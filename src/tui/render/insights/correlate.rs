@@ -32,7 +32,7 @@ const DELTA_W: usize = 5;
 
 /// What the panel needs to draw a scrollbar and map a drag: the list length and
 /// how many rows are visible at once.
-pub(super) struct StatsListMetrics {
+pub(super) struct InsightsListMetrics {
     pub(super) total: usize,
     pub(super) viewport: usize,
 }
@@ -47,11 +47,14 @@ pub(super) fn draw(
     empty_msg: &str,
     feeling_header: &str,
     scroll: &mut u16,
-) -> StatsListMetrics {
+) -> InsightsListMetrics {
     if items.is_empty() {
         *scroll = 0;
         render_centered_notice(frame, area, empty_msg);
-        return StatsListMetrics { total: 0, viewport: 0 };
+        return InsightsListMetrics {
+            total: 0,
+            viewport: 0,
+        };
     }
     let columns = (area.width >= TABLE_MIN_WIDTH)
         .then(|| Columns::fit(area.width as usize))
@@ -79,7 +82,7 @@ fn draw_compact(
     area: Rect,
     items: &[Correlate],
     scroll: &mut u16,
-) -> StatsListMetrics {
+) -> InsightsListMetrics {
     let viewport = area.height as usize;
     let range = visible_range(items.len(), viewport, scroll);
     let name_w = (area.width as usize / 4).clamp(8, 20);
@@ -88,7 +91,7 @@ fn draw_compact(
         .map(|correlate| correlate_line(correlate, name_w, true))
         .collect();
     frame.render_widget(Paragraph::new(lines), area);
-    StatsListMetrics {
+    InsightsListMetrics {
         total: items.len(),
         viewport,
     }
@@ -105,7 +108,7 @@ fn draw_table(
     scroll: &mut u16,
     columns: &Columns,
     feeling_header: &str,
-) -> StatsListMetrics {
+) -> InsightsListMetrics {
     let viewport = (area.height.saturating_sub(3) / 2) as usize;
     let range = visible_range(items.len(), viewport, scroll);
 
@@ -133,7 +136,7 @@ fn draw_table(
     lines.push(columns.rule('└', '┴', '┘', border, border));
 
     frame.render_widget(Paragraph::new(lines), area);
-    StatsListMetrics {
+    InsightsListMetrics {
         total: items.len(),
         viewport,
     }
@@ -166,7 +169,8 @@ impl Columns {
             let Some(flex) = inner.checked_sub(fixed) else {
                 continue;
             };
-            let need = Self::NAME_MIN + Self::FEELING_MIN + if with_bar { Self::BAR_MIN } else { 0 };
+            let need =
+                Self::NAME_MIN + Self::FEELING_MIN + if with_bar { Self::BAR_MIN } else { 0 };
             if flex < need {
                 continue;
             }
@@ -209,7 +213,14 @@ impl Columns {
     /// and the `─` fill takes `dash`; giving the inter-row rules a fainter `dash`
     /// but a full-weight `junction` keeps the vertical column lines uniform instead
     /// of banding where the rules cross them.
-    fn rule(&self, left: char, mid: char, right: char, junction: Style, dash: Style) -> Line<'static> {
+    fn rule(
+        &self,
+        left: char,
+        mid: char,
+        right: char,
+        junction: Style,
+        dash: Style,
+    ) -> Line<'static> {
         let mut spans = vec![Span::styled(left.to_string(), junction)];
         for (i, w) in self.widths().iter().enumerate() {
             if i > 0 {
@@ -226,14 +237,29 @@ impl Columns {
     /// feelings).
     fn header_row(&self, feeling_header: &str) -> Line<'static> {
         let mut spans = vec![border()];
-        push_cell(&mut spans, Span::styled(pad("Name", self.name, false), theme().muted()));
-        push_cell(&mut spans, Span::styled(pad("Count", COUNT_W, true), theme().muted()));
-        push_cell(&mut spans, Span::styled(pad("Avg", AVG_W, true), theme().muted()));
-        push_cell(&mut spans, Span::styled(pad("Δ", DELTA_W, true), theme().muted()));
+        push_cell(
+            &mut spans,
+            Span::styled(pad("Name", self.name, false), theme().muted()),
+        );
+        push_cell(
+            &mut spans,
+            Span::styled(pad("Count", COUNT_W, true), theme().muted()),
+        );
+        push_cell(
+            &mut spans,
+            Span::styled(pad("Avg", AVG_W, true), theme().muted()),
+        );
+        push_cell(
+            &mut spans,
+            Span::styled(pad("Δ", DELTA_W, true), theme().muted()),
+        );
         if let Some(bar) = self.bar {
             // Reads left-to-right to match the diverging bar: drains fill left of
             // the centre marker, lifts fill right.
-            push_cell(&mut spans, Span::styled(pad("Drains / lifts", bar, false), theme().muted()));
+            push_cell(
+                &mut spans,
+                Span::styled(pad("Drains / lifts", bar, false), theme().muted()),
+            );
         }
         push_cell(
             &mut spans,
@@ -248,9 +274,16 @@ impl Columns {
         let mut spans = vec![border()];
         push_cell(
             &mut spans,
-            Span::raw(pad(&truncate_ellipsis(&correlate.name, self.name), self.name, false)),
+            Span::raw(pad(
+                &truncate_ellipsis(&correlate.name, self.name),
+                self.name,
+                false,
+            )),
         );
-        push_cell(&mut spans, Span::raw(format!("{:>COUNT_W$}", correlate.count)));
+        push_cell(
+            &mut spans,
+            Span::raw(format!("{:>COUNT_W$}", correlate.count)),
+        );
         push_cell(
             &mut spans,
             match correlate.avg_mood {
@@ -261,9 +294,10 @@ impl Columns {
         push_cell(
             &mut spans,
             match correlate.mood_delta {
-                Some(delta) => {
-                    Span::styled(format!("{:>DELTA_W$}", signed(delta)), theme().signed(delta))
-                }
+                Some(delta) => Span::styled(
+                    format!("{:>DELTA_W$}", signed(delta)),
+                    theme().signed(delta),
+                ),
                 None => Span::styled(format!("{:>DELTA_W$}", "—"), theme().muted()),
             },
         );
@@ -280,7 +314,11 @@ impl Columns {
         push_cell(
             &mut spans,
             Span::styled(
-                pad(&truncate_ellipsis(&feelings_label(correlate), self.feeling), self.feeling, false),
+                pad(
+                    &truncate_ellipsis(&feelings_label(correlate), self.feeling),
+                    self.feeling,
+                    false,
+                ),
                 theme().muted(),
             ),
         );
@@ -349,7 +387,10 @@ fn delta_bar(delta: Option<f32>, max_abs: f32, width: usize) -> Line<'static> {
             // Fill the negative side from the centre outward (the right end of
             // the left half is nearest the marker).
             let filled = ((frac * left_len as f32).round() as usize).min(left_len);
-            left.iter_mut().rev().take(filled).for_each(|cell| *cell = true);
+            left.iter_mut()
+                .rev()
+                .take(filled)
+                .for_each(|cell| *cell = true);
         }
     }
 
@@ -389,7 +430,10 @@ pub(super) fn correlate_line(
         correlate.count,
     ))];
     match correlate.avg_mood {
-        Some(avg) => spans.push(Span::styled(format!("{:>5}", signed(avg)), theme().signed(avg))),
+        Some(avg) => spans.push(Span::styled(
+            format!("{:>5}", signed(avg)),
+            theme().signed(avg),
+        )),
         None => spans.push(Span::styled("    —", theme().muted())),
     }
     match correlate.mood_delta {
@@ -399,10 +443,11 @@ pub(super) fn correlate_line(
         )),
         None => spans.push(Span::styled("       ", theme().muted())),
     }
-    if show_feeling
-        && let Some((feeling, count)) = correlate.top_feelings.first()
-    {
-        spans.push(Span::styled(format!("  {feeling} ({count})"), theme().muted()));
+    if show_feeling && let Some((feeling, count)) = correlate.top_feelings.first() {
+        spans.push(Span::styled(
+            format!("  {feeling} ({count})"),
+            theme().muted(),
+        ));
     }
     Line::from(spans)
 }
@@ -414,7 +459,11 @@ mod tests {
     /// The number of cells the bar occupies, and how many are filled on each side
     /// of the centre marker.
     fn bar_shape(line: &Line) -> (usize, usize, usize) {
-        let cells: String = line.spans.iter().map(|span| span.content.as_ref()).collect();
+        let cells: String = line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
         let width = cells.chars().count();
         let marker = cells.find('│').map(|byte| cells[..byte].chars().count());
         let (left, right) = match marker {

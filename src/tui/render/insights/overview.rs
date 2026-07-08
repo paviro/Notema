@@ -172,11 +172,9 @@ fn drains_stat(analytics: &Analytics) -> Stat {
 /// feeling (noted) when this year has none yet.
 fn top_feeling_stat(analytics: &Analytics) -> Stat {
     if let Some(name) = &analytics.top_feeling_this_year {
-        Stat::new("Top feeling", name.clone())
-            .sub(Span::styled("this year", theme().muted()))
+        Stat::new("Top feeling", name.clone()).sub(Span::styled("this year", theme().muted()))
     } else if let Some(tally) = analytics.mood.feelings.first() {
-        Stat::new("Top feeling", tally.name.clone())
-            .sub(Span::styled("all time", theme().muted()))
+        Stat::new("Top feeling", tally.name.clone()).sub(Span::styled("all time", theme().muted()))
     } else {
         Stat::new("Top feeling", "—")
     }
@@ -208,9 +206,13 @@ fn extreme_weekday(mood: &MoodAnalytics, best: bool) -> Option<usize> {
         .enumerate()
         .filter_map(|(day, avg)| avg.map(|avg| (day, avg)));
     if best {
-        scored.max_by(|a, b| a.1.total_cmp(&b.1)).map(|(day, _)| day)
+        scored
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(day, _)| day)
     } else {
-        scored.min_by(|a, b| a.1.total_cmp(&b.1)).map(|(day, _)| day)
+        scored
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(day, _)| day)
     }
 }
 

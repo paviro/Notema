@@ -28,7 +28,7 @@ use super::state::{
 };
 use crate::tui::entry_rows::{EntryRowCache, RowMeta, build_entry_row_cache};
 use crate::tui::image::{ImageAsset, ImageRuntime, entry_images, viewer_image_size};
-use crate::tui::render::insights::{StatsScope, StatsTab, StatsTimeframe};
+use crate::tui::render::insights::{InsightsScope, InsightsTab, InsightsTimeframe};
 use journal_analytics::{Analytics, Correlations, analyze, build_correlations};
 
 pub(crate) const JOURNAL_LIST_WIDTH: u16 = 27;
@@ -42,9 +42,9 @@ pub(crate) enum Focus {
     Journals,
     Entries,
     EntryView,
-    /// The journal-stats insights panel — the right-hand column when no entry is
+    /// The journal insights panel — the right-hand column when no entry is
     /// selected. Reached with Right past Entries; its Left/Right cycle tabs.
-    Stats,
+    Insights,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,12 +103,12 @@ struct EntryBodyKey {
 ///
 /// Two counters, because the caches have different dependencies:
 /// - [`Self::entries_version`] bumps only when the `entries` Vec changes. It
-///   keys the body and stats caches, which depend on entry content alone.
+///   keys the body and analytics caches, which depend on entry content alone.
 /// - [`Self::rows_version`] bumps when entries **or** search hits change. It
 ///   keys the row cache, which is built from the hits in Search mode.
 ///
 /// A search recompute therefore bumps only `rows_version`, so the (more
-/// expensive) rendered-body and journal-stats memos survive keystroke-driven
+/// expensive) rendered-body and journal-insights memos survive keystroke-driven
 /// query edits instead of rebuilding every time.
 #[derive(Default)]
 struct RenderCaches {
@@ -135,18 +135,18 @@ struct RenderCaches {
 
 /// The windowed-correlations memo: `(entries_version, scope key, timeframe)` and
 /// the correlations built for them.
-type WindowedCache = Option<(u64, String, StatsTimeframe, Rc<Correlations>)>;
+type WindowedCache = Option<(u64, String, InsightsTimeframe, Rc<Correlations>)>;
 
 impl RenderCaches {
-    /// The `entries` Vec changed: both the entries-keyed (body, stats) and
+    /// The `entries` Vec changed: both the entries-keyed (body, analytics) and
     /// rows-keyed caches are stale.
     fn bump_entries(&mut self) {
         self.entries_version = self.entries_version.wrapping_add(1);
         self.rows_version = self.rows_version.wrapping_add(1);
     }
 
-    /// Only the entry-list rows changed (a search recompute); the body and stats
-    /// caches, keyed on [`Self::entries_version`], stay valid.
+    /// Only the entry-list rows changed (a search recompute); the body and
+    /// analytics caches, keyed on [`Self::entries_version`], stay valid.
     fn bump_rows(&mut self) {
         self.rows_version = self.rows_version.wrapping_add(1);
     }
@@ -207,7 +207,7 @@ impl RenderCaches {
         &self,
         version: u64,
         scope_key: &str,
-        timeframe: StatsTimeframe,
+        timeframe: InsightsTimeframe,
         build: impl FnOnce() -> Correlations,
     ) -> Rc<Correlations> {
         if let Some((cached_version, key, cached_tf, correlations)) =
@@ -219,8 +219,12 @@ impl RenderCaches {
             return correlations.clone();
         }
         let correlations = Rc::new(build());
-        *self.windowed_cache.borrow_mut() =
-            Some((version, scope_key.to_string(), timeframe, correlations.clone()));
+        *self.windowed_cache.borrow_mut() = Some((
+            version,
+            scope_key.to_string(),
+            timeframe,
+            correlations.clone(),
+        ));
         correlations
     }
 }
@@ -309,7 +313,7 @@ impl Library {
 pub(crate) struct Nav {
     pub(crate) journal_list: ListState,
     /// The selected entry (or search hit) index, or `None` when no entry is
-    /// selected. In Browse mode `None` shows the journal stats in the preview
+    /// selected. In Browse mode `None` shows the journal insights in the preview
     /// pane instead of an entry — reached by scrolling up past the first entry
     /// or clicking empty space in the list.
     pub(crate) selected_entry_index: Option<usize>,
@@ -324,17 +328,17 @@ pub(crate) struct Nav {
     /// [`Self::entry_view_fullscreen`] it only matters in multi-column layouts
     /// (single-column already renders the panel full-screen) and is reset when
     /// focus leaves the panel.
-    pub(crate) stats_fullscreen: bool,
+    pub(crate) insights_fullscreen: bool,
     pub(crate) mode: Mode,
-    /// Which tab the journal-stats panel shows, and whether its analytic tabs
+    /// Which tab the journal-insights panel shows, and whether its analytic tabs
     /// aggregate the selected journal or every journal. Only interactive while
     /// browsing with the Journals column focused.
-    pub(crate) stats_tab: StatsTab,
-    pub(crate) stats_scope: StatsScope,
+    pub(crate) insights_tab: InsightsTab,
+    pub(crate) insights_scope: InsightsScope,
     /// The rolling window the mood-driver tabs (Drivers, Feelings) aggregate over.
-    /// Orthogonal to `stats_scope`: scope picks *which* entries, timeframe picks
+    /// Orthogonal to `insights_scope`: scope picks *which* entries, timeframe picks
     /// *which slice of time* within them.
-    pub(crate) stats_timeframe: StatsTimeframe,
+    pub(crate) insights_timeframe: InsightsTimeframe,
 }
 
 impl Default for Nav {
@@ -346,11 +350,11 @@ impl Default for Nav {
             scroll: ScrollState::default(),
             focus: Focus::Journals,
             entry_view_fullscreen: false,
-            stats_fullscreen: false,
+            insights_fullscreen: false,
             mode: Mode::Browse,
-            stats_tab: StatsTab::default(),
-            stats_scope: StatsScope::default(),
-            stats_timeframe: StatsTimeframe::default(),
+            insights_tab: InsightsTab::default(),
+            insights_scope: InsightsScope::default(),
+            insights_timeframe: InsightsTimeframe::default(),
         }
     }
 }
@@ -372,9 +376,9 @@ pub(crate) struct App {
     /// The insights list scrollbar geometry from the last render, so a mouse drag
     /// can map cursor rows back to a scroll offset. `total == 0` means the current
     /// tab has no scrollable list (no bar drawn).
-    pub(crate) stats_scroll: StatsScrollGeometry,
+    pub(crate) insights_scroll: InsightsScrollGeometry,
     pub(crate) scrollbar: ScrollbarDragState,
-    /// Per-frame render memo caches (rows, rendered body, journal stats) and the
+    /// Per-frame render memo caches (rows, rendered body, journal insights) and the
     /// version counters that invalidate them. See [`RenderCaches`].
     caches: RenderCaches,
 }
@@ -394,7 +398,7 @@ pub(crate) struct EntryViewImageHits {
 /// The insights list scrollbar geometry captured at render time, so the mouse
 /// handler can map a drag on the panel's bar back to a row offset.
 #[derive(Default)]
-pub(crate) struct StatsScrollGeometry {
+pub(crate) struct InsightsScrollGeometry {
     /// The outer panel rect the bar is drawn on.
     pub(crate) area: Rect,
     /// Total rows in the current list.
@@ -409,7 +413,7 @@ pub(crate) enum ScrollbarDrag {
     Journals,
     EntryList,
     EntryView,
-    Stats,
+    Insights,
 }
 
 /// The in-progress scrollbar drag, if any. A drag keeps scrolling even after the
@@ -445,7 +449,7 @@ impl App {
             status_bar: StatusBar::default(),
             image: ImageState::default(),
             entry_view_image_hits: EntryViewImageHits::default(),
-            stats_scroll: StatsScrollGeometry::default(),
+            insights_scroll: InsightsScrollGeometry::default(),
             scrollbar: ScrollbarDragState::default(),
             caches: RenderCaches::default(),
         };
@@ -514,7 +518,7 @@ impl App {
     fn after_entries_changed(&mut self) {
         self.library.rebuild_indexes();
         // Entries (and possibly hits) changed: invalidate every version-keyed
-        // cache — the body/stats caches (entries_version) and the row cache
+        // cache — the body/analytics caches (entries_version) and the row cache
         // (rows_version).
         self.caches.bump_entries();
         if !self.search.query.is_empty() {
@@ -559,7 +563,7 @@ impl App {
         }
 
         // The viewed entry's body/images may have changed: drop the image caches
-        // (the version-keyed row/body/stats caches self-invalidate on the bump).
+        // (the version-keyed row/body/analytics caches self-invalidate on the bump).
         self.image.runtime.clear();
         self.image.warm = None;
         self.image.selected_cache.borrow_mut().take();
@@ -651,8 +655,8 @@ impl App {
     /// midnight for no real benefit.
     pub(crate) fn cached_analytics(&self) -> Option<Rc<Analytics>> {
         let today = chrono::Local::now().date_naive();
-        match self.nav.stats_scope {
-            StatsScope::Journal => {
+        match self.nav.insights_scope {
+            InsightsScope::Journal => {
                 let name = self.selected_journal()?.name.clone();
                 Some(
                     self.caches
@@ -661,7 +665,7 @@ impl App {
                         }),
                 )
             }
-            StatsScope::All => {
+            InsightsScope::All => {
                 // A NUL-prefixed key can't collide with a journal name.
                 Some(
                     self.caches
@@ -675,33 +679,38 @@ impl App {
     }
 
     /// The memoized lift/drain correlations for the current scope, windowed to
-    /// `nav.stats_timeframe`. `None` in `Journal` scope with no journal selected.
+    /// `nav.insights_timeframe`. `None` in `Journal` scope with no journal selected.
     /// Powers the Drivers ranking.
     pub(crate) fn cached_windowed_correlations(&self) -> Option<Rc<Correlations>> {
         let today = chrono::Local::now().date_naive();
-        let timeframe = self.nav.stats_timeframe;
-        let (scope_key, entries): (String, Vec<&Entry>) = match self.nav.stats_scope {
-            StatsScope::Journal => (self.selected_journal()?.name.clone(), self.selected_entries()),
-            StatsScope::All => ("\u{0}all".to_string(), self.library.entries.iter().collect()),
+        let timeframe = self.nav.insights_timeframe;
+        let (scope_key, entries): (String, Vec<&Entry>) = match self.nav.insights_scope {
+            InsightsScope::Journal => (
+                self.selected_journal()?.name.clone(),
+                self.selected_entries(),
+            ),
+            InsightsScope::All => (
+                "\u{0}all".to_string(),
+                self.library.entries.iter().collect(),
+            ),
         };
-        Some(self.caches.windowed(
-            self.caches.entries_version,
-            &scope_key,
-            timeframe,
-            || {
-                let windowed: Vec<&Entry> = match timeframe.window(today) {
-                    None => entries.clone(),
-                    Some((start, end)) => entries
-                        .iter()
-                        .copied()
-                        .filter(|entry| {
-                            entry_group_date(entry).is_some_and(|date| start <= date && date <= end)
-                        })
-                        .collect(),
-                };
-                build_correlations(&windowed)
-            },
-        ))
+        Some(
+            self.caches
+                .windowed(self.caches.entries_version, &scope_key, timeframe, || {
+                    let windowed: Vec<&Entry> = match timeframe.window(today) {
+                        None => entries.clone(),
+                        Some((start, end)) => entries
+                            .iter()
+                            .copied()
+                            .filter(|entry| {
+                                entry_group_date(entry)
+                                    .is_some_and(|date| start <= date && date <= end)
+                            })
+                            .collect(),
+                    };
+                    build_correlations(&windowed)
+                }),
+        )
     }
 
     pub(crate) fn scroll_entry_view(&mut self, delta: i16) {
@@ -723,16 +732,20 @@ impl App {
     /// Scroll the insights list by `delta` rows. The offset saturates here and is
     /// clamped to the list's length when the panel renders, mirroring the entry
     /// view — so `i16::MAX` from an End key just lands on the last page.
-    pub(crate) fn scroll_stats(&mut self, delta: i16) {
+    pub(crate) fn scroll_insights(&mut self, delta: i16) {
         if delta.is_negative() {
-            self.nav.scroll.stats = self.nav.scroll.stats.saturating_sub(delta.unsigned_abs());
+            self.nav.scroll.insights = self
+                .nav
+                .scroll
+                .insights
+                .saturating_sub(delta.unsigned_abs());
         } else {
-            self.nav.scroll.stats = self.nav.scroll.stats.saturating_add(delta as u16);
+            self.nav.scroll.insights = self.nav.scroll.insights.saturating_add(delta as u16);
         }
     }
 
-    pub(crate) fn page_stats(&mut self, delta: i16) {
-        self.scroll_stats(delta.saturating_mul(10));
+    pub(crate) fn page_insights(&mut self, delta: i16) {
+        self.scroll_insights(delta.saturating_mul(10));
     }
 
     pub(crate) fn set_status(&mut self, message: impl Into<String>) {

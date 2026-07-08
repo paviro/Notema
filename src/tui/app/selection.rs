@@ -50,23 +50,23 @@ impl App {
     /// Whether an entry is the active preview: one is selected *and* focus sits on
     /// a column that owns it (anything but the journal list). Browsing journals —
     /// even with a selection lingering from an earlier preview — is not previewing
-    /// an entry. Both the entry-list highlight and the preview-vs-stats choice key
+    /// an entry. Both the entry-list highlight and the preview-vs-insights choice key
     /// off this single predicate so they can never disagree.
     fn entry_is_previewed(&self) -> bool {
         self.nav.focus != Focus::Journals && self.nav.selected_entry_index.is_some()
     }
 
-    /// The preview pane shows journal stats (instead of an entry) when browsing and
+    /// The preview pane shows journal insights (instead of an entry) when browsing and
     /// no entry is being previewed.
-    pub(crate) fn show_journal_stats_preview(&self) -> bool {
+    pub(crate) fn show_journal_insights_preview(&self) -> bool {
         self.nav.mode == Mode::Browse && !self.entry_is_previewed()
     }
 
     /// Whether the insights panel is the focused pane — the context in which its
     /// tab (Left/Right) and scope (`g`) keys apply, and where its tabs render in
     /// the inverted focused style.
-    pub(crate) fn stats_panel_focused(&self) -> bool {
-        self.nav.focus == Focus::Stats
+    pub(crate) fn insights_panel_focused(&self) -> bool {
+        self.nav.focus == Focus::Insights
     }
 
     /// Whether the entries list should draw a highlighted selection row.
@@ -186,7 +186,7 @@ impl App {
         let len = match self.nav.focus {
             // The insights panel's tabs are non-scrolling top-N views; Up/Down do
             // nothing there (tabs switch with Left/Right).
-            Focus::Stats => return,
+            Focus::Insights => return,
             Focus::Journals if self.nav.mode == Mode::Browse => self.library.journals.len(),
             Focus::Entries | Focus::EntryView | Focus::Journals => self.current_entry_list_len(),
         };
@@ -197,22 +197,22 @@ impl App {
         let previous_entry_index = self.nav.selected_entry_index;
         if self.nav.focus == Focus::Journals && self.nav.mode == Mode::Browse {
             move_list_selection(&mut self.nav.journal_list, len, delta);
-            // Browsing journals previews the journal's stats, not an entry: leave the
+            // Browsing journals previews the journal's insights, not an entry: leave the
             // entry selection empty until the user moves into the entries column.
             self.nav.selected_entry_index = None;
             *self.nav.entry_list.offset_mut() = 0;
             // A different journal means different insights, so its lists start fresh.
-            self.nav.scroll.reset_stats();
+            self.nav.scroll.reset_insights();
         } else {
             match self.nav.selected_entry_index {
-                // Deselected (Browse shows journal stats): a downward move selects
-                // the first entry; an upward move stays on the stats view.
+                // Deselected (Browse shows journal insights): a downward move selects
+                // the first entry; an upward move stays on the insights view.
                 None if self.nav.mode == Mode::Browse => {
                     if delta > 0 {
                         self.nav.selected_entry_index = Some(0);
                     }
                 }
-                // Scrolling up past the first entry deselects, revealing journal stats.
+                // Scrolling up past the first entry deselects, revealing journal insights.
                 Some(0) if self.nav.mode == Mode::Browse && delta < 0 => {
                     self.nav.selected_entry_index = None;
                 }
@@ -235,8 +235,8 @@ impl App {
 
         if self.selected_journal_index() != index {
             self.nav.journal_list.select(Some(index));
-            // Selecting a journal previews its stats, not an entry: clear any entry
-            // selection so the stats column shows and no preview is rendered.
+            // Selecting a journal previews its insights, not an entry: clear any entry
+            // selection so the insights column shows and no preview is rendered.
             self.nav.selected_entry_index = None;
             self.reset_entry_scroll();
         }
@@ -364,9 +364,9 @@ impl App {
     /// Whether the insights panel currently occupies the whole screen: either the
     /// terminal is single-column (no room for other panes) or the panel has been
     /// expanded to full screen in a multi-column layout.
-    pub(crate) fn stats_is_fullscreen(&self, width: u16) -> bool {
-        self.nav.focus == Focus::Stats
-            && (single_panel_is_active(width) || self.nav.stats_fullscreen)
+    pub(crate) fn insights_is_fullscreen(&self, width: u16) -> bool {
+        self.nav.focus == Focus::Insights
+            && (single_panel_is_active(width) || self.nav.insights_fullscreen)
     }
 
     pub(crate) fn selected_entry_view(&self) -> Option<(String, String)> {

@@ -7,7 +7,6 @@ mod journals;
 mod layout;
 mod markdown_panel;
 mod pending;
-pub(crate) mod stats;
 mod unlock;
 
 use ratatui::{
@@ -55,6 +54,8 @@ pub(crate) use dialogs::{
 };
 use entries::draw_entry_list;
 use image_viewer::draw_image_viewer;
+use insights::draw_journal_insights;
+pub(crate) use insights::insights_tab_at;
 use journals::draw_journals;
 pub(crate) use journals::{JOURNAL_BOX_HEIGHT, journal_list_rect};
 pub(crate) use layout::{TuiLayout, tui_layout};
@@ -62,8 +63,6 @@ use markdown_panel::draw_selected_entry_view;
 pub(crate) use pending::{
     AccessNotice, draw_disable_notice, draw_pending_notice, draw_pending_request,
 };
-use stats::draw_journal_stats;
-pub(crate) use stats::stats_tab_at;
 pub(crate) use unlock::draw_unlock;
 
 /// Style for the blinking block caret shared by the search field and the unlock
@@ -94,7 +93,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
 
     // Cleared each frame; the entry-view render repopulates it when an entry is
-    // shown, so a stale hit-map can't leak onto stats or empty views.
+    // shown, so a stale hit-map can't leak onto insights or empty views.
     app.entry_view_image_hits = EntryViewImageHits::default();
 
     if app.entry_view_is_fullscreen(area.width) {
@@ -126,12 +125,12 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if let Some(area) = layout.entries {
         draw_entry_list(frame, area, app);
     }
-    if let Some(area) = layout.stats {
-        draw_journal_stats(frame, area.area, app);
+    if let Some(area) = layout.insights {
+        draw_journal_insights(frame, area.area, app);
     } else if let Some(area) = layout.entry_view {
-        // With no entry selected, the preview pane shows the journal stats.
-        if app.show_journal_stats_preview() {
-            draw_journal_stats(frame, area.area, app);
+        // With no entry selected, the preview pane shows the journal insights.
+        if app.show_journal_insights_preview() {
+            draw_journal_insights(frame, area.area, app);
         } else {
             draw_selected_entry_view(frame, area.area, app);
         }

@@ -135,15 +135,15 @@ fn pane_target(
                 app.nav.journal_list.offset(),
             )
         }
-        ScrollbarDrag::Stats => {
+        ScrollbarDrag::Insights => {
             // The list tabs record their geometry at render time; other tabs leave
             // `total == 0`, so no bar is offered.
-            let stats = &app.stats_scroll;
+            let geometry = &app.insights_scroll;
             (
-                stats.area,
-                stats.total,
-                stats.viewport,
-                app.nav.scroll.stats as usize,
+                geometry.area,
+                geometry.total,
+                geometry.viewport,
+                app.nav.scroll.insights as usize,
             )
         }
     };
@@ -175,7 +175,7 @@ fn scrollbar_target_at(
         ScrollbarDrag::EntryView,
         ScrollbarDrag::EntryList,
         ScrollbarDrag::Journals,
-        ScrollbarDrag::Stats,
+        ScrollbarDrag::Insights,
     ]
     .into_iter()
     .filter_map(|which| pane_target(app, which, layout))
@@ -208,9 +208,9 @@ fn set_pane_scroll(app: &mut App, which: ScrollbarDrag, offset: usize) {
             app.nav.scroll.entry_view = offset.min(u16::MAX as usize) as u16;
             app.nav.focus = Focus::EntryView;
         }
-        ScrollbarDrag::Stats => {
-            app.nav.scroll.stats = offset.min(u16::MAX as usize) as u16;
-            app.nav.focus = Focus::Stats;
+        ScrollbarDrag::Insights => {
+            app.nav.scroll.insights = offset.min(u16::MAX as usize) as u16;
+            app.nav.focus = Focus::Insights;
         }
     }
 }
@@ -230,9 +230,9 @@ fn step_pane_scroll(app: &mut App, target: &ScrollbarTarget, delta: i16) {
             app.scroll_entry_view(delta);
             app.nav.focus = Focus::EntryView;
         }
-        ScrollbarDrag::Stats => {
-            app.scroll_stats(delta);
-            app.nav.focus = Focus::Stats;
+        ScrollbarDrag::Insights => {
+            app.scroll_insights(delta);
+            app.nav.focus = Focus::Insights;
         }
     }
 }
@@ -338,20 +338,20 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
                 view_selected(app)?;
             }
         } else if app.nav.mode == Mode::Browse {
-            // Clicking empty space in the list deselects, revealing journal stats.
+            // Clicking empty space in the list deselects, revealing journal insights.
             app.nav.selected_entry_index = None;
         }
         return Ok(());
     }
 
-    if let Some(area) = layout.stats
+    if let Some(area) = layout.insights
         && render::point_in_rect(area.area, mouse.column, mouse.row)
         && app.nav.mode == Mode::Browse
     {
-        app.nav.focus = Focus::Stats;
+        app.nav.focus = Focus::Insights;
         // Clicking a tab in the border selects it; clicking elsewhere just focuses.
-        if let Some(tab) = render::stats_tab_at(area.area, mouse.column, mouse.row) {
-            app.nav.stats_tab = tab;
+        if let Some(tab) = render::insights_tab_at(area.area, mouse.column, mouse.row) {
+            app.nav.insights_tab = tab;
         }
         return Ok(());
     }
@@ -399,11 +399,11 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
 
 fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, delta: i16) {
     // Probed first, and via the rendered geometry rather than a layout slot, so it
-    // also catches the stats shown in the preview column when no entry is selected.
-    if app.stats_scroll.total > 0
-        && render::point_in_rect(app.stats_scroll.area, mouse.column, mouse.row)
+    // also catches the insights shown in the preview column when no entry is selected.
+    if app.insights_scroll.total > 0
+        && render::point_in_rect(app.insights_scroll.area, mouse.column, mouse.row)
     {
-        app.scroll_stats(delta);
+        app.scroll_insights(delta);
         return;
     }
 
@@ -720,13 +720,19 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::ToggleJournals => Some(Action::ToggleJournals),
         // Clicking the tabs hint steps forward through the tabs (Right); scope
         // toggles — both only while the insights panel is focused.
-        render::HintId::StatsTab if app.stats_panel_focused() => Some(Action::FocusRight),
-        render::HintId::StatsScope if app.stats_panel_focused() => Some(Action::ToggleStatsScope),
-        render::HintId::StatsTimeframe if app.stats_panel_focused() => {
-            Some(Action::CycleStatsTimeframe)
+        render::HintId::InsightsTab if app.insights_panel_focused() => Some(Action::FocusRight),
+        render::HintId::InsightsScope if app.insights_panel_focused() => {
+            Some(Action::ToggleInsightsScope)
         }
-        render::HintId::ExpandStats if app.stats_panel_focused() => Some(Action::ExpandStats),
-        render::HintId::CloseStats if app.stats_panel_focused() => Some(Action::CollapseStats),
+        render::HintId::InsightsTimeframe if app.insights_panel_focused() => {
+            Some(Action::CycleInsightsTimeframe)
+        }
+        render::HintId::ExpandInsights if app.insights_panel_focused() => {
+            Some(Action::ExpandInsights)
+        }
+        render::HintId::CloseInsights if app.insights_panel_focused() => {
+            Some(Action::CollapseInsights)
+        }
         _ => None,
     }
 }

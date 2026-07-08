@@ -10,8 +10,8 @@ use ratatui::{
 
 use journal_analytics::Analytics;
 
-use super::widgets::{Bar, Section, Stat, draw_bars, draw_stats, heading, stack};
 use super::signed;
+use super::widgets::{Bar, Section, Stat, draw_bars, draw_stats, heading, stack};
 use crate::tui::render::render_centered_notice;
 use crate::tui::theme::theme;
 

@@ -4,7 +4,7 @@ use crate::{
     tui::{
         app::{App, Focus, ScrollbarDrag},
         render,
-        render::insights::{StatsScope, StatsTab, StatsTimeframe},
+        render::insights::{InsightsScope, InsightsTab, InsightsTimeframe},
         scroll,
         state::{EditMetadataFocus, ListNav},
         test_support::{app_with_entries, app_with_journals, new_app},
@@ -134,24 +134,24 @@ fn right_past_entries_focuses_insights_and_arrows_cycle_tabs() {
     app.nav.focus = Focus::Entries;
     // No entry selected → the right column is the insights preview.
     app.nav.selected_entry_index = None;
-    assert!(app.show_journal_stats_preview());
+    assert!(app.show_journal_insights_preview());
 
     // Right past Entries focuses the panel on its first tab.
     move_focus_right(&mut app, true);
-    assert_eq!(app.nav.focus, Focus::Stats);
-    assert_eq!(app.nav.stats_tab, StatsTab::Overview);
-    assert!(app.stats_panel_focused());
+    assert_eq!(app.nav.focus, Focus::Insights);
+    assert_eq!(app.nav.insights_tab, InsightsTab::Overview);
+    assert!(app.insights_panel_focused());
 
     // Right steps forward through the tabs without leaving the panel.
     move_focus_right(&mut app, true);
-    assert_eq!(app.nav.focus, Focus::Stats);
-    assert_eq!(app.nav.stats_tab, StatsTab::Writing);
+    assert_eq!(app.nav.focus, Focus::Insights);
+    assert_eq!(app.nav.insights_tab, InsightsTab::Writing);
 
     // Left steps back; from the first tab it leaves to the entries column.
     move_focus_left(&mut app);
     assert_eq!(
-        (app.nav.focus, app.nav.stats_tab),
-        (Focus::Stats, StatsTab::Overview)
+        (app.nav.focus, app.nav.insights_tab),
+        (Focus::Insights, InsightsTab::Overview)
     );
     move_focus_left(&mut app);
     assert_eq!(app.nav.focus, Focus::Entries);
@@ -161,28 +161,28 @@ fn right_past_entries_focuses_insights_and_arrows_cycle_tabs() {
 fn enter_expands_and_collapses_the_insights_panel() {
     let mut app = app_with_entries(1);
     app.nav.selected_entry_index = None;
-    app.nav.focus = Focus::Stats;
+    app.nav.focus = Focus::Insights;
 
     // Enter on the focused panel expands it; Enter/Esc collapse it back.
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Enter), true),
-        Some(Action::ExpandStats)
+        Some(Action::ExpandInsights)
     );
-    app.nav.stats_fullscreen = true;
+    app.nav.insights_fullscreen = true;
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Enter), true),
-        Some(Action::CollapseStats)
+        Some(Action::CollapseInsights)
     );
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Esc), true),
-        Some(Action::CollapseStats)
+        Some(Action::CollapseInsights)
     );
 
     // Leaving the panel (Left from the first tab) resets full-screen so it
     // re-opens collapsed.
     move_focus_left(&mut app);
     assert_eq!(app.nav.focus, Focus::Entries);
-    assert!(!app.nav.stats_fullscreen);
+    assert!(!app.nav.insights_fullscreen);
 }
 
 #[test]
@@ -194,55 +194,58 @@ fn scope_key_toggles_only_while_insights_panel_is_focused() {
         None
     );
 
-    app.nav.focus = Focus::Stats;
+    app.nav.focus = Focus::Insights;
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Char('g')), true),
-        Some(Action::ToggleStatsScope)
+        Some(Action::ToggleInsightsScope)
     );
 }
 
 #[test]
 fn window_key_cycles_timeframe_only_on_driver_tabs() {
     let mut app = app_with_entries(1);
-    app.nav.focus = Focus::Stats;
+    app.nav.focus = Focus::Insights;
 
     // Overview doesn't window, so `w` is inert there.
-    app.nav.stats_tab = StatsTab::Overview;
-    assert_eq!(keyboard::key_to_action(&app, key(KeyCode::Char('w')), true), None);
-
-    // On Drivers it cycles the rolling window forward, wrapping back to Overall.
-    app.nav.stats_tab = StatsTab::Drivers;
+    app.nav.insights_tab = InsightsTab::Overview;
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Char('w')), true),
-        Some(Action::CycleStatsTimeframe)
+        None
     );
-    assert_eq!(StatsTimeframe::Overall.next(), StatsTimeframe::Year);
-    assert_eq!(StatsTimeframe::Week.next(), StatsTimeframe::Overall);
+
+    // On Drivers it cycles the rolling window forward, wrapping back to Overall.
+    app.nav.insights_tab = InsightsTab::Drivers;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('w')), true),
+        Some(Action::CycleInsightsTimeframe)
+    );
+    assert_eq!(InsightsTimeframe::Overall.next(), InsightsTimeframe::Year);
+    assert_eq!(InsightsTimeframe::Week.next(), InsightsTimeframe::Overall);
 }
 
 #[test]
 fn clicking_a_border_tab_focuses_the_panel_and_selects_that_tab() {
     let mut app = app_with_entries(1);
-    // Preview state so the stats panel is the right-hand column.
+    // Preview state so the insights panel is the right-hand column.
     app.nav.selected_entry_index = None;
     app.nav.focus = Focus::Journals;
 
-    // Click the "Drivers" label in the stats panel's top border. At width 160 the
+    // Click the "Drivers" label in the insights panel's top border. At width 160 the
     // panel is wide enough for full titles; Drivers is the fifth tab, at x≈117.
     mouse_in_area(&mut app, mouse(down(), 117, 0), 160, 20);
 
-    assert_eq!(app.nav.focus, Focus::Stats);
-    assert_eq!(app.nav.stats_tab, StatsTab::Drivers);
+    assert_eq!(app.nav.focus, Focus::Insights);
+    assert_eq!(app.nav.insights_tab, InsightsTab::Drivers);
 }
 
 #[test]
-fn stats_tab_and_scope_cycle_predictably() {
-    assert_eq!(StatsTab::Overview.next(), StatsTab::Writing);
-    assert_eq!(StatsTab::Feelings.next(), StatsTab::Drivers);
-    assert_eq!(StatsTab::Drivers.next(), StatsTab::Overview);
-    assert_eq!(StatsTab::Overview.prev(), StatsTab::Drivers);
-    assert_eq!(StatsScope::Journal.toggle(), StatsScope::All);
-    assert_eq!(StatsScope::All.toggle(), StatsScope::Journal);
+fn insights_tab_and_scope_cycle_predictably() {
+    assert_eq!(InsightsTab::Overview.next(), InsightsTab::Writing);
+    assert_eq!(InsightsTab::Feelings.next(), InsightsTab::Drivers);
+    assert_eq!(InsightsTab::Drivers.next(), InsightsTab::Overview);
+    assert_eq!(InsightsTab::Overview.prev(), InsightsTab::Drivers);
+    assert_eq!(InsightsScope::Journal.toggle(), InsightsScope::All);
+    assert_eq!(InsightsScope::All.toggle(), InsightsScope::Journal);
 }
 
 #[test]
@@ -414,10 +417,10 @@ fn wide_journal_click_selects_journal_and_keeps_journal_focus() {
     );
 
     assert_eq!(app.selected_journal_index(), 1);
-    // Selecting a journal clears the entry selection so the stats column shows
+    // Selecting a journal clears the entry selection so the insights column shows
     // instead of an entry preview.
     assert_eq!(app.nav.selected_entry_index, None);
-    assert!(app.show_journal_stats_preview());
+    assert!(app.show_journal_insights_preview());
     assert_eq!(app.nav.scroll.entry_view, 0);
     assert_eq!(app.nav.focus, Focus::Journals);
 }
@@ -534,7 +537,7 @@ fn entry_click_selects_row_without_opening_viewer_when_entry_view_is_visible() {
 }
 
 #[test]
-fn entry_panel_month_divider_click_deselects_to_journal_stats() {
+fn entry_panel_month_divider_click_deselects_to_journal_insights() {
     let mut app = app_with_entries(1);
     app.nav.focus = Focus::EntryView;
     let layout = render::tui_layout(Rect::new(0, 0, 120, 12), &app);
@@ -557,7 +560,7 @@ fn entry_panel_month_divider_click_deselects_to_journal_stats() {
 }
 
 #[test]
-fn entry_panel_empty_space_click_deselects_to_journal_stats() {
+fn entry_panel_empty_space_click_deselects_to_journal_insights() {
     let mut app = app_with_entries(1);
     app.nav.focus = Focus::EntryView;
     let layout = render::tui_layout(Rect::new(0, 0, 130, 20), &app);

@@ -138,7 +138,6 @@ impl Theme {
             Palette::Monochrome => self.muted(),
         }
     }
-
 }
 
 #[cfg(test)]

@@ -2,14 +2,14 @@
 //! rolling timeframe the mood-driver views window to, and whether the analytic
 //! tabs aggregate the selected journal or every journal. The aggregation itself
 //! lives in the `journal-analytics` crate; this file is only the UI-side enums
-//! that `stats/` renders and the event layer drives.
+//! that `insights/` renders and the event layer drives.
 
 use chrono::{Duration, NaiveDate};
 
 /// Which insight the panel is showing. `Overview` is an at-a-glance dashboard;
 /// the rest each sharpen the analytics toward "what makes me feel good/bad".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum StatsTab {
+pub(crate) enum InsightsTab {
     #[default]
     Overview,
     /// Writing habits: streaks, when you write, and word volume.
@@ -20,8 +20,8 @@ pub(crate) enum StatsTab {
     Drivers,
 }
 
-impl StatsTab {
-    pub(crate) const ALL: [StatsTab; 5] = [
+impl InsightsTab {
+    pub(crate) const ALL: [InsightsTab; 5] = [
         Self::Overview,
         Self::Writing,
         Self::Mood,
@@ -40,14 +40,14 @@ impl StatsTab {
         matches!(self, Self::Drivers | Self::Feelings)
     }
 
-    /// Whether this tab's first section is a [`heading`](super::stats)-led block,
+    /// Whether this tab's first section is a [`heading`](super::widgets)-led block,
     /// which already opens with its own blank row. Such tabs skip the panel's top
     /// margin so the first title sits one row below the border, not two.
     pub(crate) fn leads_with_heading(self) -> bool {
         matches!(self, Self::Mood | Self::Feelings)
     }
 
-    /// Whether this tab windows to the selected [`StatsTimeframe`]. Only Drivers:
+    /// Whether this tab windows to the selected [`InsightsTimeframe`]. Only Drivers:
     /// Feelings' Balance shows all windows at once, so its `w` toggle would be a
     /// no-op.
     pub(crate) fn uses_timeframe(self) -> bool {
@@ -101,7 +101,7 @@ impl StatsTab {
 /// regardless of where "today" sits in the month, and no locale/week-start
 /// config is needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum StatsTimeframe {
+pub(crate) enum InsightsTimeframe {
     #[default]
     Overall,
     Year,
@@ -109,8 +109,8 @@ pub(crate) enum StatsTimeframe {
     Week,
 }
 
-impl StatsTimeframe {
-    pub(crate) const ALL: [StatsTimeframe; 4] =
+impl InsightsTimeframe {
+    pub(crate) const ALL: [InsightsTimeframe; 4] =
         [Self::Overall, Self::Year, Self::Month, Self::Week];
 
     fn index(self) -> usize {
@@ -149,13 +149,13 @@ impl StatsTimeframe {
 /// Whether the analytic tabs aggregate only the selected journal or every
 /// journal. `Overview` ignores this (it's always the selected journal's card).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum StatsScope {
+pub(crate) enum InsightsScope {
     #[default]
     Journal,
     All,
 }
 
-impl StatsScope {
+impl InsightsScope {
     pub(crate) fn toggle(self) -> Self {
         match self {
             Self::Journal => Self::All,

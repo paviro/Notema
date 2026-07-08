@@ -12,7 +12,7 @@ use ratatui::{
 
 use journal_analytics::{Analytics, Sentiment};
 
-use super::correlate::{self, StatsListMetrics};
+use super::correlate::{self, InsightsListMetrics};
 use super::widgets::{Section, heading, sentiment_segments, stack};
 use crate::tui::render::render_centered_notice;
 use crate::tui::theme::theme;
@@ -26,12 +26,15 @@ pub(super) fn draw(
     area: Rect,
     analytics: &Analytics,
     scroll: &mut u16,
-) -> StatsListMetrics {
+) -> InsightsListMetrics {
     let mood = &analytics.mood;
     if mood.feelings.is_empty() {
         *scroll = 0;
         render_centered_notice(frame, area, "No feelings logged yet");
-        return StatsListMetrics { total: 0, viewport: 0 };
+        return InsightsListMetrics {
+            total: 0,
+            viewport: 0,
+        };
     }
 
     let sections = stack(
@@ -51,11 +54,21 @@ pub(super) fn draw(
         Some(area) => {
             let body = heading(frame, area, "Feelings");
             // The trailing column here is which feelings co-occur with each row's feeling.
-            correlate::draw(frame, body, &analytics.correlations.feelings, "—", "Together", scroll)
+            correlate::draw(
+                frame,
+                body,
+                &analytics.correlations.feelings,
+                "—",
+                "Together",
+                scroll,
+            )
         }
         None => {
             *scroll = 0;
-            StatsListMetrics { total: 0, viewport: 0 }
+            InsightsListMetrics {
+                total: 0,
+                viewport: 0,
+            }
         }
     }
 }
