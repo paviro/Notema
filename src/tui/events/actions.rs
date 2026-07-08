@@ -168,7 +168,7 @@ pub(super) fn edit_selected(terminal: &mut Term, app: &mut App) -> AppResult<()>
             && location.longitude.is_some()
             && !app.store.entry_has_weather(&target.path).unwrap_or(true)
         {
-            app.capture_weather_for_entry(&target.path, &location, datetime);
+            app.capture_environment_for_entry(&target.path, &location, datetime);
         }
     }
     Ok(())
@@ -334,14 +334,14 @@ pub(super) fn set_location_on_entry(app: &mut App, location: Option<Location>) -
         MetadataField::Location(location.clone().map(Box::new)),
     )?;
 
-    // An explicit location change always refreshes the captured weather; clearing
-    // the location clears it. A name-only location (no coordinates) or an entry
-    // with no date leaves any existing weather untouched.
+    // An explicit location change always refreshes the captured environment data;
+    // clearing the location clears it. A name-only location (no coordinates) or an
+    // entry with no date leaves any existing data untouched.
     match (location, datetime) {
         (Some(location), Some(datetime)) => {
-            app.capture_weather_for_entry(&target.path, &location, datetime);
+            app.capture_environment_for_entry(&target.path, &location, datetime);
         }
-        (None, _) => app.clear_weather_for_entry(&target.path),
+        (None, _) => app.clear_environment_for_entry(&target.path),
         _ => {}
     }
 

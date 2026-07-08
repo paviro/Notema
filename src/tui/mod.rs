@@ -1,5 +1,6 @@
 mod app;
 mod entry_rows;
+mod environment;
 mod events;
 mod geocode;
 mod hit_test;
@@ -12,7 +13,6 @@ mod surface;
 mod test_support;
 mod theme;
 mod watcher;
-mod weather;
 mod worker;
 
 use crate::{AppResult, config::Config};
@@ -356,9 +356,9 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
         let images_ready = app.image.runtime.poll_results();
         // A finished geocode lookup updates the open location dialog; repaint too.
         let geocode_ready = app.apply_geocode_results();
-        // Finished weather lookups are persisted to disk (not shown), so the file
-        // watcher — not a repaint — reflects them.
-        app.apply_weather_results();
+        // Finished environment lookups are persisted to disk (not shown), so the
+        // file watcher — not a repaint — reflects them.
+        app.apply_environment_results();
 
         let mut poll_timeout = app
             .status_timeout()
@@ -369,11 +369,11 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
             poll_timeout = poll_timeout.min(Duration::from_millis(30));
         }
         // Likewise while a geocode lookup is in flight (so its result lands
-        // quickly) or a weather lookup is (so it's persisted promptly).
+        // quickly) or an environment lookup is (so it's persisted promptly).
         let geocode_pending = app
             .edit_location_state()
             .is_some_and(|state| state.pending_request_id.is_some());
-        if geocode_pending || app.weather.has_pending() {
+        if geocode_pending || app.environment.has_pending() {
             poll_timeout = poll_timeout.min(Duration::from_millis(50));
         }
         // Wake often enough to blink the search caret while typing in the field.
