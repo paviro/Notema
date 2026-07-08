@@ -44,6 +44,12 @@ pub(crate) enum HintId {
     MoodIncrease,
     MoodSave,
     MoodClear,
+    BeginEditLocation,
+    LocationSwitchFocus,
+    LocationResolve,
+    LocationSelectRow,
+    LocationSave,
+    LocationClear,
     OpenImageViewer,
     HintsToggle,
     ToggleJournals,
@@ -543,6 +549,7 @@ fn selected_entry_action_hints(include_view: bool) -> Vec<Hint> {
     hints.push(Hint::new("tags", "t", HintId::BeginEditTags));
     hints.push(Hint::new("feel", "f", HintId::BeginEditFeelings));
     hints.push(Hint::new("mood", "m", HintId::BeginEditMood));
+    hints.push(Hint::new("location", "l", HintId::BeginEditLocation));
     hints
 }
 
@@ -571,6 +578,7 @@ fn expanded_footer_hints(app: &App) -> Vec<Hint> {
         hints.push(Hint::new("act", "a", HintId::BeginEditActivities));
         hints.push(Hint::new("feel", "f", HintId::BeginEditFeelings));
         hints.push(Hint::new("mood", "m", HintId::BeginEditMood));
+        hints.push(Hint::new("location", "l", HintId::BeginEditLocation));
         hints.push(Hint::new("star", "s", HintId::ToggleStarred));
         hints.extend(image_hint(app));
     } else {

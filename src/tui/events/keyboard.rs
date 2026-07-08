@@ -8,7 +8,7 @@ use crate::tui::{
     image::image_for_digit,
     render,
     render::insights::InsightsTab,
-    state::{EditMetadataFocus, Overlay},
+    state::{EditLocationFocus, EditMetadataFocus, Overlay},
 };
 
 use super::action::Action;
@@ -42,6 +42,7 @@ pub(super) fn key_to_action(
         Overlay::EditMetadata(_) => tags_key_to_action(app, key),
         Overlay::EditFeelings(_) => feelings_key_to_action(app, key),
         Overlay::EditMood(_) => mood_key_to_action(key),
+        Overlay::EditLocation(_) => location_key_to_action(app, key),
         Overlay::ImageViewer(_) => image_viewer_key_to_action(key),
     }
 }
@@ -183,6 +184,7 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         KeyCode::Char('a') if app.can_act_on_selected_entry() => Some(Action::BeginEditActivities),
         KeyCode::Char('f') if app.can_act_on_selected_entry() => Some(Action::BeginEditFeelings),
         KeyCode::Char('m') if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
+        KeyCode::Char('l') if app.can_act_on_selected_entry() => Some(Action::BeginEditLocation),
         KeyCode::Char('s') if app.can_act_on_selected_entry() => Some(Action::ToggleStarred),
         KeyCode::Char('i' | '0'..='9')
             if app.nav.focus == Focus::EntryView && app.has_selected_entry_target() =>
@@ -207,6 +209,7 @@ fn entry_view_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
         KeyCode::Char('a') => Some(Action::BeginEditActivities),
         KeyCode::Char('f') => Some(Action::BeginEditFeelings),
         KeyCode::Char('m') => Some(Action::BeginEditMood),
+        KeyCode::Char('l') => Some(Action::BeginEditLocation),
         KeyCode::Char('s') => Some(Action::ToggleStarred),
         KeyCode::Char('i' | '0'..='9') => image_shortcut(app, key),
         _ => None,
@@ -342,6 +345,34 @@ fn mood_key_to_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Delete | KeyCode::Backspace => Some(Action::MoodClear),
         KeyCode::Left => Some(Action::MoodDecrease),
         KeyCode::Right => Some(Action::MoodIncrease),
+        _ => None,
+    }
+}
+
+fn location_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
+    let state = app.edit_location_state()?;
+    let focus = state.focus;
+    match key.code {
+        KeyCode::Esc => Some(Action::CancelOverlay),
+        KeyCode::Tab => Some(Action::LocationSwitchFocus),
+        // Delete (not Backspace, which edits text) clears the entry's location.
+        KeyCode::Delete => Some(Action::LocationClear),
+        KeyCode::Up if focus == EditLocationFocus::List => Some(Action::LocationMoveUp),
+        KeyCode::Down if focus == EditLocationFocus::List => Some(Action::LocationMoveDown),
+        // On the list, Enter/Space adopt the highlighted preset or match and save.
+        KeyCode::Enter | KeyCode::Char(' ') if focus == EditLocationFocus::List => {
+            Some(Action::LocationSelectRow)
+        }
+        // In the query field, Enter looks the address/coordinates up — then, once
+        // the current query is resolved, a second Enter saves instead of re-querying.
+        KeyCode::Enter if focus == EditLocationFocus::Query && state.query_looked_up => {
+            Some(Action::LocationSave)
+        }
+        KeyCode::Enter if focus == EditLocationFocus::Query => Some(Action::LocationResolve),
+        // In the name field, Enter commits.
+        KeyCode::Enter => Some(Action::LocationSave),
+        KeyCode::Backspace if focus != EditLocationFocus::List => Some(Action::LocationBackspace),
+        KeyCode::Char(ch) if focus != EditLocationFocus::List => Some(Action::LocationInput(ch)),
         _ => None,
     }
 }

@@ -6,7 +6,7 @@ use crate::{
         render,
         render::insights::{InsightsTab, InsightsTimeframe},
         scroll,
-        state::{EditMetadataFocus, FeelingRow, ListNav},
+        state::{EditMetadataFocus, FeelingRow, ListNav, LocationPreset},
         test_support::{app_with_entries, app_with_journals, new_app},
     },
 };
@@ -304,6 +304,92 @@ fn leaving_the_viewer_clears_fullscreen() {
 
     assert_eq!(app.nav.focus, Focus::Entries);
     assert!(!app.nav.entry_view_fullscreen);
+}
+
+#[test]
+fn browse_l_opens_the_location_dialog() {
+    let mut app = app_with_entries(1);
+    app.nav.focus = Focus::Entries;
+    app.nav.selected_entry_index = Some(0);
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('l')), true),
+        Some(Action::BeginEditLocation)
+    );
+}
+
+#[test]
+fn location_dialog_keys_route_by_focus() {
+    let mut app = app_with_entries(1);
+    app.nav.focus = Focus::Entries;
+    app.nav.selected_entry_index = Some(0);
+    app.begin_edit_location();
+
+    // Opens focused on the address field (top): chars type in, and Enter looks
+    // the query up (nothing resolved yet).
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('x')), true),
+        Some(Action::LocationInput('x'))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Tab), true),
+        Some(Action::LocationSwitchFocus)
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::CancelOverlay)
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::LocationResolve)
+    );
+
+    // With a preset present, focus can reach the list (Query → Name → List),
+    // where Enter picks a row.
+    {
+        let state = app.edit_location_state_mut().unwrap();
+        state.presets.push(LocationPreset {
+            label: "Berlin".to_string(),
+            location: journal_storage::Location {
+                city: Some("Berlin".to_string()),
+                ..Default::default()
+            },
+        });
+        state.switch_focus(); // Query -> Name
+        state.switch_focus(); // Name -> List
+        assert_eq!(state.focus, crate::tui::state::EditLocationFocus::List);
+    }
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::LocationSelectRow)
+    );
+}
+
+#[test]
+fn location_query_enter_saves_once_the_query_is_resolved() {
+    let mut app = app_with_entries(1);
+    app.nav.focus = Focus::Entries;
+    app.nav.selected_entry_index = Some(0);
+    app.begin_edit_location();
+    {
+        let state = app.edit_location_state_mut().unwrap();
+        state.focus = crate::tui::state::EditLocationFocus::Query;
+        state.query = "52.5, 13.4".to_string();
+        state.query_looked_up = false;
+    }
+
+    // Before a lookup, Enter in the address field queries.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::LocationResolve)
+    );
+
+    // Once resolved, Enter saves instead of re-querying.
+    app.edit_location_state_mut().unwrap().query_looked_up = true;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::LocationSave)
+    );
 }
 
 #[test]
@@ -1063,7 +1149,15 @@ fn fold_leading_wheel_nets_opposing_scrolls() {
     let up = wheel_event(MouseEventKind::ScrollUp);
     let down = wheel_event(MouseEventKind::ScrollDown);
     // Five up + two down → net -3, all seven consumed.
-    let events = vec![up.clone(), up.clone(), up.clone(), up.clone(), up, down.clone(), down];
+    let events = vec![
+        up.clone(),
+        up.clone(),
+        up.clone(),
+        up.clone(),
+        up,
+        down.clone(),
+        down,
+    ];
     assert_eq!(fold_leading_wheel(&events), (-3, 7));
 }
 
@@ -1072,7 +1166,12 @@ fn fold_leading_wheel_stops_at_first_non_wheel() {
     let down = wheel_event(MouseEventKind::ScrollDown);
     let key = Event::Key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
     // Only the leading wheel run is folded; the key stays for later handling.
-    let events = vec![down.clone(), down, key, wheel_event(MouseEventKind::ScrollUp)];
+    let events = vec![
+        down.clone(),
+        down,
+        key,
+        wheel_event(MouseEventKind::ScrollUp),
+    ];
     assert_eq!(fold_leading_wheel(&events), (2, 2));
 }
 

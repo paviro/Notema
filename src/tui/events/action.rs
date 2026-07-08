@@ -72,6 +72,17 @@ pub(crate) enum Action {
     MoodIncrease,
     MoodSave,
     MoodClear,
+    // Location overlay
+    BeginEditLocation,
+    LocationSwitchFocus,
+    LocationInput(char),
+    LocationBackspace,
+    LocationMoveUp,
+    LocationMoveDown,
+    LocationResolve,
+    LocationSelectRow,
+    LocationSave,
+    LocationClear,
     // Image viewer overlay
     OpenImageViewer(usize),
     ImageViewerNext,

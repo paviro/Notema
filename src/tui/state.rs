@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use journal_core::feelings::FeelingGroup;
-use journal_storage::SearchHit;
+use journal_storage::{GeocodeHit, Location, SearchHit};
 use ratatui::widgets::ListState;
 
 use super::app::SearchScope;
@@ -653,6 +653,280 @@ pub(crate) struct EditMoodState {
     pub(crate) draft: i8,
 }
 
+/// Which field of the location dialog has keyboard focus.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EditLocationFocus {
+    #[default]
+    Query,
+    Name,
+    List,
+}
+
+/// Progress of an on-demand geocode lookup, surfaced as the dialog's status line.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) enum LocationResolveStatus {
+    #[default]
+    Idle,
+    Resolving,
+    Resolved,
+    NoMatch,
+    Error(String),
+}
+
+/// A recent/most-common existing location offered as a preset. `label` is its
+/// display line; `location` is copied wholesale when the preset is chosen.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LocationPreset {
+    pub(crate) label: String,
+    pub(crate) location: Location,
+}
+
+/// State for the location overlay: two text fields (a free-form address or
+/// coordinate query, and a place label) plus a list that shows geocode candidate
+/// matches once a lookup returns, or recent/common presets otherwise. Geocoding
+/// is dispatched to a background worker; `pending_request_id` guards against a
+/// stale reply landing after a newer request.
+pub(crate) struct EditLocationState {
+    /// Free-form address, or `"lat, lon"` coordinates.
+    pub(crate) query: String,
+    /// The place's human label — maps to [`Location::name`].
+    pub(crate) name: String,
+    /// Coordinates + names resolved from the query, a candidate, or a preset.
+    pub(crate) resolved: Option<Location>,
+    /// Recent-then-common existing locations, shown when no lookup is active.
+    pub(crate) presets: Vec<LocationPreset>,
+    /// Candidate matches from the last forward geocode; while non-empty they
+    /// replace the presets in the list.
+    pub(crate) candidates: Vec<GeocodeHit>,
+    pub(crate) list: SelectableList,
+    pub(crate) focus: EditLocationFocus,
+    pub(crate) status: LocationResolveStatus,
+    /// Whether the current query text has already been looked up. When set, Enter
+    /// in the address field commits instead of re-querying; editing the query
+    /// clears it (and the shown result), flipping Enter back to "look up".
+    pub(crate) query_looked_up: bool,
+    /// Id assigned to the next dispatched request; the in-flight one is kept in
+    /// `pending_request_id` so a late reply for an older query can be dropped.
+    pub(crate) next_request_id: u64,
+    pub(crate) pending_request_id: Option<u64>,
+}
+
+impl EditLocationState {
+    pub(crate) fn new(current: Option<Location>, presets: Vec<LocationPreset>) -> Self {
+        let name = current
+            .as_ref()
+            .and_then(|loc| loc.name.clone())
+            .unwrap_or_default();
+        let query = current.as_ref().map(query_seed).unwrap_or_default();
+        // Treat the seeded query as already looked up only when the stored location
+        // carries address detail — a bare coordinate pair still needs a lookup, so
+        // Enter should resolve it rather than save.
+        let query_looked_up = !query.is_empty()
+            && current
+                .as_ref()
+                .is_some_and(|location| location.has_named_parts());
+        let mut state = Self {
+            query_looked_up,
+            query,
+            name,
+            resolved: current,
+            presets,
+            candidates: Vec::new(),
+            list: SelectableList::default(),
+            focus: EditLocationFocus::Query,
+            status: LocationResolveStatus::Idle,
+            next_request_id: 0,
+            pending_request_id: None,
+        };
+        state.normalize_list_state();
+        state
+    }
+
+    /// The list shows geocode candidates once a lookup returns them, else presets.
+    pub(crate) fn showing_candidates(&self) -> bool {
+        !self.candidates.is_empty()
+    }
+
+    /// The labels currently shown in the list — candidate matches (our parsed
+    /// label, falling back to the raw display name) or preset labels.
+    pub(crate) fn list_labels(&self) -> Vec<String> {
+        if self.showing_candidates() {
+            self.candidates
+                .iter()
+                .map(|hit| {
+                    hit.location
+                        .display_label()
+                        .unwrap_or_else(|| hit.display_name.clone())
+                })
+                .collect()
+        } else {
+            self.presets
+                .iter()
+                .map(|preset| preset.label.clone())
+                .collect()
+        }
+    }
+
+    fn row_count(&self) -> usize {
+        if self.showing_candidates() {
+            self.candidates.len()
+        } else {
+            self.presets.len()
+        }
+    }
+
+    /// Cycle focus Query → Name → List → Query. The list is skipped when it's
+    /// empty, so Tab just toggles between the two input fields.
+    pub(crate) fn switch_focus(&mut self) {
+        let has_list = self.row_count() > 0;
+        self.focus = match self.focus {
+            EditLocationFocus::Query => EditLocationFocus::Name,
+            EditLocationFocus::Name if has_list => EditLocationFocus::List,
+            EditLocationFocus::Name => EditLocationFocus::Query,
+            EditLocationFocus::List => EditLocationFocus::Query,
+        };
+    }
+
+    /// Type a char into whichever text field has focus (inert on the list).
+    pub(crate) fn input_char(&mut self, ch: char) {
+        match self.focus {
+            EditLocationFocus::Query => {
+                self.query.push(ch);
+                self.invalidate_lookup();
+            }
+            EditLocationFocus::Name => self.name.push(ch),
+            EditLocationFocus::List => {}
+        }
+    }
+
+    /// Backspace the focused text field (inert on the list).
+    pub(crate) fn backspace(&mut self) {
+        match self.focus {
+            EditLocationFocus::Query => {
+                self.query.pop();
+                self.invalidate_lookup();
+            }
+            EditLocationFocus::Name => {
+                self.name.pop();
+            }
+            EditLocationFocus::List => {}
+        }
+    }
+
+    /// Editing the query invalidates the last lookup: drop the resolved result and
+    /// candidate matches, clear the status preview, and flip Enter back to "look
+    /// up". The typed name is untouched.
+    fn invalidate_lookup(&mut self) {
+        self.query_looked_up = false;
+        self.resolved = None;
+        self.candidates.clear();
+        self.status = LocationResolveStatus::Idle;
+        self.normalize_list_state();
+    }
+
+    /// Fold a finished forward-geocode reply into the dialog: replace the
+    /// candidate list, move focus onto it when there are matches, and update the
+    /// status line.
+    pub(crate) fn apply_candidates(&mut self, hits: Vec<GeocodeHit>) {
+        self.candidates = hits;
+        self.list.set_offset(0);
+        if self.candidates.is_empty() {
+            self.status = LocationResolveStatus::NoMatch;
+            // Don't leave focus stranded on a list that just emptied.
+            if self.focus == EditLocationFocus::List && self.presets.is_empty() {
+                self.focus = EditLocationFocus::Query;
+            }
+        } else {
+            self.status = LocationResolveStatus::Resolved;
+            self.focus = EditLocationFocus::List;
+            self.select_index(0);
+        }
+        self.normalize_list_state();
+    }
+
+    /// Fold a finished reverse-geocode reply into the dialog: enrich the resolved
+    /// coordinates with the returned names (keeping the user's coordinates). The
+    /// coordinates are now looked up, so Enter in the address field will save.
+    pub(crate) fn apply_reverse(&mut self, hit: Option<GeocodeHit>) {
+        match hit {
+            Some(hit) => {
+                let mut location = hit.location;
+                // Prefer the coordinates the user actually entered.
+                if let Some(resolved) = &self.resolved {
+                    location.latitude = resolved.latitude.or(location.latitude);
+                    location.longitude = resolved.longitude.or(location.longitude);
+                }
+                self.resolved = Some(location);
+                self.status = LocationResolveStatus::Resolved;
+            }
+            // The coordinates the user entered are still resolved and saveable;
+            // only the name lookup came back empty.
+            None => self.status = LocationResolveStatus::NoMatch,
+        }
+        self.query_looked_up = true;
+    }
+
+    /// Adopt the highlighted preset/candidate as the resolved location, seeding
+    /// the query field from it. Its name (a preset's label, or a POI/venue name
+    /// from geocoding) fills the name field only when the user hasn't typed one,
+    /// so a deliberate custom name is never clobbered.
+    pub(crate) fn select_row(&mut self) {
+        let Some(index) = self.selected_index() else {
+            return;
+        };
+        let location = if self.showing_candidates() {
+            self.candidates.get(index).map(|hit| hit.location.clone())
+        } else {
+            self.presets
+                .get(index)
+                .map(|preset| preset.location.clone())
+        };
+        if let Some(location) = location {
+            if self.name.trim().is_empty()
+                && let Some(name) = &location.name
+            {
+                self.name = name.clone();
+            }
+            self.query = query_seed(&location);
+            self.resolved = Some(location);
+            self.status = LocationResolveStatus::Resolved;
+        }
+    }
+
+    /// The location to persist: the resolved coordinates/address with the typed
+    /// name applied. `None` when nothing is set (clears the entry's location).
+    pub(crate) fn composed(&self) -> Option<Location> {
+        let mut location = self.resolved.clone().unwrap_or_default();
+        let name = self.name.trim();
+        location.name = (!name.is_empty()).then(|| name.to_string());
+        (!location.is_empty()).then_some(location)
+    }
+}
+
+impl ListNav for EditLocationState {
+    fn list(&self) -> &SelectableList {
+        &self.list
+    }
+
+    fn list_mut(&mut self) -> &mut SelectableList {
+        &mut self.list
+    }
+
+    fn item_count(&self) -> usize {
+        self.row_count()
+    }
+}
+
+/// Seed the address/coords field from a location: its coordinates when known (so
+/// it stays re-resolvable). Empty otherwise — the place name lives in its own
+/// field and must not be echoed here.
+fn query_seed(location: &Location) -> String {
+    match (location.latitude, location.longitude) {
+        (Some(lat), Some(lon)) => format!("{lat}, {lon}"),
+        _ => String::new(),
+    }
+}
+
 /// Fullscreen image viewer overlay: the entry's images in body order and the
 /// one currently shown.
 pub(crate) struct ImageViewerState {
@@ -682,6 +956,9 @@ pub(crate) enum Overlay {
     EditMetadata(EditMetadataState),
     EditFeelings(EditFeelingState),
     EditMood(EditMoodState),
+    // Boxed: this state is much larger than the other variants (candidate/preset
+    // lists), so keeping it behind a pointer keeps `Overlay` small.
+    EditLocation(Box<EditLocationState>),
     ImageViewer(ImageViewerState),
 }
 
@@ -915,6 +1192,201 @@ mod tests {
         assert!(shown.contains(&"hiking"));
         // The archived-only value stays hidden until its query matches.
         assert!(!shown.contains(&"wanderlust"));
+    }
+
+    fn hit(name: &str, lat: f64, lon: f64) -> GeocodeHit {
+        GeocodeHit {
+            display_name: name.to_string(),
+            location: Location {
+                city: Some(name.to_string()),
+                latitude: Some(lat),
+                longitude: Some(lon),
+                ..Location::default()
+            },
+        }
+    }
+
+    #[test]
+    fn location_composes_name_only_and_clears_when_empty() {
+        let mut state = EditLocationState::new(None, Vec::new());
+        assert_eq!(state.composed(), None);
+
+        state.name = "Home".to_string();
+        let composed = state.composed().unwrap();
+        assert_eq!(composed.name.as_deref(), Some("Home"));
+        assert!(composed.latitude.is_none());
+    }
+
+    #[test]
+    fn location_selecting_a_candidate_fills_resolved_and_saves_coordinates() {
+        let mut state = EditLocationState::new(None, Vec::new());
+        state.apply_candidates(vec![hit("Paris", 48.85, 2.35)]);
+
+        // A match list takes focus and reports resolved.
+        assert!(state.showing_candidates());
+        assert_eq!(state.focus, EditLocationFocus::List);
+        assert_eq!(state.status, LocationResolveStatus::Resolved);
+
+        state.select_row();
+        let composed = state.composed().unwrap();
+        assert_eq!(composed.latitude, Some(48.85));
+        assert_eq!(composed.city.as_deref(), Some("Paris"));
+    }
+
+    #[test]
+    fn location_picking_a_geocoded_address_keeps_the_typed_name() {
+        let mut state = EditLocationState::new(None, Vec::new());
+        state.name = "Home".to_string();
+        // A plain address candidate carries a road/city but no POI name.
+        let candidate = GeocodeHit {
+            display_name: "Bahnhofstraße 1, Berlin".to_string(),
+            location: Location {
+                road: Some("Bahnhofstraße".to_string()),
+                house_number: Some("1".to_string()),
+                city: Some("Berlin".to_string()),
+                latitude: Some(52.52),
+                longitude: Some(13.405),
+                ..Location::default()
+            },
+        };
+        state.apply_candidates(vec![candidate]);
+        state.select_row();
+
+        let composed = state.composed().unwrap();
+        assert_eq!(
+            composed.name.as_deref(),
+            Some("Home"),
+            "typed name survives"
+        );
+        assert_eq!(composed.road.as_deref(), Some("Bahnhofstraße"));
+        assert_eq!(composed.city.as_deref(), Some("Berlin"));
+        assert_eq!(composed.latitude, Some(52.52));
+    }
+
+    #[test]
+    fn location_picking_a_poi_fills_an_empty_name() {
+        // No name typed: a candidate's POI name (a shop/venue) fills it.
+        let mut state = EditLocationState::new(None, Vec::new());
+        let candidate = GeocodeHit {
+            display_name: "Corner Cafe, Bahnhofstraße 1, Berlin".to_string(),
+            location: Location {
+                name: Some("Corner Cafe".to_string()),
+                road: Some("Bahnhofstraße".to_string()),
+                house_number: Some("1".to_string()),
+                city: Some("Berlin".to_string()),
+                ..Location::default()
+            },
+        };
+        state.apply_candidates(vec![candidate]);
+        state.select_row();
+
+        assert_eq!(
+            state.composed().unwrap().name.as_deref(),
+            Some("Corner Cafe")
+        );
+    }
+
+    #[test]
+    fn location_no_candidates_reports_no_match_and_keeps_presets() {
+        let preset = LocationPreset {
+            label: "Berlin".to_string(),
+            location: Location {
+                city: Some("Berlin".to_string()),
+                ..Location::default()
+            },
+        };
+        let mut state = EditLocationState::new(None, vec![preset]);
+        state.apply_candidates(Vec::new());
+
+        assert!(!state.showing_candidates());
+        assert_eq!(state.status, LocationResolveStatus::NoMatch);
+        assert_eq!(state.item_count(), 1, "presets stay listed");
+    }
+
+    #[test]
+    fn location_tab_skips_the_list_when_empty() {
+        // No presets and no candidates: Tab only toggles the two input fields.
+        let mut state = EditLocationState::new(None, Vec::new());
+        assert_eq!(state.focus, EditLocationFocus::Query);
+        state.switch_focus();
+        assert_eq!(state.focus, EditLocationFocus::Name);
+        state.switch_focus();
+        assert_eq!(state.focus, EditLocationFocus::Query, "the list is skipped");
+
+        // With a preset present, the list joins the cycle.
+        let preset = LocationPreset {
+            label: "Berlin".to_string(),
+            location: Location {
+                city: Some("Berlin".to_string()),
+                ..Location::default()
+            },
+        };
+        let mut state = EditLocationState::new(None, vec![preset]);
+        state.switch_focus(); // Query -> Name
+        state.switch_focus(); // Name -> List
+        assert_eq!(state.focus, EditLocationFocus::List);
+    }
+
+    #[test]
+    fn location_reverse_keeps_user_coordinates_and_adds_names() {
+        let mut state = EditLocationState::new(None, Vec::new());
+        state.resolved = Some(Location {
+            latitude: Some(1.0),
+            longitude: Some(2.0),
+            ..Location::default()
+        });
+        state.apply_reverse(Some(hit("Town", 9.9, 9.9)));
+
+        let resolved = state.resolved.unwrap();
+        assert_eq!(resolved.latitude, Some(1.0));
+        assert_eq!(resolved.longitude, Some(2.0));
+        assert_eq!(resolved.city.as_deref(), Some("Town"));
+    }
+
+    #[test]
+    fn location_opened_with_coords_only_still_needs_a_lookup() {
+        // Only coordinates stored: Enter should look up, not save.
+        let coords_only = Location {
+            latitude: Some(52.5),
+            longitude: Some(13.4),
+            ..Location::default()
+        };
+        let state = EditLocationState::new(Some(coords_only), Vec::new());
+        assert!(!state.query.is_empty());
+        assert!(!state.query_looked_up);
+
+        // Coordinates plus address detail count as already resolved.
+        let resolved = Location {
+            city: Some("Berlin".to_string()),
+            latitude: Some(52.5),
+            longitude: Some(13.4),
+            ..Location::default()
+        };
+        let state = EditLocationState::new(Some(resolved), Vec::new());
+        assert!(state.query_looked_up);
+    }
+
+    #[test]
+    fn location_query_flips_to_save_after_lookup_then_back_on_edit() {
+        let mut state = EditLocationState::new(None, Vec::new());
+        state.focus = EditLocationFocus::Query;
+        state.query = "52.5, 13.4".to_string();
+        state.resolved = Some(Location {
+            latitude: Some(52.5),
+            longitude: Some(13.4),
+            ..Location::default()
+        });
+
+        // A finished reverse lookup marks the query resolved (Enter would save).
+        state.apply_reverse(Some(hit("Berlin", 52.5, 13.4)));
+        assert!(state.query_looked_up);
+        assert!(state.resolved.is_some());
+
+        // Editing the query reverts to look-up mode and clears the shown result.
+        state.input_char('5');
+        assert!(!state.query_looked_up);
+        assert!(state.resolved.is_none());
+        assert_eq!(state.status, LocationResolveStatus::Idle);
     }
 
     #[test]

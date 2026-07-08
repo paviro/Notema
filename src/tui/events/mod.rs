@@ -19,8 +19,8 @@ use crate::{
 use action::Action;
 use actions::{
     create_entry_in_selected_journal, delete_selected, delete_selected_journal, edit_selected,
-    set_feelings_on_entry, set_metadata_on_entry, set_mood_on_entry, submit_new_journal,
-    toggle_archive_selected_journal, toggle_starred_on_entry, view_selected,
+    set_feelings_on_entry, set_location_on_entry, set_metadata_on_entry, set_mood_on_entry,
+    submit_new_journal, toggle_archive_selected_journal, toggle_starred_on_entry, view_selected,
 };
 use keyboard::{keep_selection_visible, move_focus_left, move_focus_right};
 
@@ -281,6 +281,56 @@ pub(crate) fn dispatch_action(
             })?;
         }
 
+        Action::BeginEditLocation => app.begin_edit_location(),
+        Action::LocationSwitchFocus => {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.switch_focus();
+            }
+        }
+        Action::LocationInput(ch) => {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.input_char(ch);
+            }
+        }
+        Action::LocationBackspace => {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.backspace();
+            }
+        }
+        Action::LocationMoveUp => {
+            let list_height = location_dialog_list_height(terminal, app)?;
+            if let Some(state) = app.edit_location_state_mut() {
+                state.move_up();
+                state.ensure_selected_visible(list_height);
+            }
+        }
+        Action::LocationMoveDown => {
+            let list_height = location_dialog_list_height(terminal, app)?;
+            if let Some(state) = app.edit_location_state_mut() {
+                state.move_down();
+                state.ensure_selected_visible(list_height);
+            }
+        }
+        Action::LocationResolve => app.resolve_location_query(),
+        Action::LocationSelectRow => {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.select_row();
+            }
+            let Some(location) = app.edit_location_state().map(|state| state.composed()) else {
+                return Ok(false);
+            };
+            commit_entry_edit(app, |app| set_location_on_entry(app, location.clone()))?;
+        }
+        Action::LocationSave => {
+            let Some(location) = app.edit_location_state().map(|state| state.composed()) else {
+                return Ok(false);
+            };
+            commit_entry_edit(app, |app| set_location_on_entry(app, location.clone()))?;
+        }
+        Action::LocationClear => {
+            commit_entry_edit(app, |app| set_location_on_entry(app, None))?;
+        }
+
         Action::OpenImageViewer(index) => app.begin_image_viewer(index),
         Action::ImageViewerNext => app.image_viewer_step(1),
         Action::ImageViewerPrev => app.image_viewer_step(-1),
@@ -397,6 +447,20 @@ fn metadata_dialog_list_height(
         .map_or(0, |state| state.filtered.len());
     Ok(
         render::metadata_dialog_layout(terminal_area(terminal)?, filtered_len)
+            .list
+            .height,
+    )
+}
+
+fn location_dialog_list_height(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &App,
+) -> AppResult<u16> {
+    let rows = app
+        .edit_location_state()
+        .map_or(0, |state| render::location_list_rows(&state.list_labels()));
+    Ok(
+        render::location_dialog_layout(terminal_area(terminal)?, rows)
             .list
             .height,
     )

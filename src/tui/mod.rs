@@ -1,6 +1,7 @@
 mod app;
 mod entry_rows;
 mod events;
+mod geocode;
 mod hit_test;
 mod image;
 mod render;
@@ -351,6 +352,8 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
     loop {
         // A newly finished image build makes the frame stale; repaint below.
         let images_ready = app.image.runtime.poll_results();
+        // A finished geocode lookup updates the open location dialog; repaint too.
+        let geocode_ready = app.apply_geocode_results();
 
         let mut poll_timeout = app
             .status_timeout()
@@ -359,6 +362,13 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
         // Poll briefly while builds are pending so results paint promptly.
         if app.image.runtime.has_pending() {
             poll_timeout = poll_timeout.min(Duration::from_millis(30));
+        }
+        // Likewise while a geocode lookup is in flight, so its result lands quickly.
+        if app
+            .edit_location_state()
+            .is_some_and(|state| state.pending_request_id.is_some())
+        {
+            poll_timeout = poll_timeout.min(Duration::from_millis(50));
         }
         // Wake often enough to blink the search caret while typing in the field.
         if app.is_search_input_active() {
@@ -499,6 +509,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
             || refreshed
             || search_recomputed
             || images_ready
+            || geocode_ready
             || animate_loading
             || blink_toggled
         {

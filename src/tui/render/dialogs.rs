@@ -8,9 +8,10 @@ use ratatui::{
 
 use unicode_width::UnicodeWidthStr;
 
+use crate::tui::entry_rows::wrap_text;
 use crate::tui::state::{
-    DeleteContext, EditFeelingState, EditMetadataFocus, EditMetadataState, EditMoodState,
-    FeelingRow, ListNav,
+    DeleteContext, EditFeelingState, EditLocationFocus, EditLocationState, EditMetadataFocus,
+    EditMetadataState, EditMoodState, FeelingRow, ListNav, LocationResolveStatus,
 };
 use crate::tui::surface::metadata_value_rows;
 
@@ -82,7 +83,67 @@ const METADATA_DIALOG_INPUT_VALUE_HINTS: [Hint; 3] = [
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
+const LOCATION_DIALOG_LIST_HINTS: [Hint; 4] = [
+    Hint::new("pick", "enter", HintId::LocationSelectRow),
+    Hint::new("edit", "tab", HintId::LocationSwitchFocus),
+    Hint::new("clear", "del", HintId::LocationClear),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
+const LOCATION_DIALOG_QUERY_HINTS: [Hint; 4] = [
+    Hint::new("look up", "enter", HintId::LocationResolve),
+    Hint::new("next", "tab", HintId::LocationSwitchFocus),
+    Hint::new("clear", "del", HintId::LocationClear),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
+/// Query-field hints once the query is resolved: Enter now saves.
+const LOCATION_DIALOG_QUERY_RESOLVED_HINTS: [Hint; 4] = [
+    Hint::new("save", "enter", HintId::LocationSave),
+    Hint::new("next", "tab", HintId::LocationSwitchFocus),
+    Hint::new("clear", "del", HintId::LocationClear),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
+const LOCATION_DIALOG_NAME_HINTS: [Hint; 4] = [
+    Hint::new("save", "enter", HintId::LocationSave),
+    Hint::new("next", "tab", HintId::LocationSwitchFocus),
+    Hint::new("clear", "del", HintId::LocationClear),
+    Hint::new("cancel", "esc", HintId::CancelOverlay),
+];
+
 const LIST_DIALOG_WIDTH: u16 = 44;
+const LOCATION_DIALOG_WIDTH: u16 = 66;
+const LOCATION_DIALOG_MAX_VISIBLE_ROWS: u16 = 8;
+/// Text width available to a wrapped list row: the inner width less the border,
+/// the selection-cursor column, and one leading pad column.
+const LOCATION_LIST_WRAP_WIDTH: usize = (LOCATION_DIALOG_WIDTH - 4) as usize;
+/// Cap the lines a single (wrapped) list row may occupy.
+const LOCATION_LIST_MAX_ITEM_LINES: usize = 3;
+
+/// Wrap a list label into its display lines (at least one).
+fn location_row_lines(label: &str) -> Vec<String> {
+    let lines = wrap_text(
+        label,
+        LOCATION_LIST_WRAP_WIDTH,
+        LOCATION_LIST_MAX_ITEM_LINES,
+    );
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
+    }
+}
+
+/// Total rows the list occupies once every label is wrapped — what the dialog is
+/// sized to, so multi-line rows aren't clipped.
+pub(crate) fn location_list_rows(labels: &[String]) -> usize {
+    labels
+        .iter()
+        .map(|label| location_row_lines(label).len())
+        .sum::<usize>()
+        .max(1)
+}
 const MOOD_DIALOG_WIDTH: u16 = 90;
 const CONFIRM_DIALOG_WIDTH: u16 = 42;
 const NEW_JOURNAL_DIALOG_WIDTH: u16 = 56;
@@ -98,6 +159,18 @@ pub(crate) fn feelings_dialog_hints(focus: EditMetadataFocus) -> &'static [Hint]
 
 pub(crate) fn mood_dialog_hints() -> &'static [Hint] {
     &MOOD_DIALOG_HINTS
+}
+
+pub(crate) fn location_dialog_hints(
+    focus: EditLocationFocus,
+    query_looked_up: bool,
+) -> &'static [Hint] {
+    match focus {
+        EditLocationFocus::Query if query_looked_up => &LOCATION_DIALOG_QUERY_RESOLVED_HINTS,
+        EditLocationFocus::Query => &LOCATION_DIALOG_QUERY_HINTS,
+        EditLocationFocus::Name => &LOCATION_DIALOG_NAME_HINTS,
+        EditLocationFocus::List => &LOCATION_DIALOG_LIST_HINTS,
+    }
 }
 
 pub(crate) fn metadata_dialog_hints(
@@ -176,6 +249,89 @@ fn feelings_dialog_hint_height(frame_area: Rect) -> u16 {
 
 fn mood_dialog_hint_height(frame_area: Rect) -> u16 {
     hint_height(&MOOD_DIALOG_HINTS, dialog_hint_width(frame_area, 44))
+}
+
+fn location_dialog_hint_height(frame_area: Rect) -> u16 {
+    // Reserve the tallest focus state so the layout doesn't shift as focus moves.
+    let width = dialog_hint_width(frame_area, LOCATION_DIALOG_WIDTH);
+    hint_height(&LOCATION_DIALOG_QUERY_HINTS, width)
+        .max(hint_height(&LOCATION_DIALOG_QUERY_RESOLVED_HINTS, width))
+        .max(hint_height(&LOCATION_DIALOG_NAME_HINTS, width))
+        .max(hint_height(&LOCATION_DIALOG_LIST_HINTS, width))
+}
+
+/// Fixed rows above the list, mirroring the feelings dialog's framing: a title,
+/// a separator, the two inputs, a blank spacer, the status line, a separator, and
+/// the list heading.
+const LOCATION_DIALOG_CHROME: u16 = 8;
+/// A blank row between the list and the hint block, matching the feelings dialog.
+const LOCATION_DIALOG_HINTS_SPACER: u16 = 1;
+
+pub(crate) fn location_dialog_area(frame_area: Rect, list_rows: usize) -> Rect {
+    const BORDERS: u16 = 2;
+    let hint_height = location_dialog_hint_height(frame_area);
+    let visible = (list_rows as u16).clamp(1, LOCATION_DIALOG_MAX_VISIBLE_ROWS);
+    let h =
+        (BORDERS + LOCATION_DIALOG_CHROME + LOCATION_DIALOG_HINTS_SPACER + hint_height + visible)
+            .min(frame_area.height.saturating_sub(2));
+    super::centered_rect_fixed_size(LOCATION_DIALOG_WIDTH, h, frame_area)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct LocationDialogLayout {
+    pub(crate) area: Rect,
+    pub(crate) title: Rect,
+    pub(crate) title_separator: Rect,
+    pub(crate) name: Rect,
+    pub(crate) query: Rect,
+    pub(crate) status: Rect,
+    pub(crate) list_separator: Rect,
+    pub(crate) heading: Rect,
+    pub(crate) list: Rect,
+    pub(crate) hints: Rect,
+}
+
+pub(crate) fn location_dialog_layout(frame_area: Rect, list_rows: usize) -> LocationDialogLayout {
+    let area = location_dialog_area(frame_area, list_rows);
+    let inner = super::panel_inner(area);
+    let hint_height = location_dialog_hint_height(frame_area);
+    let row = |offset: u16| Rect {
+        x: inner.x,
+        y: inner.y + offset,
+        width: inner.width,
+        height: 1,
+    };
+    // Rows: title(0) sep(1) address(2) name(3) spacer(4) status(5) sep(6) heading(7),
+    // then the list, a blank spacer, and the hints.
+    let list_height = inner
+        .height
+        .saturating_sub(LOCATION_DIALOG_CHROME + LOCATION_DIALOG_HINTS_SPACER + hint_height);
+    let list = Rect {
+        x: inner.x,
+        y: inner.y + LOCATION_DIALOG_CHROME,
+        width: inner.width,
+        height: list_height,
+    };
+    let hints = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(hint_height),
+        width: inner.width,
+        height: hint_height,
+    };
+
+    LocationDialogLayout {
+        area,
+        title: row(0),
+        title_separator: row(1),
+        query: row(2),
+        name: row(3),
+        // row(4) is a blank spacer between the inputs and the status line.
+        status: row(5),
+        list_separator: row(6),
+        heading: row(7),
+        list,
+        hints,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -666,6 +822,131 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
     if layout.hints.y < layout.inner.y + layout.inner.height {
         render_hint_line(frame, mood_dialog_hints(), layout.hints);
     }
+}
+
+pub(super) fn draw_edit_location_dialog(frame: &mut Frame<'_>, state: &mut EditLocationState) {
+    let showing_candidates = state.showing_candidates();
+    let labels = state.list_labels();
+    let item_count = labels.len();
+    // Size the dialog to the wrapped row span so multi-line rows aren't clipped.
+    let layout = location_dialog_layout(frame.area(), location_list_rows(&labels));
+
+    state.normalize_list_state();
+    let max_visible = layout.list.height;
+    let max_offset = item_count.saturating_sub(max_visible as usize);
+    let scroll = state.offset().min(max_offset);
+    state.list.set_offset(scroll);
+
+    let list_focused = state.focus == EditLocationFocus::List;
+    let dim = Style::default().add_modifier(Modifier::DIM);
+    let bold = Style::default().add_modifier(Modifier::BOLD);
+
+    frame.render_widget(Clear, layout.area);
+    frame.render_widget(
+        Block::default()
+            .title(" Edit Location ")
+            .borders(Borders::ALL),
+        layout.area,
+    );
+
+    render_lines_in_area(
+        frame,
+        [Line::from(Span::styled(" Location ", bold))],
+        layout.title,
+    );
+    render_separator(frame, layout.title_separator);
+
+    render_search_field(
+        frame,
+        layout.query,
+        "Address / coords: ",
+        &state.query,
+        state.focus == EditLocationFocus::Query,
+    );
+    render_search_field(
+        frame,
+        layout.name,
+        "Name: ",
+        &state.name,
+        state.focus == EditLocationFocus::Name,
+    );
+
+    // Status line: reflects the in-flight/last lookup, or the resolved value.
+    let status_line = match &state.status {
+        LocationResolveStatus::Idle => {
+            match state.resolved.as_ref().and_then(|l| l.display_label()) {
+                Some(label) => Line::from(vec![Span::raw("  "), Span::styled(label, dim)]),
+                None => Line::from(Span::styled(
+                    "  Enter an address or \"lat, lon\", then press enter",
+                    dim,
+                )),
+            }
+        }
+        LocationResolveStatus::Resolving => Line::from(Span::styled("  Resolving…", dim)),
+        LocationResolveStatus::NoMatch => Line::from(Span::styled("  No matches found", dim)),
+        LocationResolveStatus::Error(error) => Line::from(Span::styled(format!("  {error}"), dim)),
+        LocationResolveStatus::Resolved => {
+            match state.resolved.as_ref().and_then(|l| l.display_label()) {
+                Some(label) => Line::from(vec![Span::styled("  ✓ ", bold), Span::raw(label)]),
+                None => Line::from(Span::styled("  Resolved", dim)),
+            }
+        }
+    };
+    render_lines_in_area(frame, [status_line], layout.status);
+
+    render_separator(frame, layout.list_separator);
+
+    let heading = if showing_candidates {
+        " Matches "
+    } else {
+        " Recent places "
+    };
+    render_lines_in_area(
+        frame,
+        [Line::from(Span::styled(heading, bold))],
+        layout.heading,
+    );
+
+    // Wrap long rows onto continuation lines (aligned under the first) instead of
+    // clipping them.
+    let items: Vec<ListItem<'_>> = if labels.is_empty() {
+        let text = if showing_candidates {
+            " (no matches)"
+        } else {
+            " (no saved places yet)"
+        };
+        vec![ListItem::new(Line::from(text))]
+    } else {
+        labels
+            .iter()
+            .map(|label| {
+                let lines: Vec<Line<'static>> = location_row_lines(label)
+                    .into_iter()
+                    .map(|line| Line::from(format!(" {line}")))
+                    .collect();
+                ListItem::new(lines)
+            })
+            .collect()
+    };
+
+    let list = List::new(items)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_symbol(">")
+        .highlight_spacing(HighlightSpacing::Always);
+    let mut render_state = list_state_for_render(
+        state.selected_index(),
+        scroll,
+        layout.list.height,
+        list_focused && item_count > 0,
+    );
+    frame.render_stateful_widget(list, layout.list, &mut render_state);
+
+    render_hint_line(
+        frame,
+        location_dialog_hints(state.focus, state.query_looked_up),
+        layout.hints,
+    );
+    render_scrollbar_if_needed(frame, layout.area, item_count, max_visible, scroll);
 }
 
 pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditFeelingState) {

@@ -45,12 +45,13 @@ pub(crate) use chrome::{
     expanded_footer_text, footer_height, footer_hint_id_at, footer_text, hint_height, hint_id_at,
 };
 use dialogs::{
-    draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_metadata_dialog,
-    draw_edit_mood_dialog, draw_new_journal_input,
+    draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_location_dialog,
+    draw_edit_metadata_dialog, draw_edit_mood_dialog, draw_new_journal_input,
 };
 pub(crate) use dialogs::{
     feelings_dialog_hints, feelings_dialog_layout, feelings_selected_line_count,
-    metadata_dialog_hints, metadata_dialog_layout, mood_dialog_hints, mood_dialog_layout,
+    location_dialog_layout, location_list_rows, metadata_dialog_hints, metadata_dialog_layout,
+    mood_dialog_hints, mood_dialog_layout,
 };
 use entries::draw_entry_list;
 use image_viewer::draw_image_viewer;
@@ -161,6 +162,10 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
 
     if let Some(state) = app.edit_mood_state() {
         draw_edit_mood_dialog(frame, state);
+    }
+
+    if let Some(state) = app.edit_location_state_mut() {
+        draw_edit_location_dialog(frame, state);
     }
 
     if let Some(state) = app.image_viewer_state() {

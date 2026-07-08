@@ -91,10 +91,12 @@ fn layout_places_hit_targets_in_three_columns() {
     assert!(!layout.single_panel);
     assert!(layout.entry_view.is_some());
     assert!(layout.insights.is_none());
-    assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 27, 19));
-    assert_eq!(layout.entries.unwrap().panel.area, Rect::new(27, 0, 47, 19));
-    assert_eq!(layout.entry_view.unwrap().area, Rect::new(74, 0, 66, 19));
-    assert_eq!(layout.footer, Rect::new(0, 19, 140, 1));
+    // The browse action footer wraps to two rows at this width, so the three
+    // columns share the remaining 18 rows.
+    assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 27, 18));
+    assert_eq!(layout.entries.unwrap().panel.area, Rect::new(27, 0, 47, 18));
+    assert_eq!(layout.entry_view.unwrap().area, Rect::new(74, 0, 66, 18));
+    assert_eq!(layout.footer, Rect::new(0, 18, 140, 2));
 }
 
 #[test]

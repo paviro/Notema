@@ -371,6 +371,8 @@ pub(crate) struct App {
     pub(crate) overlay: Overlay,
     pub(crate) status_bar: StatusBar,
     pub(crate) image: ImageState,
+    /// Background geocoding for the location dialog; spawned on first lookup.
+    pub(crate) geocode: crate::tui::geocode::GeocodeWorker,
     /// Clickable `[Image N …]` label positions from the last entry-view render.
     pub(crate) entry_view_image_hits: EntryViewImageHits,
     /// The insights list scrollbar geometry from the last render, so a mouse drag
@@ -448,6 +450,7 @@ impl App {
             overlay: Overlay::None,
             status_bar: StatusBar::default(),
             image: ImageState::default(),
+            geocode: crate::tui::geocode::GeocodeWorker::default(),
             entry_view_image_hits: EntryViewImageHits::default(),
             insights_scroll: InsightsScrollGeometry::default(),
             scrollbar: ScrollbarDragState::default(),
@@ -828,6 +831,7 @@ pub(crate) fn single_panel_is_active(width: u16) -> bool {
 }
 
 mod images;
+mod location;
 mod metadata;
 mod overlays;
 mod search;

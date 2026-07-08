@@ -1,5 +1,5 @@
 use crate::{AppResult, editor};
-use journal_storage::{EditOutcome, MetadataField};
+use journal_storage::{EditOutcome, Location, MetadataField};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
     io,
@@ -300,6 +300,30 @@ pub(super) fn set_mood_on_entry(app: &mut App, mood: Option<i8>) -> AppResult<()
     Ok(())
 }
 
+pub(super) fn set_location_on_entry(app: &mut App, location: Option<Location>) -> AppResult<()> {
+    let Some(target) = app.selected_entry_target() else {
+        return Ok(());
+    };
+
+    if !reject_if_locked(app, &target) {
+        return Ok(());
+    }
+
+    let had_location = location.is_some();
+    app.store.set_entry_metadata_field(
+        &target.path,
+        MetadataField::Location(location.map(Box::new)),
+    )?;
+
+    app.set_status(if had_location {
+        "Location saved"
+    } else {
+        "Location cleared"
+    });
+    app.refresh()?;
+    Ok(())
+}
+
 pub(super) fn toggle_starred_on_entry(app: &mut App) -> AppResult<()> {
     let Some(target) = app.selected_entry_target() else {
         return Ok(());
@@ -370,5 +394,30 @@ mod tests {
         set_feelings_on_entry(&mut app, &feelings).unwrap();
 
         assert_eq!(app.selected_entry_feelings(), feelings);
+    }
+
+    #[test]
+    fn set_location_on_entry_writes_and_clears_front_matter() {
+        let dir = tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        let path = entry_dir.join("a.md");
+        fs::write(&path, "+++\ntags = []\n+++\n\n# A\n").unwrap();
+
+        let config = Config::new(dir.path().to_path_buf(), "true");
+        let mut app = new_app(config);
+        app.select_journal_by_name("work");
+
+        let location = Location {
+            name: Some("Cafe".to_string()),
+            latitude: Some(52.52),
+            longitude: Some(13.405),
+            ..Location::default()
+        };
+        set_location_on_entry(&mut app, Some(location)).unwrap();
+        assert_eq!(app.selected_entry_location().as_deref(), Some("Cafe"));
+
+        set_location_on_entry(&mut app, None).unwrap();
+        assert_eq!(app.selected_entry_location(), None);
     }
 }
