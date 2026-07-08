@@ -17,7 +17,8 @@ on light, dark, and monochrome/e-ink terminals.
   image rendering, and entry metadata.
 - **Fuzzy search** across the whole corpus, including metadata.
 - **Rich metadata** per entry — tags, people, activities, feelings (from a
-  fixed vocabulary), and a mood score (-5…+5).
+  fixed vocabulary), a mood score (-5…+5), and a location (name an address or
+  enter coordinates; addresses are geocoded via OpenStreetMap Nominatim).
 - **Editor integration** — write and edit entries in `$EDITOR`.
 - **Day One import** — import a Day One JSON export, photos included.
 - **End-to-end encryption** — per-device [age](https://age-encryption.org) keys,

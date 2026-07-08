@@ -56,9 +56,14 @@ source = "dayone"
 id = "UUID"
 
 [location]
-place = "Twin Peaks"
-locality = "San Francisco"
-administrative_area = "California"
+name = "Twin Peaks"
+house_number = "501"
+road = "Twin Peaks Blvd"
+suburb = "Twin Peaks"
+postcode = "94114"
+city = "San Francisco"
+county = "San Francisco County"
+state = "California"
 country = "United States"
 latitude = 37.7544
 longitude = -122.4477
@@ -109,7 +114,7 @@ then the system/import tables.
 | `starred`      | boolean         | Whether the entry is flagged as a favorite. Omitted when false. |
 | `[datetime]`   | table           | `created_at` (RFC 3339; falls back to the filename date if missing), `edited_at` (RFC 3339; only genuine human edits move it — not encryption or asset rewrites), `timezone` (IANA zone name the entry was authored in, e.g. `Europe/Berlin` — capture-only, complements the offset in `created_at`), and `writing_seconds` (accumulated editor-open time, whole seconds; seeded from Day One's `editingTime` and grown by native edits that change the body). |
 | `[import]`     | table           | Provenance of an imported entry: `source` (e.g. `dayone`) and `id` (the source's identifier). Absent for entries created in the app. Used to skip re-importing. |
-| `[location]`   | table           | Where the entry was written (Day One import): optional `place`, `locality`, `administrative_area`, `country`, `latitude`, `longitude` — only the provided fields are stored. Capture-only: displayed, not edited or searched. |
+| `[location]`   | table           | Where the entry was written. Fields are OpenStreetMap / Nominatim address keys, stored one-to-one — optional `name` (a place/venue label), `house_number`, `road`, `neighbourhood`, `quarter`, `suburb`, `borough`, `city_district`, `city`, `town`, `village`, `municipality`, `hamlet`, `postcode`, `county`, `state_district`, `province`, `region`, `state`, `country`, `latitude`, `longitude`. Only the keys a geocode returns are stored (the rest omitted). Set in the app via the location dialog (name a place, or enter an address/coordinates geocoded through Nominatim); Day One import maps its coarse placemark onto `name`/`city`/`state`/`country`. Displayed but not searched. |
 | `[weather]`    | table           | Weather at the time of writing (Day One import): optional `condition` (a slug, e.g. `partly-cloudy`), `temperature_celsius`, `feels_like_celsius`, `humidity` (0–1), `pressure_mb`, `visibility_km`, plus a nested `[weather.wind]` with `speed_kph` and `direction` (degrees). Capture-only, stored not surfaced. |
 | `[celestial]`  | table           | Sun/moon at the time of writing (Day One import): optional `moon_phase` (0–1), `moon_phase_name`, `sunrise`, `sunset`. Capture-only. |
 
