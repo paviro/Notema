@@ -1,3 +1,6 @@
+/// The canonical feelings the picker offers. Order here is display order only;
+/// it carries no good/bad meaning — a feeling's valence is never inferred from
+/// the word. The only signal for how an entry felt is the user's mood score.
 pub const FEELINGS: &[&str] = &[
     "calm",
     "content",
@@ -24,32 +27,6 @@ pub const FEELINGS: &[&str] = &[
     "guilty",
     "numb",
 ];
-
-/// Emotional valence of a feeling. The [`FEELINGS`] list is ordered
-/// positive → neutral → negative, so a value's slot in it is its sign.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Valence {
-    Positive,
-    Neutral,
-    Negative,
-}
-
-/// Classify a feeling by valence, or `None` if it is not a known feeling. The
-/// two neutral values (`okay`, `mixed`) split the ordered list; everything
-/// before them is positive, everything after is negative.
-pub fn feeling_valence(feeling: &str) -> Option<Valence> {
-    let feeling = feeling.trim().to_lowercase();
-    let index = FEELINGS.iter().position(|f| *f == feeling)?;
-    let okay = FEELINGS.iter().position(|f| *f == "okay").unwrap();
-    let mixed = FEELINGS.iter().position(|f| *f == "mixed").unwrap();
-    Some(if index < okay {
-        Valence::Positive
-    } else if index <= mixed {
-        Valence::Neutral
-    } else {
-        Valence::Negative
-    })
-}
 
 pub fn normalize_feeling(feeling: &str) -> Option<String> {
     let feeling = feeling.trim().to_lowercase();

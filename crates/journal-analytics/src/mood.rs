@@ -5,7 +5,6 @@
 use std::collections::{BTreeMap, HashMap};
 
 use chrono::{Datelike, NaiveDate};
-use journal_core::{Valence, feeling_valence};
 use journal_storage::Entry;
 
 use crate::{MoodBucket, Tally, period_key, period_label, sort_by_count_desc};
@@ -25,7 +24,7 @@ pub struct MoodAnalytics {
     pub by_month: [Option<f32>; 12],
     /// Feeling frequency, most common first.
     pub feelings: Vec<Tally>,
-    /// All-time sentiment mix, and the same over the trailing year / month / week
+    /// All-time mood balance, and the same over the trailing year / month / week
     /// (indices `0`/`1`/`2` of `sentiment_windows`) so Balance can show the trend.
     pub sentiment: Sentiment,
     pub sentiment_windows: [Sentiment; 3],
@@ -34,8 +33,9 @@ pub struct MoodAnalytics {
     pub worst_period: Option<MoodBucket>,
 }
 
-/// Feeling mentions split by valence. Counts every feeling occurrence, so an
-/// entry with two positive feelings adds two to `positive`.
+/// Entries split by mood sign, using a neutral band around the midpoint: a mood
+/// of `>= 2` is positive, `-1..=1` neutral, `<= -2` negative. Each entry that
+/// logged a mood counts once; entries with no mood contribute nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Sentiment {
     pub positive: usize,
@@ -73,6 +73,7 @@ pub(crate) fn build(
     for (entry, date) in entries.iter().zip(dates) {
         if let Some(mood) = entry.metadata.mood {
             moods.push(mood);
+            add_mood_valence(&mut sentiment, mood);
             if let Some(date) = date {
                 let slot = series_acc
                     .entry(period_key(*date, by_year))
@@ -85,22 +86,18 @@ pub(crate) fn build(
                 let month = (date.month() - 1) as usize;
                 month_acc[month].0 += i64::from(mood);
                 month_acc[month].1 += 1;
-            }
-        }
-
-        tally_feelings(entry, &mut feelings, &mut sentiment);
-        // The trailing-window Balance tallies: an entry counts in a window when its
-        // date is within that many days of `today`.
-        if let Some(date) = date {
-            let age = (today - *date).num_days();
-            for (window, span) in sentiment_windows.iter_mut().zip(SENTIMENT_WINDOW_DAYS) {
-                if (0..span).contains(&age) {
-                    for feeling in &entry.metadata.feelings {
-                        add_feeling_valence(window, feeling);
+                // The trailing-window Balance tallies: an entry counts in a window
+                // when its date is within that many days of `today`.
+                let age = (today - *date).num_days();
+                for (window, span) in sentiment_windows.iter_mut().zip(SENTIMENT_WINDOW_DAYS) {
+                    if (0..span).contains(&age) {
+                        add_mood_valence(window, mood);
                     }
                 }
             }
         }
+
+        tally_feelings(entry, &mut feelings);
     }
 
     let series: Vec<MoodBucket> = series_acc
@@ -126,26 +123,22 @@ pub(crate) fn build(
     }
 }
 
-/// Fold one entry's feelings into the frequency and sentiment accumulators.
-fn tally_feelings<'a>(
-    entry: &'a Entry,
-    feelings: &mut HashMap<&'a str, usize>,
-    sentiment: &mut Sentiment,
-) {
+/// Fold one entry's feelings into the frequency accumulator.
+fn tally_feelings<'a>(entry: &'a Entry, feelings: &mut HashMap<&'a str, usize>) {
     for feeling in &entry.metadata.feelings {
         *feelings.entry(feeling.as_str()).or_default() += 1;
-        add_feeling_valence(sentiment, feeling);
     }
 }
 
-/// Fold one feeling's valence into a sentiment tally. Unknown feelings (not in
-/// the canonical list) contribute nothing.
-fn add_feeling_valence(sentiment: &mut Sentiment, feeling: &str) {
-    match feeling_valence(feeling) {
-        Some(Valence::Positive) => sentiment.positive += 1,
-        Some(Valence::Neutral) => sentiment.neutral += 1,
-        Some(Valence::Negative) => sentiment.negative += 1,
-        None => {}
+/// Fold one entry's mood into a Balance tally, using a neutral band around the
+/// midpoint: `>= 2` positive, `-1..=1` neutral, `<= -2` negative.
+fn add_mood_valence(sentiment: &mut Sentiment, mood: i8) {
+    if mood >= 2 {
+        sentiment.positive += 1;
+    } else if mood <= -2 {
+        sentiment.negative += 1;
+    } else {
+        sentiment.neutral += 1;
     }
 }
 
@@ -214,12 +207,12 @@ mod tests {
 
     #[test]
     fn sentiment_windows_track_trailing_days() {
-        // `mood()` anchors today at 2024-12-31. calm=positive, sad=negative.
+        // `mood()` anchors today at 2024-12-31. mood>=2 positive, <=-2 negative.
         let entries = [
-            mood_entry("2024-12-30T00:00:00Z", None, &["calm"]), // within week
-            mood_entry("2024-12-10T00:00:00Z", None, &["sad"]),  // within month, not week
-            mood_entry("2024-06-01T00:00:00Z", None, &["calm"]), // within year, not month
-            mood_entry("2020-01-01T00:00:00Z", None, &["sad"]),  // all-time only
+            mood_entry("2024-12-30T00:00:00Z", Some(4), &[]),  // within week, positive
+            mood_entry("2024-12-10T00:00:00Z", Some(-3), &[]), // within month, not week, negative
+            mood_entry("2024-06-01T00:00:00Z", Some(4), &[]),  // within year, not month, positive
+            mood_entry("2020-01-01T00:00:00Z", Some(-3), &[]), // all-time only, negative
         ];
         let mood = mood(&entries);
         // All-time: 2 positive, 2 negative.
@@ -246,16 +239,18 @@ mod tests {
     }
 
     #[test]
-    fn sentiment_counts_every_feeling_mention() {
+    fn sentiment_buckets_entries_by_mood() {
         let entries = [
-            mood_entry("2024-01-01T00:00:00Z", None, &["calm", "okay", "sad"]),
-            mood_entry("2024-01-02T00:00:00Z", None, &["calm", "sad"]),
+            mood_entry("2024-01-01T00:00:00Z", Some(4), &[]), // positive
+            mood_entry("2024-01-02T00:00:00Z", Some(1), &[]), // neutral (within band)
+            mood_entry("2024-01-03T00:00:00Z", Some(-1), &[]), // neutral (within band)
+            mood_entry("2024-01-04T00:00:00Z", Some(-3), &[]), // negative
+            mood_entry("2024-01-05T00:00:00Z", None, &["calm"]), // no mood -> excluded
         ];
         let mood = mood(&entries);
-        // Sentiment counts every mention: 2 calm (pos), 1 okay (neutral), 2 sad (neg).
-        assert_eq!(mood.sentiment.positive, 2);
-        assert_eq!(mood.sentiment.neutral, 1);
-        assert_eq!(mood.sentiment.negative, 2);
+        assert_eq!(mood.sentiment.positive, 1);
+        assert_eq!(mood.sentiment.neutral, 2);
+        assert_eq!(mood.sentiment.negative, 1);
         assert_eq!(mood.sentiment.positive_negative_ratio(), Some(1.0));
     }
 
@@ -272,7 +267,7 @@ mod tests {
 
     #[test]
     fn ratio_is_none_without_negatives() {
-        let entries = [mood_entry("2024-01-01T00:00:00Z", None, &["calm"])];
+        let entries = [mood_entry("2024-01-01T00:00:00Z", Some(4), &[])];
         assert!(mood(&entries).sentiment.positive_negative_ratio().is_none());
     }
 }

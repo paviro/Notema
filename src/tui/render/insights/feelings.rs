@@ -1,7 +1,8 @@
-//! The Feelings tab: the positive/neutral/negative balance across rolling
-//! windows above a scrollable table of every feeling — its frequency, mood
-//! association, and the feelings it most often shows up together with (the last
-//! column). Balance sits fixed on top; the table fills the rest and scrolls.
+//! The Feelings tab: the mood balance (positive/neutral/negative by mood score)
+//! across rolling windows above a scrollable table of every feeling — its
+//! frequency, mood association, and the feelings it most often shows up together
+//! with (the last column). Balance sits fixed on top; the table fills the rest
+//! and scrolls.
 
 use ratatui::{
     Frame,
@@ -73,8 +74,9 @@ pub(super) fn draw(
     }
 }
 
-/// One sentiment bar per window, `label ▓▓▓···`, so the trend across all-time /
-/// year / month / week reads down the column. Empty windows show a dim track.
+/// One mood-balance bar per window, `label ▓▓▓···`, so the trend across all-time
+/// / year / month / week reads down the column. Windows with no logged moods show
+/// a dim track.
 fn draw_balance(frame: &mut Frame<'_>, area: Rect, all: &Sentiment, windows: &[Sentiment; 3]) {
     const LABEL_W: usize = 5;
     let rows = [all, &windows[0], &windows[1], &windows[2]];
