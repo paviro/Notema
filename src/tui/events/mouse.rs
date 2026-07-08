@@ -339,6 +339,8 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
             activities: &activities,
             feelings: &feelings,
             mood,
+            // Location is display-only — not part of the click hit-test.
+            location: &[],
         };
         if let Some((chip, value)) =
             render::metadata_at_point(area.area, mouse.column, mouse.row, metadata)

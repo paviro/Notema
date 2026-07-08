@@ -12,7 +12,21 @@ use std::fs;
 use std::path::Path;
 
 use chrono::{DateTime, FixedOffset};
-use journal_storage::{AppResult, AssetFailure, JournalStore, Metadata};
+use journal_storage::{AppResult, AssetFailure, JournalStore, Location, Metadata};
+
+/// Map Day One's parsed location onto the store's [`Location`], keeping only the
+/// place hierarchy and coordinates (the geofence `region` and `timeZoneName` are
+/// dropped — the latter is already captured as the entry's `timezone`).
+fn map_location(location: &dayone::model::Location) -> Location {
+    Location {
+        place: location.place_name.clone(),
+        locality: location.locality_name.clone(),
+        administrative_area: location.administrative_area.clone(),
+        country: location.country.clone(),
+        latitude: location.latitude,
+        longitude: location.longitude,
+    }
+}
 
 use dayone::model::DayOneExport;
 use dayone::moments::{MediaIndex, rewrite_moments};
@@ -131,6 +145,11 @@ pub fn import_dayone(
             starred: entry.starred,
             ..Metadata::default()
         };
+        let location = entry
+            .location
+            .as_ref()
+            .map(map_location)
+            .filter(|l| !l.is_empty());
 
         let path = store.create_imported_entry(
             journal,
@@ -139,6 +158,7 @@ pub fn import_dayone(
             created_at,
             edited_at,
             tz,
+            location.as_ref(),
             &import_id,
         )?;
         // Replace un-fetchable images with a placeholder only when we actually

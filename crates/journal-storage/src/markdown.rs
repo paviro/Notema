@@ -1,4 +1,4 @@
-use journal_core::{Metadata, MetadataField};
+use journal_core::{Location, Metadata, MetadataField};
 use serde::{Deserialize, Serialize};
 
 /// Every entry front-matter field, parsed and serialized in a single TOML pass.
@@ -19,6 +19,10 @@ pub struct FrontMatter {
     pub metadata: Metadata,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub import_id: Option<String>,
+    /// Where the entry was written (Day One import). Keep last — a TOML table
+    /// can't be followed by scalar keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<Location>,
 }
 
 pub fn split_front_matter(content: &str) -> (Option<&str>, &str) {
@@ -266,6 +270,42 @@ mod tests {
                 .mood,
             None
         );
+    }
+
+    #[test]
+    fn location_table_serializes_after_scalars_and_round_trips() {
+        // The gate: a `[location]` table under `#[serde(flatten)] metadata` must
+        // serialize (as the last thing) and re-parse. render_entry swallows a
+        // serialize failure into empty output, so assert the table is actually there.
+        let fm = FrontMatter {
+            created_at: Some("2021-04-03T08:30:05+02:00".to_string()),
+            metadata: Metadata {
+                tags: vec!["dream".to_string()],
+                ..Metadata::default()
+            },
+            import_id: Some("dayone:X".to_string()),
+            location: Some(Location {
+                place: Some("1 Example Plaza".to_string()),
+                locality: Some("Testville".to_string()),
+                country: Some("Testland".to_string()),
+                latitude: Some(10.0),
+                ..Location::default()
+            }),
+            ..FrontMatter::default()
+        };
+
+        let rendered = render_entry(&fm, "# Body\n");
+        assert!(rendered.contains("[location]"), "table missing: {rendered}");
+        // Scalars precede the table (valid TOML), and the body survives.
+        let table_at = rendered.find("[location]").unwrap();
+        assert!(rendered.find("import_id").unwrap() < table_at);
+        assert!(rendered.contains("\n+++\n\n# Body\n"));
+
+        let (front_matter, _) = split_front_matter(&rendered);
+        let parsed = front_matter_fields(front_matter.unwrap());
+        assert_eq!(parsed.location, fm.location);
+        assert_eq!(parsed.metadata.tags, vec!["dream".to_string()]);
+        assert_eq!(parsed.import_id.as_deref(), Some("dayone:X"));
     }
 
     #[test]

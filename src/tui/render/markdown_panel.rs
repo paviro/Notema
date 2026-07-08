@@ -26,8 +26,8 @@ use crate::tui::{
         render_scrollbar_if_needed, viewer_scroll,
     },
     surface::{
-        EntryMetadataLayout, EntryMetadataValues, MetadataRowLayout, PanelGeometry,
-        metadata_value_rows,
+        EntryMetadataLayout, EntryMetadataValues, LOCATION_PREFIX, MetadataRowLayout,
+        PanelGeometry, metadata_value_rows,
     },
 };
 
@@ -40,6 +40,9 @@ pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &
         let activities = app.selected_entry_activities();
         let feelings = app.selected_entry_feelings();
         let mood = app.selected_entry_mood();
+        // Zero-or-one element so the location label flows through the same
+        // `&[String]` row machinery as tags/feelings.
+        let location: Vec<String> = app.selected_entry_location().into_iter().collect();
         let entry_path = app.selected_entry_target().map(|target| target.path);
 
         let (scroll, labels, content_rect, line_count) = draw_markdown_panel(
@@ -56,6 +59,7 @@ pub(crate) fn draw_selected_entry_view(frame: &mut Frame<'_>, area: Rect, app: &
                     activities: &activities,
                     feelings: &feelings,
                     mood,
+                    location: &location,
                 },
             },
             app.nav.scroll.entry_view,
@@ -317,6 +321,7 @@ struct EntryMetadata<'a> {
     activities: &'a [String],
     feelings: &'a [String],
     mood: Option<i8>,
+    location: &'a [String],
 }
 
 impl<'a> EntryMetadata<'a> {
@@ -327,6 +332,7 @@ impl<'a> EntryMetadata<'a> {
             activities: self.activities,
             feelings: self.feelings,
             mood: self.mood,
+            location: self.location,
         }
     }
 }
@@ -407,6 +413,19 @@ fn draw_metadata_section(
             row.rect,
         );
     }
+
+    if !metadata.location.is_empty()
+        && let Some(row) = layout.location
+    {
+        frame.render_widget(
+            Paragraph::new(metadata_value_lines_for_row(
+                LOCATION_PREFIX,
+                row,
+                metadata.location,
+            )),
+            row.rect,
+        );
+    }
 }
 
 fn metadata_section_lines(width: u16, metadata: EntryMetadata<'_>) -> Vec<Line<'static>> {
@@ -415,6 +434,7 @@ fn metadata_section_lines(width: u16, metadata: EntryMetadata<'_>) -> Vec<Line<'
         && metadata.people.is_empty()
         && metadata.activities.is_empty()
         && metadata.tags.is_empty()
+        && metadata.location.is_empty()
     {
         return Vec::new();
     }
@@ -457,6 +477,14 @@ fn metadata_section_lines(width: u16, metadata: EntryMetadata<'_>) -> Vec<Line<'
             "Tags: ".len() as u16,
             width,
             metadata.tags,
+        ));
+    }
+    if !metadata.location.is_empty() {
+        lines.extend(metadata_value_lines_for_width(
+            LOCATION_PREFIX,
+            LOCATION_PREFIX.len() as u16,
+            width,
+            metadata.location,
         ));
     }
 

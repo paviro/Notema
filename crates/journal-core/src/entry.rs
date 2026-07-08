@@ -36,6 +36,58 @@ fn is_unstarred(starred: &bool) -> bool {
     !*starred
 }
 
+/// Where an entry was written, captured on import (Day One) — a coarse-to-fine
+/// place hierarchy plus coordinates. Every field is optional: only what the
+/// source provided is stored, and an all-empty location is dropped entirely.
+/// Capture-only: displayed but not edited or searched.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Location {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locality: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub administrative_area: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latitude: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub longitude: Option<f64>,
+}
+
+impl Location {
+    pub fn is_empty(&self) -> bool {
+        self.place.is_none()
+            && self.locality.is_none()
+            && self.administrative_area.is_none()
+            && self.country.is_none()
+            && self.latitude.is_none()
+            && self.longitude.is_none()
+    }
+
+    /// A one-line label: the named parts (coarse-to-fine) joined by `", "`, or
+    /// the coordinates when no names are known. `None` when nothing is known.
+    pub fn display_label(&self) -> Option<String> {
+        let parts: Vec<&str> = [
+            self.place.as_deref(),
+            self.locality.as_deref(),
+            self.administrative_area.as_deref(),
+            self.country.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        if !parts.is_empty() {
+            return Some(parts.join(", "));
+        }
+        match (self.latitude, self.longitude) {
+            (Some(lat), Some(lon)) => Some(format!("{lat:.4}, {lon:.4}")),
+            _ => None,
+        }
+    }
+}
+
 /// Read `mood` as an integer and clamp it to [`MOOD_RANGE`], dropping
 /// out-of-range values to `None` without failing the whole parse.
 fn deserialize_mood<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<i8>, D::Error> {
@@ -68,7 +120,8 @@ impl Timestamp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Not `Eq`: `Location` carries `f64` coordinates.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
     pub id: String,
     pub journal: String,
@@ -78,6 +131,9 @@ pub struct Entry {
     pub edited_at: Option<String>,
     pub preview: String,
     pub metadata: Metadata,
+    /// Where the entry was written, captured on import. Displayed but not edited
+    /// or searched, so it lives outside [`Metadata`].
+    pub location: Option<Location>,
     /// Provenance of an imported entry, e.g. `"dayone:<UUID>"`. `None` for
     /// entries created directly in the app. Used to skip re-importing and as an
     /// anchor for back-filling richer metadata once the format supports it.

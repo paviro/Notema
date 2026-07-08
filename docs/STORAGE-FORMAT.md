@@ -47,6 +47,15 @@ activities = ["coding"]
 feelings = ["focused", "proud"]
 mood = 3
 starred = true
+import_id = "dayone:UUID"
+
+[location]
+place = "Twin Peaks"
+locality = "San Francisco"
+administrative_area = "California"
+country = "United States"
+latitude = 37.7544
+longitude = -122.4477
 +++
 
 # Entry body
@@ -75,6 +84,7 @@ Markdown content here.
 | `mood`         | integer         | Overall mood, clamped to `-5..=5`. Out-of-range or non-integer values are dropped to “no mood” rather than failing the parse. |
 | `starred`      | boolean         | Whether the entry is flagged as a favorite. Omitted when false. |
 | `import_id`    | string          | Provenance of an imported entry, as `source:id` (e.g. `dayone:<UUID>`). Absent for entries created in the app. Used to skip re-importing. |
+| `[location]`   | table           | Where the entry was written (Day One import): optional `place`, `locality`, `administrative_area`, `country`, `latitude`, `longitude` — only the provided fields are stored. Capture-only: displayed, not edited or searched. |
 
 All list fields are plural; timestamps are RFC 3339 with an offset. There is no
 schema-version field — the format evolves by adding optional fields, and readers

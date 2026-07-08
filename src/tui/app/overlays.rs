@@ -58,6 +58,13 @@ impl App {
             .is_some_and(|entry| entry.metadata.starred)
     }
 
+    /// The selected entry's location as a one-line label, if any.
+    pub(crate) fn selected_entry_location(&self) -> Option<String> {
+        self.resolved_selected_entry()
+            .and_then(|entry| entry.location.as_ref())
+            .and_then(|location| location.display_label())
+    }
+
     pub(crate) fn begin_edit_mood(&mut self) {
         let saved = self.selected_entry_mood();
         let draft = saved.unwrap_or(0);

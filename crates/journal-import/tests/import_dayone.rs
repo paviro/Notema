@@ -137,6 +137,71 @@ fn imports_without_zone_fall_back_to_utc_offset() {
 }
 
 #[test]
+fn imports_location_storing_only_present_fields() {
+    let (dir, store) = plaintext_store();
+    let json = r#"{
+        "entries": [
+            {
+                "uuid": "FULL",
+                "text": "Full location",
+                "creationDate": "2021-04-03T06:30:05Z",
+                "location": {
+                    "placeName": "1 Example Plaza",
+                    "localityName": "Testville",
+                    "administrativeArea": "Test Province",
+                    "country": "Testland",
+                    "latitude": 10.0,
+                    "longitude": 20.0,
+                    "region": { "radius": 75 }
+                }
+            },
+            {
+                "uuid": "PARTIAL",
+                "text": "City + country only",
+                "creationDate": "2021-04-03T07:00:00Z",
+                "location": { "localityName": "Testville", "country": "Testland" }
+            },
+            {
+                "uuid": "NONE",
+                "text": "No location",
+                "creationDate": "2021-04-03T08:00:00Z"
+            }
+        ]
+    }"#;
+
+    import_dayone(&store, "diary", &write_export(&dir, json), false).unwrap();
+    let entries = store.scan_entries().unwrap();
+    let raw = |uuid: &str| {
+        let e = entries
+            .iter()
+            .find(|e| e.import_id.as_deref() == Some(&format!("dayone:{uuid}")))
+            .unwrap();
+        std::fs::read_to_string(&e.path).unwrap()
+    };
+
+    let full = raw("FULL");
+    assert!(full.contains("[location]"));
+    assert!(full.contains("place = \"1 Example Plaza\""));
+    assert!(full.contains("locality = \"Testville\""));
+    assert!(full.contains("administrative_area = \"Test Province\""));
+    assert!(full.contains("country = \"Testland\""));
+    assert!(full.contains("latitude = 10.0"));
+    // The geofence radius is dropped.
+    assert!(!full.contains("radius"));
+
+    // Only the two present fields are written — no place/coords lines.
+    let partial = raw("PARTIAL");
+    assert!(partial.contains("[location]"));
+    assert!(partial.contains("locality = \"Testville\""));
+    assert!(partial.contains("country = \"Testland\""));
+    assert!(!partial.contains("place"));
+    assert!(!partial.contains("latitude"));
+
+    // No location object → no table.
+    assert!(!raw("NONE").contains("[location]"));
+}
+
+#[test]
 fn re_running_the_same_export_skips_already_imported_entries() {
     let (dir, store) = plaintext_store();
     let json = r#"{

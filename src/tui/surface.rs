@@ -52,6 +52,8 @@ pub(crate) struct EntryMetadataLayout {
     pub(crate) tags: Option<MetadataRowLayout>,
     pub(crate) people: Option<MetadataRowLayout>,
     pub(crate) activities: Option<MetadataRowLayout>,
+    /// Rendered like the other rows but excluded from the click hit-test.
+    pub(crate) location: Option<MetadataRowLayout>,
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +63,8 @@ pub(crate) struct EntryMetadataValues<'a> {
     pub(crate) activities: &'a [String],
     pub(crate) feelings: &'a [String],
     pub(crate) mood: Option<i8>,
+    /// Zero or one element (the one-line location label); rendered, not clickable.
+    pub(crate) location: &'a [String],
 }
 
 pub(crate) fn panel_inner(area: Rect) -> Rect {
@@ -111,6 +115,7 @@ pub(crate) fn entry_metadata_layout(
     let mut tags_row = None;
     let mut people_row = None;
     let mut activities_row = None;
+    let mut location_row = None;
 
     if let Some(metadata_rect) = metadata {
         let mut y = metadata_rect.y.saturating_add(1);
@@ -178,6 +183,22 @@ pub(crate) fn entry_metadata_layout(
                 },
                 prefix_width: "Tags: ".len() as u16,
             });
+            y = y.saturating_add(height);
+        }
+        if !values.location.is_empty() {
+            let height = metadata_row_height(
+                LOCATION_PREFIX.len() as u16,
+                metadata_rect.width,
+                values.location,
+            );
+            location_row = Some(MetadataRowLayout {
+                rect: Rect {
+                    y,
+                    height,
+                    ..metadata_rect
+                },
+                prefix_width: LOCATION_PREFIX.len() as u16,
+            });
         }
     }
 
@@ -189,8 +210,12 @@ pub(crate) fn entry_metadata_layout(
         tags: tags_row,
         people: people_row,
         activities: activities_row,
+        location: location_row,
     }
 }
+
+/// The bold label prefixing the (display-only) location row.
+pub(crate) const LOCATION_PREFIX: &str = "Location: ";
 
 pub(crate) fn metadata_item_at(
     row: MetadataRowLayout,
@@ -272,6 +297,8 @@ fn metadata_section_height(row_width: u16, values: EntryMetadataValues<'_>) -> u
         + (!values.activities.is_empty() as u16)
             * metadata_row_height("Activities: ".len() as u16, row_width, values.activities)
         + (!values.tags.is_empty() as u16)
-            * metadata_row_height("Tags: ".len() as u16, row_width, values.tags);
+            * metadata_row_height("Tags: ".len() as u16, row_width, values.tags)
+        + (!values.location.is_empty() as u16)
+            * metadata_row_height(LOCATION_PREFIX.len() as u16, row_width, values.location);
     if rows == 0 { 0 } else { 1 + rows }
 }

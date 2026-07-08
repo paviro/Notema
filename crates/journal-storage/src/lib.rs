@@ -12,8 +12,8 @@ use journal_encryption as crypto;
 
 pub use error::StorageError;
 pub use journal_core::{
-    AppResult, Entry, EntryEncryptionState, EntryPath, MOOD_RANGE, Metadata, MetadataField,
-    SearchHit, SearchScope, Timestamp, search_loaded_entries,
+    AppResult, Entry, EntryEncryptionState, EntryPath, Location, MOOD_RANGE, Metadata,
+    MetadataField, SearchHit, SearchScope, Timestamp, search_loaded_entries,
 };
 pub use journal_encryption::{
     DeviceIdentityInfo, EncryptionError, ExposeSecret, PendingRequest, Recipient, SecretString,
@@ -583,6 +583,7 @@ impl JournalStore {
         created_at: chrono::DateTime<chrono::FixedOffset>,
         edited_at: chrono::DateTime<chrono::FixedOffset>,
         timezone: Option<&str>,
+        location: Option<&Location>,
         import_id: &str,
     ) -> AppResult<PathBuf> {
         storage::create_imported_entry(
@@ -594,6 +595,7 @@ impl JournalStore {
             created_at,
             edited_at,
             timezone,
+            location,
             import_id,
         )
     }

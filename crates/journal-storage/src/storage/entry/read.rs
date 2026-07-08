@@ -101,6 +101,7 @@ pub fn read_entry(
         timezone: _,
         mut metadata,
         import_id,
+        location,
     } = front_matter.map(front_matter_fields).unwrap_or_default();
     metadata.feelings = normalize_feelings(metadata.feelings.iter().map(String::as_str));
     let created_at = created_at.map(Timestamp::parse);
@@ -119,6 +120,7 @@ pub fn read_entry(
         edited_at,
         preview,
         metadata,
+        location,
         import_id,
         content: body,
         word_count,
@@ -137,6 +139,7 @@ fn locked_entry(journal: &str, path: &Path) -> AppResult<Entry> {
         edited_at: None,
         preview: "[locked] Encrypted entry".to_string(),
         metadata: Metadata::default(),
+        location: None,
         import_id: None,
         content: "Encryption identity not available".to_string(),
         word_count: 0,

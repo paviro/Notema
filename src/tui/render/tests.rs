@@ -68,6 +68,7 @@ fn metadata_values<'a>(
         activities: &[],
         feelings,
         mood,
+        location: &[],
     }
 }
 
@@ -308,6 +309,37 @@ fn metadata_hit_map_accounts_for_mood_row() {
             values
         ),
         Some((MetadataChip::Tags, "work".to_string()))
+    );
+}
+
+#[test]
+fn metadata_layout_places_location_row_after_tags() {
+    let area = Rect::new(42, 0, 60, 19);
+    let tags = vec!["work".to_string()];
+    let location = vec!["Testville, Testland".to_string()];
+    let values = EntryMetadataValues {
+        tags: &tags,
+        people: &[],
+        activities: &[],
+        feelings: &[],
+        mood: None,
+        location: &location,
+    };
+
+    let layout = crate::tui::surface::entry_metadata_layout(area, values);
+    let tags_row = layout.tags.unwrap();
+    let location_row = layout.location.expect("location row is laid out");
+
+    // Stacked below tags, and it does not participate in the click hit-test.
+    assert!(location_row.rect.y >= tags_row.rect.y + tags_row.rect.height);
+    assert_eq!(
+        metadata_at_point(
+            area,
+            location_row.rect.x + location_row.prefix_width,
+            location_row.rect.y,
+            values
+        ),
+        None
     );
 }
 
@@ -1263,6 +1295,7 @@ fn plain_entry(created_at: Option<&str>, preview: &str) -> Entry {
         edited_at: None,
         preview: preview.to_string(),
         metadata: journal_storage::Metadata::default(),
+        location: None,
         import_id: None,
         content: String::new(),
         word_count: 0,
@@ -1337,6 +1370,7 @@ fn entry_group_labels_use_created_timestamp() {
         edited_at: None,
         preview: String::new(),
         metadata: journal_storage::Metadata::default(),
+        location: None,
         import_id: None,
         content: String::new(),
         word_count: 0,
@@ -1358,6 +1392,7 @@ fn entry_group_labels_fall_back_to_filename_date() {
         edited_at: None,
         preview: String::new(),
         metadata: journal_storage::Metadata::default(),
+        location: None,
         import_id: None,
         content: String::new(),
         word_count: 0,

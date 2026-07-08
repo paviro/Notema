@@ -78,6 +78,7 @@ mod tests {
             edited_at: None,
             preview: String::new(),
             metadata,
+            location: None,
             import_id: None,
             content: content.to_string(),
             word_count: content.split_whitespace().count(),
