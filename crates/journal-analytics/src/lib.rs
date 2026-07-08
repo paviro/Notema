@@ -11,7 +11,7 @@ pub mod cadence;
 pub mod correlations;
 pub mod mood;
 
-pub use cadence::{Cadence, EntryRef, PeriodCount};
+pub use cadence::{Cadence, EntryRef};
 pub use correlations::{Correlate, Correlations, build_correlations};
 pub use mood::{MoodAnalytics, Sentiment};
 
@@ -21,6 +21,13 @@ pub struct Analytics {
     pub cadence: Cadence,
     pub mood: MoodAnalytics,
     pub correlations: Correlations,
+    pub highlights: Highlights,
+}
+
+/// The headline picks the Overview tab surfaces, each derived from the aggregates
+/// above: who and what move your mood, and this year's dominant feeling.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Highlights {
     /// A person who rides with your better-than-average moods, and an activity or
     /// tag that does the same. Each is chosen from those within reach of the
     /// strongest lift in its group and rotated by the day, so "what lifts you"
@@ -58,7 +65,10 @@ pub struct Tally {
 /// the function stays pure and testable.
 pub fn analyze(entries: &[&Entry], today: NaiveDate) -> Analytics {
     // Resolve each entry's grouping date once; every family reuses it.
-    let dates: Vec<Option<NaiveDate>> = entries.iter().map(|entry| entry_group_date(entry)).collect();
+    let dates: Vec<Option<NaiveDate>> = entries
+        .iter()
+        .map(|entry| entry_group_date(entry))
+        .collect();
     // Decide the period granularity once from the whole span so the cadence
     // histogram and the mood series always agree on year-vs-month buckets.
     let by_year = multi_year(dates.iter().flatten().map(|date| date.year()));
@@ -82,11 +92,13 @@ pub fn analyze(entries: &[&Entry], today: NaiveDate) -> Analytics {
         cadence: cadence::build(entries, &dates, by_year, today),
         mood: mood::build(entries, &dates, by_year, today),
         correlations,
-        lifts_person,
-        lifts_thing,
-        drains_person,
-        drains_thing,
-        top_feeling_this_year,
+        highlights: Highlights {
+            lifts_person,
+            lifts_thing,
+            drains_person,
+            drains_thing,
+            top_feeling_this_year,
+        },
     }
 }
 
@@ -115,11 +127,17 @@ fn pick_extreme<'a>(
     let threshold = extreme * 0.85;
     candidates.retain(|correlate| {
         let delta = correlate.mood_delta.unwrap_or(0.0);
-        if positive { delta >= threshold } else { delta <= threshold }
+        if positive {
+            delta >= threshold
+        } else {
+            delta <= threshold
+        }
     });
     candidates.sort_by(|a, b| a.name.cmp(&b.name));
     let index = today.num_days_from_ce().rem_euclid(candidates.len() as i32) as usize;
-    candidates.get(index).map(|correlate| correlate.name.clone())
+    candidates
+        .get(index)
+        .map(|correlate| correlate.name.clone())
 }
 
 /// The feeling logged on the most entries dated in `year`; ties break
@@ -251,8 +269,8 @@ mod tests {
         assert!(analytics.mood.series.is_empty());
         assert!(analytics.mood.mean.is_none());
         assert!(analytics.correlations.people.is_empty());
-        assert!(analytics.drains_person.is_none());
-        assert!(analytics.drains_thing.is_none());
+        assert!(analytics.highlights.drains_person.is_none());
+        assert!(analytics.highlights.drains_thing.is_none());
     }
 
     #[test]
@@ -271,7 +289,7 @@ mod tests {
             mood_entry("2024-05-01T00:00:00Z", Some(3), &[]),
         ];
         let analytics = analyze(&refs(&entries), date(2024, 6, 1));
-        assert_eq!(analytics.cadence.per_period[0].label, "2023");
+        assert_eq!(analytics.cadence.per_period[0].name, "2023");
         assert_eq!(analytics.mood.series[0].label, "2023");
     }
 
@@ -287,6 +305,7 @@ mod tests {
         // 2024's most common feeling, not the all-time "sad".
         assert_eq!(
             analyze(&refs(&entries), date(2024, 6, 1))
+                .highlights
                 .top_feeling_this_year
                 .as_deref(),
             Some("calm"),
@@ -294,6 +313,7 @@ mod tests {
         // A year with no entries yet leaves the fallback to the caller.
         assert!(
             analyze(&refs(&entries), date(2025, 6, 1))
+                .highlights
                 .top_feeling_this_year
                 .is_none()
         );
@@ -314,13 +334,20 @@ mod tests {
         let entries = [
             dated("2024-01-01T00:00:00Z", -3, |_| {}),
             dated("2024-01-02T00:00:00Z", -3, |_| {}),
-            dated("2024-01-03T00:00:00Z", 5, |e| e.metadata.people = vec!["gym-buddy".into()]),
-            dated("2024-01-04T00:00:00Z", 5, |e| e.metadata.tags = vec!["sun".into()]),
+            dated("2024-01-03T00:00:00Z", 5, |e| {
+                e.metadata.people = vec!["gym-buddy".into()]
+            }),
+            dated("2024-01-04T00:00:00Z", 5, |e| {
+                e.metadata.tags = vec!["sun".into()]
+            }),
         ];
         // A companion comes from people, the thing from activities/tags.
         let analytics = analyze(&refs(&entries), date(2024, 1, 5));
-        assert_eq!(analytics.lifts_person.as_deref(), Some("gym-buddy"));
-        assert_eq!(analytics.lifts_thing.as_deref(), Some("sun"));
+        assert_eq!(
+            analytics.highlights.lifts_person.as_deref(),
+            Some("gym-buddy")
+        );
+        assert_eq!(analytics.highlights.lifts_thing.as_deref(), Some("sun"));
     }
 
     #[test]
@@ -338,12 +365,16 @@ mod tests {
         let entries = [
             dated("2024-01-01T00:00:00Z", 4, |_| {}),
             dated("2024-01-02T00:00:00Z", 4, |_| {}),
-            dated("2024-01-03T00:00:00Z", -5, |e| e.metadata.people = vec!["ex".into()]),
-            dated("2024-01-04T00:00:00Z", -5, |e| e.metadata.tags = vec!["rain".into()]),
+            dated("2024-01-03T00:00:00Z", -5, |e| {
+                e.metadata.people = vec!["ex".into()]
+            }),
+            dated("2024-01-04T00:00:00Z", -5, |e| {
+                e.metadata.tags = vec!["rain".into()]
+            }),
         ];
         let analytics = analyze(&refs(&entries), date(2024, 1, 5));
-        assert_eq!(analytics.drains_person.as_deref(), Some("ex"));
-        assert_eq!(analytics.drains_thing.as_deref(), Some("rain"));
+        assert_eq!(analytics.highlights.drains_person.as_deref(), Some("ex"));
+        assert_eq!(analytics.highlights.drains_thing.as_deref(), Some("rain"));
     }
 
     #[test]
@@ -372,8 +403,12 @@ mod tests {
             with_person("2024-01-04T00:00:00Z", 5, "bbb"),
         ];
         // `aaa` and `bbb` lift equally, so consecutive days name different people.
-        let day1 = analyze(&refs(&entries), date(2024, 1, 1)).lifts_person;
-        let day2 = analyze(&refs(&entries), date(2024, 1, 2)).lifts_person;
+        let day1 = analyze(&refs(&entries), date(2024, 1, 1))
+            .highlights
+            .lifts_person;
+        let day2 = analyze(&refs(&entries), date(2024, 1, 2))
+            .highlights
+            .lifts_person;
         assert!(matches!(day1.as_deref(), Some("aaa" | "bbb")));
         assert_ne!(day1, day2);
     }

@@ -149,7 +149,10 @@ fn metrics(analytics: &Analytics) -> Vec<Stat> {
 /// The people and things linked to your better moods (rotated daily): a person on
 /// the value line, an activity or tag beneath it. Falls back to whichever exists.
 fn lifts_stat(analytics: &Analytics) -> Stat {
-    match (&analytics.lifts_person, &analytics.lifts_thing) {
+    match (
+        &analytics.highlights.lifts_person,
+        &analytics.highlights.lifts_thing,
+    ) {
         (Some(person), Some(thing)) => {
             Stat::new("Lifts you", person.clone()).sub(Span::styled(thing.clone(), theme().muted()))
         }
@@ -160,7 +163,10 @@ fn lifts_stat(analytics: &Analytics) -> Stat {
 
 /// The mirror of [`lifts_stat`]: the people and things linked to your worse moods.
 fn drains_stat(analytics: &Analytics) -> Stat {
-    match (&analytics.drains_person, &analytics.drains_thing) {
+    match (
+        &analytics.highlights.drains_person,
+        &analytics.highlights.drains_thing,
+    ) {
         (Some(person), Some(thing)) => Stat::new("Drains you", person.clone())
             .sub(Span::styled(thing.clone(), theme().muted())),
         (Some(name), None) | (None, Some(name)) => Stat::new("Drains you", name.clone()),
@@ -171,7 +177,7 @@ fn drains_stat(analytics: &Analytics) -> Stat {
 /// This year's most-logged feeling, noted as such; falls back to the all-time top
 /// feeling (noted) when this year has none yet.
 fn top_feeling_stat(analytics: &Analytics) -> Stat {
-    if let Some(name) = &analytics.top_feeling_this_year {
+    if let Some(name) = &analytics.highlights.top_feeling_this_year {
         Stat::new("Top feeling", name.clone()).sub(Span::styled("this year", theme().muted()))
     } else if let Some(tally) = analytics.mood.feelings.first() {
         Stat::new("Top feeling", tally.name.clone()).sub(Span::styled("all time", theme().muted()))

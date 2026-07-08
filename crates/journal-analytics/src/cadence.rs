@@ -1,12 +1,12 @@
 //! Writing-habit aggregates: how much, how often, and how consistently entries
-//! are written. All of it is missing from the current stats panel.
+//! are written.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{Datelike, NaiveDate, Timelike};
 use journal_storage::Entry;
 
-use crate::{period_key, period_label};
+use crate::{Tally, period_key, period_label};
 
 /// Cadence and volume of the writing itself.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,18 +31,11 @@ pub struct Cadence {
     /// Entry counts by hour of day (`0`..`24`), wall-clock in each entry's own
     /// offset. Only entries with a parsed timestamp contribute.
     pub by_hour: [usize; 24],
-    /// Entries per calendar period, chronological. Year or month buckets to
-    /// match the mood series.
-    pub per_period: Vec<PeriodCount>,
+    /// Entries per calendar period, chronological (the period label is the
+    /// [`Tally`] name). Year or month buckets to match the mood series.
+    pub per_period: Vec<Tally>,
     pub longest_entry: Option<EntryRef>,
     pub shortest_entry: Option<EntryRef>,
-}
-
-/// Number of entries in one calendar period.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PeriodCount {
-    pub label: String,
-    pub count: usize,
 }
 
 /// A light reference to a single entry — enough to point at it in a "longest
@@ -78,10 +71,16 @@ pub(crate) fn build(
             date: *date,
             word_count: entry.word_count,
         };
-        if longest_entry.as_ref().is_none_or(|cur| entry.word_count > cur.word_count) {
+        if longest_entry
+            .as_ref()
+            .is_none_or(|cur| entry.word_count > cur.word_count)
+        {
             longest_entry = Some(entry_ref.clone());
         }
-        if shortest_entry.as_ref().is_none_or(|cur| entry.word_count < cur.word_count) {
+        if shortest_entry
+            .as_ref()
+            .is_none_or(|cur| entry.word_count < cur.word_count)
+        {
             shortest_entry = Some(entry_ref);
         }
 
@@ -112,7 +111,9 @@ pub(crate) fn build(
         words_per_entry_avg,
         words_per_entry_median: median(&mut word_counts),
         active_days: day_list.len(),
-        date_span: day_list.first().map(|first| (*first, *day_list.last().unwrap())),
+        date_span: day_list
+            .first()
+            .map(|first| (*first, *day_list.last().unwrap())),
         current_streak,
         longest_streak,
         longest_gap_days,
@@ -120,8 +121,8 @@ pub(crate) fn build(
         by_hour,
         per_period: periods
             .into_iter()
-            .map(|((year, month), count)| PeriodCount {
-                label: period_label(year, month, by_year),
+            .map(|((year, month), count)| Tally {
+                name: period_label(year, month, by_year),
                 count,
             })
             .collect(),
@@ -275,6 +276,9 @@ mod tests {
         ];
         let cadence = analyze(&refs(&entries), date(2024, 1, 1)).cadence;
         assert_eq!(cadence.active_days, 1);
-        assert_eq!(cadence.date_span, Some((date(2024, 1, 1), date(2024, 1, 1))));
+        assert_eq!(
+            cadence.date_span,
+            Some((date(2024, 1, 1), date(2024, 1, 1)))
+        );
     }
 }

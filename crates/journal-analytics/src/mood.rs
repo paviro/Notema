@@ -74,7 +74,9 @@ pub(crate) fn build(
         if let Some(mood) = entry.metadata.mood {
             moods.push(mood);
             if let Some(date) = date {
-                let slot = series_acc.entry(period_key(*date, by_year)).or_insert((0, 0));
+                let slot = series_acc
+                    .entry(period_key(*date, by_year))
+                    .or_insert((0, 0));
                 slot.0 += i64::from(mood);
                 slot.1 += 1;
                 let weekday = date.weekday().num_days_from_monday() as usize;

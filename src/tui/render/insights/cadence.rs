@@ -54,7 +54,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics) {
             .per_period
             .iter()
             .map(|period| Bar {
-                label: period.label.clone(),
+                label: period.name.clone(),
                 fill: period.count as f32 / max as f32,
                 value: period.count.to_string(),
                 style: theme().bar_fill(),

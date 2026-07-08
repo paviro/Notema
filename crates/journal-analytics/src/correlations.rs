@@ -16,14 +16,14 @@ pub struct Correlate {
     /// Average mood across the co-occurring entries that carry a mood, or `None`
     /// when none do.
     pub avg_mood: Option<f32>,
-    /// The feelings most often logged alongside this value as `(feeling, count)`,
-    /// most common first (capped at a few), so a row can show which feelings ride
-    /// with it and how often.
-    pub top_feelings: Vec<(String, usize)>,
     /// `avg_mood` minus the journal's overall mean mood: positive means entries
     /// with this value skew happier than average, negative sadder. `None` when
     /// `avg_mood` is `None` or the journal has no mood data.
     pub mood_delta: Option<f32>,
+    /// The feelings most often logged alongside this value as `(feeling, count)`,
+    /// most common first (capped at a few), so a row can show which feelings ride
+    /// with it and how often.
+    pub top_feelings: Vec<(String, usize)>,
 }
 
 /// Correlations for each metadata dimension. Each list is sorted most-frequent
@@ -85,7 +85,12 @@ pub(crate) fn build(entries: &[&Entry]) -> Correlations {
     }
 }
 
-fn accumulate(map: &mut HashMap<String, Acc>, values: &[String], entry: &Entry, exclude_self: bool) {
+fn accumulate(
+    map: &mut HashMap<String, Acc>,
+    values: &[String],
+    entry: &Entry,
+    exclude_self: bool,
+) {
     for value in values {
         let acc = map.entry(value.clone()).or_default();
         acc.count += 1;
@@ -112,11 +117,11 @@ fn finish(map: HashMap<String, Acc>, overall_mean: Option<f32>) -> Vec<Correlate
                 name,
                 count: acc.count,
                 avg_mood,
-                top_feelings: top_feelings(acc.feelings),
                 mood_delta: match (avg_mood, overall_mean) {
                     (Some(avg), Some(mean)) => Some(avg - mean),
                     _ => None,
                 },
+                top_feelings: top_feelings(acc.feelings),
             }
         })
         .collect();
@@ -186,11 +191,18 @@ mod tests {
     #[test]
     fn count_avg_mood_and_top_feeling() {
         let entries = [
-            entry("2024-01-01T00:00:00Z", Some(4), &["alex"], &["calm", "happy"]),
+            entry(
+                "2024-01-01T00:00:00Z",
+                Some(4),
+                &["alex"],
+                &["calm", "happy"],
+            ),
             entry("2024-01-02T00:00:00Z", Some(2), &["alex"], &["calm"]),
             entry("2024-01-03T00:00:00Z", None, &["sam"], &["sad"]),
         ];
-        let people = analyze(&refs(&entries), date(2024, 1, 3)).correlations.people;
+        let people = analyze(&refs(&entries), date(2024, 1, 3))
+            .correlations
+            .people;
         let alex = &people[0];
         assert_eq!(alex.name, "alex");
         assert_eq!(alex.count, 2);
@@ -214,7 +226,9 @@ mod tests {
             entry("2024-01-02T00:00:00Z", Some(2), &["mid"], &[]),
             entry("2024-01-03T00:00:00Z", Some(0), &["drain"], &[]),
         ];
-        let people = analyze(&refs(&entries), date(2024, 1, 3)).correlations.people;
+        let people = analyze(&refs(&entries), date(2024, 1, 3))
+            .correlations
+            .people;
 
         let desc = by_mood_delta_desc(&people);
         assert_eq!(desc[0].name, "lift");
@@ -233,7 +247,9 @@ mod tests {
             entry("2024-01-01T00:00:00Z", Some(5), &[], &["grateful"]),
             entry("2024-01-02T00:00:00Z", Some(1), &[], &["anxious"]),
         ];
-        let feelings = analyze(&refs(&entries), date(2024, 1, 2)).correlations.feelings;
+        let feelings = analyze(&refs(&entries), date(2024, 1, 2))
+            .correlations
+            .feelings;
 
         let lifts = by_mood_delta_desc(&feelings);
         assert_eq!(lifts[0].name, "grateful");
@@ -249,7 +265,9 @@ mod tests {
             entry("2024-01-01T00:00:00Z", Some(3), &["known"], &[]),
             entry("2024-01-02T00:00:00Z", None, &["unknown"], &[]),
         ];
-        let people = analyze(&refs(&entries), date(2024, 1, 2)).correlations.people;
+        let people = analyze(&refs(&entries), date(2024, 1, 2))
+            .correlations
+            .people;
         assert_eq!(by_mood_delta_desc(&people).last().unwrap().name, "unknown");
         assert_eq!(by_mood_delta_asc(&people).last().unwrap().name, "unknown");
     }
