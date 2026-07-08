@@ -27,7 +27,6 @@ use ratatui::{
     widgets::{Block, BorderType, Borders},
 };
 
-use journal_analytics::Correlate;
 use journal_storage::journal_display_name;
 
 use crate::tui::app::{App, InsightsScrollGeometry};
@@ -105,7 +104,9 @@ pub(crate) fn draw_journal_insights(frame: &mut Frame<'_>, area: Rect, app: &mut
         }
         InsightsTab::Writing => cadence::draw(frame, content, &analytics),
         InsightsTab::Mood => mood::draw(frame, content, &analytics),
-        InsightsTab::Feelings => draw_feelings(frame, area, content, app, &analytics),
+        InsightsTab::Feelings => draw_scrollable(frame, area, app, |frame, scroll| {
+            feelings::draw(frame, content, &analytics, scroll)
+        }),
         InsightsTab::Drivers => {
             // Merge people/activities/tags for the selected window into one
             // lift/drain ranking; the Rc is dropped before the `&mut app` call.
@@ -113,51 +114,25 @@ pub(crate) fn draw_journal_insights(frame: &mut Frame<'_>, area: Rect, app: &mut
                 .cached_windowed_correlations()
                 .map(|correlations| drivers::rows(&correlations))
                 .unwrap_or_default();
-            draw_correlate_list(frame, area, content, app, &rows, "No drivers yet");
+            // The trailing column is the feelings that ride with each driver.
+            draw_scrollable(frame, area, app, |frame, scroll| {
+                correlate::draw(frame, content, &rows, "No drivers yet", "Feelings", scroll)
+            });
         }
     }
 }
 
-/// Render the Feelings tab: fixed Balance + co-occurrence sections above a
-/// scrollable feelings table, recording the table's scroll geometry on the panel
-/// border like [`draw_correlate_list`] does for the ranked lists.
-fn draw_feelings(
+/// Render a scrollable list tab (Feelings, Drivers) via `draw`, threading the
+/// panel's shared scroll offset through it, then draw the scrollbar and record its
+/// geometry on the outer `panel` border so a mouse drag can map back to an offset.
+fn draw_scrollable(
     frame: &mut Frame<'_>,
     panel: Rect,
-    content: Rect,
     app: &mut App,
-    analytics: &journal_analytics::Analytics,
+    draw: impl FnOnce(&mut Frame<'_>, &mut u16) -> correlate::InsightsListMetrics,
 ) {
     let mut scroll = app.nav.scroll.insights;
-    let metrics = feelings::draw(frame, content, analytics, &mut scroll);
-    app.nav.scroll.insights = scroll;
-    render_scrollbar_if_needed(
-        frame,
-        panel,
-        metrics.total,
-        metrics.viewport as u16,
-        scroll as usize,
-    );
-    app.insights_scroll = InsightsScrollGeometry {
-        area: panel,
-        total: metrics.total,
-        viewport: metrics.viewport as u16,
-    };
-}
-
-/// Render a scrollable correlate list and its scrollbar on the outer `panel`
-/// border, then record the geometry so a mouse drag can map back to an offset.
-fn draw_correlate_list(
-    frame: &mut Frame<'_>,
-    panel: Rect,
-    content: Rect,
-    app: &mut App,
-    items: &[Correlate],
-    empty_msg: &str,
-) {
-    let mut scroll = app.nav.scroll.insights;
-    // On Drivers the trailing column is the feelings that ride with each driver.
-    let metrics = correlate::draw(frame, content, items, empty_msg, "Feelings", &mut scroll);
+    let metrics = draw(frame, &mut scroll);
     app.nav.scroll.insights = scroll;
     render_scrollbar_if_needed(
         frame,
