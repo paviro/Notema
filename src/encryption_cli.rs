@@ -1,4 +1,5 @@
 use crate::{AppResult, config::Config, prompts};
+use anyhow::bail;
 use indicatif::{ProgressBar, ProgressStyle};
 use journal_storage::JournalStore;
 use std::path::Path;
@@ -37,21 +38,20 @@ pub fn encrypt_store(
     let mut bootstrapped_without_passphrase = false;
     let recipient = if store.encryption_enabled() {
         if !store.unlock_available() {
-            return Err(format!(
+            bail!(
                 "this journal is already encrypted for other devices, but this one has no key at {}; run `{}` to request access instead",
                 store.paths().keys.identity_file.display(),
                 crate::ENROLL_CMD,
-            )
-            .into());
+            );
         }
         store.public_recipient()?
     } else if store.has_encrypted_entries()? {
         // Encrypted entries but no roster to encrypt more against — reuse the
-        // storage layer's own message rather than restating it here.
+        // storage layer's own message rather than restating it here. anyhow
+        // prints the typed error's Display, so route it through directly.
         return Err(journal_storage::EncryptionError::RecipientsMissing {
             path: store.paths().keys.devices_file.clone(),
         }
-        .to_string()
         .into());
     } else {
         println!("No journal encryption identity configured; generating an age identity.");
@@ -78,11 +78,10 @@ pub fn encrypt_store(
 pub fn decrypt_store(config_path: &Path, config: &Config) -> AppResult<()> {
     let mut store = JournalStore::for_config(config_path, &config.journal.path)?;
     if !store.unlock_available() {
-        return Err(format!(
+        bail!(
             "age identity not found at {}; encrypted entries cannot be decrypted on this machine",
             store.paths().keys.identity_file.display()
-        )
-        .into());
+        );
     }
     let passphrase = if store.identity_needs_passphrase()? {
         Some(prompts::prompt_unlock_passphrase()?)

@@ -1,4 +1,5 @@
 use crate::{AppResult, JournalStore, storage};
+use anyhow::{Context, bail};
 use chrono::Local;
 use journal_encryption::{self as crypto, KeyPaths};
 use nanoid::nanoid;
@@ -264,11 +265,10 @@ fn migrate_store(
     })();
 
     if let Err(error) = result {
-        return Err(format!(
+        bail!(
             "migration failed; plaintext backup remains at {}: {error}",
             backup.display()
-        )
-        .into());
+        );
     }
 
     let backup_path = if matches!(mode, MigrationMode::Encrypt { .. }) {
@@ -345,10 +345,10 @@ fn strip_age(path: &Path) -> AppResult<PathBuf> {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or("asset path has no UTF-8 file name")?;
+        .context("asset path has no UTF-8 file name")?;
     let base = name
         .strip_suffix(".age")
-        .ok_or("encrypted asset does not end in .age")?;
+        .context("encrypted asset does not end in .age")?;
     Ok(path.with_file_name(base))
 }
 
@@ -393,12 +393,11 @@ fn ensure_no_migration_collisions(files: &[PathBuf], mode: &MigrationMode<'_>) -
     for source in files {
         let target = migration_target(source, mode)?;
         if target.exists() {
-            return Err(format!(
+            bail!(
                 "cannot migrate {}; target already exists: {}",
                 source.display(),
                 target.display()
-            )
-            .into());
+            );
         }
     }
     Ok(())
@@ -415,12 +414,11 @@ fn ensure_no_asset_collisions(files: &[PathBuf], mode: &MigrationMode<'_>) -> Ap
             MigrationMode::Decrypt { .. } => strip_age(source)?,
         };
         if target.exists() {
-            return Err(format!(
+            bail!(
                 "cannot migrate asset {}; target already exists: {}",
                 source.display(),
                 target.display()
-            )
-            .into());
+            );
         }
     }
     Ok(())
@@ -442,7 +440,7 @@ fn decrypt_encrypted_entry(path: &Path, identity: &crypto::UnlockedIdentity) -> 
     let decrypted = fs::read_to_string(&temp)?;
     if decrypted.is_empty() {
         let _ = fs::remove_file(&temp);
-        return Err(format!("decrypted entry is empty: {}", path.display()).into());
+        bail!("decrypted entry is empty: {}", path.display());
     }
     fs::rename(&temp, &target)?;
     fs::remove_file(path)?;
@@ -460,10 +458,10 @@ fn decrypted_entry_path(path: &Path) -> AppResult<PathBuf> {
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or("encrypted entry path has no UTF-8 file name")?;
+        .context("encrypted entry path has no UTF-8 file name")?;
     let plain_name = name
         .strip_suffix(".md.age")
-        .ok_or("encrypted entry path does not end in .md.age")?;
+        .context("encrypted entry path does not end in .md.age")?;
     Ok(path.with_file_name(format!("{plain_name}.md")))
 }
 
@@ -484,12 +482,11 @@ pub(crate) fn atomic<T>(store: &JournalStore, op: impl FnOnce() -> AppResult<T>)
         }
         Err(error) => {
             if let Err(restore_error) = restore_store(&root, &backup) {
-                return Err(format!(
+                bail!(
                     "{error}; ALSO failed to roll back the store: {restore_error}. \
                      A backup of the pre-change store remains at {}",
                     backup.display()
-                )
-                .into());
+                );
             }
             Err(error)
         }

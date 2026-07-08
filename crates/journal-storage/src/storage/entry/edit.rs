@@ -1,6 +1,7 @@
 use super::codec::EntryCodec;
 use super::paths::entry_assets_dir;
 use crate::AppResult;
+use anyhow::{Context, bail};
 use journal_encryption::{self as crypto, KeyPaths};
 use std::{
     fs,
@@ -121,14 +122,14 @@ pub fn move_entry_to_trash(root: &Path, entry_path: &Path) -> AppResult<PathBuf>
     let mut components = relative.components();
     let journal = components
         .next()
-        .ok_or("entry path is missing journal component")?
+        .context("entry path is missing journal component")?
         .as_os_str();
     let mut entry_relative_path = PathBuf::new();
     for component in components {
         entry_relative_path.push(component.as_os_str());
     }
     if entry_relative_path.as_os_str().is_empty() {
-        return Err("entry path is missing file path after journal component".into());
+        bail!("entry path is missing file path after journal component");
     }
 
     let trash_path = root.join(".trash").join(journal).join(entry_relative_path);

@@ -1,3 +1,4 @@
+use anyhow::{Context, bail};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -129,7 +130,7 @@ impl JournalStorePaths {
     pub fn for_config(config_path: &Path, journal_root: &Path) -> AppResult<Self> {
         let config_dir = config_path
             .parent()
-            .ok_or("config path has no parent directory")?;
+            .context("config path has no parent directory")?;
         Ok(Self::new(journal_root, config_dir))
     }
 }
@@ -333,7 +334,7 @@ impl JournalStore {
             .iter()
             .any(|recipient| recipient.name == name && recipient.enc_key == own_key)
         {
-            return Err("refusing to revoke this device's own recipient".into());
+            bail!("refusing to revoke this device's own recipient");
         }
         let summary = migrate::atomic(self, || {
             crypto::revoke_recipient(&self.paths.keys, identity, name)?;
@@ -499,7 +500,9 @@ impl JournalStore {
     ) -> AppResult<&crypto::UnlockedIdentity> {
         let identity = self.require_identity(context)?;
         if !crypto::identity_is_recipient(&self.paths.keys, identity)? {
-            return Err("this device's key is not a current store recipient, so it cannot re-encrypt; approve it from a device that can already read this journal".into());
+            bail!(
+                "this device's key is not a current store recipient, so it cannot re-encrypt; approve it from a device that can already read this journal"
+            );
         }
         Ok(identity)
     }

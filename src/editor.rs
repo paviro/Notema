@@ -1,4 +1,5 @@
 use crate::AppResult;
+use anyhow::{Context, bail};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -9,13 +10,17 @@ use std::{
 pub fn open_editor(editor: &str, path: &Path) -> AppResult<()> {
     let mut parts = shell_words::split(editor)?;
     if parts.is_empty() {
-        return Err("editor command is empty".into());
+        bail!("editor command is empty");
     }
 
     let program = parts.remove(0);
-    let status = Command::new(program).args(parts).arg(path).status()?;
+    let status = Command::new(&program)
+        .args(parts)
+        .arg(path)
+        .status()
+        .with_context(|| format!("failed to launch editor '{program}'"))?;
     if !status.success() {
-        return Err(format!("editor exited with status {status}").into());
+        bail!("editor exited with status {status}");
     }
     Ok(())
 }
@@ -24,10 +29,13 @@ pub fn open_editor(editor: &str, path: &Path) -> AppResult<()> {
 /// edited text. Returns `None` if the editor exits with an error.
 pub fn edit_body(editor: &str, body: &str) -> AppResult<Option<String>> {
     let temp = unique_temp_path("body.md");
-    fs::write(&temp, body)?;
+    fs::write(&temp, body).with_context(|| format!("writing editor buffer {}", temp.display()))?;
     let result = open_editor(editor, &temp);
     let new_body = if result.is_ok() {
-        Some(fs::read_to_string(&temp)?)
+        Some(
+            fs::read_to_string(&temp)
+                .with_context(|| format!("reading edited buffer {}", temp.display()))?,
+        )
     } else {
         None
     };

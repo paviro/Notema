@@ -1777,6 +1777,7 @@ dependencies = [
 name = "journal"
 version = "2026.7.1"
 dependencies = [
+ "anyhow",
  "chrono",
  "clap",
  "crossterm 0.29.0",
@@ -1808,6 +1809,7 @@ dependencies = [
 name = "journal-core"
 version = "2026.7.1"
 dependencies = [
+ "anyhow",
  "chrono",
  "nucleo",
  "serde",
@@ -1833,6 +1835,7 @@ dependencies = [
 name = "journal-import"
 version = "2026.7.1"
 dependencies = [
+ "anyhow",
  "chrono",
  "chrono-tz",
  "journal-core",
@@ -1847,6 +1850,7 @@ dependencies = [
 name = "journal-storage"
 version = "2026.7.1"
 dependencies = [
+ "anyhow",
  "chrono",
  "iana-time-zone",
  "image 0.25.10",

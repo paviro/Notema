@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 journal-core = { path = "../journal-core" }
 journal-storage = { path = "../journal-storage" }
+anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 regex = "1"

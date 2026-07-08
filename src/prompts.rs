@@ -2,6 +2,7 @@
 //! first-run setup, kept together so their wording stays consistent.
 
 use crate::AppResult;
+use anyhow::bail;
 use journal_storage::{ExposeSecret, SecretString};
 use rpassword::prompt_password;
 use std::io::{self, IsTerminal, Write};
@@ -14,10 +15,9 @@ pub(crate) fn confirm(prompt: &str, skip: bool) -> AppResult<bool> {
         return Ok(true);
     }
     if !io::stdin().is_terminal() {
-        return Err(format!(
+        bail!(
             "{prompt}\nrefusing to continue without a terminal to confirm; re-run with --yes to proceed"
-        )
-        .into());
+        );
     }
     print!("{prompt} [y/N]: ");
     io::stdout().flush()?;
@@ -89,11 +89,11 @@ pub(crate) fn prompt_passphrase_choice(stdout: &mut impl Write) -> AppResult<Opt
 pub(crate) fn prompt_new_passphrase() -> AppResult<SecretString> {
     let passphrase = SecretString::from(prompt_password("New journal encryption passphrase: ")?);
     if passphrase.expose_secret().is_empty() {
-        return Err("encryption passphrase cannot be empty".into());
+        bail!("encryption passphrase cannot be empty");
     }
     let confirm = SecretString::from(prompt_password("Confirm journal encryption passphrase: ")?);
     if passphrase.expose_secret() != confirm.expose_secret() {
-        return Err("encryption passphrases did not match".into());
+        bail!("encryption passphrases did not match");
     }
     Ok(passphrase)
 }

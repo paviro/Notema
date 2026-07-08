@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 journal-core = { path = "../journal-core" }
 journal-encryption = { path = "../journal-encryption" }
+anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 iana-time-zone = "0.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp"] }

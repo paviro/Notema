@@ -2,6 +2,7 @@ use super::Metadata;
 use super::codec::EntryCodec;
 use super::paths::{ENTRY_ID_LEN, encrypted_entry_path_with_id, entry_path_with_id};
 use crate::AppResult;
+use anyhow::bail;
 use chrono::{DateTime, FixedOffset, Local};
 use journal_core::Location;
 use nanoid::nanoid;
@@ -120,10 +121,7 @@ pub(crate) fn create_entry_file(
         }
     }
 
-    Err(
-        format!("could not create a unique entry path after {ENTRY_CREATE_ATTEMPTS} attempts")
-            .into(),
-    )
+    bail!("could not create a unique entry path after {ENTRY_CREATE_ATTEMPTS} attempts")
 }
 
 fn write_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {

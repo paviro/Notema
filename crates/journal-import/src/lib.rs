@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+use anyhow::Context;
 use chrono::{DateTime, FixedOffset};
 use journal_storage::{AppResult, AssetFailure, JournalStore, Location, Metadata};
 
@@ -82,9 +83,9 @@ pub fn import_dayone(
     download_remote: bool,
 ) -> AppResult<ImportReport> {
     let raw = fs::read_to_string(json_path)
-        .map_err(|error| format!("could not read {}: {error}", json_path.display()))?;
-    let export: DayOneExport = serde_json::from_str(&raw)
-        .map_err(|error| format!("could not parse Day One export: {error}"))?;
+        .with_context(|| format!("could not read {}", json_path.display()))?;
+    let export: DayOneExport =
+        serde_json::from_str(&raw).context("could not parse Day One export")?;
     let media_root = json_path.parent().unwrap_or_else(|| Path::new("."));
 
     if !store.list_journals()?.iter().any(|j| j.name == journal) {

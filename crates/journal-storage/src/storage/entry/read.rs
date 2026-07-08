@@ -5,6 +5,7 @@ use crate::{
     AppResult,
     markdown::{FrontMatter, display_preview, front_matter_fields, split_front_matter},
 };
+use anyhow::Context;
 use journal_core::entry::build_search_haystack;
 use journal_core::feelings::normalize_feelings;
 use journal_encryption as crypto;
@@ -105,7 +106,7 @@ pub fn read_entry(
     } = front_matter.map(front_matter_fields).unwrap_or_default();
     metadata.feelings = normalize_feelings(metadata.feelings.iter().map(String::as_str));
     let created_at = created_at.map(Timestamp::parse);
-    let id = entry_id(path).ok_or("entry file has no UTF-8 stem")?;
+    let id = entry_id(path).context("entry file has no UTF-8 stem")?;
     let preview = display_preview(body);
     let body = body.trim_start_matches('\n').to_string();
     let word_count = body.split_whitespace().count();
@@ -129,7 +130,7 @@ pub fn read_entry(
 }
 
 fn locked_entry(journal: &str, path: &Path) -> AppResult<Entry> {
-    let id = entry_id(path).ok_or("entry file has no UTF-8 stem")?;
+    let id = entry_id(path).context("entry file has no UTF-8 stem")?;
     Ok(Entry {
         id,
         journal: journal.to_string(),

@@ -1,4 +1,5 @@
 use crate::AppResult;
+use anyhow::{Context, bail};
 use journal_storage::JournalStore;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -165,13 +166,15 @@ pub fn default_config_path() -> AppResult<PathBuf> {
             .join("config.toml"));
     }
 
-    let home = dirs::home_dir().ok_or("could not determine home directory")?;
+    let home = dirs::home_dir().context("could not determine home directory")?;
     Ok(home.join(".config").join("journal").join("config.toml"))
 }
 
 pub fn load_config(path: &Path) -> AppResult<Config> {
-    let text = fs::read_to_string(path)?;
-    let mut config: Config = toml::from_str(&text)?;
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("reading config {}", path.display()))?;
+    let mut config: Config =
+        toml::from_str(&text).with_context(|| format!("parsing config {}", path.display()))?;
     config.journal.path = expand_tilde(config.journal.path);
     Ok(config)
 }
@@ -246,11 +249,10 @@ pub fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult<Startu
 pub fn load_existing(path_override: Option<&Path>) -> AppResult<(PathBuf, Config)> {
     let config_path = config_path(path_override)?;
     if !config_path.exists() {
-        return Err(format!(
+        bail!(
             "config file not found at {}; run `journal` once to set it up or pass --config <DIR>",
             config_path.display()
-        )
-        .into());
+        );
     }
 
     let config = load_config(&config_path)?;
@@ -274,11 +276,10 @@ fn config_path(path_override: Option<&Path>) -> AppResult<PathBuf> {
             // stale `.../config.toml`) would silently nest into
             // `.../config.toml/config.toml` and trigger a bogus first-run setup.
             if dir.is_file() || dir.file_name() == Some(std::ffi::OsStr::new("config.toml")) {
-                return Err(format!(
+                bail!(
                     "--config takes a directory, not a file; pass {} instead",
                     dir.parent().unwrap_or(dir).display()
-                )
-                .into());
+                );
             }
             Ok(dir.join("config.toml"))
         }

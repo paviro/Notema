@@ -1,4 +1,5 @@
 use crate::{AppResult, config, editor, encryption_cli, prompts, tui};
+use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use journal_core::feelings;
 use journal_storage::{JournalStore, MOOD_RANGE, Metadata, SecretString};
@@ -209,9 +210,7 @@ pub fn run() -> AppResult<()> {
 
     validate_no_legacy_entry_args(&cli)?;
     if stdin_is_pipe {
-        return Err(
-            "piped entry text requires `journal log`; run `journal log` with piped stdin".into(),
-        );
+        bail!("piped entry text requires `journal log`; run `journal log` with piped stdin");
     }
 
     let config::Startup {
@@ -284,11 +283,10 @@ fn open_unlocked_store_with_passphrase(
     let mut store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
     if !store.unlock_available() {
-        return Err(format!(
+        bail!(
             "no encryption identity on this device; run `{}` first",
             crate::ENROLL_CMD
-        )
-        .into());
+        );
     }
     let passphrase = if store.identity_needs_passphrase()? {
         Some(prompts::prompt_unlock_passphrase()?)
@@ -308,11 +306,10 @@ fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> 
     let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
     let Some(info) = store.this_device()? else {
-        return Err(format!(
+        bail!(
             "no encryption identity on this device; run `{}` first",
             crate::ENROLL_CMD
-        )
-        .into());
+        );
     };
 
     if args.remove
@@ -363,8 +360,8 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
     let store = JournalStore::for_config(&config_path, &config.journal.path)?;
     store.ensure()?;
     if !store.encryption_enabled() {
-        return Err(
-            "this journal is not encrypted yet; run `journal encryption enable` to turn it on for this device".into(),
+        bail!(
+            "this journal is not encrypted yet; run `journal encryption enable` to turn it on for this device"
         );
     }
     if store.unlock_available() {
@@ -372,14 +369,13 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
             .this_device()?
             .map(|device| device.name)
             .unwrap_or_default();
-        return Err(format!(
+        bail!(
             "this device already has an identity ('{name}') at {}.\n\
              If you're waiting for approval, run `journal encryption device list` to see the \
              request, or approve it from a device that can already read this journal.\n\
              To start over, delete that identity file and re-run enroll.",
             store.paths().keys.identity_file.display()
-        )
-        .into());
+        );
     }
 
     let (name, passphrase) =
@@ -491,10 +487,10 @@ fn select_requests(
             .filter(|request| &request.id == which || &request.recipient.name == which)
             .collect()
     } else {
-        return Err(format!("specify a device name or id to {action}, or pass --all").into());
+        bail!("specify a device name or id to {action}, or pass --all");
     };
     if selected.is_empty() {
-        return Err("no pending request matched".into());
+        bail!("no pending request matched");
     }
     Ok(selected)
 }
@@ -541,7 +537,7 @@ fn import_dayone_command(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
         .journal
         .as_deref()
         .or(config.journal.default.as_deref())
-        .ok_or("no journal specified; pass --journal or set one with `journal use <name>`")?;
+        .context("no journal specified; pass --journal or set one with `journal use <name>`")?;
     // Validate the name only — the importer creates the journal if it's missing.
     let journal = JournalStore::validate_journal_name(journal)?;
 
@@ -621,22 +617,22 @@ fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
 
 fn validate_no_legacy_entry_args(cli: &Cli) -> AppResult<()> {
     if cli.journal.is_some() {
-        return Err("--journal belongs to `journal log`".into());
+        bail!("--journal belongs to `journal log`");
     }
     if !cli.tag.is_empty() {
-        return Err("--tag belongs to `journal log`".into());
+        bail!("--tag belongs to `journal log`");
     }
     if !cli.person.is_empty() {
-        return Err("--person belongs to `journal log`".into());
+        bail!("--person belongs to `journal log`");
     }
     if !cli.activity.is_empty() {
-        return Err("--activity belongs to `journal log`".into());
+        bail!("--activity belongs to `journal log`");
     }
     if !cli.feeling.is_empty() {
-        return Err("--feeling belongs to `journal log`".into());
+        bail!("--feeling belongs to `journal log`");
     }
     if cli.mood.is_some() {
-        return Err("--mood belongs to `journal log`".into());
+        bail!("--mood belongs to `journal log`");
     }
     Ok(())
 }
@@ -653,7 +649,7 @@ fn set_default_journal(cli: &Cli, journal: &str) -> AppResult<()> {
 fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<()> {
     let body_from_args = !args.body.is_empty();
     if body_from_args && stdin_is_pipe {
-        return Err("entry text cannot be combined with piped stdin".into());
+        bail!("entry text cannot be combined with piped stdin");
     }
 
     let (config_path, config) = config::load_existing(cli.config.as_deref())?;
@@ -661,7 +657,7 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
         .journal
         .as_deref()
         .or(config.journal.default.as_deref())
-        .ok_or("no journal specified; pass --journal or set one with `journal use <name>`")?;
+        .context("no journal specified; pass --journal or set one with `journal use <name>`")?;
     validate_existing_journal(&config.journal.path, journal)?;
     let tags = comma_separated_values(&args.tag);
     let people = comma_separated_values(&args.person);
@@ -672,15 +668,15 @@ fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool)
             .flat_map(|f| f.split(','))
             .map(str::trim)
             .filter(|f| !f.is_empty()),
-    )?;
+    )
+    .map_err(anyhow::Error::msg)?;
     let mood = if let Some(score) = args.mood {
         if !MOOD_RANGE.contains(&score) {
-            return Err(format!(
+            bail!(
                 "--mood must be between {} and {}, got {score}",
                 MOOD_RANGE.start(),
                 MOOD_RANGE.end()
-            )
-            .into());
+            );
         }
         Some(score)
     } else {
@@ -774,7 +770,7 @@ fn validate_existing_journal(root: &Path, journal: &str) -> AppResult<()> {
     let journal = JournalStore::validate_journal_name(journal)?;
     let path = root.join(&journal);
     if !path.is_dir() {
-        return Err(format!("journal '{journal}' does not exist").into());
+        bail!("journal '{journal}' does not exist");
     }
     Ok(())
 }

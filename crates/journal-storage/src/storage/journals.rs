@@ -1,4 +1,5 @@
 use crate::{AppResult, StorageError};
+use anyhow::bail;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -113,7 +114,7 @@ pub fn create_journal(root: &Path, name: &str) -> AppResult<Journal> {
     // that would masquerade as archived. (Validation itself accepts the suffix so
     // that resolving an already-archived journal by name still works.)
     if is_archived_name(&name) {
-        return Err(format!("'{ARCHIVED_SUFFIX}' is a reserved journal-name suffix").into());
+        bail!("'{ARCHIVED_SUFFIX}' is a reserved journal-name suffix");
     }
     let path = root.join(&name);
     fs::create_dir_all(&path)?;
@@ -127,14 +128,14 @@ pub fn create_journal(root: &Path, name: &str) -> AppResult<Journal> {
 pub fn validate_journal_name(name: &str) -> AppResult<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err("journal name cannot be empty".into());
+        bail!("journal name cannot be empty");
     }
     if is_hidden_name(trimmed) || trimmed == "." || trimmed == ".." {
-        return Err(format!("'{trimmed}' is a reserved journal name").into());
+        bail!("'{trimmed}' is a reserved journal name");
     }
     let path = Path::new(trimmed);
     if path.components().count() != 1 || trimmed.contains('/') || trimmed.contains('\\') {
-        return Err("journal name must be a single folder name".into());
+        bail!("journal name must be a single folder name");
     }
 
     Ok(trimmed.to_string())
