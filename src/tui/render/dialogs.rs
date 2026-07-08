@@ -12,6 +12,7 @@ use crate::tui::state::{
     DeleteContext, EditFeelingState, EditMetadataFocus, EditMetadataState, EditMoodState,
     FeelingRow, ListNav,
 };
+use crate::tui::surface::metadata_value_rows;
 
 use super::{
     chrome::{Hint, HintId, hint_height, hint_lines, render_scrollbar_if_needed},
@@ -36,31 +37,22 @@ const FEELINGS_DIALOG_INPUT_HINTS: [Hint; 3] = [
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
-/// The "Selected: …" footer, word-wrapped to the dialog's inner width. Returns at
-/// least one line ("Selected: none" when nothing is picked). Used both to size the
-/// dialog and to render it, so the reserved height always matches the drawn lines.
-pub(crate) fn feelings_selected_lines(selected: &[String]) -> Vec<String> {
-    let width = LIST_DIALOG_WIDTH.saturating_sub(2).max(1) as usize;
-    if selected.is_empty() {
-        return vec!["Selected: none".to_string()];
-    }
-    let mut lines = Vec::new();
-    let mut line = "Selected: ".to_string();
-    let mut has_item = false;
-    for feeling in selected {
-        let sep = if has_item { " | " } else { "" };
-        let addition = sep.chars().count() + feeling.chars().count();
-        if has_item && line.chars().count() + addition > width {
-            lines.push(std::mem::take(&mut line));
-            line.push_str(feeling);
-        } else {
-            line.push_str(sep);
-            line.push_str(feeling);
-        }
-        has_item = true;
-    }
-    lines.push(line);
-    lines
+const SELECTED_LABEL: &str = "Selected: ";
+
+/// Wrap the picked feelings into display rows, reusing the entry view's
+/// metadata-row layout: the "Selected: " label reserves the first row's leading
+/// width, values are separated by " | ", and each row is a list of indices into
+/// `selected`. Empty when nothing is picked (rendered as "Selected: none").
+fn feelings_selected_rows(selected: &[String]) -> Vec<Vec<usize>> {
+    let width = LIST_DIALOG_WIDTH.saturating_sub(2).max(1);
+    metadata_value_rows(SELECTED_LABEL.len() as u16, width, selected)
+}
+
+/// Number of lines the "Selected: …" footer occupies once wrapped — at least one
+/// (the "Selected: none" line when nothing is picked). Used both to size the dialog
+/// and to render it, so the reserved height always matches the drawn lines.
+pub(crate) fn feelings_selected_line_count(selected: &[String]) -> usize {
+    feelings_selected_rows(selected).len().max(1)
 }
 
 const MOOD_DIALOG_HINTS: [Hint; 5] = [
@@ -664,8 +656,8 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
 
 pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditFeelingState) {
     let rows = state.visible_rows();
-    let selected_lines = feelings_selected_lines(&state.selected);
-    let layout = feelings_dialog_layout(frame.area(), rows.len(), selected_lines.len());
+    let selected_line_count = feelings_selected_line_count(&state.selected);
+    let layout = feelings_dialog_layout(frame.area(), rows.len(), selected_line_count);
     let filtering = state.is_filtering();
     let list_focused = state.focus == EditMetadataFocus::List;
     let input_focused = state.focus == EditMetadataFocus::Input;
@@ -748,22 +740,35 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
     // The summary lines get a leading pad space; the "Selected:" label is bold and
     // its continuation lines align under the first.
     let bold = Style::default().add_modifier(Modifier::BOLD);
-    let summary: Vec<Line<'_>> = selected_lines
-        .iter()
-        .enumerate()
-        .map(|(index, text)| {
-            if index == 0 {
-                let rest = text.strip_prefix("Selected:").unwrap_or(text);
-                Line::from(vec![
-                    Span::raw(" "),
-                    Span::styled("Selected:", bold),
-                    Span::raw(rest.to_string()),
-                ])
-            } else {
-                Line::from(format!(" {text}"))
-            }
-        })
-        .collect();
+    let selected_rows = feelings_selected_rows(&state.selected);
+    let summary: Vec<Line<'_>> = if selected_rows.is_empty() {
+        vec![Line::from(vec![
+            Span::raw(" "),
+            Span::styled("Selected:", bold),
+            Span::raw(" none"),
+        ])]
+    } else {
+        selected_rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let joined = row
+                    .iter()
+                    .map(|&i| state.selected[i].as_str())
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                if index == 0 {
+                    Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled("Selected:", bold),
+                        Span::raw(format!(" {joined}")),
+                    ])
+                } else {
+                    Line::from(format!(" {joined}"))
+                }
+            })
+            .collect()
+    };
     render_lines_in_area(frame, summary, layout.selected);
     render_hint_line(frame, feelings_dialog_hints(state.focus), layout.hints);
     render_scrollbar_if_needed(frame, layout.area, list_lines, max_visible, scroll);

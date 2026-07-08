@@ -421,7 +421,7 @@ fn feelings_dialog_list_height(
     let (all_len, selected_lines) = app.edit_feeling_state().map_or((0, 1), |state| {
         (
             state.item_count(),
-            render::feelings_selected_lines(&state.selected).len(),
+            render::feelings_selected_line_count(&state.selected),
         )
     });
     Ok(
