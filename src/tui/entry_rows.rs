@@ -12,7 +12,7 @@ use super::{
 };
 
 /// Display width of `s` in terminal cells (wide/CJK characters count as 2).
-fn text_width(s: &str) -> usize {
+pub(crate) fn text_width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
@@ -566,7 +566,7 @@ pub(crate) fn wrap_text(text: &str, width: usize, max_lines: usize) -> Vec<Strin
 }
 
 /// Truncate `text` to `max` display cells, ending with `…` when it overflows.
-fn truncate_ellipsis(text: &str, max: usize) -> String {
+pub(crate) fn truncate_ellipsis(text: &str, max: usize) -> String {
     if text_width(text) <= max {
         return text.to_string();
     }

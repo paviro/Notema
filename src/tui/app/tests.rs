@@ -49,6 +49,32 @@ fn scrolling_up_past_first_entry_deselects_and_shows_stats() {
 }
 
 #[test]
+fn focusing_journals_shows_stats_even_with_a_lingering_entry_selection() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(entry_dir.join("a.md"), "+++\ntags = []\n+++\n\n# A\n").unwrap();
+
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.select_entry_index(0);
+    app.nav.focus = Focus::Entries;
+    // Focused on the entry, its preview shows and its row is highlighted.
+    assert!(!app.show_journal_stats_preview());
+    assert!(app.entries_highlighted());
+
+    // Moving focus back to the journal column (e.g. clicking the already-selected
+    // journal, or Left from the entry) leaves the selection index untouched, but the
+    // right column must revert to stats and the row must lose its highlight — the two
+    // never disagree.
+    app.nav.focus = Focus::Journals;
+    assert_eq!(app.nav.selected_entry_index, Some(0));
+    assert!(app.show_journal_stats_preview());
+    assert!(!app.entries_highlighted());
+}
+
+#[test]
 fn hidden_journals_launch_focuses_entries_with_stats_preview() {
     let dir = tempdir().unwrap();
     let entry_dir = dir.path().join("work").join("2026-07-01");
@@ -489,9 +515,7 @@ fn entry_body_cache_is_reused_until_entry_or_width_changes() {
 }
 
 #[test]
-fn search_recompute_keeps_body_and_stats_caches_but_rebuilds_rows() {
-    use crate::tui::render::stats::JournalStats;
-
+fn search_recompute_keeps_body_and_analytics_caches_but_rebuilds_rows() {
     let dir = tempdir().unwrap();
     let entry_dir = dir.path().join("work").join("2026-07-01");
     fs::create_dir_all(&entry_dir).unwrap();
@@ -503,12 +527,7 @@ fn search_recompute_keeps_body_and_stats_caches_but_rebuilds_rows() {
 
     // Prime all three caches.
     let body = app.cached_entry_body(path.as_deref(), 40, || (vec![Line::from("x")], vec![]));
-    let stats = app.cached_journal_stats("work", || JournalStats {
-        name: "work".to_string(),
-        entry_count: 0,
-        active_days: 0,
-        year_range: String::new(),
-    });
+    let analytics = app.cached_analytics().unwrap();
     let rows = app.entry_rows(30);
 
     // A search recompute changes the hits but not the entries, so it bumps
@@ -519,17 +538,12 @@ fn search_recompute_keeps_body_and_stats_caches_but_rebuilds_rows() {
     }
     app.update_search_results();
 
-    // Body and stats caches key on entries_version, which is untouched:
-    // requerying with identical inputs returns the same Rc (builder skipped).
+    // Body and analytics caches key on entries_version, which is untouched:
+    // requerying returns the same Rc (builder skipped).
     let body_after = app.cached_entry_body(path.as_deref(), 40, || (vec![Line::from("y")], vec![]));
     assert!(Rc::ptr_eq(&body, &body_after));
-    let stats_after = app.cached_journal_stats("work", || JournalStats {
-        name: "work".to_string(),
-        entry_count: 99,
-        active_days: 99,
-        year_range: "changed".to_string(),
-    });
-    assert!(Rc::ptr_eq(&stats, &stats_after));
+    let analytics_after = app.cached_analytics().unwrap();
+    assert!(Rc::ptr_eq(&analytics, &analytics_after));
 
     // The row cache keys on rows_version, which the recompute bumped, so it
     // rebuilt.

@@ -11,16 +11,25 @@ use super::image::ImageAsset;
 
 const STATUS_DURATION: Duration = Duration::from_secs(3);
 
-/// Vertical scroll offset for the entry preview panel.
+/// Vertical scroll offsets for the panels that scroll their own body: the entry
+/// preview, and the insights panel's ranked-list tabs (People / Activities / Tags).
 #[derive(Default)]
 pub(crate) struct ScrollState {
     pub(crate) entry_view: u16,
+    /// First visible row of the insights list tabs, in row units (not pixels).
+    pub(crate) stats: u16,
 }
 
 impl ScrollState {
     /// Reset the entry preview scroll.
     pub(crate) fn reset_entry_view(&mut self) {
         self.entry_view = 0;
+    }
+
+    /// Reset the insights list scroll — called when the tab, scope, or journal
+    /// changes so a new list starts at the top.
+    pub(crate) fn reset_stats(&mut self) {
+        self.stats = 0;
     }
 }
 

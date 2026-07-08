@@ -9,4 +9,5 @@ pub use entry::{
     Entry, EntryEncryptionState, EntryPath, ImportSource, Location, MOOD_RANGE, Metadata,
     MetadataField, SearchHit, SearchScope, Timestamp,
 };
+pub use feelings::{Valence, feeling_valence};
 pub use search::search_loaded_entries;

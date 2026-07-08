@@ -12,6 +12,11 @@ pub(crate) enum Action {
     PageEntryView(i16),
     ScrollEntryViewToStart,
     ScrollEntryViewToEnd,
+    // Insights list scroll (Focus::Stats, People / Activities / Tags tabs)
+    ScrollStats(i16),
+    PageStats(i16),
+    ScrollStatsToStart,
+    ScrollStatsToEnd,
     // Browse operations
     BeginSearch,
     ExitSearch,
@@ -20,6 +25,9 @@ pub(crate) enum Action {
     // Expand the focused entry viewer to full screen (multi-column) / collapse back
     ExpandEntryView,
     CollapseEntryView,
+    // Expand the focused insights panel to full screen (multi-column) / collapse back
+    ExpandStats,
+    CollapseStats,
     BeginDelete,
     ConfirmDelete,
     // Cancel / close — covers Esc across all overlays
@@ -33,6 +41,9 @@ pub(crate) enum Action {
     NewEntry,
     NewJournal,
     ToggleArchiveJournal,
+    // Journal-stats insights panel (Focus::Stats). Tabs switch via FocusLeft/Right.
+    ToggleStatsScope,
+    CycleStatsTimeframe,
     // New-journal input overlay
     JournalInputChar(char),
     JournalInputBackspace,

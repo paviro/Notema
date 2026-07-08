@@ -135,6 +135,17 @@ fn pane_target(
                 app.nav.journal_list.offset(),
             )
         }
+        ScrollbarDrag::Stats => {
+            // The list tabs record their geometry at render time; other tabs leave
+            // `total == 0`, so no bar is offered.
+            let stats = &app.stats_scroll;
+            (
+                stats.area,
+                stats.total,
+                stats.viewport,
+                app.nav.scroll.stats as usize,
+            )
+        }
     };
     let max_scroll = content_length.saturating_sub(viewport as usize);
     let bar = crate::tui::scroll::scrollbar_bar_rect(area);
@@ -164,6 +175,7 @@ fn scrollbar_target_at(
         ScrollbarDrag::EntryView,
         ScrollbarDrag::EntryList,
         ScrollbarDrag::Journals,
+        ScrollbarDrag::Stats,
     ]
     .into_iter()
     .filter_map(|which| pane_target(app, which, layout))
@@ -196,6 +208,10 @@ fn set_pane_scroll(app: &mut App, which: ScrollbarDrag, offset: usize) {
             app.nav.scroll.entry_view = offset.min(u16::MAX as usize) as u16;
             app.nav.focus = Focus::EntryView;
         }
+        ScrollbarDrag::Stats => {
+            app.nav.scroll.stats = offset.min(u16::MAX as usize) as u16;
+            app.nav.focus = Focus::Stats;
+        }
     }
 }
 
@@ -213,6 +229,10 @@ fn step_pane_scroll(app: &mut App, target: &ScrollbarTarget, delta: i16) {
         ScrollbarDrag::EntryView => {
             app.scroll_entry_view(delta);
             app.nav.focus = Focus::EntryView;
+        }
+        ScrollbarDrag::Stats => {
+            app.scroll_stats(delta);
+            app.nav.focus = Focus::Stats;
         }
     }
 }
@@ -324,6 +344,18 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
         return Ok(());
     }
 
+    if let Some(area) = layout.stats
+        && render::point_in_rect(area.area, mouse.column, mouse.row)
+        && app.nav.mode == Mode::Browse
+    {
+        app.nav.focus = Focus::Stats;
+        // Clicking a tab in the border selects it; clicking elsewhere just focuses.
+        if let Some(tab) = render::stats_tab_at(area.area, mouse.column, mouse.row) {
+            app.nav.stats_tab = tab;
+        }
+        return Ok(());
+    }
+
     if let Some(area) = layout.entry_view
         && render::point_in_rect(area.area, mouse.column, mouse.row)
         && app.has_selected_entry_target()
@@ -366,6 +398,15 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
 }
 
 fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, delta: i16) {
+    // Probed first, and via the rendered geometry rather than a layout slot, so it
+    // also catches the stats shown in the preview column when no entry is selected.
+    if app.stats_scroll.total > 0
+        && render::point_in_rect(app.stats_scroll.area, mouse.column, mouse.row)
+    {
+        app.scroll_stats(delta);
+        return;
+    }
+
     if let Some(area) = layout.entry_view
         && render::point_in_rect(area.area, mouse.column, mouse.row)
     {
@@ -677,6 +718,15 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         }
         render::HintId::HintsToggle => Some(Action::ToggleHints),
         render::HintId::ToggleJournals => Some(Action::ToggleJournals),
+        // Clicking the tabs hint steps forward through the tabs (Right); scope
+        // toggles — both only while the insights panel is focused.
+        render::HintId::StatsTab if app.stats_panel_focused() => Some(Action::FocusRight),
+        render::HintId::StatsScope if app.stats_panel_focused() => Some(Action::ToggleStatsScope),
+        render::HintId::StatsTimeframe if app.stats_panel_focused() => {
+            Some(Action::CycleStatsTimeframe)
+        }
+        render::HintId::ExpandStats if app.stats_panel_focused() => Some(Action::ExpandStats),
+        render::HintId::CloseStats if app.stats_panel_focused() => Some(Action::CollapseStats),
         _ => None,
     }
 }

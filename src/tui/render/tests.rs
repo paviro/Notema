@@ -123,8 +123,9 @@ fn layout_places_hit_targets_in_two_columns_without_inline_entry_view() {
     assert!(!layout.single_panel);
     assert!(layout.entry_view.is_none());
     assert!(layout.stats.is_none());
-    assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 27, 19));
-    assert_eq!(layout.entries.unwrap().panel.area, Rect::new(27, 0, 63, 19));
+    let ch = 20 - footer_height(&app, 90);
+    assert_eq!(layout.journals.unwrap().area, Rect::new(0, 0, 27, ch));
+    assert_eq!(layout.entries.unwrap().panel.area, Rect::new(27, 0, 63, ch));
 }
 
 #[test]
@@ -981,50 +982,306 @@ fn selected_entry_is_not_reversed_when_journals_are_focused() {
     );
 }
 
-#[test]
-fn journal_stats_summarizes_selected_journal() {
-    let app = app_with_entry();
-
-    let stats = journal_stats(&app).unwrap();
-
-    assert_eq!(stats.name, "work");
-    assert_eq!(stats.entry_count, 1);
-    assert_eq!(stats.active_days, 1);
-    assert_eq!(stats.year_range, "2026");
-}
-
-#[test]
-fn journal_stats_handles_empty_journals() {
+/// An `App` with a `work` journal holding one entry carrying mood, feelings, and
+/// a person, with `work` selected and the Journals column focused (so the tabbed
+/// stats panel is the visible right pane).
+fn app_with_metadata_entry() -> App {
     let dir = tempdir().unwrap();
-    fs::create_dir_all(dir.path().join("work")).unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\ntags = [\"work\"]\nfeelings = [\"calm\"]\npeople = [\"alex\"]\nactivities = [\"running\"]\nmood = 3\n[dates]\ncreated = \"2026-07-01T10:00:00+02:00\"\n+++\n\n# A\nBody\n",
+    )
+    .unwrap();
     let config = Config::new(dir.path().to_path_buf(), "true");
     let mut app = new_app(config);
     app.select_journal_by_name("work");
+    std::mem::forget(dir);
+    app
+}
 
-    let stats = journal_stats(&app).unwrap();
-
-    assert_eq!(stats.name, "work");
-    assert_eq!(stats.entry_count, 0);
-    assert_eq!(stats.active_days, 0);
-    assert_eq!(stats.year_range, "No dated entries");
+/// Put `app` into the state where the insights panel is the visible, focused
+/// right pane: browsing with the panel focused and no entry selected.
+fn focus_insights(app: &mut App, tab: insights::StatsTab) {
+    app.nav.selected_entry_index = None;
+    app.nav.focus = Focus::Stats;
+    app.nav.stats_tab = tab;
 }
 
 #[test]
-fn centered_stats_layout_places_identity_above_metric_cards() {
-    let layout = centered_stats_layout(Rect {
-        x: 10,
-        y: 3,
-        width: 80,
-        height: 24,
-    });
+fn stats_panel_shows_all_tabs_in_its_border() {
+    let mut app = app_with_entry();
+    focus_insights(&mut app, insights::StatsTab::Overview);
+    // Wide enough that the strip uses full titles rather than short/initials.
+    let text = render_text(app, 170, 20);
 
-    assert_eq!(layout.identity.y, 8);
-    assert_eq!(layout.identity.height, 6);
-    assert_eq!(layout.entries.y, 14);
-    assert_eq!(layout.days.y, 14);
-    assert!(layout.entries.x < layout.days.x);
-    assert_eq!(layout.entries.height, 6);
-    assert_eq!(layout.days.height, 6);
+    for title in ["Overview", "Writing", "Mood", "Feelings", "Drivers"] {
+        assert!(text.contains(title), "tab bar missing {title}: {text}");
+    }
+}
+
+#[test]
+fn stats_overview_tab_shows_journal_summary() {
+    let mut app = app_with_entry();
+    focus_insights(&mut app, insights::StatsTab::Overview);
+    let text = render_text(app, 140, 20);
+
+    // The paired cards plus the totals in the title box.
+    assert!(text.contains("Lifts you"));
+    assert!(text.contains("Drains you"));
+    assert!(text.contains("Happiest day"));
+    assert!(text.contains("Active days"));
+    assert!(text.contains("entry") || text.contains("entries"));
+}
+
+#[test]
+fn stats_switching_tab_changes_the_body() {
+    let mut app = app_with_entry();
+    focus_insights(&mut app, insights::StatsTab::Feelings);
+
+    let text = render_text(app, 140, 20);
+
+    // The lone fixture entry has no feelings, so the Feelings tab shows its empty
+    // state rather than the Overview cards.
+    assert!(text.contains("No feelings logged yet"));
+    assert!(!text.contains("Days"));
+}
+
+#[test]
+fn stats_feelings_tab_renders_frequency_bar() {
+    let mut app = app_with_metadata_entry();
+    focus_insights(&mut app, insights::StatsTab::Feelings);
+
+    let text = render_text(app, 140, 20);
+
+    assert!(text.contains("calm"));
+    assert!(text.contains('▓'), "expected a bar glyph: {text}");
+}
+
+/// A journal whose entries make `alex` a clear mood lift and `rain` a clear
+/// drain, each appearing enough times (≥3) to clear the Drivers noise guard.
+fn app_with_drivers() -> App {
+    let dir = tempdir().unwrap();
+    let base = dir.path().join("work");
+    let specs = [
+        (5, "people = [\"alex\"]"),
+        (5, "people = [\"alex\"]"),
+        (5, "people = [\"alex\"]"),
+        (-5, "tags = [\"rain\"]"),
+        (-5, "tags = [\"rain\"]"),
+        (-5, "tags = [\"rain\"]"),
+    ];
+    for (index, (mood, meta)) in specs.iter().enumerate() {
+        let day = index + 1;
+        let entry_dir = base.join(format!("2026-07-{day:02}"));
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join("a.md"),
+            format!(
+                "+++\n{meta}\nmood = {mood}\n[dates]\ncreated = \"2026-07-{day:02}T10:00:00+02:00\"\n+++\n\n# E\nBody\n"
+            ),
+        )
+        .unwrap();
+    }
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    std::mem::forget(dir);
+    app
+}
+
+#[test]
+fn stats_drivers_tab_ranks_lifts_and_drains() {
+    let mut app = app_with_drivers();
+    focus_insights(&mut app, insights::StatsTab::Drivers);
+
+    let text = render_text(app, 140, 20);
+
+    // People, activities, and tags are merged into one ranking.
+    assert!(text.contains("alex"), "lifting person missing: {text}");
+    assert!(text.contains("rain"), "draining tag missing: {text}");
+}
+
+#[test]
+fn stats_drivers_tab_renders_headed_table_with_mood_bar() {
+    let mut app = app_with_drivers();
+    focus_insights(&mut app, insights::StatsTab::Drivers);
+    // Expanded to full screen — the "bigger screen" case with room for the bar.
+    app.nav.stats_fullscreen = true;
+
+    let text = render_text(app, 140, 20);
+
+    assert!(text.contains("Count"), "table header missing: {text}");
+    assert!(text.contains("Drains / lifts"), "bar column missing: {text}");
+    assert!(text.contains('│'), "bar centre marker missing: {text}");
+}
+
+/// An app whose sole entry lists `count` people (`p00`..), so the People tab has a
+/// list long enough to scroll.
+/// A journal where people `p00`..`p{count-1}` each ride high moods across three
+/// entries (clearing the ≥3 noise guard), plus baseline low-mood entries — so the
+/// Drivers ranking is a list long enough to scroll.
+fn app_with_many_drivers(count: usize) -> App {
+    let dir = tempdir().unwrap();
+    let base = dir.path().join("work");
+    let people: Vec<String> = (0..count).map(|i| format!("\"p{i:02}\"")).collect();
+    let people = people.join(", ");
+    // Three high-mood entries listing everyone, then two low-mood baselines.
+    let specs = [
+        (5, format!("people = [{people}]")),
+        (5, format!("people = [{people}]")),
+        (5, format!("people = [{people}]")),
+        (-3, String::new()),
+        (-3, String::new()),
+    ];
+    for (index, (mood, meta)) in specs.iter().enumerate() {
+        let day = index + 1;
+        let entry_dir = base.join(format!("2026-07-{day:02}"));
+        fs::create_dir_all(&entry_dir).unwrap();
+        let meta = if meta.is_empty() {
+            String::new()
+        } else {
+            format!("{meta}\n")
+        };
+        fs::write(
+            entry_dir.join("a.md"),
+            format!(
+                "+++\n{meta}mood = {mood}\n[dates]\ncreated = \"2026-07-{day:02}T10:00:00+02:00\"\n+++\n\n# A\nBody\n"
+            ),
+        )
+        .unwrap();
+    }
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    std::mem::forget(dir);
+    app
+}
+
+#[test]
+fn stats_list_scrolls_to_reveal_later_rows() {
+    let focused_drivers = |scroll: u16| {
+        let mut app = app_with_many_drivers(30);
+        focus_insights(&mut app, insights::StatsTab::Drivers);
+        app.nav.stats_fullscreen = true;
+        app.nav.scroll.stats = scroll;
+        render_text(app, 120, 12)
+    };
+
+    // A short panel can't show every driver: the first is visible, a late one isn't.
+    let top = focused_drivers(0);
+    assert!(top.contains("p00"), "first row should be visible: {top}");
+    assert!(!top.contains("p29"), "last row should be off-screen: {top}");
+
+    // Jumping to the end (like the End key) reveals the last row and drops the first;
+    // the render clamps the saturated offset to the final page.
+    let bottom = focused_drivers(u16::MAX);
+    assert!(bottom.contains("p29"), "last row should scroll into view: {bottom}");
+    assert!(!bottom.contains("p00"), "first row should scroll away: {bottom}");
+}
+
+#[test]
+fn stats_feelings_tab_shows_balance_and_feeling_table() {
+    let mut app = app_with_metadata_entry();
+    focus_insights(&mut app, insights::StatsTab::Feelings);
+
+    let text = render_text(app, 140, 30);
+
+    assert!(text.contains("Balance"), "feelings tab missing balance: {text}");
+    assert!(text.contains("calm"), "feelings table missing the feeling: {text}");
+}
+
+#[test]
+fn stats_writing_tab_renders_habit_sections() {
+    let mut app = app_with_metadata_entry();
+    focus_insights(&mut app, insights::StatsTab::Writing);
+    // Wide + full screen so the weekday/hour charts sit side by side.
+    app.nav.stats_fullscreen = true;
+
+    let text = render_text(app, 140, 20);
+
+    assert!(text.contains("Streak"), "writing tab missing streak: {text}");
+    assert!(
+        text.contains("By weekday") && text.contains("By hour"),
+        "writing tab missing side-by-side histograms: {text}"
+    );
+}
+
+#[test]
+fn stats_mood_tab_renders_temporal_sections() {
+    let mut app = app_with_metadata_entry();
+    focus_insights(&mut app, insights::StatsTab::Mood);
+
+    let text = render_text(app, 140, 20);
+
+    // The trimmed Mood tab keeps the temporal views and drops the abstract stats.
+    assert!(
+        text.contains("Mood over time"),
+        "mood tab missing time series: {text}"
+    );
+    assert!(text.contains("By weekday"), "mood tab missing weekday: {text}");
+    assert!(!text.contains("Distribution"), "distribution should be gone: {text}");
+}
+
+#[test]
+fn stats_tab_hit_test_maps_border_columns_to_tabs() {
+    // Inner width 47 fits all five full labels: " Overview · Writing · Mood ·
+    // Feelings · Drivers", the title starting one past the corner at 75.
+    let area = Rect::new(74, 0, 49, 19);
+    assert_eq!(
+        stats_tab_at(area, 78, 0),
+        Some(insights::StatsTab::Overview) // 76..84
+    );
+    assert_eq!(stats_tab_at(area, 90, 0), Some(insights::StatsTab::Writing)); // 87..94
+    assert_eq!(stats_tab_at(area, 98, 0), Some(insights::StatsTab::Mood)); // 97..101
+    assert_eq!(
+        stats_tab_at(area, 107, 0),
+        Some(insights::StatsTab::Feelings) // 104..112
+    );
+    assert_eq!(stats_tab_at(area, 117, 0), Some(insights::StatsTab::Drivers)); // 115..122
+    // The corner, the gaps, and other rows are not tabs.
+    assert_eq!(stats_tab_at(area, 74, 0), None);
+    assert_eq!(stats_tab_at(area, 85, 0), None);
+    assert_eq!(stats_tab_at(area, 78, 1), None);
+}
+
+#[test]
+fn stats_active_tab_inverts_only_when_panel_is_focused() {
+    // Focused: the active tab in the border uses the reversed style.
+    let mut focused = app_with_entry();
+    focus_insights(&mut focused, insights::StatsTab::Overview);
+    let backend = render_app(focused, 140, 20);
+    assert!(
+        stats_border_has_reversed_text(&backend, 140),
+        "focused panel should invert its active tab"
+    );
+
+    // Unfocused (Journals): the active tab is bold, not reversed. A focused
+    // Journals panel reverses its own title, so the check is scoped to the stats
+    // column to ignore that.
+    let mut unfocused = app_with_entry();
+    unfocused.nav.selected_entry_index = None;
+    unfocused.nav.focus = Focus::Journals;
+    let backend = render_app(unfocused, 140, 20);
+    assert!(
+        !stats_border_has_reversed_text(&backend, 140),
+        "unfocused panel must not invert its active tab"
+    );
+}
+
+/// Whether any non-blank cell in the stats panel's top border row is reversed —
+/// the mark of the focused active tab. Scoped to the right-hand stats column
+/// (past the journal + entry columns) so a focused Journals title doesn't count.
+fn stats_border_has_reversed_text(backend: &TestBackend, width: u16) -> bool {
+    const STATS_COLUMN_X: usize = 74;
+    backend
+        .buffer()
+        .content()
+        .iter()
+        .take(width as usize)
+        .skip(STATS_COLUMN_X)
+        .any(|cell| cell.symbol() != " " && cell.modifier.contains(Modifier::REVERSED))
 }
 
 #[test]

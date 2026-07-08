@@ -1785,6 +1785,7 @@ dependencies = [
  "image 0.24.9",
  "image 0.25.10",
  "indicatif",
+ "journal-analytics",
  "journal-core",
  "journal-import",
  "journal-storage",
@@ -1803,6 +1804,15 @@ dependencies = [
  "toml 1.1.2+spec-1.1.0",
  "unicode-width 0.2.0",
  "zeroize",
+]
+
+[[package]]
+name = "journal-analytics"
+version = "2026.7.1"
+dependencies = [
+ "chrono",
+ "journal-core",
+ "journal-storage",
 ]
 
 [[package]]

@@ -4,7 +4,7 @@ version = "2026.7.1"
 edition = "2024"
 
 [workspace]
-members = ["crates/journal-core", "crates/journal-encryption", "crates/journal-storage", "crates/journal-import"]
+members = ["crates/journal-core", "crates/journal-encryption", "crates/journal-storage", "crates/journal-import", "crates/journal-analytics"]
 
 [dependencies]
 anyhow = "1"
@@ -17,6 +17,7 @@ indicatif = "0.17"
 # rascii_art still targets image 0.24; a second, decode-feature-free copy lets us
 # hand it images we already decoded on the 0.25 side (see `tui::image::to_rascii_image`).
 image_024 = { package = "image", version = "0.24", default-features = false }
+journal-analytics = { path = "crates/journal-analytics" }
 journal-core = { path = "crates/journal-core" }
 journal-import = { path = "crates/journal-import" }
 journal-storage = { path = "crates/journal-storage" }

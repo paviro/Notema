@@ -2,6 +2,7 @@ mod chrome;
 mod dialogs;
 mod entries;
 mod image_viewer;
+pub(crate) mod insights;
 mod journals;
 mod layout;
 mod markdown_panel;
@@ -62,8 +63,7 @@ pub(crate) use pending::{
     AccessNotice, draw_disable_notice, draw_pending_notice, draw_pending_request,
 };
 use stats::draw_journal_stats;
-#[cfg(test)]
-pub(crate) use stats::{centered_stats_layout, journal_stats};
+pub(crate) use stats::stats_tab_at;
 pub(crate) use unlock::draw_unlock;
 
 /// Style for the blinking block caret shared by the search field and the unlock

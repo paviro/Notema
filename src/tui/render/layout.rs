@@ -48,12 +48,23 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
         return layout;
     }
 
+    // Likewise for an expanded insights panel: hand it the whole content area and
+    // let its responsive renderer pick a larger, multi-column layout from the
+    // bigger `Rect` — no fullscreen flag reaches the render code.
+    if app.stats_is_fullscreen(content.width) {
+        layout.stats = Some(PanelGeometry::new(content));
+        return layout;
+    }
+
     if single_panel {
         match app.nav.focus {
             Focus::Journals if app.nav.mode == Mode::Browse && show_journals => {
                 layout.journals = Some(PanelGeometry::new(content))
             }
             Focus::EntryView => layout.entry_view = Some(PanelGeometry::new(content)),
+            // Stats isn't reachable at single-panel width, but a resize can strand
+            // focus here — show the panel full-width so it stays visible.
+            Focus::Stats => layout.stats = Some(PanelGeometry::new(content)),
             Focus::Journals | Focus::Entries => {
                 layout.entries = Some(EntryListGeometry::new(content))
             }
@@ -73,7 +84,10 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
                 .split(content);
             layout.journals = Some(PanelGeometry::new(body[0]));
             layout.entries = Some(EntryListGeometry::new(body[1]));
-            if app.nav.mode == Mode::Browse && app.nav.focus == Focus::Journals {
+            // The right column is the insights panel whenever no entry is
+            // previewed (Journals/Entries/Stats focus with nothing selected), and
+            // the entry viewer once an entry is selected.
+            if app.show_journal_stats_preview() {
                 layout.stats = Some(PanelGeometry::new(body[2]));
             } else {
                 layout.entry_view = Some(PanelGeometry::new(body[2]));

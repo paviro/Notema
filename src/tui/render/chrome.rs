@@ -44,6 +44,11 @@ pub(crate) enum HintId {
     OpenImageViewer,
     HintsToggle,
     ToggleJournals,
+    StatsTab,
+    StatsScope,
+    StatsTimeframe,
+    ExpandStats,
+    CloseStats,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,6 +441,25 @@ fn browse_footer_line(app: &App) -> HintLine {
         Focus::Journals => {
             let mut hints = vec![Hint::new("new journal", "n", HintId::NewJournal)];
             hints.extend(archive_hint(app));
+            hints.push(Hint::new("search", "/", HintId::BeginSearch));
+            hints.push(journals_hint(app));
+            hints.push(Hint::new("hints", "h", HintId::HintsToggle));
+            hints.push(Hint::new("quit", "q", HintId::Quit));
+            hints
+        }
+        Focus::Stats => {
+            let mut hints = vec![
+                Hint::new("tabs", "←/→", HintId::StatsTab),
+                Hint::new("scope", "g", HintId::StatsScope),
+            ];
+            if app.nav.stats_tab.uses_timeframe() {
+                hints.push(Hint::new("window", "w", HintId::StatsTimeframe));
+            }
+            if app.nav.stats_fullscreen {
+                hints.push(Hint::new("close", "enter/esc", HintId::CloseStats));
+            } else {
+                hints.push(Hint::new("expand", "enter", HintId::ExpandStats));
+            }
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
             hints.push(journals_hint(app));
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));

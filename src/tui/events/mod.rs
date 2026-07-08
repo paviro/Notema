@@ -56,6 +56,11 @@ pub(crate) fn dispatch_action(
         Action::ScrollEntryViewToStart => app.nav.scroll.entry_view = 0,
         Action::ScrollEntryViewToEnd => app.nav.scroll.entry_view = u16::MAX,
 
+        Action::ScrollStats(delta) => app.scroll_stats(delta),
+        Action::PageStats(delta) => app.page_stats(delta),
+        Action::ScrollStatsToStart => app.nav.scroll.stats = 0,
+        Action::ScrollStatsToEnd => app.nav.scroll.stats = u16::MAX,
+
         Action::BeginSearch => {
             app.begin_search();
         }
@@ -70,6 +75,8 @@ pub(crate) fn dispatch_action(
         Action::ViewSelected => view_selected(app)?,
         Action::ExpandEntryView => app.nav.entry_view_fullscreen = true,
         Action::CollapseEntryView => app.nav.entry_view_fullscreen = false,
+        Action::ExpandStats => app.nav.stats_fullscreen = true,
+        Action::CollapseStats => app.nav.stats_fullscreen = false,
         Action::BeginDelete => app.begin_confirm_delete(),
         Action::ConfirmDelete => confirm_delete(app)?,
         Action::CancelOverlay => {
@@ -106,6 +113,14 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::NewJournal => app.begin_new_journal_input(),
+        Action::ToggleStatsScope => {
+            app.nav.stats_scope = app.nav.stats_scope.toggle();
+            app.nav.scroll.reset_stats();
+        }
+        Action::CycleStatsTimeframe => {
+            app.nav.stats_timeframe = app.nav.stats_timeframe.next();
+            app.nav.scroll.reset_stats();
+        }
         Action::ToggleArchiveJournal => {
             toggle_archive_selected_journal(app)?;
             keep_selection_visible(terminal, app)?;
