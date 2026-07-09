@@ -1,10 +1,16 @@
 [package]
 name = "journal"
-version = "2026.7.1"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [workspace]
 members = ["crates/journal-core", "crates/journal-encryption", "crates/journal-storage", "crates/journal-import", "crates/journal-analytics", "crates/journal-seed", "crates/journal-locate"]
+
+# One version for the whole workspace: the macOS location helper stamps this into
+# its bundle and the runtime checks it, so the crates must not drift apart.
+[workspace.package]
+version = "2026.7.1"
+edition = "2024"
 
 [dependencies]
 anyhow = "1"
