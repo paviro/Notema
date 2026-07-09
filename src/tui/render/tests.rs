@@ -347,6 +347,113 @@ fn metadata_layout_places_location_row_after_tags() {
 }
 
 #[test]
+fn location_wrapped_lines_break_a_long_label_flush_left() {
+    let label = "Cafe Central - Main Street, Inner City, 1010 Vienna, Austria";
+    let lines = crate::tui::surface::location_wrapped_lines(10, 30, label);
+
+    assert!(lines.len() >= 2, "long label should wrap: {lines:?}");
+    // First line leaves room for the 10-cell "Location: " prefix; the rest use
+    // the full width. No continuation line starts with a leading space.
+    assert!(crate::tui::entry_rows::text_width(&lines[0]) <= 20);
+    for line in &lines[1..] {
+        assert!(crate::tui::entry_rows::text_width(line) <= 30);
+        assert!(!line.starts_with(' '));
+    }
+}
+
+#[test]
+fn location_row_height_reflects_wrapped_lines() {
+    let short = vec!["Cafe".to_string()];
+    let long = vec!["Grand Central Station Cafe".to_string()];
+    let area = Rect::new(0, 0, 24, 60);
+
+    let short_layout = crate::tui::surface::entry_metadata_layout(
+        area,
+        EntryMetadataValues {
+            tags: &[],
+            people: &[],
+            activities: &[],
+            feelings: &[],
+            mood: None,
+            location: &short,
+        },
+    );
+    let long_layout = crate::tui::surface::entry_metadata_layout(
+        area,
+        EntryMetadataValues {
+            tags: &[],
+            people: &[],
+            activities: &[],
+            feelings: &[],
+            mood: None,
+            location: &long,
+        },
+    );
+
+    assert_eq!(short_layout.location.unwrap().rect.height, 1);
+    assert!(long_layout.location.unwrap().rect.height >= 2);
+}
+
+#[test]
+fn entry_view_wraps_long_location_with_flush_left_continuation() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+            entry_dir.join("a.md"),
+            "+++\n\n[datetime]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n\n[location]\nname = \"Grand Central Station Cafe\"\n+++\n\n# A\nBody\n",
+        )
+        .unwrap();
+    let config = Config::new(dir.path().to_path_buf(), "true");
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.nav.focus = Focus::EntryView;
+
+    let entry_view = Rect::new(0, 0, 24, 60 - expanded_footer_height(&app, 24));
+    let location = vec!["Grand Central Station Cafe".to_string()];
+    let values = EntryMetadataValues {
+        tags: &[],
+        people: &[],
+        activities: &[],
+        feelings: &[],
+        mood: None,
+        location: &location,
+    };
+    let metadata = crate::tui::surface::entry_metadata_layout(entry_view, values);
+    let location_row = metadata.location.expect("location row is laid out");
+
+    // Expected wrapping at the row's real (border-inset) width.
+    let wrapped = crate::tui::surface::location_wrapped_lines(
+        location_row.prefix_width,
+        location_row.rect.width,
+        "Grand Central Station Cafe",
+    );
+    assert!(wrapped.len() >= 2, "label should wrap: {wrapped:?}");
+    let continuation = wrapped[1].chars().next().unwrap().to_string();
+
+    let backend = render_app(app, 24, 60);
+    let buffer = backend.buffer();
+
+    assert_eq!(location_row.rect.height as usize, wrapped.len());
+    // Line 0 leads with the bold "Location: " label; the continuation line runs
+    // flush-left (first wrapped word, no prefix, no leading space).
+    assert_eq!(
+        buffer
+            .cell((location_row.rect.x, location_row.rect.y))
+            .unwrap()
+            .symbol(),
+        "L"
+    );
+    assert_eq!(
+        buffer
+            .cell((location_row.rect.x, location_row.rect.y + 1))
+            .unwrap()
+            .symbol(),
+        continuation
+    );
+}
+
+#[test]
 fn metadata_hit_map_uses_terminal_cell_width_for_wide_text() {
     let area = Rect::new(42, 0, 60, 19);
     let tags = vec!["集中".to_string()];

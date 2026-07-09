@@ -548,18 +548,59 @@ pub(crate) fn wrap_text(text: &str, width: usize, max_lines: usize) -> Vec<Strin
             break;
         }
 
-        let head = take_width(rest, width).0;
-        let (line_end, next_start) = if head.is_empty() {
-            // The first character is wider than the whole line; consume it so
-            // we always make progress and never split mid-character.
-            let end = rest.chars().next().map_or(rest.len(), char::len_utf8);
-            (end, end)
-        } else {
-            match head.rfind(' ') {
-                Some(space) => (space, space + 1),
-                None => (head.len(), head.len()),
+        let (line_end, next_start) = wrap_break(rest, width);
+        lines.push(rest[..line_end].to_string());
+        rest = &rest[next_start..];
+    }
+    lines
+}
+
+/// Choose a word-break in `text` so the first line fits `width` display cells.
+/// Returns byte offsets `(line_end, next_start)`: where the line ends and where the
+/// next line resumes (skipping the break space). Always makes progress — falls back
+/// to a hard character split when a single word/char is wider than the line.
+fn wrap_break(text: &str, width: usize) -> (usize, usize) {
+    let head = take_width(text, width).0;
+    if head.is_empty() {
+        // The first character is wider than the whole line; consume it so we
+        // always make progress and never split mid-character.
+        let end = text.chars().next().map_or(text.len(), char::len_utf8);
+        (end, end)
+    } else {
+        match head.rfind(' ') {
+            Some(space) => (space, space + 1),
+            None => (head.len(), head.len()),
+        }
+    }
+}
+
+/// Greedy word-wrap by display width where the first line fits `first_width`
+/// cells and every following line fits `rest_width`. Unbounded (never
+/// truncates), so long flowing labels break onto as many lines as needed.
+pub(crate) fn wrap_text_hanging(text: &str, first_width: usize, rest_width: usize) -> Vec<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let width = if lines.is_empty() { first_width } else { rest_width };
+        if width == 0 {
+            // No room on this line; if we've made no progress at all the value
+            // is unrenderable, so bail rather than loop forever.
+            if lines.is_empty() {
+                lines.push(rest.to_string());
             }
-        };
+            break;
+        }
+        if text_width(rest) <= width {
+            lines.push(rest.to_string());
+            break;
+        }
+
+        let (line_end, next_start) = wrap_break(rest, width);
         lines.push(rest[..line_end].to_string());
         rest = &rest[next_start..];
     }

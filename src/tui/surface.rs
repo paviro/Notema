@@ -1,6 +1,8 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use unicode_width::UnicodeWidthStr;
 
+use crate::tui::entry_rows::wrap_text_hanging;
+
 /// Per-entry box chrome consumed horizontally: a left/right border plus one
 /// space of padding on each side (`│ … │`).
 pub(crate) const ENTRY_BOX_H_OVERHEAD: u16 = 4;
@@ -63,7 +65,7 @@ pub(crate) struct EntryMetadataValues<'a> {
     pub(crate) activities: &'a [String],
     pub(crate) feelings: &'a [String],
     pub(crate) mood: Option<i8>,
-    /// Zero or one element (the one-line location label); rendered, not clickable.
+    /// Zero or one element (the location label); rendered, not clickable.
     pub(crate) location: &'a [String],
 }
 
@@ -185,12 +187,8 @@ pub(crate) fn entry_metadata_layout(
             });
             y = y.saturating_add(height);
         }
-        if !values.location.is_empty() {
-            let height = metadata_row_height(
-                LOCATION_PREFIX.len() as u16,
-                metadata_rect.width,
-                values.location,
-            );
+        if let Some(location) = values.location.first() {
+            let height = location_row_height(metadata_rect.width, location);
             location_row = Some(MetadataRowLayout {
                 rect: Rect {
                     y,
@@ -288,6 +286,21 @@ fn metadata_row_height(prefix_width: u16, row_width: u16, values: &[String]) -> 
         .min(u16::MAX as usize) as u16
 }
 
+/// Word-wrap the single-string location label across lines: the first line
+/// leaves room for the bold `prefix_width`-cell label, continuation lines run
+/// the full width flush-left (matching how the other metadata rows wrap).
+pub(crate) fn location_wrapped_lines(prefix_width: u16, width: u16, value: &str) -> Vec<String> {
+    let first_width = (width as usize).saturating_sub(prefix_width as usize);
+    wrap_text_hanging(value, first_width, width as usize)
+}
+
+fn location_row_height(width: u16, value: &str) -> u16 {
+    location_wrapped_lines(LOCATION_PREFIX.len() as u16, width, value)
+        .len()
+        .max(1)
+        .min(u16::MAX as usize) as u16
+}
+
 fn metadata_section_height(row_width: u16, values: EntryMetadataValues<'_>) -> u16 {
     let rows = values.mood.is_some() as u16
         + (!values.feelings.is_empty() as u16)
@@ -298,7 +311,9 @@ fn metadata_section_height(row_width: u16, values: EntryMetadataValues<'_>) -> u
             * metadata_row_height("Activities: ".len() as u16, row_width, values.activities)
         + (!values.tags.is_empty() as u16)
             * metadata_row_height("Tags: ".len() as u16, row_width, values.tags)
-        + (!values.location.is_empty() as u16)
-            * metadata_row_height(LOCATION_PREFIX.len() as u16, row_width, values.location);
+        + values
+            .location
+            .first()
+            .map_or(0, |location| location_row_height(row_width, location));
     if rows == 0 { 0 } else { 1 + rows }
 }

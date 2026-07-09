@@ -27,7 +27,7 @@ use crate::tui::{
     },
     surface::{
         EntryMetadataLayout, EntryMetadataValues, LOCATION_PREFIX, MetadataRowLayout,
-        PanelGeometry, metadata_value_rows,
+        PanelGeometry, location_wrapped_lines, metadata_value_rows,
     },
 };
 
@@ -414,18 +414,33 @@ fn draw_metadata_section(
         );
     }
 
-    if !metadata.location.is_empty()
+    if let Some(location) = metadata.location.first()
         && let Some(row) = layout.location
     {
         frame.render_widget(
-            Paragraph::new(metadata_value_lines_for_row(
-                LOCATION_PREFIX,
-                row,
-                metadata.location,
-            )),
+            Paragraph::new(location_lines(row.prefix_width, row.rect.width, location)),
             row.rect,
         );
     }
+}
+
+/// Build the location row as wrapped lines: the bold `Location: ` label leads
+/// the first line, continuation lines run flush-left.
+fn location_lines(prefix_width: u16, width: u16, value: &str) -> Vec<Line<'static>> {
+    location_wrapped_lines(prefix_width, width, value)
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            if index == 0 {
+                Line::from(vec![
+                    Span::styled(LOCATION_PREFIX, Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(chunk),
+                ])
+            } else {
+                Line::from(Span::raw(chunk))
+            }
+        })
+        .collect()
 }
 
 fn metadata_section_lines(width: u16, metadata: EntryMetadata<'_>) -> Vec<Line<'static>> {
@@ -479,13 +494,8 @@ fn metadata_section_lines(width: u16, metadata: EntryMetadata<'_>) -> Vec<Line<'
             metadata.tags,
         ));
     }
-    if !metadata.location.is_empty() {
-        lines.extend(metadata_value_lines_for_width(
-            LOCATION_PREFIX,
-            LOCATION_PREFIX.len() as u16,
-            width,
-            metadata.location,
-        ));
+    if let Some(location) = metadata.location.first() {
+        lines.extend(location_lines(LOCATION_PREFIX.len() as u16, width, location));
     }
 
     lines
