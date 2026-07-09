@@ -49,6 +49,7 @@ struct Handle {
     on_disk: PathBuf,
     encoding: StoreFileEncoding,
     buf: Vec<u8>,
+    deleted: bool,
     dirty: bool,
     writable: bool,
 }
@@ -67,9 +68,6 @@ struct Ctx {
 struct Inner {
     handles: HashMap<u64, Handle>,
     next_fh: u64,
-    /// Plaintext byte length per on-disk file, so `getattr` need not decrypt every
-    /// time. Dropped whenever the file is written.
-    sizes: HashMap<PathBuf, u64>,
 }
 
 /// Mount `store` (already unlocked) at `mountpoint`, exposing its entries and
@@ -86,7 +84,6 @@ pub fn mount(store: JournalStore, mountpoint: &Path) -> AppResult<()> {
         inner: Mutex::new(Inner {
             handles: HashMap::new(),
             next_fh: 1,
-            sizes: HashMap::new(),
         }),
         uid: unsafe { libc::getuid() },
         gid: unsafe { libc::getgid() },
@@ -344,26 +341,14 @@ impl Ctx {
     }
 
     /// Current plaintext length of an on-disk file, preferring an open handle's
-    /// live buffer (so `stat` stays consistent mid-edit) and otherwise decrypting
-    /// once and caching. Propagates a read/decrypt failure rather than reporting a
-    /// non-empty file as zero-length: the store is unlocked at mount time, so a
-    /// failure here is real corruption, not an empty file.
+    /// live buffer so `stat` stays consistent mid-edit.
     fn file_size(&self, file: &BackingFile) -> AppResult<u64> {
         let inner = self.lock();
         if let Some(handle) = inner.handles.values().find(|h| h.on_disk == file.path) {
             return Ok(handle.buf.len() as u64);
         }
-        if let Some(&size) = inner.sizes.get(&file.path) {
-            return Ok(size);
-        }
         drop(inner);
-        let size = self.store.read_store_file(&file.path, file.encoding)?.len() as u64;
-        self.inner
-            .lock()
-            .unwrap()
-            .sizes
-            .insert(file.path.clone(), size);
-        Ok(size)
+        Ok(self.store.read_store_file(&file.path, file.encoding)?.len() as u64)
     }
 
     /// Re-encrypt and write back a dirty handle's buffer; no-op for clean or
@@ -373,6 +358,9 @@ impl Ctx {
         let Some(handle) = inner.handles.get(&fh) else {
             return Ok(());
         };
+        if handle.deleted {
+            return Ok(());
+        }
         if !handle.dirty || !handle.writable {
             return Ok(());
         }
@@ -389,7 +377,6 @@ impl Ctx {
         if let Some(handle) = inner.handles.get_mut(&fh) {
             handle.dirty = false;
         }
-        inner.sizes.remove(&file.path);
         Ok(())
     }
 }
@@ -562,6 +549,7 @@ fn open(ctx: *mut c_void, path: *const c_char, flags: c_int, fh_out: *mut u64) -
             on_disk: file.path,
             encoding: file.encoding,
             buf,
+            deleted: false,
             dirty: truncate && writable,
             writable,
         },
@@ -611,6 +599,7 @@ fn create(
             on_disk: file.path,
             encoding: file.encoding,
             buf: Vec::new(),
+            deleted: false,
             dirty: false,
             writable,
         },
@@ -749,7 +738,6 @@ fn truncate(ctx: *mut c_void, path: *const c_char, size: i64, _fh: u64, _has_fh:
     {
         return app_errno(&e);
     }
-    ctx.lock().sizes.remove(&file.path);
     0
 }
 
@@ -769,7 +757,15 @@ fn unlink(ctx: *mut c_void, path: *const c_char) -> c_int {
     };
     match std::fs::remove_file(&file.path) {
         Ok(()) => {
-            ctx.lock().sizes.remove(&file.path);
+            let mut inner = ctx.lock();
+            for handle in inner
+                .handles
+                .values_mut()
+                .filter(|handle| handle.on_disk == file.path)
+            {
+                handle.deleted = true;
+                handle.dirty = false;
+            }
             0
         }
         Err(err) => errno(&err),
@@ -874,11 +870,22 @@ fn rename(ctx: *mut c_void, from: *const c_char, to: *const c_char, flags: u32) 
     } else {
         return -libc::ENOENT;
     };
+    if from_disk == to_disk {
+        return 0;
+    }
     match std::fs::rename(&from_disk, &to_disk) {
         Ok(()) => {
             let mut inner = ctx.lock();
-            inner.sizes.remove(&from_disk);
-            inner.sizes.remove(&to_disk);
+            for handle in inner.handles.values_mut() {
+                if handle.on_disk == to_disk {
+                    handle.deleted = true;
+                    handle.dirty = false;
+                } else if handle.on_disk == from_disk {
+                    handle.on_disk = to_disk.clone();
+                } else if let Ok(relative) = handle.on_disk.strip_prefix(&from_disk) {
+                    handle.on_disk = to_disk.join(relative);
+                }
+            }
             0
         }
         Err(err) => errno(&err),
@@ -1033,7 +1040,6 @@ mod tests {
                 inner: Mutex::new(Inner {
                     handles: HashMap::new(),
                     next_fh: 1,
-                    sizes: HashMap::new(),
                 }),
                 uid: 0,
                 gid: 0,
@@ -1229,6 +1235,48 @@ mod tests {
     }
 
     #[test]
+    fn rename_open_file_moves_later_writeback_to_new_path() {
+        let fx = Fixture::new();
+        fx.mkdir_p("diary");
+        write_new(&fx, "/diary/a.md", b"old body");
+
+        let p = cpath("/diary/a.md");
+        let mut fh = 0u64;
+        assert_eq!(
+            jf_open(
+                fx.ctx,
+                p.as_ptr(),
+                libc::O_RDWR | libc::O_TRUNC,
+                &mut fh,
+            ),
+            0
+        );
+        assert_eq!(
+            jf_rename(
+                fx.ctx,
+                cpath("/diary/a.md").as_ptr(),
+                cpath("/diary/b.md").as_ptr(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(
+            jf_write(
+                fx.ctx,
+                p.as_ptr(),
+                b"new body".as_ptr() as *const c_char,
+                8,
+                0,
+                fh,
+            ),
+            8
+        );
+        assert_eq!(jf_release(fx.ctx, p.as_ptr(), fh), 0);
+        assert!(!fx.root().join("diary/a.md.age").exists());
+        assert_eq!(fx.read_disk(&fx.root().join("diary/b.md.age")), b"new body");
+    }
+
+    #[test]
     fn unlink_removes_file() {
         let fx = Fixture::new();
         fx.mkdir_p("diary");
@@ -1239,6 +1287,31 @@ mod tests {
         assert!(!fx.root().join("diary/note.md.age").exists());
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
         assert_eq!(jf_getattr(fx.ctx, p.as_ptr(), &mut st), -libc::ENOENT);
+    }
+
+    #[test]
+    fn unlink_open_file_release_does_not_resurrect_it() {
+        let fx = Fixture::new();
+        fx.mkdir_p("diary");
+        write_new(&fx, "/diary/note.md", b"old body");
+
+        let p = cpath("/diary/note.md");
+        let mut fh = 0u64;
+        assert_eq!(jf_open(fx.ctx, p.as_ptr(), libc::O_RDWR, &mut fh), 0);
+        assert_eq!(
+            jf_write(
+                fx.ctx,
+                p.as_ptr(),
+                b"new".as_ptr() as *const c_char,
+                3,
+                0,
+                fh,
+            ),
+            3
+        );
+        assert_eq!(jf_unlink(fx.ctx, p.as_ptr()), 0);
+        assert_eq!(jf_release(fx.ctx, p.as_ptr(), fh), 0);
+        assert!(!fx.root().join("diary/note.md.age").exists());
     }
 
     #[test]
@@ -1253,6 +1326,26 @@ mod tests {
             0
         );
         assert_eq!(st.st_size, 11); // plaintext length, not the larger ciphertext
+    }
+
+    #[test]
+    fn getattr_reflects_external_size_changes() {
+        let fx = Fixture::new();
+        fx.mkdir_p("diary");
+        write_new(&fx, "/diary/note.md", b"abc");
+
+        let disk = fx.root().join("diary/note.md.age");
+        ctx_ref(fx.ctx)
+            .store
+            .write_store_file(&disk, StoreFileEncoding::Encrypted, b"abcdef")
+            .unwrap();
+
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            jf_getattr(fx.ctx, cpath("/diary/note.md").as_ptr(), &mut st),
+            0
+        );
+        assert_eq!(st.st_size, 6);
     }
 
     #[test]
@@ -1273,6 +1366,30 @@ mod tests {
                 libc::O_RDONLY,
                 &mut fh,
             ),
+            -libc::ENOENT
+        );
+    }
+
+    #[test]
+    fn traversal_and_symlinks_are_inaccessible() {
+        let fx = Fixture::new();
+        fx.mkdir_p("diary");
+        write_new(&fx, "/diary/target.md", b"x");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            fx.root().join("diary/target.md.age"),
+            fx.root().join("diary/link.md.age"),
+        )
+        .unwrap();
+
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        assert_eq!(
+            jf_getattr(fx.ctx, cpath("/diary/../.age/devices.toml").as_ptr(), &mut st),
+            -libc::ENOENT
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            jf_getattr(fx.ctx, cpath("/diary/link.md").as_ptr(), &mut st),
             -libc::ENOENT
         );
     }
