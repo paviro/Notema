@@ -167,14 +167,15 @@ pub fn default_config_path() -> AppResult<PathBuf> {
             .join("config.toml"));
     }
 
-    let home = dirs::home_dir().context("could not determine home directory")?;
-    // macOS keeps app data under Application Support, namespaced by the reverse-DNS
-    // bundle id so it can't collide with another app called "journal". Other
-    // Unixes use ~/.config, where the app name is already the namespace.
+    // macOS keeps app data under Application Support; other Unixes use ~/.config,
+    // where the app name is already the namespace.
     #[cfg(target_os = "macos")]
-    let dir = home.join("Library/Application Support/de.paviro.journal");
+    let dir = journal_core::paths::macos_support_dir().context("HOME is not set")?;
     #[cfg(not(target_os = "macos"))]
-    let dir = home.join(".config").join("journal");
+    let dir = dirs::home_dir()
+        .context("could not determine home directory")?
+        .join(".config")
+        .join("journal");
     Ok(dir.join("config.toml"))
 }
 

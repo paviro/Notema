@@ -113,14 +113,8 @@ fn ensure_helper() -> AppResult<PathBuf> {
     Ok(binary)
 }
 
-/// `~/Library/Application Support/de.paviro.journal` — the app's macOS support
-/// directory, shared with the general config. Namespaced by the reverse-DNS
-/// bundle id so it can't collide with another app called "journal".
 fn support_dir() -> AppResult<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow::anyhow!("HOME is not set"))?;
-    Ok(home.join("Library/Application Support/de.paviro.journal"))
+    journal_core::paths::macos_support_dir().ok_or_else(|| anyhow::anyhow!("HOME is not set"))
 }
 
 /// Read `CFBundleShortVersionString` from an extracted bundle's `Info.plist`.

@@ -3,6 +3,7 @@ pub type AppResult<T> = anyhow::Result<T>;
 pub mod entry;
 pub mod feelings;
 pub mod markdown;
+pub mod paths;
 pub mod search;
 
 pub use entry::{
