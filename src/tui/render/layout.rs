@@ -62,8 +62,8 @@ pub(crate) fn tui_layout(area: Rect, app: &App) -> TuiLayout {
                 layout.journals = Some(PanelGeometry::new(content))
             }
             Focus::EntryView => layout.entry_view = Some(PanelGeometry::new(content)),
-            // Insights isn't reachable at single-panel width, but a resize can strand
-            // focus here — show the panel full-width so it stays visible.
+            // Reached by pressing Right from the entries column (or stranded here by a
+            // resize) — show the panel full-width, the only pane at this width.
             Focus::Insights => layout.insights = Some(PanelGeometry::new(content)),
             Focus::Journals | Focus::Entries => {
                 layout.entries = Some(EntryListGeometry::new(content))

@@ -434,10 +434,9 @@ pub(super) fn move_focus_right(app: &mut App, entry_view_available: bool) {
             Focus::EntryView
         }
         // With no entry to preview, the right column is the insights panel; Right
-        // focuses it (landing on the first tab).
-        Focus::Entries if entry_view_available && app.show_journal_insights_preview() => {
-            Focus::Insights
-        }
+        // focuses it (landing on the first tab). Reachable at single-panel width
+        // too, where it takes over the full screen.
+        Focus::Entries if app.show_journal_insights_preview() => Focus::Insights,
         // Right steps forward through the tabs, stopping at the last.
         Focus::Insights => {
             if app.nav.insights_tab.index() + 1 < InsightsTab::ALL.len() {

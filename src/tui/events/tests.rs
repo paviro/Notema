@@ -160,6 +160,24 @@ fn right_past_entries_focuses_insights_and_arrows_cycle_tabs() {
 }
 
 #[test]
+fn right_reaches_insights_in_single_panel_layout() {
+    let mut app = app_with_entries(1);
+    app.nav.focus = Focus::Entries;
+    // No entry selected → the entries column previews the journal insights.
+    app.nav.selected_entry_index = None;
+    assert!(app.show_journal_insights_preview());
+
+    // At single-panel width (entry view unavailable) Right still focuses the panel,
+    // which renders full-screen; Left from the first tab returns to the entries list.
+    move_focus_right(&mut app, false);
+    assert_eq!(app.nav.focus, Focus::Insights);
+    assert_eq!(app.nav.insights_tab, InsightsTab::Overview);
+
+    move_focus_left(&mut app);
+    assert_eq!(app.nav.focus, Focus::Entries);
+}
+
+#[test]
 fn enter_expands_and_collapses_the_insights_panel() {
     let mut app = app_with_entries(1);
     app.nav.selected_entry_index = None;
