@@ -90,23 +90,26 @@ const LOCATION_DIALOG_LIST_HINTS: [Hint; 4] = [
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
-const LOCATION_DIALOG_QUERY_HINTS: [Hint; 4] = [
+const LOCATION_DIALOG_QUERY_HINTS: [Hint; 5] = [
     Hint::new("look up", "enter", HintId::LocationResolve),
+    Hint::new("locate", "^l", HintId::LocationGrabDevice),
     Hint::new("next", "tab", HintId::LocationSwitchFocus),
     Hint::new("clear", "del", HintId::LocationClear),
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
 /// Query-field hints once the query is resolved: Enter now saves.
-const LOCATION_DIALOG_QUERY_RESOLVED_HINTS: [Hint; 4] = [
+const LOCATION_DIALOG_QUERY_RESOLVED_HINTS: [Hint; 5] = [
     Hint::new("save", "enter", HintId::LocationSave),
+    Hint::new("locate", "^l", HintId::LocationGrabDevice),
     Hint::new("next", "tab", HintId::LocationSwitchFocus),
     Hint::new("clear", "del", HintId::LocationClear),
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
-const LOCATION_DIALOG_NAME_HINTS: [Hint; 4] = [
+const LOCATION_DIALOG_NAME_HINTS: [Hint; 5] = [
     Hint::new("save", "enter", HintId::LocationSave),
+    Hint::new("locate", "^l", HintId::LocationGrabDevice),
     Hint::new("next", "tab", HintId::LocationSwitchFocus),
     Hint::new("clear", "del", HintId::LocationClear),
     Hint::new("cancel", "esc", HintId::CancelOverlay),

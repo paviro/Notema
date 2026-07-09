@@ -366,6 +366,26 @@ fn location_dialog_keys_route_by_focus() {
 }
 
 #[test]
+fn location_ctrl_l_grabs_device_and_plain_l_types() {
+    let mut app = app_with_entries(1);
+    app.nav.focus = Focus::Entries;
+    app.nav.selected_entry_index = Some(0);
+    app.begin_edit_location();
+
+    // Ctrl+L grabs the device's current location from any focus...
+    let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
+    assert_eq!(
+        keyboard::key_to_action(&app, ctrl_l, true),
+        Some(Action::LocationGrabDevice)
+    );
+    // ...but a bare 'l' is still text typed into the query field.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('l')), true),
+        Some(Action::LocationInput('l'))
+    );
+}
+
+#[test]
 fn location_query_enter_saves_once_the_query_is_resolved() {
     let mut app = app_with_entries(1);
     app.nav.focus = Focus::Entries;

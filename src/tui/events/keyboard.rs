@@ -1,5 +1,5 @@
 use crate::AppResult;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 
@@ -355,6 +355,12 @@ fn location_key_to_action(app: &App, key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::CancelOverlay),
         KeyCode::Tab => Some(Action::LocationSwitchFocus),
+        // Ctrl+L grabs the device's current location. A bare letter can't be a
+        // shortcut here — the query/name fields take every plain char as text —
+        // so this is matched (with the modifier) before the text-input arm.
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(Action::LocationGrabDevice)
+        }
         // Delete (not Backspace, which edits text) clears the entry's location.
         KeyCode::Delete => Some(Action::LocationClear),
         KeyCode::Up if focus == EditLocationFocus::List => Some(Action::LocationMoveUp),

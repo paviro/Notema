@@ -17,8 +17,9 @@ on light, dark, and monochrome/e-ink terminals.
   image rendering, and entry metadata.
 - **Fuzzy search** across the whole corpus, including metadata.
 - **Rich metadata** per entry — tags, people, activities, feelings (from a
-  fixed vocabulary), a mood score (-5…+5), and a location (name an address or
-  enter coordinates; addresses are geocoded via OpenStreetMap Nominatim).
+  fixed vocabulary), a mood score (-5…+5), and a location (name an address,
+  enter coordinates, or grab the device's current GPS — geocoded via
+  OpenStreetMap Nominatim). See [Location](#location).
 - **Editor integration** — write and edit entries in `$EDITOR`.
 - **Day One import** — import a Day One JSON export, photos included.
 - **End-to-end encryption** — per-device [age](https://age-encryption.org) keys,
@@ -47,8 +48,9 @@ Run `journal` with no arguments to start setup. It asks for:
 - **Editor** — command used to write entries (default `nano`).
 
 For a brand-new, empty root it also offers to enable encryption on the spot.
-Config is written to `~/.config/journal/config.toml`
-(or `$XDG_CONFIG_HOME/journal`).
+Config is written to `~/.config/journal/config.toml` (on macOS,
+`~/Library/Application Support/de.paviro.journal/config.toml`), overridable with
+`$XDG_CONFIG_HOME` or `--config`.
 
 ## Usage
 
@@ -70,6 +72,29 @@ journal log "Shipped the release" \
   --feeling proud,focused \
   --mood 3
 ```
+
+### Location
+
+Open the location dialog on an entry (`l`) to set where it was written: type a
+place name, an address, or `lat, lon`; addresses and coordinates are geocoded
+through OpenStreetMap Nominatim.
+
+Press `Ctrl+L` to grab the device's **current** location. It fills in the
+coordinates and reverse-geocodes them to an address. The provider is
+platform-specific and only ever produces `latitude`/`longitude` — there is no
+IP-based fallback, so nothing new leaves the device beyond the Nominatim lookup:
+
+- **Android / Termux** — uses `termux-location`. Install the Termux:API app and
+  `pkg install termux-api`.
+- **Linux** — uses GeoClue2 over D-Bus. Its default Wi-Fi backend (Mozilla
+  Location Service) was retired in 2024, so a machine with no GPS device and no
+  reconfigured backend (e.g. BeaconDB) will report "no location".
+- **macOS** — uses CoreLocation. Since Ventura a bare CLI can't get location, so
+  `journal` embeds a small signed helper app (`macos/JournalLocate.app.zip`),
+  extracts it to `~/Library/Application Support/de.paviro.journal/` on first use, reads
+  the fix from it. The helper is pre-signed and committed, so this works from any
+  build (including `cargo install`). Grant Location access when first prompted, or
+  later in System Settings → Privacy & Security → Location Services.
 
 ### Import from Day One
 
@@ -107,7 +132,8 @@ Markdown content here.
 ```
 
 Per-device settings and this device's private key live separately, in the config
-directory (`~/.config/journal/`), and are **never** part of the journal folder.
+directory (`~/.config/journal/`, or `~/Library/Application Support/de.paviro.journal/`
+on macOS), and are **never** part of the journal folder.
 
 The complete on-disk format — every front-matter field, the config/state files,
 and how to recover encrypted entries with the standard `age` CLI — is documented
