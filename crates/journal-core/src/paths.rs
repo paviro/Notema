@@ -5,6 +5,7 @@
 /// another app called "journal". `None` when `HOME` is unset.
 #[cfg(target_os = "macos")]
 pub fn macos_support_dir() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME")
-        .map(|home| std::path::PathBuf::from(home).join("Library/Application Support/de.paviro.journal"))
+    std::env::var_os("HOME").map(|home| {
+        std::path::PathBuf::from(home).join("Library/Application Support/de.paviro.journal")
+    })
 }

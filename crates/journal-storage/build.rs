@@ -11,7 +11,12 @@ use std::{env, fs};
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let workspace = manifest_dir.parent().unwrap().parent().unwrap().to_path_buf();
+    let workspace = manifest_dir
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
     let locate_crate = workspace.join("crates/journal-locate");
     let plist_src = locate_crate.join("JournalLocate-Info.plist");
     let entitlements = locate_crate.join("JournalLocate.entitlements");
@@ -46,7 +51,10 @@ fn main() {
 
     let zip = out_dir.join("JournalLocate.app.zip");
     ditto(&["-c", "-k", "--keepParent"], &app, &zip);
-    println!("cargo:rustc-env=JOURNAL_LOCATE_HELPER_ZIP={}", zip.display());
+    println!(
+        "cargo:rustc-env=JOURNAL_LOCATE_HELPER_ZIP={}",
+        zip.display()
+    );
 }
 
 /// Its own target dir keeps this nested cargo build clear of the outer build's lock.
@@ -108,7 +116,9 @@ fn notarize_and_staple(app: &Path, out_dir: &Path) {
         env::var("APPLE_USERNAME"),
         env::var("APPLE_PASSWORD"),
     ) else {
-        println!("cargo:warning=location helper: notarization credentials unset, embedding signed-only helper");
+        println!(
+            "cargo:warning=location helper: notarization credentials unset, embedding signed-only helper"
+        );
         return;
     };
     let Some(team_id) = developer_id
@@ -116,7 +126,9 @@ fn notarize_and_staple(app: &Path, out_dir: &Path) {
         .and_then(|(_, rest)| rest.split_once(')'))
         .map(|(id, _)| id.to_string())
     else {
-        println!("cargo:warning=location helper: no team id in APPLE_DEVELOPER_ID, skipping notarization");
+        println!(
+            "cargo:warning=location helper: no team id in APPLE_DEVELOPER_ID, skipping notarization"
+        );
         return;
     };
 
@@ -146,7 +158,10 @@ fn notarize_and_staple(app: &Path, out_dir: &Path) {
 fn ditto(flags: &[&str], src: &Path, dest: &Path) {
     let _ = fs::remove_file(dest);
     run(
-        Command::new("/usr/bin/ditto").args(flags).arg(src).arg(dest),
+        Command::new("/usr/bin/ditto")
+            .args(flags)
+            .arg(src)
+            .arg(dest),
         "package the location helper with ditto",
     );
 }

@@ -57,8 +57,11 @@ trait Location {
 pub(super) fn locate() -> AppResult<DeviceFix> {
     // The D-Bus exchange is blocking and may never answer if no backend can, so
     // bound it — nothing to clean up when it overruns.
-    super::run_with_timeout(TIMEOUT, query_geoclue)
-        .unwrap_or_else(|| Err(anyhow::anyhow!("timed out waiting for a location fix from GeoClue")))
+    super::run_with_timeout(TIMEOUT, query_geoclue).unwrap_or_else(|| {
+        Err(anyhow::anyhow!(
+            "timed out waiting for a location fix from GeoClue"
+        ))
+    })
 }
 
 fn query_geoclue() -> AppResult<DeviceFix> {
