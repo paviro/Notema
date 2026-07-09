@@ -28,7 +28,8 @@ pub const FEELING_GROUPS: &[FeelingGroup] = &[
     FeelingGroup {
         name: "Joy & Delight",
         feelings: &[
-            f("happy", &["joyful", "joyous", "cheerful"]),
+            f("happy", &["joyous", "cheerful"]),
+            f("joyful", &[]),
             f("pleased", &["glad"]),
             f("delighted", &[]),
             f("elated", &[]),
@@ -397,7 +398,7 @@ mod tests {
 
     #[test]
     fn normalize_resolves_search_aliases_to_canonical_feeling() {
-        assert_eq!(normalize_feeling("Joyful"), Some("happy".to_string()));
+        assert_eq!(normalize_feeling("Joyous"), Some("happy".to_string()));
         assert_eq!(normalize_feeling("thankful"), Some("grateful".to_string()));
         assert_eq!(normalize_feeling("Worn Out"), Some("exhausted".to_string()));
     }
@@ -405,7 +406,7 @@ mod tests {
     #[test]
     fn validate_feelings_resolves_aliases() {
         assert_eq!(
-            validate_feelings(["joyful", "glad"]),
+            validate_feelings(["joyous", "glad"]),
             Ok(vec!["happy".to_string(), "pleased".to_string()])
         );
     }
