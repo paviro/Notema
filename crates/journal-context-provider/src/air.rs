@@ -110,7 +110,7 @@ mod tests {
     use super::*;
 
     fn naive(text: &str) -> NaiveDateTime {
-        NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M").unwrap()
+        NaiveDateTime::parse_from_str(text, crate::weather::OPEN_METEO_HOUR_FORMAT).unwrap()
     }
 
     // A minimal two-hour response covering 13:00 and 14:00 local. Pollen is

@@ -145,6 +145,16 @@ pub fn unlock_identity(
     Ok(unlocked)
 }
 
+/// Reject an empty passphrase before it wraps any key material. An empty string
+/// would silently degrade to plaintext-equivalent scrypt, so both write paths
+/// route through this guard.
+fn reject_empty_passphrase(passphrase: Option<&SecretString>) -> Result<()> {
+    if matches!(passphrase, Some(passphrase) if passphrase.expose_secret().is_empty()) {
+        return Err(EncryptionError::EmptyPassphrase);
+    }
+    Ok(())
+}
+
 /// Re-wrap this device's stored identity with a different passphrase state:
 /// `current` unlocks it as stored now, `new` chooses how to store it going
 /// forward (`Some` = scrypt-wrapped, `None` = plaintext mode-0600). Only rewrites
@@ -154,9 +164,7 @@ pub fn set_identity_passphrase(
     current: Option<&SecretString>,
     new: Option<&SecretString>,
 ) -> Result<()> {
-    if matches!(new, Some(passphrase) if passphrase.expose_secret().is_empty()) {
-        return Err(EncryptionError::EmptyPassphrase);
-    }
+    reject_empty_passphrase(new)?;
     let stored = read_stored_identity(&paths.identity_file)?;
     let identity = decrypt_identity(paths, current)?;
     write_stored_identity(paths, &stored.device_name, &identity, new)
@@ -209,9 +217,7 @@ pub(crate) fn write_stored_identity(
     identity: &UnlockedIdentity,
     passphrase: Option<&SecretString>,
 ) -> Result<()> {
-    if matches!(passphrase, Some(passphrase) if passphrase.expose_secret().is_empty()) {
-        return Err(EncryptionError::EmptyPassphrase);
-    }
+    reject_empty_passphrase(passphrase)?;
     let bundle = SecretBundle {
         x25519: Zeroizing::new(identity.identity.to_string().expose_secret().to_string()),
         ed25519: Zeroizing::new(hex::encode(identity.signing.to_bytes())),

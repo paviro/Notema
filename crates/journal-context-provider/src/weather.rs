@@ -116,6 +116,10 @@ fn extract_weather(hourly: &Hourly, target: NaiveDateTime) -> Option<Weather> {
     })
 }
 
+/// `strftime` pattern for Open-Meteo's hourly timestamps (`2024-01-02T15:00`),
+/// shared by the weather and air-quality series and their tests.
+pub(crate) const OPEN_METEO_HOUR_FORMAT: &str = "%Y-%m-%dT%H:%M";
+
 /// The index of the hourly sample whose timestamp is closest to `target`. Shared
 /// with the air-quality fetch, which uses the same hourly-series shape.
 pub(crate) fn nearest_hour_index(times: &[String], target: NaiveDateTime) -> Option<usize> {
@@ -123,7 +127,7 @@ pub(crate) fn nearest_hour_index(times: &[String], target: NaiveDateTime) -> Opt
         .iter()
         .enumerate()
         .filter_map(|(index, time)| {
-            NaiveDateTime::parse_from_str(time, "%Y-%m-%dT%H:%M")
+            NaiveDateTime::parse_from_str(time, OPEN_METEO_HOUR_FORMAT)
                 .ok()
                 .map(|parsed| (index, parsed))
         })
@@ -155,7 +159,7 @@ mod tests {
     use super::*;
 
     fn naive(text: &str) -> NaiveDateTime {
-        NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M").unwrap()
+        NaiveDateTime::parse_from_str(text, OPEN_METEO_HOUR_FORMAT).unwrap()
     }
 
     // A minimal two-hour forecast response covering 13:00 and 14:00 local.

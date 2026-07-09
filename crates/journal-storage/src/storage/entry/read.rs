@@ -168,38 +168,47 @@ fn read_entry_import_source(
 }
 
 fn locked_entry(journal: &str, path: &Path) -> AppResult<Entry> {
-    let id = entry_id(path).context("entry file has no UTF-8 stem")?;
-    Ok(Entry {
-        id,
-        journal: journal.to_string(),
-        path: path.to_path_buf(),
-        encryption_state: EntryEncryptionState::EncryptedLocked,
-        created_at: None,
-        edited_at: None,
-        preview: "[locked] Encrypted entry".to_string(),
-        metadata: Metadata::default(),
-        location: None,
-        import: None,
-        content: "Encryption identity not available".to_string(),
-        word_count: 0,
-        search_haystack: String::new(),
-    })
+    placeholder_entry(
+        journal,
+        path,
+        EntryEncryptionState::EncryptedLocked,
+        "[locked] Encrypted entry",
+        "Encryption identity not available",
+    )
 }
 
 fn unreadable_entry(journal: &str, path: &Path) -> AppResult<Entry> {
+    placeholder_entry(
+        journal,
+        path,
+        EntryEncryptionState::EncryptedUnreadable,
+        "[unreadable] Encrypted entry",
+        "Encrypted entry could not be decrypted",
+    )
+}
+
+/// A dateless stand-in for an encrypted entry this device can't render as text:
+/// either it has no usable key (locked) or decryption failed (unreadable).
+fn placeholder_entry(
+    journal: &str,
+    path: &Path,
+    encryption_state: EntryEncryptionState,
+    preview: &str,
+    content: &str,
+) -> AppResult<Entry> {
     let id = entry_id(path).context("entry file has no UTF-8 stem")?;
     Ok(Entry {
         id,
         journal: journal.to_string(),
         path: path.to_path_buf(),
-        encryption_state: EntryEncryptionState::EncryptedUnreadable,
+        encryption_state,
         created_at: None,
         edited_at: None,
-        preview: "[unreadable] Encrypted entry".to_string(),
+        preview: preview.to_string(),
         metadata: Metadata::default(),
         location: None,
         import: None,
-        content: "Encrypted entry could not be decrypted".to_string(),
+        content: content.to_string(),
         word_count: 0,
         search_haystack: String::new(),
     })

@@ -34,17 +34,6 @@ pub struct Cadence {
     /// Entries per calendar period, chronological (the period label is the
     /// [`Tally`] name). Year or month buckets to match the mood series.
     pub per_period: Vec<Tally>,
-    pub longest_entry: Option<EntryRef>,
-    pub shortest_entry: Option<EntryRef>,
-}
-
-/// A light reference to a single entry — enough to point at it in a "longest
-/// entry" callout without borrowing the [`Entry`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EntryRef {
-    pub id: String,
-    pub date: Option<NaiveDate>,
-    pub word_count: usize,
 }
 
 pub(crate) fn build(
@@ -60,29 +49,9 @@ pub(crate) fn build(
     let mut by_hour = [0usize; 24];
     let mut days: BTreeSet<NaiveDate> = BTreeSet::new();
     let mut periods: BTreeMap<(i32, u32), usize> = BTreeMap::new();
-    let mut longest_entry: Option<EntryRef> = None;
-    let mut shortest_entry: Option<EntryRef> = None;
 
     for (entry, date) in entries.iter().zip(dates) {
         word_counts.push(entry.word_count);
-
-        let entry_ref = EntryRef {
-            id: entry.id.clone(),
-            date: *date,
-            word_count: entry.word_count,
-        };
-        if longest_entry
-            .as_ref()
-            .is_none_or(|cur| entry.word_count > cur.word_count)
-        {
-            longest_entry = Some(entry_ref.clone());
-        }
-        if shortest_entry
-            .as_ref()
-            .is_none_or(|cur| entry.word_count < cur.word_count)
-        {
-            shortest_entry = Some(entry_ref);
-        }
 
         if let Some(date) = date {
             days.insert(*date);
@@ -126,8 +95,6 @@ pub(crate) fn build(
                 count,
             })
             .collect(),
-        longest_entry,
-        shortest_entry,
     }
 }
 
@@ -219,8 +186,6 @@ mod tests {
         assert_eq!(cadence.total_words, 90);
         assert_eq!(cadence.words_per_entry_avg, 30.0);
         assert_eq!(cadence.words_per_entry_median, 20);
-        assert_eq!(cadence.longest_entry.unwrap().id, "c");
-        assert_eq!(cadence.shortest_entry.unwrap().id, "a");
     }
 
     #[test]

@@ -11,7 +11,7 @@ pub mod cadence;
 pub mod correlations;
 pub mod mood;
 
-pub use cadence::{Cadence, EntryRef};
+pub use cadence::Cadence;
 pub use correlations::{Correlate, Correlations, build_correlations};
 pub use mood::{MoodAnalytics, Sentiment};
 
