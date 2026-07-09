@@ -5,9 +5,9 @@
 //! The mount mirrors the on-disk layout with the encryption suffix stripped from
 //! file names: an entry stored as `…/2026/07/09/<id>.md.age` appears as
 //! `…/2026/07/09/<id>.md`, and an encrypted asset `<id>.assets/photo.jpg.age`
-//! appears as `<id>.assets/photo.jpg`. Every file — entry or asset — is handled
-//! the same way: decrypt on read, re-encrypt on write, keyed purely off whether
-//! the on-disk name ends in `.age`.
+//! appears as `<id>.assets/photo.jpg`. Journal content is decrypted on read and
+//! re-encrypted on write; system metadata and unrelated files pass through
+//! unchanged.
 //!
 //! The mount is fully read-write: reading, editing, creating, deleting, and
 //! renaming files and directories all work and are reflected on disk (encrypted
@@ -27,12 +27,19 @@
 use journal_core::AppResult;
 use journal_storage::{JournalStore, StoreFileEncoding};
 use std::collections::HashMap;
-use std::ffi::{CStr, CString, OsStr, OsString};
+use std::ffi::{CStr, CString, OsStr};
 use std::os::raw::{c_char, c_int, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::UNIX_EPOCH;
+
+mod path_policy;
+
+use path_policy::{
+    BackingFile, backing_for_new_file, existing_file, is_directory, is_protected_path,
+    is_rejected_system_name, visible_entries, with_age,
+};
 
 unsafe extern "C" {
     fn journal_fuse_run(
@@ -133,12 +140,6 @@ const RENAME_EXCHANGE: u32 = 2;
 
 // --- path helpers -----------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BackingFile {
-    path: PathBuf,
-    encoding: StoreFileEncoding,
-}
-
 fn ctx_ref<'a>(ptr: *mut c_void) -> &'a Ctx {
     unsafe { &*(ptr as *const Ctx) }
 }
@@ -153,176 +154,6 @@ fn base_of(ctx: &Ctx, path: *const c_char) -> PathBuf {
         ctx.root.clone()
     } else {
         ctx.root.join(OsStr::from_bytes(rel))
-    }
-}
-
-/// Append the age extension: `x.md` → `x.md.age`.
-fn with_age(path: &Path) -> PathBuf {
-    let mut name = path.as_os_str().to_os_string();
-    name.push(".age");
-    PathBuf::from(name)
-}
-
-fn is_regular_file(path: &Path) -> bool {
-    std::fs::symlink_metadata(path)
-        .map(|meta| {
-            let ty = meta.file_type();
-            ty.is_file() && !ty.is_symlink()
-        })
-        .unwrap_or(false)
-}
-
-fn is_directory(path: &Path) -> bool {
-    std::fs::symlink_metadata(path)
-        .map(|meta| {
-            let ty = meta.file_type();
-            ty.is_dir() && !ty.is_symlink()
-        })
-        .unwrap_or(false)
-}
-
-/// Resolve a mounted file's actual on-disk path: the encrypted `<base>.age` if
-/// it exists, else the plain `<base>`, else `None` when neither exists.
-fn existing_file(base: &Path) -> Option<BackingFile> {
-    let encrypted = with_age(base);
-    if is_regular_file(&encrypted) {
-        Some(BackingFile {
-            path: encrypted,
-            encoding: StoreFileEncoding::Encrypted,
-        })
-    } else if is_regular_file(base) {
-        Some(BackingFile {
-            path: base.to_path_buf(),
-            encoding: StoreFileEncoding::Plain,
-        })
-    } else {
-        None
-    }
-}
-
-fn strip_age_path(path: &Path) -> Option<PathBuf> {
-    let name = path.file_name()?.to_str()?;
-    let mounted_name = name.strip_suffix(".age")?;
-    Some(path.with_file_name(mounted_name))
-}
-
-fn mounted_name_for_backing(path: &Path, name: &OsStr) -> OsString {
-    if let Some(base) = strip_age_path(path)
-        && should_encrypt_new_file(&base)
-    {
-        return mounted_name(name);
-    }
-    name.to_os_string()
-}
-
-fn should_encrypt_new_file(base: &Path) -> bool {
-    let Some(name) = base.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    if name.ends_with(".md") || name.contains(".md.") {
-        return true;
-    }
-    base.components().any(|component| {
-        component
-            .as_os_str()
-            .to_str()
-            .is_some_and(|name| name.ends_with(".assets"))
-    })
-}
-
-fn backing_for_new_file(base: PathBuf) -> BackingFile {
-    if should_encrypt_new_file(&base) {
-        BackingFile {
-            path: with_age(&base),
-            encoding: StoreFileEncoding::Encrypted,
-        }
-    } else {
-        BackingFile {
-            path: base,
-            encoding: StoreFileEncoding::Plain,
-        }
-    }
-}
-
-fn is_safe_mounted_path(path: *const c_char) -> bool {
-    let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
-    let rel = bytes.strip_prefix(b"/").unwrap_or(bytes);
-    rel.split(|&b| b == b'/')
-        .all(|component| component.is_empty() || (component != b"." && component != b".."))
-}
-
-fn component_is_rejected_system_state(component: &[u8]) -> bool {
-    component.starts_with(b"._")
-        || matches!(
-            std::str::from_utf8(component).ok(),
-            Some(
-                ".Spotlight-V100"
-                    | ".fseventsd"
-                    | ".Trashes"
-                    | ".TemporaryItems"
-                    | ".DocumentRevisions-V100"
-                    | ".apdisk"
-            )
-        )
-}
-
-fn is_rejected_system_path(path: *const c_char) -> bool {
-    let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
-    let rel = bytes.strip_prefix(b"/").unwrap_or(bytes);
-    rel.split(|&b| b == b'/')
-        .any(component_is_rejected_system_state)
-}
-
-fn is_rejected_system_name(name: &OsStr) -> bool {
-    component_is_rejected_system_state(name.as_bytes())
-}
-
-/// Whether a mounted path lies inside the `.age` encryption metadata directory
-/// (the recipients roster and pending join requests). The mount refuses to reveal
-/// or touch it: a stray tool writing there could corrupt the roster and lock the
-/// store. `.trash`, by contrast, holds ordinary encrypted entries and stays
-/// browsable so they can be recovered.
-fn is_encryption_metadata(path: *const c_char) -> bool {
-    let bytes = unsafe { CStr::from_ptr(path) }.to_bytes();
-    let rel = bytes.strip_prefix(b"/").unwrap_or(bytes);
-    rel.split(|&b| b == b'/').next() == Some(b".age")
-}
-
-fn is_protected_path(path: *const c_char) -> bool {
-    !is_safe_mounted_path(path) || is_encryption_metadata(path) || is_rejected_system_path(path)
-}
-
-/// Names to show for a mounted directory: the `.age` encryption folder and
-/// rejected system state are hidden, `.trash` is kept so deleted entries can be
-/// recovered, and the `.age` suffix is stripped only from encrypted backing
-/// files.
-fn visible_entries(base: &Path) -> std::io::Result<Vec<OsString>> {
-    let entries = std::fs::read_dir(base)?;
-    let mut names = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        let disk_name = entry.file_name();
-        let bytes = disk_name.as_bytes();
-        if bytes == b".age" || is_rejected_system_name(&disk_name) {
-            continue;
-        }
-        let path = entry.path();
-        if disk_name.to_str().is_some_and(|name| name.ends_with(".age")) {
-            names.push(mounted_name_for_backing(&path, &disk_name));
-        } else if existing_file(&path).is_some_and(|file| file.encoding == StoreFileEncoding::Plain)
-            || is_directory(&path)
-        {
-            names.push(disk_name);
-        }
-    }
-    Ok(names)
-}
-
-/// Map an on-disk basename to how it appears in the mount: `x.md.age` → `x.md`.
-fn mounted_name(disk_name: &OsStr) -> OsString {
-    match disk_name.to_str() {
-        Some(s) => OsString::from(s.strip_suffix(".age").unwrap_or(s)),
-        None => disk_name.to_os_string(),
     }
 }
 
@@ -961,7 +792,9 @@ fn release(ctx: *mut c_void, _path: *const c_char, fh: u64) -> c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::path_policy::mounted_name;
     use journal_storage::SecretString;
+    use std::ffi::OsString;
 
     #[test]
     fn with_age_and_mounted_name_round_trip() {
@@ -1400,15 +1233,18 @@ mod tests {
     }
 
     #[test]
-    fn age_metadata_is_inaccessible() {
+    fn age_metadata_passes_through_plaintext() {
         let fx = Fixture::new();
-        assert!(fx.root().join(".age/devices.toml").is_file());
+        let disk = fx.root().join(".age/devices.toml");
+        assert!(disk.is_file());
+        let raw = std::fs::read(&disk).unwrap();
 
         let mut st: libc::stat = unsafe { std::mem::zeroed() };
         assert_eq!(
             jf_getattr(fx.ctx, cpath("/.age/devices.toml").as_ptr(), &mut st),
-            -libc::ENOENT
+            0
         );
+        assert_eq!(st.st_size, raw.len() as libc::off_t);
         let mut fh = 0u64;
         assert_eq!(
             jf_open(
@@ -1417,7 +1253,24 @@ mod tests {
                 libc::O_RDONLY,
                 &mut fh,
             ),
-            -libc::ENOENT
+            0
+        );
+        let mut buf = vec![0u8; raw.len().min(64)];
+        assert_eq!(
+            jf_read(
+                fx.ctx,
+                cpath("/.age/devices.toml").as_ptr(),
+                buf.as_mut_ptr() as *mut c_char,
+                buf.len(),
+                0,
+                fh,
+            ),
+            buf.len() as c_int
+        );
+        assert_eq!(&buf, &raw[..buf.len()]);
+        assert_eq!(
+            jf_release(fx.ctx, cpath("/.age/devices.toml").as_ptr(), fh),
+            0
         );
     }
 
@@ -1529,7 +1382,7 @@ mod tests {
         assert!(top.contains(&OsString::from(".trash")));
         assert!(top.contains(&OsString::from("diary")));
         assert!(top.contains(&OsString::from(".DS_Store")));
-        assert!(!top.contains(&OsString::from(".age")));
+        assert!(top.contains(&OsString::from(".age")));
         assert!(!top.contains(&OsString::from(".Spotlight-V100")));
 
         let diary = visible_entries(&root.join("diary")).unwrap();
