@@ -296,31 +296,26 @@ fn is_protected_path(path: *const c_char) -> bool {
 /// rejected system state are hidden, `.trash` is kept so deleted entries can be
 /// recovered, and the `.age` suffix is stripped only from encrypted backing
 /// files.
-fn visible_entries(base: &Path) -> Vec<OsString> {
-    let Ok(entries) = std::fs::read_dir(base) else {
-        return Vec::new();
-    };
+fn visible_entries(base: &Path) -> std::io::Result<Vec<OsString>> {
+    let entries = std::fs::read_dir(base)?;
     let mut names = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry?;
         let disk_name = entry.file_name();
         let bytes = disk_name.as_bytes();
         if bytes == b".age" || is_rejected_system_name(&disk_name) {
             continue;
         }
-        if disk_name
-            .to_str()
-            .is_some_and(|name| name.ends_with(".age"))
+        let path = entry.path();
+        if disk_name.to_str().is_some_and(|name| name.ends_with(".age")) {
+            names.push(mounted_name_for_backing(&path, &disk_name));
+        } else if existing_file(&path).is_some_and(|file| file.encoding == StoreFileEncoding::Plain)
+            || is_directory(&path)
         {
-            names.push(mounted_name_for_backing(&entry.path(), &disk_name));
-        } else if existing_file(&entry.path())
-            .is_some_and(|file| file.encoding == StoreFileEncoding::Plain)
-        {
-            names.push(disk_name);
-        } else if is_directory(&entry.path()) {
             names.push(disk_name);
         }
     }
-    names
+    Ok(names)
 }
 
 /// Map an on-disk basename to how it appears in the mount: `x.md.age` → `x.md`.
@@ -502,7 +497,11 @@ fn readdir(ctx: *mut c_void, path: *const c_char, buf: *mut c_void, filler: *mut
         unsafe { bridge_fill(filler, buf, name.as_ptr()) };
     }
     let base = base_of(ctx, path);
-    for name in visible_entries(&base) {
+    let entries = match visible_entries(&base) {
+        Ok(entries) => entries,
+        Err(err) => return errno(&err),
+    };
+    for name in entries {
         if let Ok(name) = CString::new(name.as_bytes()) {
             unsafe { bridge_fill(filler, buf, name.as_ptr()) };
         }
@@ -633,11 +632,17 @@ fn read(
     let Some(handle) = inner.handles.get(&fh) else {
         return -libc::EBADF;
     };
-    let start = (off.max(0) as usize).min(handle.buf.len());
+    if off < 0 {
+        return -libc::EINVAL;
+    }
+    let start = (off as usize).min(handle.buf.len());
     let end = start.saturating_add(size).min(handle.buf.len());
     let slice = &handle.buf[start..end];
+    let Ok(written) = c_int::try_from(slice.len()) else {
+        return -libc::EFBIG;
+    };
     unsafe { std::ptr::copy_nonoverlapping(slice.as_ptr(), buf as *mut u8, slice.len()) };
-    slice.len() as c_int
+    written
 }
 
 #[unsafe(no_mangle)]
@@ -668,7 +673,13 @@ fn write(
     if !handle.writable {
         return -libc::EBADF;
     }
-    let start = off.max(0) as usize;
+    if off < 0 {
+        return -libc::EINVAL;
+    }
+    let Ok(written) = c_int::try_from(size) else {
+        return -libc::EFBIG;
+    };
+    let start = off as usize;
     let Some(end) = start.checked_add(size) else {
         return -libc::EFBIG;
     };
@@ -678,7 +689,7 @@ fn write(
     let data = unsafe { std::slice::from_raw_parts(buf as *const u8, size) };
     handle.buf[start..end].copy_from_slice(data);
     handle.dirty = true;
-    size as c_int
+    written
 }
 
 #[unsafe(no_mangle)]
@@ -697,7 +708,10 @@ fn truncate(ctx: *mut c_void, path: *const c_char, size: i64, _fh: u64, _has_fh:
     if is_protected_path(path) {
         return -libc::ENOENT;
     }
-    let size = size.max(0) as usize;
+    if size < 0 {
+        return -libc::EINVAL;
+    }
+    let size = size as usize;
     let base = base_of(ctx, path);
     let file = existing_file(&base);
 
@@ -803,7 +817,8 @@ fn rmdir(ctx: *mut c_void, path: *const c_char) -> c_int {
         // A folder the mount shows as empty can still hold hidden OS junk on disk
         // (a stray .DS_Store, AppleDouble `._*`) that the user can't see to
         // delete. Clear it and retry so the delete they asked for goes through.
-        if err.raw_os_error() == Some(libc::ENOTEMPTY) && visible_entries(&dir).is_empty() {
+        let visually_empty = visible_entries(&dir).is_ok_and(|entries| entries.is_empty());
+        if err.raw_os_error() == Some(libc::ENOTEMPTY) && visually_empty {
             remove_rejected_system_state_in(&dir);
             return match std::fs::remove_dir(&dir) {
                 Ok(()) => 0,
@@ -1139,6 +1154,42 @@ mod tests {
     }
 
     #[test]
+    fn negative_offsets_are_rejected() {
+        let fx = Fixture::new();
+        fx.mkdir_p("diary");
+        write_new(&fx, "/diary/note.md", b"hello");
+
+        let p = cpath("/diary/note.md");
+        let mut fh = 0u64;
+        assert_eq!(jf_open(fx.ctx, p.as_ptr(), libc::O_RDWR, &mut fh), 0);
+        let mut buf = [0u8; 1];
+        assert_eq!(
+            jf_read(
+                fx.ctx,
+                p.as_ptr(),
+                buf.as_mut_ptr() as *mut c_char,
+                1,
+                -1,
+                fh,
+            ),
+            -libc::EINVAL
+        );
+        assert_eq!(
+            jf_write(
+                fx.ctx,
+                p.as_ptr(),
+                b"x".as_ptr() as *const c_char,
+                1,
+                -1,
+                fh,
+            ),
+            -libc::EINVAL
+        );
+        assert_eq!(jf_truncate(fx.ctx, p.as_ptr(), -1, fh, 1), -libc::EINVAL);
+        assert_eq!(jf_release(fx.ctx, p.as_ptr(), fh), 0);
+    }
+
+    #[test]
     fn write_past_end_zero_fills_the_gap() {
         let fx = Fixture::new();
         fx.mkdir_p("diary");
@@ -1409,7 +1460,7 @@ mod tests {
         fx.mkdir_p("diary");
         std::fs::create_dir(fx.root().join("diary/.Spotlight-V100")).unwrap();
 
-        assert!(visible_entries(&fx.root().join("diary")).is_empty());
+        assert!(visible_entries(&fx.root().join("diary")).unwrap().is_empty());
         assert_eq!(jf_rmdir(fx.ctx, cpath("/diary").as_ptr()), 0);
         assert!(!fx.root().join("diary").exists());
     }
@@ -1474,14 +1525,14 @@ mod tests {
         std::fs::write(root.join("diary/x.md.age"), b"").unwrap();
         std::fs::write(root.join("diary/notes.age"), b"").unwrap();
 
-        let top = visible_entries(root);
+        let top = visible_entries(root).unwrap();
         assert!(top.contains(&OsString::from(".trash")));
         assert!(top.contains(&OsString::from("diary")));
         assert!(top.contains(&OsString::from(".DS_Store")));
         assert!(!top.contains(&OsString::from(".age")));
         assert!(!top.contains(&OsString::from(".Spotlight-V100")));
 
-        let diary = visible_entries(&root.join("diary"));
+        let diary = visible_entries(&root.join("diary")).unwrap();
         assert!(diary.contains(&OsString::from("x.md")));
         assert!(diary.contains(&OsString::from("notes.age")));
     }
