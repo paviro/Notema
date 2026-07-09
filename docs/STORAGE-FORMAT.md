@@ -38,10 +38,10 @@ lines, a blank line, then the Markdown body.
 
 ```markdown
 +++
-tags = ["work", "release"]
-people = ["Alice"]
 activities = ["coding"]
 feelings = ["focused", "proud"]
+people = ["Alice"]
+tags = ["work", "release"]
 mood = 3
 starred = true
 
@@ -72,15 +72,30 @@ longitude = -122.4477
 condition = "partly-cloudy"
 temperature_celsius = 19.9
 feels_like_celsius = 19.5
-humidity = 0.62
 dew_point_celsius = 12.4
+humidity = 0.62
 pressure_mb = 1013.2
-visibility_km = 12.5
 cloud_cover = 0.4
+visibility_km = 12.5
 precipitation_mm = 0.0
 wind_speed_kph = 12.0
 wind_gust_kph = 28.0
 wind_direction = 210.0
+source = "Open-Meteo"
+
+[air_quality]
+european_aqi = 42
+us_aqi = 55
+pm2_5 = 12.4
+pm10 = 18.0
+carbon_monoxide = 210.0
+nitrogen_dioxide = 14.2
+ozone = 68.0
+sulphur_dioxide = 2.1
+uv_index = 6.2
+birch_pollen = 0.0
+grass_pollen = 24.0
+ragweed_pollen = 0.0
 source = "Open-Meteo"
 
 [celestial]
@@ -88,6 +103,7 @@ moon_phase = 0.5
 moon_phase_name = "full"
 sunrise = "2026-07-05T05:51:00+02:00"
 sunset = "2026-07-05T21:29:00+02:00"
+day_length_seconds = 56280
 +++
 
 # Entry body
@@ -109,17 +125,18 @@ then the system/import tables.
 
 | Key            | Type            | Meaning |
 |----------------|-----------------|---------|
-| `tags`         | array of string | Free-form tags. |
-| `people`       | array of string | Free-form people references. |
 | `activities`   | array of string | Free-form activities. |
 | `feelings`     | array of string | From a fixed vocabulary (below); unknown values are dropped on read. |
+| `people`       | array of string | Free-form people references. |
+| `tags`         | array of string | Free-form tags. |
 | `mood`         | integer         | Overall mood, clamped to `-5..=5`. Out-of-range or non-integer values are dropped to “no mood” rather than failing the parse. |
 | `starred`      | boolean         | Whether the entry is flagged as a favorite. Omitted when false. |
 | `[datetime]`   | table           | `created_at` (RFC 3339; falls back to the filename date if missing), `edited_at` (RFC 3339; only genuine human edits move it — not encryption or asset rewrites), `timezone` (IANA zone name the entry was authored in, e.g. `Europe/Berlin` — capture-only, complements the offset in `created_at`), and `writing_seconds` (accumulated editor-open time, whole seconds; seeded from Day One's `editingTime` and grown by native edits that change the body). |
 | `[import]`     | table           | Provenance of an imported entry: `source` (e.g. `dayone`) and `id` (the source's identifier). Absent for entries created in the app. Used to skip re-importing. |
 | `[location]`   | table           | Where the entry was written. Fields are OpenStreetMap / Nominatim address keys, stored one-to-one — optional `name` (a place/venue label), `house_number`, `road`, `neighbourhood`, `quarter`, `suburb`, `borough`, `city_district`, `city`, `town`, `village`, `municipality`, `hamlet`, `postcode`, `county`, `state_district`, `province`, `region`, `state`, `country`, `latitude`, `longitude`. Only the keys a geocode returns are stored (the rest omitted). Two more are set only when the coordinates come from a device "grab GPS": `accuracy_m` (horizontal accuracy in metres) and `source` (the provider slug, e.g. `corelocation`, `geoclue`, `termux`). Set in the app via the location dialog; Day One import maps its coarse placemark onto `name`/`city`/`state`/`country`. Displayed but not searched. |
-| `[weather]`    | table           | Weather at the time of writing — fetched from Open-Meteo when a location is set, or captured on Day One import. All optional: `condition` (a slug, e.g. `partly-cloudy`), `temperature_celsius`, `feels_like_celsius`, `humidity` (0–1), `dew_point_celsius`, `pressure_mb`, `visibility_km`, `cloud_cover` (0–1), `precipitation_mm`, `wind_speed_kph`, `wind_gust_kph`, `wind_direction` (degrees), and `source` (provider, for attribution). Capture-only, stored not surfaced. |
-| `[celestial]`  | table           | Sun/moon at the time of writing — computed locally when a location is set, or captured on Day One import. All optional: `moon_phase` (0–1), `moon_phase_name`, `sunrise`, `sunset`. Capture-only. |
+| `[weather]`    | table           | Weather at the time of writing — fetched from Open-Meteo when a location is set, or captured on Day One import. All optional: `condition` (a slug, e.g. `partly-cloudy`), `temperature_celsius`, `feels_like_celsius`, `dew_point_celsius`, `humidity` (0–1), `pressure_mb`, `cloud_cover` (0–1), `visibility_km`, `precipitation_mm`, `wind_speed_kph`, `wind_gust_kph`, `wind_direction` (degrees), and `source` (provider, for attribution). Capture-only, stored not surfaced. |
+| `[air_quality]`| table           | Air quality and UV at the time of writing — fetched from Open-Meteo's air-quality endpoint (a separate provider than `[weather]`, so an entry may carry one without the other). All optional: `european_aqi`, `us_aqi`, `pm2_5`, `pm10` (µg/m³), `carbon_monoxide`, `nitrogen_dioxide`, `ozone`, `sulphur_dioxide` (µg/m³), `uv_index`, `birch_pollen`, `grass_pollen`, `ragweed_pollen` (grains/m³, Europe only), and `source` (provider, for attribution). Capture-only. |
+| `[celestial]`  | table           | Sun/moon at the time of writing — computed locally when a location is set, or captured on Day One import. All optional: `moon_phase` (0–1), `moon_phase_name`, `sunrise`, `sunset`, `day_length_seconds` (sunset − sunrise). Capture-only. |
 
 All list fields are plural; timestamps are RFC 3339 with an offset. There is no
 schema-version field — the format evolves by adding optional fields, and readers

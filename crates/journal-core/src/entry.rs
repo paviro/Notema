@@ -13,13 +13,13 @@ pub const MOOD_RANGE: RangeInclusive<i8> = -5..=5;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Metadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub people: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub activities: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub feelings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub people: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     #[serde(
         default,
         deserialize_with = "deserialize_mood",
@@ -196,19 +196,19 @@ pub struct Weather {
     pub temperature_celsius: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feels_like_celsius: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub humidity: Option<f64>,
     /// The dew point — the temperature at which the air would saturate; a truer
     /// "mugginess" signal than relative humidity alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dew_point_celsius: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pressure_mb: Option<f64>,
+    pub humidity: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub visibility_km: Option<f64>,
+    pub pressure_mb: Option<f64>,
     /// Total sky cloudiness, as a 0–1 fraction (like `humidity`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud_cover: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility_km: Option<f64>,
     /// Precipitation total for the hour, in millimetres (rain plus melted snow).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precipitation_mm: Option<f64>,
@@ -267,28 +267,28 @@ pub struct AirQuality {
     /// Coarse particulate matter (≤10µm), in µg/m³.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pm10: Option<f64>,
-    /// Ground-level ozone, in µg/m³.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ozone: Option<f64>,
-    /// Nitrogen dioxide, in µg/m³.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub nitrogen_dioxide: Option<f64>,
-    /// Sulphur dioxide, in µg/m³.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sulphur_dioxide: Option<f64>,
     /// Carbon monoxide, in µg/m³.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub carbon_monoxide: Option<f64>,
+    /// Nitrogen dioxide, in µg/m³.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nitrogen_dioxide: Option<f64>,
+    /// Ground-level ozone, in µg/m³.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ozone: Option<f64>,
+    /// Sulphur dioxide, in µg/m³.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sulphur_dioxide: Option<f64>,
     /// The UV index — served by this same air-quality endpoint, not the weather
     /// one, so it is stored here rather than in `[weather]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uv_index: Option<f64>,
-    /// Grass pollen, in grains/m³ (Europe only; `None` elsewhere).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grass_pollen: Option<f64>,
     /// Birch pollen, in grains/m³ (Europe only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub birch_pollen: Option<f64>,
+    /// Grass pollen, in grains/m³ (Europe only; `None` elsewhere).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grass_pollen: Option<f64>,
     /// Ragweed pollen, in grains/m³ (Europe only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ragweed_pollen: Option<f64>,
@@ -414,11 +414,11 @@ pub fn build_search_haystack(content: &str, metadata: &Metadata) -> String {
     let mut buf = String::with_capacity(content.len() + 16);
     buf.push_str(content);
     for value in metadata
-        .tags
+        .activities
         .iter()
-        .chain(&metadata.people)
-        .chain(&metadata.activities)
         .chain(&metadata.feelings)
+        .chain(&metadata.people)
+        .chain(&metadata.tags)
     {
         buf.push(' ');
         buf.push_str(value);

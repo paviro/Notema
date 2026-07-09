@@ -24,14 +24,15 @@ pub struct FrontMatter {
     /// set, or captured on Day One import. A TOML table, so it trails the scalars.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weather: Option<Weather>,
+    /// Air quality (and UV) at the time of writing: fetched from Open-Meteo's
+    /// air-quality endpoint — a separate provider than weather, so its own table.
+    /// Grouped next to `weather` as the other fetched atmospheric conditions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub air_quality: Option<AirQuality>,
     /// Sun/moon at the time of writing — astronomy, kept as its own table rather
     /// than under weather. Computed locally, or captured on Day One import.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub celestial: Option<Celestial>,
-    /// Air quality (and UV) at the time of writing: fetched from Open-Meteo's
-    /// air-quality endpoint — a separate provider than weather, so its own table.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub air_quality: Option<AirQuality>,
 }
 
 /// The `[datetime]` table: when an entry was created and last edited, the IANA
@@ -427,9 +428,9 @@ mod tests {
 
     #[test]
     fn weather_and_celestial_tables_serialize_and_round_trip() {
-        // The gate: the flat `[weather]` and `[celestial]` tables must serialize
-        // after `[location]` (TOML requires tables follow the flattened scalars)
-        // and re-parse unchanged.
+        // The gate: the flat `[weather]`, `[air_quality]`, and `[celestial]` tables
+        // must serialize after `[location]` (TOML requires tables follow the
+        // flattened scalars) and re-parse unchanged.
         let fm = FrontMatter {
             location: Some(Location {
                 city: Some("Testville".to_string()),
@@ -458,14 +459,14 @@ mod tests {
         };
 
         let rendered = render_entry(&fm, "# Body\n");
-        // Ordering: [location] then [weather] then [celestial] then [air_quality].
+        // Ordering: [location] then [weather] then [air_quality] then [celestial].
         let location_at = rendered.find("[location]").unwrap();
         let weather_at = rendered.find("[weather]").unwrap();
-        let celestial_at = rendered.find("[celestial]").unwrap();
         let air_at = rendered.find("[air_quality]").unwrap();
+        let celestial_at = rendered.find("[celestial]").unwrap();
         assert!(location_at < weather_at, "{rendered}");
-        assert!(weather_at < celestial_at);
-        assert!(celestial_at < air_at);
+        assert!(weather_at < air_at);
+        assert!(air_at < celestial_at);
 
         let (front_matter, _) = split_front_matter(&rendered);
         let parsed = front_matter_fields(front_matter.unwrap());
