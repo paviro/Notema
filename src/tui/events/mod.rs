@@ -312,6 +312,7 @@ pub(crate) fn dispatch_action(
             }
         }
         Action::LocationResolve => app.resolve_location_query(),
+        Action::LocationGrabDevice => app.grab_device_location(),
         Action::LocationSelectRow => {
             if let Some(state) = app.edit_location_state_mut() {
                 state.select_row();

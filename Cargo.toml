@@ -4,7 +4,7 @@ version = "2026.7.1"
 edition = "2024"
 
 [workspace]
-members = ["crates/journal-core", "crates/journal-encryption", "crates/journal-storage", "crates/journal-import", "crates/journal-analytics", "crates/journal-seed"]
+members = ["crates/journal-core", "crates/journal-encryption", "crates/journal-storage", "crates/journal-import", "crates/journal-analytics", "crates/journal-seed", "crates/journal-locate"]
 
 [dependencies]
 anyhow = "1"

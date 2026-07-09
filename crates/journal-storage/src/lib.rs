@@ -6,6 +6,7 @@ use std::{
 
 mod air;
 mod celestial;
+mod device_location;
 mod error;
 mod geocode;
 mod http;
@@ -18,6 +19,7 @@ use journal_encryption as crypto;
 
 pub use air::fetch_air_quality;
 pub use celestial::compute_celestial;
+pub use device_location::{DeviceFix, DeviceLocationSource, device_location};
 pub use error::StorageError;
 pub use geocode::{GeocodeHit, geocode, reverse_geocode};
 pub use journal_core::{AirQuality, Celestial, Weather};

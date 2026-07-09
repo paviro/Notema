@@ -144,6 +144,26 @@ impl App {
         self.geocode.request(dispatch, crate::tui::geocode::resolve);
     }
 
+    /// Ask the device for its current location, then name it like any coordinates.
+    /// The grab and the reverse lookup both run on the worker thread, so the dialog
+    /// just shows "Resolving…" until the fix (or a failure) comes back.
+    pub(crate) fn grab_device_location(&mut self) {
+        let dispatch = {
+            let Some(state) = self.edit_location_state_mut() else {
+                return;
+            };
+            let id = state.next_request_id;
+            state.next_request_id += 1;
+            state.pending_request_id = Some(id);
+            state.status = LocationResolveStatus::Resolving;
+            GeocodeRequest {
+                id,
+                query: GeocodeQuery::Device,
+            }
+        };
+        self.geocode.request(dispatch, crate::tui::geocode::resolve);
+    }
+
     /// Fold any finished geocode replies into the open dialog, ignoring stale ones
     /// (a reply whose id isn't the in-flight request). Returns whether anything
     /// changed, so the event loop knows to repaint.
@@ -158,6 +178,12 @@ impl App {
                 continue;
             }
             state.pending_request_id = None;
+            // A device grab returns coordinates first: adopt them as the resolved,
+            // saveable value and mirror them into the query field before the
+            // reverse-geocoded names (handled by the branch below) land.
+            if let Some((lat, lon)) = result.device_coords {
+                state.seed_coordinates(lat, lon);
+            }
             match result.hits {
                 Ok(hits) if result.reverse => state.apply_reverse(hits.into_iter().next()),
                 Ok(hits) => state.apply_candidates(hits),

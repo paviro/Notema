@@ -16,8 +16,9 @@ use std::os::unix::fs::FileTypeExt;
 #[command(about = "Markdown terminal journal")]
 struct Cli {
     /// Config directory holding config.toml and this device's encryption key;
-    /// defaults to $XDG_CONFIG_HOME/journal (or ~/.config/journal). Global, so it
-    /// works before or after a subcommand.
+    /// defaults to $XDG_CONFIG_HOME/journal, else ~/.config/journal (macOS:
+    /// ~/Library/Application Support/de.paviro.journal). Global, so it works
+    /// before or after a subcommand.
     #[arg(long, value_name = "DIR", global = true)]
     config: Option<PathBuf>,
 

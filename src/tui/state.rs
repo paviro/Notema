@@ -844,6 +844,19 @@ impl EditLocationState {
         self.normalize_list_state();
     }
 
+    /// Adopt a freshly grabbed device fix: mirror the coordinates into the query
+    /// field and make them the resolved, saveable value. Any stale address fields
+    /// are dropped — the reverse-geocoded names for this new spot arrive next, via
+    /// [`apply_reverse`](Self::apply_reverse).
+    pub(crate) fn seed_coordinates(&mut self, lat: f64, lon: f64) {
+        self.query = format!("{lat}, {lon}");
+        self.resolved = Some(Location {
+            latitude: Some(lat),
+            longitude: Some(lon),
+            ..Location::default()
+        });
+    }
+
     /// Fold a finished reverse-geocode reply into the dialog: enrich the resolved
     /// coordinates with the returned names (keeping the user's coordinates). The
     /// coordinates are now looked up, so Enter in the address field will save.
@@ -1341,6 +1354,35 @@ mod tests {
         assert_eq!(resolved.latitude, Some(1.0));
         assert_eq!(resolved.longitude, Some(2.0));
         assert_eq!(resolved.city.as_deref(), Some("Town"));
+    }
+
+    #[test]
+    fn location_device_grab_seeds_coords_then_reverse_names_them() {
+        let mut state = EditLocationState::new(None, Vec::new());
+        state.name = "Desk".to_string();
+        // Simulate a stale prior address to prove the grab starts clean.
+        state.resolved = Some(Location {
+            city: Some("Elsewhere".to_string()),
+            ..Location::default()
+        });
+
+        // A grabbed fix mirrors into the query field and becomes the resolved,
+        // saveable coordinates — with the stale address dropped.
+        state.seed_coordinates(52.52, 13.405);
+        assert_eq!(state.query, "52.52, 13.405");
+        let resolved = state.resolved.clone().unwrap();
+        assert_eq!(resolved.latitude, Some(52.52));
+        assert_eq!(resolved.longitude, Some(13.405));
+        assert!(resolved.city.is_none(), "stale address is cleared");
+
+        // The reverse lookup then names the spot, keeping the grabbed coordinates
+        // and the name the user had typed.
+        state.apply_reverse(Some(hit("Berlin", 9.9, 9.9)));
+        let composed = state.composed().unwrap();
+        assert_eq!(composed.latitude, Some(52.52));
+        assert_eq!(composed.longitude, Some(13.405));
+        assert_eq!(composed.city.as_deref(), Some("Berlin"));
+        assert_eq!(composed.name.as_deref(), Some("Desk"), "typed name kept");
     }
 
     #[test]

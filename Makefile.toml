@@ -111,15 +111,19 @@ command = "cargo"
 args = ["build", "--release", "--target", "x86_64-pc-windows-gnu"]
 
 # macOS targets
+# .env carries the Apple credentials journal-storage's build.rs reads to sign and
+# notarize the location helper. Missing .env falls back to ad-hoc signing.
 [tasks.build-macos-intel]
 description = "Build for Intel macOS"
 command = "cargo"
 args = ["build", "--release", "--target", "x86_64-apple-darwin"]
+env_files = ["./.env"]
 
 [tasks.build-macos-silicon]
 description = "Build for Apple Silicon macOS"
 command = "cargo"
 args = ["build", "--release", "--target", "aarch64-apple-darwin"]
+env_files = ["./.env"]
 
 [tasks.build-macos-universal]
 description = "Build universal macOS binary (Intel + Apple Silicon)"

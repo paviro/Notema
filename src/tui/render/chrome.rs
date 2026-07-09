@@ -47,6 +47,7 @@ pub(crate) enum HintId {
     BeginEditLocation,
     LocationSwitchFocus,
     LocationResolve,
+    LocationGrabDevice,
     LocationSelectRow,
     LocationSave,
     LocationClear,

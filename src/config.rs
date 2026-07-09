@@ -160,6 +160,7 @@ impl Default for UiState {
 }
 
 pub fn default_config_path() -> AppResult<PathBuf> {
+    // An explicit XDG_CONFIG_HOME always wins, on every platform.
     if let Ok(config_home) = env::var("XDG_CONFIG_HOME") {
         return Ok(PathBuf::from(config_home)
             .join("journal")
@@ -167,7 +168,14 @@ pub fn default_config_path() -> AppResult<PathBuf> {
     }
 
     let home = dirs::home_dir().context("could not determine home directory")?;
-    Ok(home.join(".config").join("journal").join("config.toml"))
+    // macOS keeps app data under Application Support, namespaced by the reverse-DNS
+    // bundle id so it can't collide with another app called "journal". Other
+    // Unixes use ~/.config, where the app name is already the namespace.
+    #[cfg(target_os = "macos")]
+    let dir = home.join("Library/Application Support/de.paviro.journal");
+    #[cfg(not(target_os = "macos"))]
+    let dir = home.join(".config").join("journal");
+    Ok(dir.join("config.toml"))
 }
 
 pub fn load_config(path: &Path) -> AppResult<Config> {

@@ -80,6 +80,7 @@ pub(crate) enum Action {
     LocationMoveUp,
     LocationMoveDown,
     LocationResolve,
+    LocationGrabDevice,
     LocationSelectRow,
     LocationSave,
     LocationClear,

@@ -90,11 +90,12 @@ IP-based fallback, so nothing new leaves the device beyond the Nominatim lookup:
   Location Service) was retired in 2024, so a machine with no GPS device and no
   reconfigured backend (e.g. BeaconDB) will report "no location".
 - **macOS** — uses CoreLocation. Since Ventura a bare CLI can't get location, so
-  `journal` embeds a small signed helper app (`macos/JournalLocate.app.zip`),
-  extracts it to `~/Library/Application Support/de.paviro.journal/` on first use, reads
-  the fix from it. The helper is pre-signed and committed, so this works from any
-  build (including `cargo install`). Grant Location access when first prompted, or
-  later in System Settings → Privacy & Security → Location Services.
+  `journal` embeds a small signed helper app, extracts it to
+  `~/Library/Application Support/de.paviro.journal/` on first use, and reads the
+  fix from it. The helper is built, signed, and (for release builds) notarized by
+  `journal-storage`'s build script, so it is never a committed binary. Grant
+  Location access when first prompted, or later in System Settings → Privacy &
+  Security → Location Services.
 
 ### Import from Day One
 
