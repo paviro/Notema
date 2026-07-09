@@ -335,6 +335,7 @@ dependencies = [
 [tasks.release-all]
 description = "Build and package all platforms"
 dependencies = [
+    "check-apple-credentials",
     "run-tests",
     "build-all",
     "package-all",
@@ -343,6 +344,29 @@ dependencies = [
     "notarize-macos-universal"
 ]
 
+# A release is signed and notarized, so refuse to start one without the Apple
+# credentials. Local, unsigned builds use `cargo build --release` instead.
+[tasks.check-apple-credentials]
+description = "Fail early unless the Apple signing/notarization credentials are set"
+script = '''
+if [ -f ./.env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+fi
+missing=""
+[ -n "$APPLE_DEVELOPER_ID" ] || missing="$missing APPLE_DEVELOPER_ID"
+[ -n "$APPLE_USERNAME" ] || missing="$missing APPLE_USERNAME"
+[ -n "$APPLE_PASSWORD" ] || missing="$missing APPLE_PASSWORD"
+if [ -n "$missing" ]; then
+    echo "release-all needs Apple credentials for signing + notarization; missing:$missing" >&2
+    echo "Set them in ./.env, or use \`cargo build --release\` for an unsigned local build." >&2
+    exit 1
+fi
+echo "Apple credentials present."
+'''
+
 [tasks.sign-macos-intel]
 description = "Sign Intel macOS binary if APPLE_DEVELOPER_ID is set"
 dependencies = ["build-macos-intel"]
@@ -350,15 +374,11 @@ env_files = ["./.env"]
 condition = { files_exist = ["./.env"] }
 script = '''
 BINARY_PATH="target/x86_64-apple-darwin/release/journal"
-if [ -n "$APPLE_DEVELOPER_ID" ]; then
-    if codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime "$BINARY_PATH"; then
-        echo "Successfully signed Intel macOS binary."
-    else
-        echo "Failed to sign Intel macOS binary."
-    fi
-else
-    echo "APPLE_DEVELOPER_ID not set, skipping code signing for Intel macOS binary."
+if [ -z "$APPLE_DEVELOPER_ID" ]; then
+    echo "APPLE_DEVELOPER_ID not set, cannot sign Intel macOS binary." >&2
+    exit 1
 fi
+codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime "$BINARY_PATH"
 '''
 
 [tasks.sign-macos-silicon]
@@ -368,15 +388,11 @@ env_files = ["./.env"]
 condition = { files_exist = ["./.env"] }
 script = '''
 BINARY_PATH="target/aarch64-apple-darwin/release/journal"
-if [ -n "$APPLE_DEVELOPER_ID" ]; then
-    if codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime "$BINARY_PATH"; then
-        echo "Successfully signed Apple Silicon macOS binary."
-    else
-        echo "Failed to sign Apple Silicon macOS binary."
-    fi
-else
-    echo "APPLE_DEVELOPER_ID not set, skipping code signing for Apple Silicon macOS binary."
+if [ -z "$APPLE_DEVELOPER_ID" ]; then
+    echo "APPLE_DEVELOPER_ID not set, cannot sign Apple Silicon macOS binary." >&2
+    exit 1
 fi
+codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime "$BINARY_PATH"
 '''
 
 [tasks.sign-macos-universal]
@@ -386,15 +402,11 @@ env_files = ["./.env"]
 condition = { files_exist = ["./.env"] }
 script = '''
 BINARY_PATH="target/universal-apple-darwin/release/journal"
-if [ -n "$APPLE_DEVELOPER_ID" ]; then
-    if codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime "$BINARY_PATH"; then
-        echo "Successfully signed Universal macOS binary."
-    else
-        echo "Failed to sign Universal macOS binary."
-    fi
-else
-    echo "APPLE_DEVELOPER_ID not set, skipping code signing for Universal macOS binary."
+if [ -z "$APPLE_DEVELOPER_ID" ]; then
+    echo "APPLE_DEVELOPER_ID not set, cannot sign Universal macOS binary." >&2
+    exit 1
 fi
+codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime "$BINARY_PATH"
 '''
 
 [tasks.notarize-macos-intel]
@@ -405,15 +417,11 @@ condition = { files_exist = ["./.env"] }
 script = '''
 ZIP_PATH="release/apple-darwin-x86_64.zip"
 TEAM_ID=$(echo "$APPLE_DEVELOPER_ID" | sed -n 's/.*(\(.*\)).*/\1/p')
-if [ -n "$APPLE_USERNAME" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$TEAM_ID" ]; then
-    if xcrun notarytool submit "$ZIP_PATH" --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" --wait; then
-        echo "Successfully notarized Intel macOS zip."
-    else
-        echo "Failed to notarize Intel macOS zip."
-    fi
-else
-    echo "APPLE_USERNAME, APPLE_PASSWORD, or APPLE_DEVELOPER_ID not set, skipping notarization for Intel macOS zip."
+if [ -z "$APPLE_USERNAME" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$TEAM_ID" ]; then
+    echo "APPLE_USERNAME, APPLE_PASSWORD, or APPLE_DEVELOPER_ID team id not set, cannot notarize Intel macOS zip." >&2
+    exit 1
 fi
+xcrun notarytool submit "$ZIP_PATH" --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" --wait
 '''
 
 [tasks.notarize-macos-silicon]
@@ -424,15 +432,11 @@ condition = { files_exist = ["./.env"] }
 script = '''
 ZIP_PATH="release/apple-darwin-aarch64.zip"
 TEAM_ID=$(echo "$APPLE_DEVELOPER_ID" | sed -n 's/.*(\(.*\)).*/\1/p')
-if [ -n "$APPLE_USERNAME" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$TEAM_ID" ]; then
-    if xcrun notarytool submit "$ZIP_PATH" --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" --wait; then
-        echo "Successfully notarized Apple Silicon macOS zip."
-    else
-        echo "Failed to notarize Apple Silicon macOS zip."
-    fi
-else
-    echo "APPLE_USERNAME, APPLE_PASSWORD, or APPLE_DEVELOPER_ID not set, skipping notarization for Apple Silicon macOS zip."
+if [ -z "$APPLE_USERNAME" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$TEAM_ID" ]; then
+    echo "APPLE_USERNAME, APPLE_PASSWORD, or APPLE_DEVELOPER_ID team id not set, cannot notarize Apple Silicon macOS zip." >&2
+    exit 1
 fi
+xcrun notarytool submit "$ZIP_PATH" --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" --wait
 '''
 
 [tasks.notarize-macos-universal]
@@ -443,13 +447,9 @@ condition = { files_exist = ["./.env"] }
 script = '''
 ZIP_PATH="release/apple-darwin-universal.zip"
 TEAM_ID=$(echo "$APPLE_DEVELOPER_ID" | sed -n 's/.*(\(.*\)).*/\1/p')
-if [ -n "$APPLE_USERNAME" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$TEAM_ID" ]; then
-    if xcrun notarytool submit "$ZIP_PATH" --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" --wait; then
-        echo "Successfully notarized Universal macOS zip."
-    else
-        echo "Failed to notarize Universal macOS zip."
-    fi
-else
-    echo "APPLE_USERNAME, APPLE_PASSWORD, or APPLE_DEVELOPER_ID not set, skipping notarization for Universal macOS zip."
+if [ -z "$APPLE_USERNAME" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$TEAM_ID" ]; then
+    echo "APPLE_USERNAME, APPLE_PASSWORD, or APPLE_DEVELOPER_ID team id not set, cannot notarize Universal macOS zip." >&2
+    exit 1
 fi
+xcrun notarytool submit "$ZIP_PATH" --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" --wait
 '''

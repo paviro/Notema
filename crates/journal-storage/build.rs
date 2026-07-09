@@ -97,40 +97,33 @@ fn assemble_bundle(binary: &Path, plist_src: &Path, out_dir: &Path, version: &st
 fn sign(app: &Path, entitlements: &Path) {
     let mut cmd = Command::new("codesign");
     cmd.args(["--force", "--entitlements"]).arg(entitlements);
-    match env::var("APPLE_DEVELOPER_ID") {
-        Ok(id) if !id.is_empty() => {
+    match env_nonempty("APPLE_DEVELOPER_ID") {
+        Some(id) => {
             cmd.args(["--options", "runtime", "--timestamp", "--sign", &id]);
         }
-        _ => {
+        None => {
             cmd.args(["--sign", "-"]);
         }
     }
     run(cmd.arg(app), "sign the location helper");
 }
 
-/// Stapling embeds the ticket so the extracted `.app` validates offline. Skipped
-/// when credentials are absent — a release build then embeds a signed-only helper.
+/// Stapling embeds the ticket so the extracted `.app` validates offline. An ad-hoc
+/// build (no `APPLE_DEVELOPER_ID`) has nothing to notarize; a Developer-ID build is
+/// distributable, so notarization is required and any gap fails the build.
 fn notarize_and_staple(app: &Path, out_dir: &Path) {
-    let (Ok(developer_id), Ok(user), Ok(password)) = (
-        env::var("APPLE_DEVELOPER_ID"),
-        env::var("APPLE_USERNAME"),
-        env::var("APPLE_PASSWORD"),
-    ) else {
-        println!(
-            "cargo:warning=location helper: notarization credentials unset, embedding signed-only helper"
-        );
+    let Some(developer_id) = env_nonempty("APPLE_DEVELOPER_ID") else {
         return;
     };
-    let Some(team_id) = developer_id
+    let user = env_nonempty("APPLE_USERNAME")
+        .expect("APPLE_DEVELOPER_ID is set but APPLE_USERNAME is missing — cannot notarize the location helper");
+    let password = env_nonempty("APPLE_PASSWORD")
+        .expect("APPLE_DEVELOPER_ID is set but APPLE_PASSWORD is missing — cannot notarize the location helper");
+    let team_id = developer_id
         .rsplit_once('(')
         .and_then(|(_, rest)| rest.split_once(')'))
         .map(|(id, _)| id.to_string())
-    else {
-        println!(
-            "cargo:warning=location helper: no team id in APPLE_DEVELOPER_ID, skipping notarization"
-        );
-        return;
-    };
+        .expect("APPLE_DEVELOPER_ID has no team id in parentheses — cannot notarize the location helper");
 
     let notary_zip = out_dir.join("JournalLocate-notary.zip");
     ditto(&["-c", "-k", "--keepParent"], app, &notary_zip);
@@ -171,4 +164,8 @@ fn run(cmd: &mut Command, what: &str) {
         .status()
         .unwrap_or_else(|error| panic!("could not {what}: {error}"));
     assert!(status.success(), "failed to {what} (exit {status})");
+}
+
+fn env_nonempty(key: &str) -> Option<String> {
+    env::var(key).ok().filter(|value| !value.is_empty())
 }
