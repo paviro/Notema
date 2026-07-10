@@ -37,6 +37,23 @@ impl ScrollState {
     }
 }
 
+/// What the mouse cursor is over, for hover highlights. Any key event clears
+/// it back to `None` — that single rule is the whole keyboard/mouse input-mode
+/// machine: a parked cursor must not keep glowing while the user arrows
+/// around, and the next mouse move restores it. Hovering never moves the main
+/// panels' selection (selecting has side effects — journal switch, preview
+/// swap — that stay click-only); overlay menus do follow the cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum HoverTarget {
+    #[default]
+    None,
+    Journal(usize),
+    Entry(usize),
+    FooterHint(crate::tui::render::HintId),
+    ThemePickerRow(usize),
+    SettingsRow(usize),
+}
+
 /// The kind of event a toast reports, driving its accent color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ToastVariant {

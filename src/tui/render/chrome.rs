@@ -147,8 +147,10 @@ fn placement_at(placements: &[(u16, Hint)], origin_x: u16, col: u16) -> Option<H
 
 /// Render a laid-out hint row as styled spans: the gaps stay plain and each key
 /// chip is drawn reversed + bold. Columns match [`RenderedHintLine::text`]
-/// exactly, so the visual output lines up with hit-testing.
-fn styled_hint_line(rendered: &RenderedHintLine) -> Line<'static> {
+/// exactly, so the visual output lines up with hit-testing. The hovered hint's
+/// label lifts out of the muted/plain row (underlined in bordered chrome so it
+/// reads without color) as the click affordance.
+fn styled_hint_line(rendered: &RenderedHintLine, hovered: Option<HintId>) -> Line<'static> {
     if rendered.placements.is_empty() {
         return Line::from(rendered.text.clone());
     }
@@ -166,7 +168,13 @@ fn styled_hint_line(rendered: &RenderedHintLine) -> Line<'static> {
         col += clamp_u16(UnicodeWidthStr::width(label.as_str()));
         // Flat chrome mutes the labels so the key chips carry the row, like a
         // status bar; bordered keeps the classic plain labels.
-        spans.push(if flat_chrome() {
+        spans.push(if hovered == Some(hint.id) {
+            if flat_chrome() {
+                Span::styled(label, theme().text())
+            } else {
+                Span::styled(label, Style::default().add_modifier(Modifier::UNDERLINED))
+            }
+        } else if flat_chrome() {
             Span::styled(label, theme().muted())
         } else {
             Span::raw(label)
@@ -176,9 +184,17 @@ fn styled_hint_line(rendered: &RenderedHintLine) -> Line<'static> {
 }
 
 pub(crate) fn hint_lines(hints: &[Hint], width: u16) -> Vec<Line<'static>> {
+    hint_lines_hovered(hints, width, None)
+}
+
+pub(crate) fn hint_lines_hovered(
+    hints: &[Hint],
+    width: u16,
+    hovered: Option<HintId>,
+) -> Vec<Line<'static>> {
     rendered_hint_lines(hints, width)
         .iter()
-        .map(styled_hint_line)
+        .map(|line| styled_hint_line(line, hovered))
         .collect()
 }
 
@@ -317,16 +333,17 @@ fn editor_footer_line() -> HintLine {
 }
 
 pub(crate) fn footer_lines(app: &App, width: u16) -> Text<'static> {
+    let hovered = app.hovered_footer_hint();
     if app.editor.is_some() {
-        return Text::from(editor_footer_line().lines(width));
+        return Text::from(editor_footer_line().lines(width, hovered));
     }
     if !app.state.ui.show_hints {
         return Text::default();
     }
 
     let lines = match app.nav.mode {
-        Mode::Search => search_footer_line(app).lines(width),
-        Mode::Browse => browse_footer_line(app).lines(width),
+        Mode::Search => search_footer_line(app).lines(width, hovered),
+        Mode::Browse => browse_footer_line(app).lines(width, hovered),
     };
     Text::from(lines)
 }
@@ -406,15 +423,17 @@ pub(crate) fn expanded_footer_text(app: &App, width: u16) -> String {
 }
 
 pub(crate) fn expanded_footer_lines(app: &App, width: u16) -> Text<'static> {
+    let hovered = app.hovered_footer_hint();
     if app.editor.is_some() {
-        return Text::from(editor_footer_line().lines(width));
+        return Text::from(editor_footer_line().lines(width, hovered));
     }
     if !app.state.ui.show_hints {
         return Text::default();
     }
-    Text::from(hint_lines(
+    Text::from(hint_lines_hovered(
         &expanded_footer_hints(app),
         width.saturating_sub(1),
+        hovered,
     ))
 }
 
@@ -462,10 +481,10 @@ impl HintLine {
         rendered_hint_lines(&self.hints, width)
     }
 
-    fn lines(&self, width: u16) -> Vec<Line<'static>> {
+    fn lines(&self, width: u16, hovered: Option<HintId>) -> Vec<Line<'static>> {
         self.rendered_lines(width)
             .iter()
-            .map(styled_hint_line)
+            .map(|line| styled_hint_line(line, hovered))
             .collect()
     }
 
@@ -1103,7 +1122,7 @@ pub(crate) fn draw_metadata_menu(frame: &mut Frame<'_>, mode: MetadataMenuMode) 
     let rows = metadata_menu_rows();
     // The chooser always fits, so it never scrolls.
     let mut scroll = 0;
-    draw_table_dialog(frame, &metadata_menu_dialog(&rows, mode), &mut scroll);
+    draw_table_dialog(frame, &metadata_menu_dialog(&rows, mode), &mut scroll, None);
 }
 
 pub(crate) enum MetadataChoice {
@@ -1170,11 +1189,17 @@ pub(crate) enum SettingsChoice {
 
 /// Draw the settings menu: a centered chooser whose rows open the settings
 /// dialogs. Same table popup as the metadata menu.
-pub(crate) fn draw_settings_menu(frame: &mut Frame<'_>) {
+pub(crate) fn draw_settings_menu(frame: &mut Frame<'_>, hovered_row: Option<usize>) {
     let rows = settings_menu_rows();
     // The menu always fits, so it never scrolls.
     let mut scroll = 0;
-    draw_table_dialog(frame, &settings_menu_dialog(&rows), &mut scroll);
+    draw_table_dialog(frame, &settings_menu_dialog(&rows), &mut scroll, hovered_row);
+}
+
+/// The settings-menu data row under `(col, row)`, for hover highlighting.
+pub(crate) fn settings_menu_row_at_point(frame_area: Rect, col: u16, row: u16) -> Option<usize> {
+    let rows = settings_menu_rows();
+    table_dialog_row_at_point(frame_area, &settings_menu_dialog(&rows), 0, col, row)
 }
 
 pub(crate) fn settings_menu_choice_at_point(
@@ -1262,7 +1287,7 @@ fn editor_shortcut_dialog(rows: &[Vec<String>]) -> TableDialog<'_> {
 /// lean while staying fully discoverable.
 pub(crate) fn draw_editor_shortcuts(frame: &mut Frame<'_>, scroll: &mut u16) {
     let rows = editor_shortcut_rows();
-    draw_table_dialog(frame, &editor_shortcut_dialog(&rows), scroll);
+    draw_table_dialog(frame, &editor_shortcut_dialog(&rows), scroll, None);
 }
 
 pub(crate) fn editor_shortcut_hint_at_point(
@@ -1538,9 +1563,22 @@ pub(crate) fn editor_shortcut_close_at_point(
 /// full bordered grid when the box is tall enough, otherwise collapses to chrome-
 /// less rows — like the insights tabs. `scroll` drives a scrollbar when the content
 /// still overflows.
-fn draw_table_dialog(frame: &mut Frame<'_>, dialog: &TableDialog, scroll: &mut u16) {
-    let metrics = table_dialog_metrics(frame.area(), dialog, *scroll);
+fn draw_table_dialog(
+    frame: &mut Frame<'_>,
+    dialog: &TableDialog,
+    scroll: &mut u16,
+    hovered_row: Option<usize>,
+) {
+    let mut metrics = table_dialog_metrics(frame.area(), dialog, *scroll);
     *scroll = metrics.scroll;
+    // Lift the hovered data row; the line index mirrors
+    // `table_dialog_row_at_point`'s mapping so hover and click can't disagree.
+    if let Some(row) = hovered_row {
+        let line = if metrics.grid { 3 + 2 * row } else { row };
+        if let Some(line) = metrics.lines.get_mut(line) {
+            line.style = line.style.patch(theme().hover());
+        }
+    }
 
     if flat_chrome() {
         draw_dialog_frame(frame, metrics.area, dialog.title, false);

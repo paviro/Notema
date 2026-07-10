@@ -559,7 +559,11 @@ pub(crate) fn theme_picker_layout(frame_area: Rect, len: usize) -> ThemePickerLa
     ThemePickerLayout { area, list, hints }
 }
 
-pub(super) fn draw_theme_picker(frame: &mut Frame<'_>, state: &mut ThemePickerState) {
+pub(super) fn draw_theme_picker(
+    frame: &mut Frame<'_>,
+    state: &mut ThemePickerState,
+    hovered_row: Option<usize>,
+) {
     let layout = theme_picker_layout(frame.area(), state.entries.len());
 
     state.normalize_list_state();
@@ -575,7 +579,8 @@ pub(super) fn draw_theme_picker(frame: &mut Frame<'_>, state: &mut ThemePickerSt
         state
             .entries
             .iter()
-            .map(|entry| {
+            .enumerate()
+            .map(|(index, entry)| {
                 // The configured theme's row carries the active marker; a file
                 // that failed to parse renders in the error style so picking it
                 // (a no-op preview, a toast on Enter) isn't a surprise.
@@ -584,12 +589,19 @@ pub(super) fn draw_theme_picker(frame: &mut Frame<'_>, state: &mut ThemePickerSt
                 } else {
                     " "
                 };
-                match entry.theme {
+                let item = match entry.theme {
                     Some(_) => ListItem::new(Line::from(format!("{marker} {}", entry.name))),
                     None => ListItem::new(Line::from(Span::styled(
                         format!("{marker} {} (broken)", entry.name),
                         theme().error(),
                     ))),
+                };
+                // The selection highlight patches over the hover lift, so the
+                // hovered-and-selected row still reads as selected.
+                if Some(index) == hovered_row && Some(index) != state.selected_index() {
+                    item.style(theme().hover())
+                } else {
+                    item
                 }
             })
             .collect()

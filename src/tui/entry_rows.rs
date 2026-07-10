@@ -357,8 +357,14 @@ pub(crate) fn journal_list_rows(app: &App, inner_width: usize) -> Vec<BoxRow> {
             rows.push(BoxRow::new(None, lines));
         }
         let lines = if flat {
+            let hovered = matches!(
+                app.hover,
+                crate::tui::state::HoverTarget::Journal(i) if i == index
+            );
             let style = if select_all || selected == Some(index) {
                 theme().selection()
+            } else if hovered {
+                theme().text().patch(theme().hover())
             } else {
                 theme().text().bg(theme().element_bg())
             };

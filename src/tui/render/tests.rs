@@ -2171,7 +2171,7 @@ fn editor_metadata_menu_hit_tests_rows() {
 
 #[test]
 fn settings_menu_lists_the_theme_row_and_hit_tests_it() {
-    let text = render_to_text(64, 20, chrome::draw_settings_menu);
+    let text = render_to_text(64, 20, |frame| chrome::draw_settings_menu(frame, None));
     assert!(text.contains("Settings"));
     assert!(text.contains("Theme…"));
     assert!(text.contains("enter select · esc close"));
@@ -2410,6 +2410,58 @@ mod flat_chrome_tests {
         }
         let divider = &buffer[(list.x + 2, list.y + 9)];
         assert_ne!(divider.bg, selection_bg, "divider flooded");
+    }
+
+    #[test]
+    fn hovered_journal_card_lifts_to_the_hover_background() {
+        pin_flat();
+        let theme = theme::test_flat_theme();
+        let mut app = app_with_journals(&["work", "zeta"]);
+        app.hover = crate::tui::state::HoverTarget::Journal(1);
+        let layout = tui_layout(Rect::new(0, 0, 120, 30), &app);
+        let list = journal_list_rect(layout.journals.unwrap().content);
+        let backend = render_app(app, 120, 30);
+        let buffer = backend.buffer();
+        // The second (unselected) card sits one row block down; hovered, its
+        // background is the hover lift instead of the element surface.
+        let hovered = &buffer[(list.x + 2, list.y + 5)];
+        assert_eq!(hovered.bg, theme.hover().bg.unwrap());
+        // The selected card keeps its selection background.
+        let selected = &buffer[(list.x + 2, list.y + 1)];
+        assert_eq!(selected.bg, theme.selection().bg.unwrap());
+    }
+
+    #[test]
+    fn hovered_entry_box_carries_the_hover_background() {
+        pin_flat();
+        let theme = theme::test_flat_theme();
+        let mut app = app_with_entry();
+        // Deselect so the selection highlight doesn't own the hovered row.
+        app.nav.selected_entry_index = None;
+        app.hover = crate::tui::state::HoverTarget::Entry(0);
+        let layout = tui_layout(Rect::new(0, 0, 120, 30), &app);
+        let content = layout.entries.unwrap().panel.content;
+        let backend = render_app(app, 120, 30);
+        let buffer = backend.buffer();
+        // Row 0 is the leading blank; the entry's box starts on row 1.
+        let cell = &buffer[(content.x + 1, content.y + 1)];
+        assert_eq!(cell.bg, theme.hover().bg.unwrap());
+    }
+
+    #[test]
+    fn hovered_footer_hint_label_lifts_out_of_the_muted_row() {
+        pin_flat();
+        let theme = theme::test_flat_theme();
+        let mut app = app_with_journals(&["alpha"]);
+        app.hover = crate::tui::state::HoverTarget::FooterHint(chrome::HintId::Quit);
+        let text = chrome::footer_lines(&app, 120);
+        let label = text
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content == " quit")
+            .expect("quit label in the browse footer");
+        assert_eq!(label.style, theme.text(), "hovered label still muted");
     }
 
     #[test]

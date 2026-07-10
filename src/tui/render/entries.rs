@@ -48,13 +48,38 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
     }
 
     let highlight_active = app.entries_highlighted();
-    let (items, selected_visible, _) = visible_box_items(
+    let (items, selected_visible, item_indices) = visible_box_items(
         &cache.rows,
         pixel_offset,
         viewport_height,
         app.nav.selected_entry_index,
         highlight_active,
     );
+
+    // Lift the hovered entry's box; the selected row keeps its highlight.
+    let hovered = match app.hover {
+        crate::tui::state::HoverTarget::Entry(index) => Some(index),
+        _ => None,
+    };
+    let selected = app
+        .nav
+        .selected_entry_index
+        .filter(|_| highlight_active);
+    let items: Vec<_> = if hovered.is_some() && hovered != selected {
+        items
+            .into_iter()
+            .zip(&item_indices)
+            .map(|(item, index)| {
+                if *index == hovered {
+                    item.style(theme().hover())
+                } else {
+                    item
+                }
+            })
+            .collect()
+    } else {
+        items
+    };
 
     let list = List::new(items)
         .highlight_style(theme().selection())

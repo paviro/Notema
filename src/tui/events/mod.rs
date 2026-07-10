@@ -26,7 +26,7 @@ use actions::{
 use keyboard::{keep_selection_visible, move_focus_left, move_focus_right};
 
 pub(crate) use keyboard::handle_key;
-pub(crate) use mouse::{fold_leading_wheel, handle_mouse, handle_scroll, is_wheel};
+pub(crate) use mouse::{fold_leading_wheel, handle_mouse, handle_scroll, is_wheel, update_hover};
 
 /// How long the "Fetching weather and air quality…" modal waits before giving up
 /// and saving without the data.

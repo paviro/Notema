@@ -22,6 +22,7 @@ use crossterm::{
     cursor::{SetCursorStyle, Show},
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -469,6 +470,9 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
 
         let redraw = match event {
             Some(Event::Key(key)) => {
+                // Back to keyboard mode: a parked cursor must not keep its
+                // hover glow while the user arrows around.
+                app.clear_hover();
                 // No global Ctrl+C quit: `q` quits the app, and the editor forwards
                 // Ctrl+C to the textarea as copy.
                 if events::handle_key(terminal, &mut app, key)? {
@@ -500,6 +504,23 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
                 let area = events::terminal_area(terminal)?;
                 events::handle_scroll(&mut app, last, area, net);
                 true
+            }
+            Some(Event::Mouse(mouse)) if mouse.kind == MouseEventKind::Moved => {
+                // Coalesce a motion burst: only the cursor's latest position
+                // matters. Repaint only when the hovered target actually
+                // changed, so motion inside one row costs nothing.
+                let mut last = mouse;
+                while event::poll(Duration::ZERO)? {
+                    match event::read()? {
+                        Event::Mouse(m) if m.kind == MouseEventKind::Moved => last = m,
+                        other => {
+                            pending_events.push_back(other);
+                            break;
+                        }
+                    }
+                }
+                let area = events::terminal_area(terminal)?;
+                events::update_hover(&mut app, last.column, last.row, area)
             }
             Some(Event::Mouse(mouse)) => {
                 if events::handle_mouse(terminal, &mut app, mouse)? {

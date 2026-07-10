@@ -10,7 +10,7 @@ use crate::tui::{
     },
     editor_state::EditorPrompt,
     render,
-    state::{ListNav, MetadataKind, Overlay},
+    state::{HoverTarget, ListNav, MetadataKind, Overlay},
 };
 
 use super::action::Action;
@@ -564,30 +564,108 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
     }
 }
 
+// ── Hover ─────────────────────────────────────────────────────────────────────
+
+/// Track what's under the cursor. Returns whether the hover target changed —
+/// the run loop only repaints then, so motion inside one row costs nothing.
+/// Hovering never moves the main panels' selection (selecting has side
+/// effects — journal switch, preview swap — that stay click-only), but overlay
+/// menus follow the cursor: the theme picker moves its selection so the
+/// hovered theme live-previews, like its arrow keys.
+pub(crate) fn update_hover(app: &mut App, col: u16, row: u16, area: Rect) -> bool {
+    let target = hover_target_at(app, col, row, area);
+    if target == app.hover {
+        return false;
+    }
+    app.hover = target;
+    if let HoverTarget::ThemePickerRow(index) = target {
+        app.theme_picker_select(index);
+    }
+    true
+}
+
+/// The hover target under `(col, row)`, probed in the click paths' priority
+/// order and through the same geometry helpers, so hover and click can never
+/// disagree about what's under the cursor.
+fn hover_target_at(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
+    if app.has_overlay() {
+        if matches!(app.overlay, Overlay::SettingsMenu) {
+            if let Some(index) = render::settings_menu_row_at_point(area, col, row) {
+                return HoverTarget::SettingsRow(index);
+            }
+        } else if let Some(state) = app.theme_picker_state() {
+            let layout = render::theme_picker_layout(area, state.entries.len());
+            if render::point_in_rect(layout.list, col, row)
+                && let Some(index) =
+                    list_row_at(layout.list, col, row, state.offset(), state.entries.len())
+            {
+                return HoverTarget::ThemePickerRow(index);
+            }
+        }
+        return HoverTarget::None;
+    }
+
+    // The footer first: it overlays nothing, so it can't shadow a list row.
+    // Covers the editor's footer too — its hints are the same clickable kind.
+    let footer = footer_area(app, area);
+    if render::point_in_rect(footer, col, row) {
+        if let Some(id) = footer_hint_at(app, footer, col, row) {
+            return HoverTarget::FooterHint(id);
+        }
+        return HoverTarget::None;
+    }
+
+    if app.editor.is_some() || editor_prompt_is_open(app) {
+        return HoverTarget::None;
+    }
+
+    let layout = render::tui_layout(area, app);
+    if app.nav.mode == Mode::Browse
+        && let Some(panel) = layout.journals
+        && render::point_in_rect(panel.area, col, row)
+    {
+        let (_, meta, _) = app.journal_rows(panel.content);
+        if let Some(index) = render::journal_index_at(
+            panel.content,
+            col,
+            row,
+            app.nav.journal_list.offset(),
+            &meta,
+        ) {
+            return HoverTarget::Journal(index);
+        }
+        return HoverTarget::None;
+    }
+
+    if let Some(geometry) = layout.entries
+        && render::point_in_rect(geometry.panel.area, col, row)
+        && let Some(index) = render::entry_index_at(
+            geometry,
+            col,
+            row,
+            app.nav.entry_list.offset(),
+            &app.entry_rows(geometry.text_width).meta,
+        )
+    {
+        return HoverTarget::Entry(index);
+    }
+
+    HoverTarget::None
+}
+
 // ── Footer click ──────────────────────────────────────────────────────────────
 
-fn footer_click_to_action(app: &App, mouse: MouseEvent, footer: Rect) -> Option<Action> {
-    let hint_id = if app.entry_view_is_fullscreen(footer.width) {
-        render::expanded_footer_hint_id_at_point(
-            app,
-            footer.x,
-            footer.y,
-            footer.width,
-            mouse.column,
-            mouse.row,
-        )
+/// The footer hint under `(col, row)`, in whichever footer form is showing.
+fn footer_hint_at(app: &App, footer: Rect, col: u16, row: u16) -> Option<render::HintId> {
+    if app.entry_view_is_fullscreen(footer.width) {
+        render::expanded_footer_hint_id_at_point(app, footer.x, footer.y, footer.width, col, row)
     } else {
-        render::footer_hint_id_at_point(
-            app,
-            footer.x,
-            footer.y,
-            footer.width,
-            mouse.column,
-            mouse.row,
-        )
-    };
+        render::footer_hint_id_at_point(app, footer.x, footer.y, footer.width, col, row)
+    }
+}
 
-    hint_id.and_then(|id| hint_id_to_action(app, id))
+fn footer_click_to_action(app: &App, mouse: MouseEvent, footer: Rect) -> Option<Action> {
+    footer_hint_at(app, footer, mouse.column, mouse.row).and_then(|id| hint_id_to_action(app, id))
 }
 
 fn footer_area(app: &App, area: Rect) -> Rect {

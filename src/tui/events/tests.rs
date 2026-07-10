@@ -6,7 +6,7 @@ use crate::{
         render,
         render::insights::{InsightsTab, InsightsTimeframe},
         scroll,
-        state::ListNav,
+        state::{HoverTarget, ListNav},
         test_support::{app_with_entries, app_with_journals, new_app},
     },
 };
@@ -1378,4 +1378,89 @@ fn theme_picker_keys_route_to_dedicated_actions() {
         mouse::hint_id_to_action(&app, render::HintId::OpenSettings),
         Some(Action::OpenSettingsMenu)
     );
+}
+
+// ── Hover ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn hover_tracks_journal_rows_without_moving_selection() {
+    let mut app = app_with_journals(&["work", "zeta"]);
+    let area = Rect::new(0, 0, 120, 20);
+    let journals = render::tui_layout(area, &app)
+        .journals
+        .expect("journals panel");
+    let list = render::journal_list_rect(journals.content);
+    let selected_before = app.nav.journal_list.selected();
+
+    // The middle line of the second journal's row.
+    let row = list.y + render::journal_row_height() + 1;
+    assert!(mouse::update_hover(&mut app, list.x + 2, row, area));
+    assert_eq!(app.hover, HoverTarget::Journal(1));
+    assert_eq!(
+        app.nav.journal_list.selected(),
+        selected_before,
+        "hover must never move the journal selection"
+    );
+
+    // Motion within the same row doesn't ask for a repaint.
+    assert!(!mouse::update_hover(&mut app, list.x + 3, row, area));
+
+    // Any key event clears the glow — the keyboard half of the input mode.
+    assert!(app.clear_hover());
+    assert_eq!(app.hover, HoverTarget::None);
+}
+
+#[test]
+fn hover_finds_footer_hints() {
+    let mut app = app_with_journals(&["work"]);
+    let area = Rect::new(0, 0, 120, 20);
+    let footer = render::tui_layout(area, &app).footer;
+    let hovered = (footer.x..footer.x + footer.width).any(|col| {
+        mouse::update_hover(&mut app, col, footer.y, area);
+        matches!(app.hover, HoverTarget::FooterHint(_))
+    });
+    assert!(hovered, "no footer hint hoverable on the browse footer");
+}
+
+#[test]
+fn theme_picker_hover_moves_selection_for_live_preview() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_theme_picker();
+    let area = Rect::new(0, 0, 90, 30);
+    let state = app.theme_picker_state().expect("picker open");
+    let len = state.entries.len();
+    assert!(len > 1, "picker should list the bundled themes");
+    let initial = state.selected_index();
+    let offset = state.offset();
+    let target = if initial == Some(offset) {
+        offset + 1
+    } else {
+        offset
+    };
+    let layout = render::theme_picker_layout(area, len);
+
+    let row = layout.list.y + (target - offset) as u16;
+    assert!(mouse::update_hover(&mut app, layout.list.x + 1, row, area));
+    assert_eq!(app.hover, HoverTarget::ThemePickerRow(target));
+    // Overlay menus follow the cursor: the hovered row becomes the selection,
+    // which live-previews the theme (same path as the arrow keys).
+    assert_eq!(
+        app.theme_picker_state().unwrap().selected_index(),
+        Some(target)
+    );
+}
+
+#[test]
+fn settings_menu_hover_targets_its_rows() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings_menu();
+    let area = Rect::new(0, 0, 64, 20);
+
+    // Find the theme row through the same hit-test the click path uses.
+    let point = (0..area.height)
+        .flat_map(|row| (0..area.width).map(move |col| (col, row)))
+        .find(|(col, row)| render::settings_menu_row_at_point(area, *col, *row) == Some(0))
+        .expect("settings menu has a hoverable row");
+    assert!(mouse::update_hover(&mut app, point.0, point.1, area));
+    assert_eq!(app.hover, HoverTarget::SettingsRow(0));
 }

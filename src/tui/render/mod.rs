@@ -46,6 +46,7 @@ pub(crate) use chrome::{
     footer_hint_id_at_point, footer_lines, hint_id_at_wrapped, metadata_menu_choice_at_point,
     metadata_menu_close_at_point, panel_block, panel_focus_stripe, render_centered_notice,
     render_scrollbar_if_needed, settings_menu_choice_at_point, settings_menu_close_at_point,
+    settings_menu_row_at_point,
 };
 #[cfg(test)]
 pub(crate) use chrome::{
@@ -68,7 +69,9 @@ use image_viewer::draw_image_viewer;
 use insights::draw_journal_insights;
 pub(crate) use insights::insights_tab_at;
 use journals::draw_journals;
-pub(crate) use journals::{JOURNAL_BOX_HEIGHT, journal_list_rect, journal_row_height};
+#[cfg(test)]
+pub(crate) use journals::JOURNAL_BOX_HEIGHT;
+pub(crate) use journals::{journal_list_rect, journal_row_height};
 pub(crate) use layout::{TuiLayout, tui_layout};
 #[cfg(test)]
 use markdown_panel::metadata_scrolls_with_body;
@@ -189,11 +192,19 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
     }
 
     if matches!(app.overlay, crate::tui::state::Overlay::SettingsMenu) {
-        chrome::draw_settings_menu(frame);
+        let hovered = match app.hover {
+            crate::tui::state::HoverTarget::SettingsRow(index) => Some(index),
+            _ => None,
+        };
+        chrome::draw_settings_menu(frame, hovered);
     }
 
+    let hovered_theme_row = match app.hover {
+        crate::tui::state::HoverTarget::ThemePickerRow(index) => Some(index),
+        _ => None,
+    };
     if let Some(state) = app.theme_picker_state_mut() {
-        draw_theme_picker(frame, state);
+        draw_theme_picker(frame, state, hovered_theme_row);
     }
 
     if let Some(input) = app.new_journal_input_mut() {

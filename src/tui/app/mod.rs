@@ -23,8 +23,8 @@ use ratatui::{
 };
 
 use super::state::{
-    DeleteContext, EditMoodState, ImageViewerState, MetadataKind, Overlay, ScrollState,
-    SearchState, ToastVariant, Toasts, move_list_selection,
+    DeleteContext, EditMoodState, HoverTarget, ImageViewerState, MetadataKind, Overlay,
+    ScrollState, SearchState, ToastVariant, Toasts, move_list_selection,
 };
 use crate::tui::editor_state::EntryEditor;
 use crate::tui::entry_rows::{EntryRowCache, RowMeta, build_entry_row_cache};
@@ -414,6 +414,9 @@ pub(crate) struct App {
     /// tab has no scrollable list (no bar drawn).
     pub(crate) insights_scroll: InsightsScrollGeometry,
     pub(crate) scrollbar: ScrollbarDragState,
+    /// The row/hint under the mouse cursor, for hover highlights. Set by mouse
+    /// motion, cleared by any key event (see [`HoverTarget`]).
+    pub(crate) hover: HoverTarget,
     /// Per-frame render memo caches (rows, rendered body, journal insights) and the
     /// version counters that invalidate them. See [`RenderCaches`].
     caches: RenderCaches,
@@ -496,6 +499,7 @@ impl App {
             entry_view_image_hits: EntryViewImageHits::default(),
             insights_scroll: InsightsScrollGeometry::default(),
             scrollbar: ScrollbarDragState::default(),
+            hover: HoverTarget::default(),
             caches: RenderCaches::default(),
         };
         app.load_entries(entry_paths)?;
@@ -819,6 +823,21 @@ impl App {
     /// Time until the nearest toast deadline, for the event loop's poll timeout.
     pub(crate) fn toast_deadline(&self) -> Option<Duration> {
         self.toasts.deadline()
+    }
+
+    /// Drop the hover highlight, reporting whether one was showing (a repaint
+    /// is due). Called on every key event — the keyboard half of the
+    /// [`HoverTarget`] input-mode rule.
+    pub(crate) fn clear_hover(&mut self) -> bool {
+        std::mem::take(&mut self.hover) != HoverTarget::None
+    }
+
+    /// The footer/editor hint under the cursor, for hover-styling its label.
+    pub(crate) fn hovered_footer_hint(&self) -> Option<crate::tui::render::HintId> {
+        match self.hover {
+            HoverTarget::FooterHint(id) => Some(id),
+            _ => None,
+        }
     }
 }
 
