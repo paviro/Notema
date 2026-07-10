@@ -16,7 +16,7 @@ use crate::tui::state::{
 use crate::tui::surface::metadata_value_rows;
 
 use super::{
-    chrome::{Hint, HintId, hint_height, hint_lines, render_scrollbar_if_needed},
+    chrome::{Hint, HintId, hint_height, hint_lines, render_confirm_buttons, render_scrollbar_if_needed},
     list_state_for_render,
     markdown_panel::MoodBar,
 };
@@ -146,6 +146,29 @@ pub(crate) fn location_list_rows(labels: &[String]) -> usize {
         .map(|label| location_row_lines(label).len())
         .sum::<usize>()
         .max(1)
+}
+
+/// Map a click at `row` within the list `Rect` to a label index, accounting for
+/// rows that wrap onto continuation lines. `offset` is the index of the first
+/// visible label. `None` when the click lands past the last rendered row.
+pub(crate) fn location_list_row_at(
+    list: Rect,
+    labels: &[String],
+    offset: usize,
+    row: u16,
+) -> Option<usize> {
+    let relative = row.checked_sub(list.y)? as usize;
+    if relative >= list.height as usize {
+        return None;
+    }
+    let mut line = 0usize;
+    for (index, label) in labels.iter().enumerate().skip(offset) {
+        line += location_row_lines(label).len();
+        if relative < line {
+            return Some(index);
+        }
+    }
+    None
 }
 const MOOD_DIALOG_WIDTH: u16 = 90;
 const CONFIRM_DIALOG_WIDTH: u16 = 42;
@@ -627,35 +650,51 @@ fn render_hint_line(frame: &mut Frame<'_>, hints: &[Hint], area: Rect) {
 
 // ── Dialog draw functions ─────────────────────────────────────────────────────
 
-pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext) {
-    let (height, message) = match ctx {
-        DeleteContext::Entry { has_body: true } => (5, "Move entry to trash?  y/n".to_string()),
-        DeleteContext::Entry { has_body: false } => {
-            (5, "Permanently delete entry?  y/n".to_string())
-        }
+/// The `(height, message)` a confirm-delete dialog needs for `ctx`. The message is
+/// centered at the top; the Delete/Cancel buttons occupy the last inner row.
+fn confirm_delete_content(ctx: &DeleteContext) -> (u16, String) {
+    match ctx {
+        DeleteContext::Entry { has_body: true } => (5, "Move entry to trash?".to_string()),
+        DeleteContext::Entry { has_body: false } => (5, "Permanently delete entry?".to_string()),
         DeleteContext::Journal {
             name,
             trash_count,
             delete_count,
         } => {
             let line2 = match (*trash_count, *delete_count) {
-                (0, d) => format!("{d} entries deleted permanently  y/n"),
-                (t, 0) => format!("{t} entries moved to trash  y/n"),
-                (t, d) => format!("{t} entries → trash, {d} deleted  y/n"),
+                (0, d) => format!("{d} entries deleted permanently"),
+                (t, 0) => format!("{t} entries moved to trash"),
+                (t, d) => format!("{t} entries → trash, {d} deleted"),
             };
             let display = journal_storage::journal_display_name(name);
             (6, format!("Delete journal '{display}'?\n{line2}"))
         }
-    };
+    }
+}
 
-    let dialog_width = (CONFIRM_DIALOG_WIDTH).max(
+fn confirm_delete_area(frame_area: Rect, ctx: &DeleteContext) -> Rect {
+    let (height, message) = confirm_delete_content(ctx);
+    let width = CONFIRM_DIALOG_WIDTH.max(
         message
             .lines()
             .map(|l| l.len() as u16 + 4)
             .max()
             .unwrap_or(0),
     );
-    let area = super::centered_rect_fixed_size(dialog_width, height, frame.area());
+    super::centered_rect_fixed_size(width, height, frame_area)
+}
+
+/// The bordered inner rect of the confirm-delete dialog, so the mouse handler can
+/// hit-test the buttons against the same geometry the draw uses.
+pub(crate) fn confirm_delete_inner(frame_area: Rect, ctx: &DeleteContext) -> Rect {
+    Block::default()
+        .borders(Borders::ALL)
+        .inner(confirm_delete_area(frame_area, ctx))
+}
+
+pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext) {
+    let (_, message) = confirm_delete_content(ctx);
+    let area = confirm_delete_area(frame.area(), ctx);
     frame.render_widget(Clear, area);
     let block = Block::default()
         .title("Confirm Delete")
@@ -663,19 +702,16 @@ pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let lines: Vec<&str> = message.lines().collect();
-    let start_y = inner.y + inner.height.saturating_sub(lines.len() as u16) / 2;
-    for (i, line) in lines.iter().enumerate() {
+    // Message at the top, the Delete/Cancel buttons on the last inner row.
+    for (i, line) in message.lines().enumerate() {
         let line_area = Rect {
-            y: start_y + i as u16,
+            y: inner.y + i as u16,
             height: 1,
             ..inner
         };
-        frame.render_widget(
-            Paragraph::new(*line).alignment(Alignment::Center),
-            line_area,
-        );
+        frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), line_area);
     }
+    render_confirm_buttons(frame, inner, "Delete (y)", "Cancel (n)");
 }
 
 pub(super) fn draw_new_journal_input(frame: &mut Frame<'_>, input: &str) {
@@ -1070,4 +1106,39 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
     render_lines_in_area(frame, summary, layout.selected);
     render_hint_line(frame, feelings_dialog_hints(state.focus), layout.hints);
     render_scrollbar_if_needed(frame, layout.area, list_lines, max_visible, scroll);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn location_list_row_at_maps_wrapped_rows() {
+        let long = "Some very long place name that keeps going ".repeat(3);
+        let labels = vec!["First".to_string(), long.clone(), "Third".to_string()];
+        let l0 = location_row_lines(&labels[0]).len();
+        let l1 = location_row_lines(&labels[1]).len();
+        assert!(l1 > 1, "long label should wrap onto multiple lines");
+
+        let list = Rect {
+            x: 0,
+            y: 10,
+            width: LOCATION_DIALOG_WIDTH,
+            height: 40,
+        };
+
+        // First label's opening line.
+        assert_eq!(location_list_row_at(list, &labels, 0, 10), Some(0));
+        // Any continuation line of the wrapped label still maps to it.
+        let last_of_second = 10 + (l0 + l1 - 1) as u16;
+        assert_eq!(location_list_row_at(list, &labels, 0, last_of_second), Some(1));
+        // The third label starts right after the wrapped one.
+        let third_start = 10 + (l0 + l1) as u16;
+        assert_eq!(location_list_row_at(list, &labels, 0, third_start), Some(2));
+        // A click past the last rendered row misses.
+        let past = third_start + location_row_lines(&labels[2]).len() as u16;
+        assert_eq!(location_list_row_at(list, &labels, 0, past), None);
+        // Scrolled: the first visible row is the label at `offset`.
+        assert_eq!(location_list_row_at(list, &labels, 1, 10), Some(1));
+    }
 }

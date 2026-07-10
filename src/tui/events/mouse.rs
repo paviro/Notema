@@ -7,7 +7,7 @@ use crate::tui::{
     app::{App, Focus, Mode, ScrollbarDrag, inline_entry_view_is_visible},
     editor_state::EditorPrompt,
     render,
-    state::{ListNav, MetadataKind, Overlay},
+    state::{EditLocationFocus, ListNav, MetadataKind, Overlay},
 };
 
 use super::action::Action;
@@ -762,6 +762,61 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         {
             state.draft = mood_score_at(layout.bar, col);
         }
+        return None;
+    }
+
+    if let Some((focus, query_looked_up)) = app
+        .edit_location_state()
+        .map(|s| (s.focus, s.query_looked_up))
+    {
+        let labels = app.edit_location_state().map(|s| s.list_labels());
+        let list_rows = labels.as_deref().map_or(1, render::location_list_rows);
+        let layout = render::location_dialog_layout(area, list_rows);
+        if let Some(action) = dialog_hint_action(
+            app,
+            layout.hints,
+            render::location_dialog_hints(focus, query_looked_up),
+            col,
+            row,
+        ) {
+            return Some(action);
+        }
+        if render::point_in_rect(layout.query, col, row) {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.focus = EditLocationFocus::Query;
+            }
+            return None;
+        }
+        if render::point_in_rect(layout.name, col, row) {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.focus = EditLocationFocus::Name;
+            }
+            return None;
+        }
+        if render::point_in_rect(layout.list, col, row) {
+            let offset = app.edit_location_state().map_or(0, |s| s.offset());
+            let index = labels
+                .as_deref()
+                .and_then(|labels| render::location_list_row_at(layout.list, labels, offset, row));
+            if let Some(state) = app.edit_location_state_mut() {
+                state.focus = EditLocationFocus::List;
+                if let Some(index) = index {
+                    state.select_index(index);
+                    return Some(Action::LocationSelectRow);
+                }
+            }
+            return None;
+        }
+        return None;
+    }
+
+    if let Overlay::ConfirmDelete(ctx) = &app.overlay {
+        let inner = render::confirm_delete_inner(area, ctx);
+        return match render::confirm_button_at(inner, col, row) {
+            Some(true) => Some(Action::ConfirmDelete),
+            Some(false) => Some(Action::CancelOverlay),
+            None => None,
+        };
     }
 
     None
@@ -802,6 +857,16 @@ fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16
         let layout = render::feelings_dialog_layout(area, all_len, selected_lines);
         if render::point_in_rect(layout.list, mouse.column, mouse.row)
             && let Some(state) = app.edit_feeling_state_mut()
+        {
+            state.scroll_by(delta, layout.list.height);
+        }
+        return;
+    }
+
+    if let Some(labels) = app.edit_location_state().map(|s| s.list_labels()) {
+        let layout = render::location_dialog_layout(area, render::location_list_rows(&labels));
+        if render::point_in_rect(layout.list, mouse.column, mouse.row)
+            && let Some(state) = app.edit_location_state_mut()
         {
             state.scroll_by(delta, layout.list.height);
         }
@@ -855,6 +920,10 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         } else {
             Action::FocusLeft
         }),
+        // The focused-viewer "enter" chip expands to full screen, matching the key.
+        render::HintId::ExpandEntryView if app.nav.focus == Focus::EntryView => {
+            Some(Action::ExpandEntryView)
+        }
         render::HintId::MetadataToggle
             if app
                 .edit_metadata_state()
@@ -874,6 +943,12 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::MoodIncrease => Some(Action::MoodIncrease),
         render::HintId::MoodSave => Some(Action::MoodSave),
         render::HintId::MoodClear => Some(Action::MoodClear),
+        render::HintId::LocationSwitchFocus => Some(Action::LocationSwitchFocus),
+        render::HintId::LocationResolve => Some(Action::LocationResolve),
+        render::HintId::LocationGrabDevice => Some(Action::LocationGrabDevice),
+        render::HintId::LocationSelectRow => Some(Action::LocationSelectRow),
+        render::HintId::LocationSave => Some(Action::LocationSave),
+        render::HintId::LocationClear => Some(Action::LocationClear),
         render::HintId::OpenImageViewer if app.selected_entry_image_count() > 0 => {
             Some(Action::OpenImageViewer(0))
         }

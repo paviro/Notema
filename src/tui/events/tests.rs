@@ -512,6 +512,20 @@ fn typed_hint_ids_route_to_actions_without_string_parsing() {
         mouse::hint_id_to_action(&app, render::HintId::CancelOverlay),
         Some(Action::CancelOverlay)
     );
+
+    // Location hints route to their identically-named actions.
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::LocationResolve),
+        Some(Action::LocationResolve)
+    );
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::LocationSelectRow),
+        Some(Action::LocationSelectRow)
+    );
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::LocationSave),
+        Some(Action::LocationSave)
+    );
 }
 
 #[test]

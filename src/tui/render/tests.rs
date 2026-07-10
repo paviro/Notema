@@ -796,18 +796,24 @@ fn feelings_dialog_shows_no_matches_when_filter_is_empty() {
 }
 
 #[test]
-fn confirm_delete_message_is_centered_in_dialog_body() {
+fn confirm_delete_shows_message_then_buttons() {
     let rows = render_confirm_delete_rows(80, 20);
-    let message_row = rows
-        .iter()
-        .position(|row| row.contains("Move entry to trash?  y/n"))
-        .unwrap();
     let title_row = rows
         .iter()
         .position(|row| row.contains("Confirm Delete"))
         .unwrap();
+    let message_row = rows
+        .iter()
+        .position(|row| row.contains("Move entry to trash?"))
+        .unwrap();
+    let button_row = rows
+        .iter()
+        .position(|row| row.contains("Delete") && row.contains("Cancel"))
+        .unwrap();
 
-    assert_eq!(message_row, title_row + 2);
+    // Message sits just below the border/title; the buttons follow, below it.
+    assert_eq!(message_row, title_row + 1);
+    assert!(button_row > message_row);
 }
 
 #[test]
@@ -1593,7 +1599,8 @@ fn expanded_entry_draws_confirm_delete_overlay() {
     let text = render_text(app, 80, 20);
 
     assert!(text.contains("Confirm Delete"));
-    assert!(text.contains("Move entry to trash?  y/n"));
+    assert!(text.contains("Move entry to trash?"));
+    assert!(text.contains("Delete") && text.contains("Cancel"));
 }
 
 #[test]

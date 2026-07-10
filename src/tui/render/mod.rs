@@ -38,9 +38,10 @@ pub(crate) use super::surface::{
     point_in_rect,
 };
 pub(crate) use chrome::{
-    Hint, HintId, MetadataChoice, MetadataMenuMode, centered_rect_fixed_size, count_label,
-    draw_editor_discard_confirm, draw_editor_shortcuts, draw_metadata_menu, draw_modal_frame,
-    editor_discard_choice_at_point, editor_shortcut_close_at_point, editor_shortcut_hint_at_point,
+    Hint, HintId, MetadataChoice, MetadataMenuMode, centered_rect_fixed_size, confirm_button_at,
+    count_label, draw_editor_discard_confirm, draw_editor_shortcuts, draw_metadata_menu,
+    draw_modal_frame, editor_discard_choice_at_point, editor_shortcut_close_at_point,
+    editor_shortcut_hint_at_point,
     expanded_footer_height, expanded_footer_hint_id_at_point, expanded_footer_lines,
     footer_hint_id_at_point, footer_lines, hint_id_at_wrapped, metadata_menu_choice_at_point,
     metadata_menu_close_at_point, panel_block, render_centered_notice, render_scrollbar_if_needed,
@@ -55,8 +56,9 @@ use dialogs::{
     draw_edit_metadata_dialog, draw_edit_mood_dialog, draw_new_journal_input,
 };
 pub(crate) use dialogs::{
-    feelings_dialog_hints, feelings_dialog_layout, feelings_selected_line_count,
-    location_dialog_layout, location_list_rows, metadata_dialog_hints, metadata_dialog_layout,
+    confirm_delete_inner, feelings_dialog_hints, feelings_dialog_layout,
+    feelings_selected_line_count, location_dialog_hints, location_dialog_layout,
+    location_list_row_at, location_list_rows, metadata_dialog_hints, metadata_dialog_layout,
     mood_dialog_hints, mood_dialog_layout,
 };
 use entries::draw_entry_list;

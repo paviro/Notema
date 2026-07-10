@@ -29,6 +29,7 @@ pub(crate) enum HintId {
     ExitSearch,
     CancelOverlay,
     CloseEntryView,
+    ExpandEntryView,
     MetadataToggle,
     MetadataSwitchFocus,
     MetadataAddFromInput,
@@ -603,7 +604,7 @@ fn search_footer_line(app: &App) -> HintLine {
     // `draw_entry_list`), so the footer only carries the action hints.
     let hints = match app.nav.focus {
         Focus::EntryView if app.has_selected_entry_target() => {
-            let mut hints = selected_entry_action_hints(true);
+            let mut hints = selected_entry_action_hints(Some(EXPAND_ENTER_HINT));
             hints.extend(image_hint(app));
             hints.push(Hint::new("exit search", "esc", HintId::ExitSearch));
             hints.push(Hint::new("quit", "q", HintId::Quit));
@@ -662,7 +663,7 @@ fn browse_footer_line(app: &App) -> HintLine {
         Focus::Entries => {
             let mut hints = vec![Hint::new("new entry", "n", HintId::NewEntry)];
             if app.has_selected_entry_target() {
-                hints.extend(selected_entry_action_hints(true));
+                hints.extend(selected_entry_action_hints(Some(VIEW_ENTER_HINT)));
             }
             // The image viewer opens only from a focused entry view, so no
             // `images` hint here.
@@ -675,7 +676,7 @@ fn browse_footer_line(app: &App) -> HintLine {
         Focus::EntryView => {
             let mut hints = vec![Hint::new("new entry", "n", HintId::NewEntry)];
             if app.has_selected_entry_target() {
-                hints.extend(selected_entry_action_hints(true));
+                hints.extend(selected_entry_action_hints(Some(EXPAND_ENTER_HINT)));
             }
             hints.extend(image_hint(app));
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
@@ -723,16 +724,21 @@ fn journals_hint(app: &App) -> Hint {
     Hint::new(label, "j", HintId::ToggleJournals)
 }
 
-fn selected_entry_action_hints(include_view: bool) -> Vec<Hint> {
-    let mut hints = Vec::new();
-    hints.push(Hint::new("edit", "e", HintId::EditSelected));
-    if include_view {
-        hints.push(Hint::new("view", "enter", HintId::ViewSelected));
-    }
+/// The edit/enter/del/metadata action hints for a selected entry. `enter` is the
+/// hint for the Enter key, which differs by focus: in the list it views the entry,
+/// in the focused viewer it expands to full screen. `None` omits it.
+fn selected_entry_action_hints(enter: Option<Hint>) -> Vec<Hint> {
+    let mut hints = vec![Hint::new("edit", "e", HintId::EditSelected)];
+    hints.extend(enter);
     hints.push(Hint::new("del", "d", HintId::BeginDelete));
     hints.push(Hint::new("metadata", "ctrl+g", HintId::OpenMetadataMenu));
     hints
 }
+
+/// Enter views the entry from the list.
+const VIEW_ENTER_HINT: Hint = Hint::new("view", "enter", HintId::ViewSelected);
+/// Enter expands the entry from the focused (multi-column) viewer.
+const EXPAND_ENTER_HINT: Hint = Hint::new("expand", "enter", HintId::ExpandEntryView);
 
 /// The `close` hint for the full-screen viewer. Enter and Esc always close it; in
 /// multi-column full screen Left is inert, while single-column also exits on Left.
@@ -810,6 +816,61 @@ pub(crate) fn render_centered_notice(frame: &mut Frame<'_>, content: Rect, messa
     );
 }
 
+// ── Confirm-dialog buttons (shared by confirm-delete and editor discard) ─────
+
+/// Width and gap of the two confirm buttons; sized for a comfortable click target
+/// with room for the label and its key hint.
+const CONFIRM_BUTTON_WIDTH: u16 = 16;
+const CONFIRM_BUTTON_GAP: u16 = 2;
+
+/// The `(yes, no)` button rects, centered on the last row of `inner`. Sizing and
+/// hit-testing both derive from this, so the drawn buttons match the click targets.
+pub(crate) fn confirm_button_rects(inner: Rect) -> (Rect, Rect) {
+    let y = inner.y + inner.height.saturating_sub(1);
+    let total = CONFIRM_BUTTON_WIDTH * 2 + CONFIRM_BUTTON_GAP;
+    let start = inner.x + inner.width.saturating_sub(total) / 2;
+    let yes = Rect {
+        x: start,
+        y,
+        width: CONFIRM_BUTTON_WIDTH,
+        height: 1,
+    };
+    let no = Rect {
+        x: start + CONFIRM_BUTTON_WIDTH + CONFIRM_BUTTON_GAP,
+        ..yes
+    };
+    (yes, no)
+}
+
+/// Draw the two confirm buttons as reversed + bold chips on the last row of `inner`.
+pub(crate) fn render_confirm_buttons(
+    frame: &mut Frame<'_>,
+    inner: Rect,
+    yes_label: &str,
+    no_label: &str,
+) {
+    let (yes, no) = confirm_button_rects(inner);
+    for (area, label) in [(yes, yes_label), (no, no_label)] {
+        frame.render_widget(
+            Paragraph::new(Span::styled(format!("[ {label} ]"), key_chip_style()))
+                .alignment(Alignment::Center),
+            area,
+        );
+    }
+}
+
+/// Map a click to a confirm button: `Some(true)` for yes, `Some(false)` for no.
+pub(crate) fn confirm_button_at(inner: Rect, col: u16, row: u16) -> Option<bool> {
+    let (yes, no) = confirm_button_rects(inner);
+    if point_in_rect(yes, col, row) {
+        Some(true)
+    } else if point_in_rect(no, col, row) {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Draw the internal editor's "Discard changes?" confirmation as a centered
 /// modal, matching the confirm-delete dialog's look.
 pub(crate) fn draw_editor_discard_confirm(frame: &mut Frame<'_>) {
@@ -821,14 +882,15 @@ pub(crate) fn draw_editor_discard_confirm(frame: &mut Frame<'_>) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let line = Rect {
-        y: inner.y + inner.height.saturating_sub(1) / 2,
+        y: inner.y,
         height: 1,
         ..inner
     };
     frame.render_widget(
-        Paragraph::new("Discard unsaved changes?  y/n").alignment(Alignment::Center),
+        Paragraph::new("Discard unsaved changes?").alignment(Alignment::Center),
         line,
     );
+    render_confirm_buttons(frame, inner, "Discard (y)", "Keep (n)");
 }
 
 pub(crate) fn editor_discard_confirm_area(frame_area: Rect) -> Rect {
@@ -837,17 +899,11 @@ pub(crate) fn editor_discard_confirm_area(frame_area: Rect) -> Rect {
 
 pub(crate) fn editor_discard_choice_at_point(frame_area: Rect, col: u16, row: u16) -> Option<bool> {
     let area = editor_discard_confirm_area(frame_area);
-    if !point_in_rect(area, col, row) {
-        return None;
-    }
     let inner = area.inner(Margin {
         vertical: 1,
         horizontal: 1,
     });
-    if row != inner.y + inner.height.saturating_sub(1) / 2 {
-        return None;
-    }
-    Some(col < inner.x + inner.width / 2)
+    confirm_button_at(inner, col, row)
 }
 
 const METADATA_MENU_ITEMS: [(&str, &str); 6] = [
