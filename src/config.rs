@@ -15,6 +15,8 @@ pub struct Config {
     pub attachments: AttachmentsSection,
     #[serde(default)]
     pub ui: UiSection,
+    #[serde(default)]
+    pub editor: EditorSection,
 }
 
 /// Which journals to open and where they live on disk.
@@ -33,6 +35,15 @@ pub struct AttachmentsSection {
     /// Fetch images referenced by remote URLs into local attachments on import.
     #[serde(default = "default_true")]
     pub download_remote_images: bool,
+}
+
+/// Editor behaviour.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EditorSection {
+    /// Open the entry editor in fullscreen (hiding the other columns) instead
+    /// of in-pane.
+    #[serde(default)]
+    pub start_fullscreen: bool,
 }
 
 /// TUI presentation preferences.
@@ -97,6 +108,7 @@ impl Config {
             },
             attachments: AttachmentsSection::default(),
             ui: UiSection::default(),
+            editor: EditorSection::default(),
         }
     }
 }

@@ -28,6 +28,9 @@ impl App {
             metadata,
         ));
         self.nav.focus = Focus::EntryView;
+        if self.config.editor.start_fullscreen {
+            self.nav.entry_view_fullscreen = true;
+        }
     }
 
     /// Open the internal editor on a blank buffer for a new entry in the selected
@@ -41,6 +44,9 @@ impl App {
         };
         self.editor = Some(EntryEditor::for_new(journal));
         self.nav.focus = Focus::EntryView;
+        if self.config.editor.start_fullscreen {
+            self.nav.entry_view_fullscreen = true;
+        }
     }
 
     /// Enter one-shot compose mode: open a fullscreen new-entry editor for
