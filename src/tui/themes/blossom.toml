@@ -1,0 +1,44 @@
+# Blossom — a cozy pink theme.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+style = "flat"
+scrim = 0.45
+
+[colors]
+bg      = { dark = "#181014", light = "#fdf2f7" }
+panel   = { dark = "#221721", light = "#f9e4ee" }
+element = { dark = "#2d1e2b", light = "#f3d3e3" }
+
+text  = { dark = "#f4e3ec", light = "#3d1f30" }
+muted = { dark = "#9c7f90", light = "#a06f88" }
+
+primary   = { dark = "#f472b6", light = "#c22e79" }
+secondary = { dark = "#c084fc", light = "#7c3aed" }
+
+border        = { dark = "#43303e", light = "#ecc7da" }
+border_subtle = { dark = "#31232e", light = "#f4dbe8" }
+border_active = { dark = "#6b4a60", light = "#d9a1c0" }
+
+success = { dark = "#86efac", light = "#15803d" }
+warning = { dark = "#fcd34d", light = "#a16207" }
+error   = { dark = "#fb7185", light = "#be123c" }
+info    = { dark = "#93c5fd", light = "#1d4ed8" }
+
+selection = { bg = { dark = "#f472b6", light = "#c22e79" }, fg = { dark = "#181014", light = "#ffffff" }, bold = true }
+key_hint  = { fg = { dark = "#f4e3ec", light = "#3d1f30" }, bold = true }
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#86efac", light = "#15803d" } }
+neutral  = { glyph = "▓", color = { dark = "#9c7f90", light = "#a06f88" } }
+negative = { glyph = "▓", color = { dark = "#fb7185", light = "#be123c" } }
+bar      = { glyph = "▓", color = { dark = "#f472b6", light = "#c22e79" } }
+track    = { glyph = "░", color = { dark = "#43303e", light = "#ecc7da" } }
+baseline = { dark = "#43303e", light = "#ecc7da" }
+
+[markdown]
+heading    = { fg = { dark = "#f472b6", light = "#c22e79" }, bold = true }
+link       = { fg = { dark = "#93c5fd", light = "#1d4ed8" }, underlined = true }
+code       = { dark = "#c084fc", light = "#7c3aed" }
+blockquote = { fg = { dark = "#9c7f90", light = "#a06f88" } }

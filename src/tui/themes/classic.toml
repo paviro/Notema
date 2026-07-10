@@ -1,0 +1,45 @@
+# Classic — the app's original look: terminal colors, drawn borders, reversed
+# selection. Every value below matches the built-in fallback; omitted keys
+# default to exactly these values.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+style = "bordered"
+scrim = 0.0        # 0 falls back to dimming (no color blend)
+
+[colors]
+bg      = "none"   # terminal default
+panel   = "none"
+element = "none"
+
+text  = {}         # terminal foreground; bold/dim come from the UI itself
+muted = {}
+
+primary   = "cyan"
+secondary = "cyan"
+
+border        = "244"
+border_subtle = "240"
+border_active = {}
+
+success = "green"
+warning = "yellow"
+error   = "red"
+info    = "blue"
+
+selection = { reversed = true }
+key_hint  = { reversed = true, bold = true }
+
+[charts]
+positive = { glyph = "▓", color = "green" }
+neutral  = { glyph = "▓" }
+negative = { glyph = "▓", color = "red" }
+bar      = { glyph = "▓", color = "cyan" }
+track    = { glyph = "░" }
+
+[markdown]
+heading    = {}
+link       = {}
+code       = {}
+blockquote = {}

@@ -1,0 +1,50 @@
+# E-Ink — pure black-and-white with maximum contrast, for e-ink and other
+# monochrome or low-refresh displays. Meaning is carried by weight, glyph, and
+# inversion, never by hue: chart series differ by fill glyph (█ ▒ ░), selection
+# is a true ink/paper swap.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+style = "bordered"
+scrim = 0.0
+
+[palette]
+ink   = { dark = "#ffffff", light = "#000000" }
+paper = { dark = "#000000", light = "#ffffff" }
+
+[colors]
+bg      = "paper"
+panel   = "paper"
+element = "paper"
+
+text  = "ink"
+muted = "ink"
+
+primary   = "ink"
+secondary = "ink"
+
+border        = "ink"
+border_subtle = "ink"
+border_active = "ink"
+
+success = "ink"
+warning = "ink"
+error   = "ink"
+info    = "ink"
+
+selection = { bg = "ink", fg = "paper", bold = true }
+key_hint  = { bg = "ink", fg = "paper", bold = true }
+
+[charts]
+positive = { glyph = "█", color = "ink" }
+neutral  = { glyph = "▒", color = "ink" }
+negative = { glyph = "░", color = "ink" }
+bar      = { glyph = "▓", color = "ink" }
+track    = { glyph = "░", color = "ink" }
+
+[markdown]
+heading    = { fg = "ink", bold = true }
+link       = { fg = "ink", underlined = true }
+code       = "ink"
+blockquote = "ink"

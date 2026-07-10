@@ -200,7 +200,8 @@ pub fn save_state(config_path: &Path, state: &State) -> AppResult<()> {
 
 /// Write `text` to `path` atomically: a same-directory temp file plus a rename, so
 /// a crash mid-write leaves the previous file intact rather than a truncated one.
-fn write_toml_atomic(path: &Path, text: &str) -> AppResult<()> {
+/// Also used by the theme engine to materialize the bundled theme files.
+pub(crate) fn write_toml_atomic(path: &Path, text: &str) -> AppResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
