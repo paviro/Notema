@@ -396,6 +396,10 @@ fn restore_terminal(output: &mut impl Write) -> AppResult<()> {
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App) -> AppResult<()> {
     let watcher = watcher::FileWatcher::start(&app.config.journal.path);
+    // Watch the themes directory too: edits to the active theme's file repaint
+    // live, no restart needed. (The directory exists — startup materialized it.)
+    let theme_watcher = watcher::FileWatcher::start(&theme::themes_dir(&app.config_path));
+    let mut pending_theme_reload_at: Option<Instant> = None;
 
     terminal.draw(|frame| render::draw(frame, &mut app))?;
     let mut overlay_was_visible = app.has_overlay();
@@ -448,6 +452,10 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
         }
         // Wake to run a debounced store reload once file changes settle.
         if let Some(at) = pending_refresh_at {
+            poll_timeout = poll_timeout.min(at.saturating_duration_since(Instant::now()));
+        }
+        // Likewise for a debounced theme reload.
+        if let Some(at) = pending_theme_reload_at {
             poll_timeout = poll_timeout.min(at.saturating_duration_since(Instant::now()));
         }
 
@@ -521,6 +529,34 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
             false
         };
 
+        // Live theme reload, debounced the same way: only changes to the
+        // active theme's file count (edits to other themes wait until they're
+        // selected). A broken edit keeps the current theme and says so.
+        let active_theme_changed = theme_watcher.poll_changes().iter().any(|path| {
+            path.extension().is_some_and(|ext| ext == "toml")
+                && path
+                    .file_stem()
+                    .is_some_and(|stem| stem == app.config.ui.theme.as_str())
+        });
+        if active_theme_changed {
+            pending_theme_reload_at = Some(Instant::now() + REFRESH_DEBOUNCE);
+        }
+        let theme_reloaded = if pending_theme_reload_at.is_some_and(|at| Instant::now() >= at) {
+            pending_theme_reload_at = None;
+            let path =
+                theme::themes_dir(&app.config_path).join(format!("{}.toml", app.config.ui.theme));
+            match theme::load_file(&path, theme::mode()) {
+                Ok(reloaded) => theme::install(reloaded),
+                Err(err) => app.toast(
+                    state::ToastVariant::Error,
+                    format!("Theme not reloaded: {err:#}"),
+                ),
+            }
+            true
+        } else {
+            false
+        };
+
         // Run the debounced search recompute once typing has paused.
         let search_recomputed = if app.search.dirty
             && app
@@ -553,6 +589,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
 
         if redraw
             || refreshed
+            || theme_reloaded
             || search_recomputed
             || images_ready
             || geocode_ready

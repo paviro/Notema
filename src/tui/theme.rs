@@ -134,7 +134,6 @@ pub(crate) fn install(theme: Theme) {
 static MODE: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
 
 /// The session's resolved dark/light mode.
-#[allow(dead_code)] // consumed by live reload and the theme picker
 pub(crate) fn mode() -> Mode {
     MODE.get().copied().unwrap_or(Mode::Dark)
 }
