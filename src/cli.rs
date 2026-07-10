@@ -23,24 +23,6 @@ struct Cli {
     #[arg(long, value_name = "DIR", global = true)]
     config: Option<PathBuf>,
 
-    #[arg(long, value_name = "NAME", hide = true)]
-    journal: Option<String>,
-
-    #[arg(long, value_name = "TAG", hide = true)]
-    tag: Vec<String>,
-
-    #[arg(long, value_name = "NAME", hide = true)]
-    person: Vec<String>,
-
-    #[arg(long, value_name = "ACTIVITY", hide = true)]
-    activity: Vec<String>,
-
-    #[arg(long, value_name = "LABEL", hide = true)]
-    feeling: Vec<String>,
-
-    #[arg(long, value_name = "SCORE", allow_hyphen_values = true, hide = true)]
-    mood: Option<i8>,
-
     #[command(subcommand)]
     command: Option<CliCommand>,
 }
@@ -249,7 +231,6 @@ pub fn run() -> AppResult<()> {
         return handle_command(&cli, command, stdin_is_pipe);
     }
 
-    validate_no_legacy_entry_args(&cli)?;
     if stdin_is_pipe {
         bail!("piped entry text requires `journal log`; run `journal log` with piped stdin");
     }
@@ -263,7 +244,6 @@ pub fn run() -> AppResult<()> {
 }
 
 fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppResult<()> {
-    validate_no_legacy_entry_args(cli)?;
     match command {
         CliCommand::Log(args) => create_entry_from_log_command(cli, args, stdin_is_pipe),
         CliCommand::Use { name } => set_default_journal(cli, name),
@@ -760,28 +740,6 @@ fn import_report_summary(
 
 fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
     if count == 1 { one } else { many }
-}
-
-fn validate_no_legacy_entry_args(cli: &Cli) -> AppResult<()> {
-    if cli.journal.is_some() {
-        bail!("--journal belongs to `journal log`");
-    }
-    if !cli.tag.is_empty() {
-        bail!("--tag belongs to `journal log`");
-    }
-    if !cli.person.is_empty() {
-        bail!("--person belongs to `journal log`");
-    }
-    if !cli.activity.is_empty() {
-        bail!("--activity belongs to `journal log`");
-    }
-    if !cli.feeling.is_empty() {
-        bail!("--feeling belongs to `journal log`");
-    }
-    if cli.mood.is_some() {
-        bail!("--mood belongs to `journal log`");
-    }
-    Ok(())
 }
 
 fn set_default_journal(cli: &Cli, journal: &str) -> AppResult<()> {
