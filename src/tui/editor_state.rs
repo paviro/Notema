@@ -3,8 +3,10 @@ use std::time::Instant;
 
 use journal_core::Metadata;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui_textarea::{DataCursor, TextArea, WrapMode};
+
+use super::theme::theme;
 
 /// What the internal editor is writing to: an existing entry file, or a new
 /// entry to be created in a journal on save.
@@ -160,7 +162,7 @@ fn new_textarea(body: &str, placeholder: Option<&str>) -> TextArea<'static> {
     textarea.set_cursor_line_style(Style::default());
     // Make selections visible (reversed video) so keyboard/mouse selection reads
     // clearly and can't silently swallow text.
-    textarea.set_selection_style(Style::default().add_modifier(Modifier::REVERSED));
+    textarea.set_selection_style(theme().selection());
     // Soft-wrap long lines like the viewer, splitting mid-word only when a word is
     // wider than the pane.
     textarea.set_wrap_mode(WrapMode::WordOrGlyph);

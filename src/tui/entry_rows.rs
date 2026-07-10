@@ -1,7 +1,7 @@
 use journal_core::{Entry, SearchHit, entry_group_date};
 use journal_storage::parse_entry_timestamp;
 use ratatui::{
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::ListItem,
 };
@@ -10,6 +10,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use super::{
     app::{App, Mode},
     scroll::clamp_scroll,
+    theme::theme,
 };
 
 /// Display width of `s` in terminal cells (wide/CJK characters count as 2).
@@ -284,10 +285,7 @@ pub(crate) enum DividerAlign {
 
 pub(crate) fn section_divider(box_width: usize, label: &str, align: DividerAlign) -> Line<'static> {
     let fill = "━".repeat(box_width.saturating_sub(text_width(label) + 1));
-    let label = Span::styled(
-        label.to_string(),
-        Style::default().add_modifier(Modifier::BOLD),
-    );
+    let label = Span::styled(label.to_string(), theme().heading());
     let spans = match align {
         DividerAlign::Left => vec![label, Span::styled(format!(" {fill}"), border_style())],
         DividerAlign::Right => vec![Span::styled(format!("{fill} "), border_style()), label],
@@ -475,7 +473,7 @@ pub(crate) fn entry_box_lines(
 }
 
 fn border_style() -> Style {
-    Style::default().add_modifier(Modifier::DIM)
+    theme().muted()
 }
 
 /// A box border with optional bold labels on the left and right, separated by a
@@ -488,7 +486,7 @@ pub(crate) fn border_line(
     right: Option<&str>,
 ) -> Line<'static> {
     let border = border_style();
-    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let bold = theme().heading();
     let left = left.filter(|label| !label.is_empty());
     let right = right.filter(|label| !label.is_empty());
     let left_width = left.map_or(0, |label| text_width(label) + 2);

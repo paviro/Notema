@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
     widgets::{HighlightSpacing, List},
 };
 
@@ -12,6 +11,7 @@ use crate::tui::{
         PanelGeometry, clamp_scroll, count_label, list_state_for_render, panel_block,
         render_scrollbar_if_needed,
     },
+    theme::theme,
 };
 
 /// Rows occupied by one journal's bordered box (top border, name, bottom border).
@@ -57,7 +57,7 @@ pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app:
     let pixel_offset = clamp_scroll(app.nav.journal_list.offset(), total_height, viewport_height);
     *app.nav.journal_list.offset_mut() = pixel_offset;
 
-    let highlight_style = Style::default().add_modifier(Modifier::REVERSED);
+    let highlight_style = theme().selection();
     let (items, selected_visible, item_indices) = visible_box_items(
         &rows,
         pixel_offset,

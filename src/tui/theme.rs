@@ -170,7 +170,6 @@ impl Theme {
     // --- text ---
 
     /// Primary body text.
-    #[allow(dead_code)] // consumed by the flat-chrome pass
     pub(crate) fn text(self) -> Style {
         self.text
     }
@@ -267,7 +266,6 @@ impl Theme {
     /// The selected row/item. Flat themes fill with the primary hue and an
     /// explicit contrast foreground; the fallback stays REVERSED so selection
     /// reads without color.
-    #[allow(dead_code)] // consumed by the flat-chrome pass
     pub(crate) fn selection(self) -> Style {
         self.selection
     }
@@ -279,7 +277,6 @@ impl Theme {
     }
 
     /// A keybinding chip/hint in the footer and dialogs.
-    #[allow(dead_code)] // consumed by the flat-chrome pass
     pub(crate) fn key_hint(self) -> Style {
         self.key_hint
     }
@@ -384,7 +381,6 @@ impl Theme {
     }
 
     /// Markdown links.
-    #[allow(dead_code)] // consumed by the themed-markdown pass
     pub(crate) fn md_link(self) -> Style {
         self.md_link
     }
@@ -834,7 +830,11 @@ impl ThemeFile {
 
         let markdown = &self.markdown;
         let md_heading = style(&markdown.heading, Style::default(), "markdown.heading")?;
-        let md_link = style(&markdown.link, Style::default(), "markdown.link")?;
+        let md_link = style(
+            &markdown.link,
+            Style::default().add_modifier(Modifier::UNDERLINED),
+            "markdown.link",
+        )?;
         let md_code = style(&markdown.code, Style::default(), "markdown.code")?;
         let md_blockquote = style(
             &markdown.blockquote,

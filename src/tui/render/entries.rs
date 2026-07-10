@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
     text::Line,
     widgets::{Clear, HighlightSpacing, List},
 };
@@ -13,6 +12,7 @@ use crate::tui::{
         EntryListGeometry, clamp_scroll, count_label, list_state_for_render, panel_block,
         render_centered_notice, render_scrollbar_if_needed,
     },
+    theme::theme,
 };
 
 pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry, app: &mut App) {
@@ -57,7 +57,7 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
     );
 
     let list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_style(theme().selection())
         .highlight_spacing(HighlightSpacing::Never);
 
     let mut render_state =

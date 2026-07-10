@@ -40,6 +40,6 @@ track    = { glyph = "░" }
 
 [markdown]
 heading    = {}
-link       = {}
+link       = { underlined = true }
 code       = {}
 blockquote = {}

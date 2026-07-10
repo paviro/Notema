@@ -1,13 +1,13 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Flex, Layout, Rect},
-    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Padding, Paragraph, Wrap},
 };
 
 use crate::tui::entry_rows::wrap_text;
 use crate::tui::text_input::PassphraseInput;
+use crate::tui::theme::theme;
 
 /// Width of the "Enter Password" container box, clamped to the available width.
 const CONTAINER_WIDTH: u16 = 68;
@@ -83,7 +83,7 @@ pub(crate) fn draw_unlock(
     // masked passphrase, with a padded input row inside.
     let subfield = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().add_modifier(Modifier::DIM))
+        .border_style(theme().muted())
         .padding(Padding::horizontal(1));
     let subfield_inner = subfield.inner(subfield_box);
     frame.render_widget(subfield, subfield_box);
@@ -99,12 +99,9 @@ pub(crate) fn draw_unlock(
     // wraps so a narrow terminal shows the whole message across the rows the
     // container reserved for it.
     frame.render_widget(
-        Paragraph::new(Span::styled(
-            status.to_string(),
-            Style::default().add_modifier(Modifier::DIM),
-        ))
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: true }),
+        Paragraph::new(Span::styled(status.to_string(), theme().muted()))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true }),
         error_row,
     );
 

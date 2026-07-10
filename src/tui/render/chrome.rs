@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Flex, Layout, Margin, Rect},
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span, Text},
     widgets::{
         Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
@@ -14,6 +14,7 @@ use super::table;
 use crate::tui::app::{App, Focus, Mode};
 use crate::tui::state::MetadataKind;
 use crate::tui::surface::point_in_rect;
+use crate::tui::theme::theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HintId {
@@ -113,9 +114,9 @@ fn key_chip_text(key: &str) -> String {
     format!(" {key} ")
 }
 
-/// The reversed + bold style for a hint's key chip.
+/// The style for a hint's key chip.
 fn key_chip_style() -> Style {
-    Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    theme().key_hint()
 }
 
 #[derive(Debug, Clone)]
@@ -788,7 +789,7 @@ pub(crate) fn panel_block(
     if focused {
         block = block
             .border_type(BorderType::Thick)
-            .border_style(Style::default().add_modifier(Modifier::BOLD));
+            .border_style(theme().focus_border());
     }
 
     if let Some(label) = footer_label {
@@ -813,7 +814,7 @@ pub(crate) fn render_centered_notice(frame: &mut Frame<'_>, content: Rect, messa
     frame.render_widget(
         Paragraph::new(message)
             .alignment(Alignment::Center)
-            .style(Style::default().add_modifier(Modifier::DIM)),
+            .style(theme().muted()),
         line,
     );
 }
@@ -1120,9 +1121,9 @@ fn dialog_cell(text: &str, col: usize, key_col: usize, width: usize) -> Vec<Span
         ];
     }
     let style = if col == 0 && col != key_col {
-        Style::default().add_modifier(Modifier::BOLD)
+        theme().heading()
     } else {
-        Style::default()
+        theme().text()
     };
     vec![Span::styled(pad_display(text, width), style)]
 }
@@ -1400,10 +1401,7 @@ pub(crate) fn count_label(count: usize, singular: &str, plural: &str) -> String 
 pub(crate) fn panel_title(title: &str, focused: bool) -> Line<'static> {
     let label = format!(" {title} ");
     if focused {
-        Line::from(Span::styled(
-            label,
-            Style::default().add_modifier(Modifier::REVERSED),
-        ))
+        Line::from(Span::styled(label, theme().selection()))
     } else {
         Line::from(label)
     }

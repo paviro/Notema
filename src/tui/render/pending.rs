@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Flex, Layout},
-    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Padding, Paragraph, Wrap},
 };
@@ -9,6 +8,7 @@ use ratatui::{
 use journal_storage::PendingRequest;
 
 use crate::tui::entry_rows::wrap_text;
+use crate::tui::theme::theme;
 
 /// Width of the request container, clamped to the available width.
 const CONTAINER_WIDTH: u16 = 68;
@@ -33,8 +33,8 @@ pub(crate) fn draw_pending_request(
 
     let recipient = &request.recipient;
 
-    let dim = Style::default().add_modifier(Modifier::DIM);
-    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let dim = theme().muted();
+    let bold = theme().heading();
     let info_lines = vec![
         Line::from(vec![
             Span::raw("Device "),
@@ -131,7 +131,7 @@ pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, noti
     } else {
         format!("Device '{device_name}'")
     };
-    let dim = Style::default().add_modifier(Modifier::DIM);
+    let dim = theme().muted();
 
     let container_width = CONTAINER_WIDTH.min(area.width);
     // The width the prose wraps to (borders + horizontal padding removed). Wrapping
@@ -201,8 +201,8 @@ pub(crate) fn draw_disable_notice(frame: &mut Frame<'_>) {
         return;
     }
 
-    let bold = Style::default().add_modifier(Modifier::BOLD);
-    let dim = Style::default().add_modifier(Modifier::DIM);
+    let bold = theme().heading();
+    let dim = theme().muted();
 
     let container_width = CONTAINER_WIDTH.min(area.width);
     // Borders (1 each side) plus the 2-cell horizontal padding: the width the body

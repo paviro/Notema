@@ -31,6 +31,7 @@ use crate::tui::{
         EntryMetadataLayout, EntryMetadataValues, LOCATION_PREFIX, MetadataRowLayout,
         PanelGeometry, location_wrapped_lines, metadata_section_height, metadata_value_rows,
     },
+    theme::theme,
 };
 
 /// The body (writing/reading area) is kept at least this tall; the metadata block
@@ -122,7 +123,7 @@ pub(crate) fn draw_entry_editor(
     // hide the widget caret and use the native bar cursor placed below.
     let selecting = editor.textarea.selection_range().is_some();
     editor.textarea.set_cursor_style(if selecting {
-        Style::default().add_modifier(Modifier::REVERSED)
+        theme().selection()
     } else {
         Style::default()
     });
@@ -381,10 +382,7 @@ fn image_label_line(index: usize, alt: &str) -> Line<'static> {
         Some(key) => format!("[{head} - click here or press {key}]"),
         None => format!("[{head} - click here]"),
     };
-    Line::from(Span::styled(
-        text,
-        Style::default().add_modifier(Modifier::UNDERLINED),
-    ))
+    Line::from(Span::styled(text, theme().md_link()))
 }
 
 /// Render a chunk of markdown text into owned (`'static`) lines.
@@ -464,7 +462,7 @@ fn draw_metadata_section(
     };
     let sep = "─".repeat(area.width.saturating_sub(1) as usize);
     frame.render_widget(
-        Paragraph::new(sep).style(Style::default().add_modifier(Modifier::DIM)),
+        Paragraph::new(sep).style(theme().muted()),
         Rect { height: 1, ..area },
     );
 
@@ -550,10 +548,7 @@ fn location_lines(prefix_width: u16, width: u16, value: &str) -> Vec<Line<'stati
         .map(|(index, chunk)| {
             if index == 0 {
                 Line::from(vec![
-                    Span::styled(
-                        LOCATION_PREFIX,
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
+                    Span::styled(LOCATION_PREFIX, theme().heading()),
                     Span::raw(chunk),
                 ])
             } else {
@@ -576,7 +571,7 @@ fn metadata_section_lines(width: u16, metadata: &EntryMetadata<'_>) -> Vec<Line<
 
     let mut lines = vec![Line::from(Span::styled(
         "─".repeat(width.saturating_sub(1) as usize),
-        Style::default().add_modifier(Modifier::DIM),
+        theme().muted(),
     ))];
 
     if let Some(score) = metadata.mood {
@@ -645,10 +640,7 @@ fn metadata_value_lines_for_width(
         .map(|(row_index, value_indices)| {
             let mut spans = Vec::new();
             if row_index == 0 {
-                spans.push(Span::styled(
-                    prefix,
-                    Style::default().add_modifier(Modifier::BOLD),
-                ));
+                spans.push(Span::styled(prefix, theme().heading()));
             }
             for (index, value_index) in value_indices.into_iter().enumerate() {
                 if index > 0 {
@@ -741,8 +733,8 @@ fn mood_bar_cells(width: u16, score: i8) -> Vec<(&'static str, Style)> {
         0
     };
 
-    let bold = Style::default().add_modifier(Modifier::BOLD);
-    let dim = Style::default().add_modifier(Modifier::DIM);
+    let bold = theme().heading();
+    let dim = theme().muted();
 
     let mut cells = Vec::with_capacity(width);
     for i in 0..width {

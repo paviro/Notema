@@ -1,7 +1,6 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph},
 };
@@ -16,6 +15,7 @@ use crate::tui::entry_rows::wrap_text;
 use crate::tui::state::{DeleteContext, EditMoodState, ListNav};
 use crate::tui::surface::metadata_value_rows;
 use crate::tui::text_input::TextInput;
+use crate::tui::theme::theme;
 
 use super::{
     chrome::{
@@ -621,8 +621,7 @@ fn render_separator(frame: &mut Frame<'_>, area: Rect) {
     }
 
     frame.render_widget(
-        Paragraph::new("─".repeat(area.width as usize))
-            .style(Style::default().add_modifier(Modifier::DIM)),
+        Paragraph::new("─".repeat(area.width as usize)).style(theme().muted()),
         Rect { height: 1, ..area },
     );
 }
@@ -796,13 +795,13 @@ pub(super) fn draw_edit_metadata_dialog(frame: &mut Frame<'_>, state: &mut EditM
         frame,
         [Line::from(Span::styled(
             format!(" {title} "),
-            Style::default().add_modifier(Modifier::BOLD),
+            theme().heading(),
         ))],
         layout.inner,
     );
     render_separator(frame, layout.list_top_separator);
     let list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_style(theme().selection())
         .highlight_symbol(">")
         .highlight_spacing(HighlightSpacing::Always);
     let mut render_state = list_state_for_render(
@@ -904,8 +903,8 @@ pub(super) fn draw_edit_location_dialog(frame: &mut Frame<'_>, state: &mut EditL
     state.list.set_offset(scroll);
 
     let list_focused = state.focus == EditLocationFocus::List;
-    let dim = Style::default().add_modifier(Modifier::DIM);
-    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let dim = theme().muted();
+    let bold = theme().heading();
 
     frame.render_widget(Clear, layout.area);
     frame.render_widget(
@@ -992,7 +991,7 @@ pub(super) fn draw_edit_location_dialog(frame: &mut Frame<'_>, state: &mut EditL
     };
 
     let list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_style(theme().selection())
         .highlight_symbol(">")
         .highlight_spacing(HighlightSpacing::Always);
     let mut render_state = list_state_for_render(
@@ -1033,7 +1032,7 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
             .map(|row| match *row {
                 FeelingRow::Header { group } => {
                     let g = &state.groups[group];
-                    let bold = Style::default().add_modifier(Modifier::BOLD);
+                    let bold = theme().heading();
                     // Disclosure marker trails the name so it never collides with the
                     // list's leading `>` selection cursor. ▾ open, ▸ collapsed.
                     let disclosure = if state.expanded[group] { '▾' } else { '▸' };
@@ -1073,15 +1072,12 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
     );
     render_lines_in_area(
         frame,
-        [Line::from(Span::styled(
-            " Feelings ",
-            Style::default().add_modifier(Modifier::BOLD),
-        ))],
+        [Line::from(Span::styled(" Feelings ", theme().heading()))],
         layout.inner,
     );
     render_separator(frame, layout.list_top_separator);
     let list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        .highlight_style(theme().selection())
         .highlight_symbol(">")
         .highlight_spacing(HighlightSpacing::Always);
     let mut render_state = list_state_for_render(
@@ -1102,7 +1098,7 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
 
     // The summary lines get a leading pad space; the "Selected:" label is bold and
     // its continuation lines align under the first.
-    let bold = Style::default().add_modifier(Modifier::BOLD);
+    let bold = theme().heading();
     let selected_rows = feelings_selected_rows(&state.selected);
     let summary: Vec<Line<'_>> = if selected_rows.is_empty() {
         vec![Line::from(vec![

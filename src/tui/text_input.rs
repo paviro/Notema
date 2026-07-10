@@ -17,6 +17,8 @@ use ratatui_textarea::{CursorMove, TextArea};
 use std::ops::{Deref, DerefMut};
 use zeroize::Zeroize;
 
+use super::theme::theme;
+
 pub(crate) struct TextInput {
     textarea: TextArea<'static>,
     /// Where the field was last drawn, for mouse hit-testing. `Rect::default()`
@@ -147,7 +149,7 @@ impl TextInput {
         // phantom end-of-line cell as a selected trailing space.
         self.textarea
             .set_cursor_style(if selecting && !self.cursor_at_end() {
-                Style::default().add_modifier(Modifier::REVERSED)
+                theme().selection()
             } else {
                 Style::default()
             });
@@ -196,11 +198,11 @@ impl From<String> for TextInput {
         // selections, and the widget's own block cursor hidden — the native
         // terminal bar cursor marks the caret instead.
         textarea.set_cursor_line_style(Style::default());
-        textarea.set_selection_style(Style::default().add_modifier(Modifier::REVERSED));
+        textarea.set_selection_style(theme().selection());
         textarea.set_cursor_style(Style::default());
         // Every field shares the form look: underlined, with a dim placeholder.
         textarea.set_style(Style::default().add_modifier(Modifier::UNDERLINED));
-        textarea.set_placeholder_style(Style::default().add_modifier(Modifier::DIM));
+        textarea.set_placeholder_style(theme().muted());
         textarea.move_cursor(CursorMove::End);
         Self {
             textarea,
