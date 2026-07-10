@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::tui::state::{ListNav, ThemePickerState};
+
 impl App {
     pub(crate) fn begin_new_journal_input(&mut self) {
         self.overlay = Overlay::NewJournal(TextInput::default());
@@ -181,6 +183,130 @@ impl App {
         if self.can_act_on_selected_entry() {
             self.overlay = Overlay::MetadataMenu;
         }
+    }
+
+    pub(crate) fn open_settings_menu(&mut self) {
+        self.overlay = Overlay::SettingsMenu;
+    }
+
+    /// Open the theme picker: list the theme files on disk (parse results
+    /// cached per row), seed the selection on the configured theme, and
+    /// remember the installed theme so Esc can restore it.
+    pub(crate) fn open_theme_picker(&mut self) {
+        use crate::tui::state::{SelectableList, ThemePickerEntry, ThemePickerState};
+
+        if let Err(err) = crate::tui::theme::ensure_bundled_themes(&self.config_path) {
+            self.toast(
+                ToastVariant::Error,
+                format!("Couldn't prepare themes: {err:#}"),
+            );
+        }
+        let dir = crate::tui::theme::themes_dir(&self.config_path);
+        let mode = crate::tui::theme::mode();
+        let mut entries: Vec<ThemePickerEntry> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|dirent| {
+                let path = dirent.path();
+                if path.extension().is_none_or(|ext| ext != "toml") {
+                    return None;
+                }
+                let name = path.file_stem()?.to_str()?.to_string();
+                Some(ThemePickerEntry {
+                    theme: crate::tui::theme::load_file(&path, mode).ok(),
+                    name,
+                })
+            })
+            .collect();
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let mut state = ThemePickerState {
+            entries,
+            list: SelectableList::default(),
+            previous: crate::tui::theme::theme(),
+            previous_name: self.config.ui.theme.clone(),
+        };
+        let active = state
+            .entries
+            .iter()
+            .position(|entry| entry.name == state.previous_name)
+            .unwrap_or(0);
+        state.select_index(active);
+        self.overlay = Overlay::ThemePicker(state);
+    }
+
+    pub(crate) fn theme_picker_state(&self) -> Option<&ThemePickerState> {
+        match &self.overlay {
+            Overlay::ThemePicker(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn theme_picker_state_mut(&mut self) -> Option<&mut ThemePickerState> {
+        match &mut self.overlay {
+            Overlay::ThemePicker(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Live preview: install the highlighted theme if it parsed. Broken rows
+    /// leave whatever is installed untouched.
+    pub(crate) fn theme_picker_preview(&mut self) {
+        if let Some(theme) = self
+            .theme_picker_state()
+            .and_then(|state| state.selected_entry())
+            .and_then(|entry| entry.theme)
+        {
+            crate::tui::theme::install(theme);
+        }
+    }
+
+    /// Move the picker selection to `index` and preview that row.
+    pub(crate) fn theme_picker_select(&mut self, index: usize) {
+        if let Some(state) = self.theme_picker_state_mut() {
+            state.select_index(index);
+        }
+        self.theme_picker_preview();
+    }
+
+    /// Confirm the highlighted theme: persist it to the config and close. A
+    /// broken row or a failed save toasts and keeps the picker open.
+    pub(crate) fn theme_picker_confirm(&mut self) {
+        let Some(entry) = self
+            .theme_picker_state()
+            .and_then(|state| state.selected_entry())
+        else {
+            return;
+        };
+        let name = entry.name.clone();
+        let Some(theme) = entry.theme else {
+            self.toast(
+                ToastVariant::Error,
+                format!("Theme '{name}' is broken; fix its file or pick another"),
+            );
+            return;
+        };
+        crate::tui::theme::install(theme);
+        self.config.ui.theme = name.clone();
+        if let Err(err) = crate::config::save_config(&self.config_path, &self.config) {
+            self.toast(
+                ToastVariant::Error,
+                format!("Couldn't save config: {err:#}"),
+            );
+            return;
+        }
+        self.toast(ToastVariant::Success, format!("Theme set to {name}"));
+        self.close_overlay();
+    }
+
+    /// Cancel the picker: restore the theme from open time; the config was
+    /// never touched.
+    pub(crate) fn theme_picker_cancel(&mut self) {
+        if let Some(state) = self.theme_picker_state() {
+            crate::tui::theme::install(state.previous);
+        }
+        self.close_overlay();
     }
 
     pub(crate) fn has_overlay(&self) -> bool {

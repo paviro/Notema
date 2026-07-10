@@ -55,6 +55,9 @@ pub(crate) enum HintId {
     LocationClear,
     OpenImageViewer,
     OpenMetadataMenu,
+    OpenSettings,
+    ThemePickerApply,
+    ThemePickerRevert,
     HintsToggle,
     ToggleJournals,
     InsightsTab,
@@ -520,6 +523,7 @@ fn browse_footer_line(app: &App) -> HintLine {
             hints.extend(archive_hint(app));
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
             hints.push(journals_hint(app));
+            hints.push(SETTINGS_HINT);
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
@@ -539,6 +543,7 @@ fn browse_footer_line(app: &App) -> HintLine {
             }
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
             hints.push(journals_hint(app));
+            hints.push(SETTINGS_HINT);
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
@@ -552,6 +557,7 @@ fn browse_footer_line(app: &App) -> HintLine {
             // `images` hint here.
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
             hints.push(journals_hint(app));
+            hints.push(SETTINGS_HINT);
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
@@ -564,6 +570,7 @@ fn browse_footer_line(app: &App) -> HintLine {
             hints.extend(image_hint(app));
             hints.push(Hint::new("search", "/", HintId::BeginSearch));
             hints.push(journals_hint(app));
+            hints.push(SETTINGS_HINT);
             hints.push(Hint::new("hints", "h", HintId::HintsToggle));
             hints.push(Hint::new("quit", "q", HintId::Quit));
             hints
@@ -594,6 +601,9 @@ fn archive_hint(app: &App) -> Option<Hint> {
         Hint::new(label, "a", HintId::ToggleArchiveJournal)
     })
 }
+
+/// The `settings (,)` hint, shown in every Browse-mode footer.
+const SETTINGS_HINT: Hint = Hint::new("settings", ",", HintId::OpenSettings);
 
 fn journals_hint(app: &App) -> Hint {
     let label = if app.state.ui.show_journals {
@@ -1131,6 +1141,58 @@ pub(crate) fn metadata_menu_close_at_point(
 ) -> bool {
     let rows = metadata_menu_rows();
     table_dialog_footer_at_point(frame_area, &metadata_menu_dialog(&rows, mode), 0, col, row)
+}
+
+const SETTINGS_MENU_ITEMS: [(&str, &str); 1] = [("t", "Theme…")];
+
+fn settings_menu_rows() -> Vec<Vec<String>> {
+    SETTINGS_MENU_ITEMS
+        .iter()
+        .map(|(key, label)| vec![key.to_string(), label.to_string()])
+        .collect()
+}
+
+fn settings_menu_dialog(rows: &[Vec<String>]) -> TableDialog<'_> {
+    TableDialog {
+        title: "Settings",
+        headers: &["Key", "Setting"],
+        rows,
+        key_col: 0,
+        footer: "enter select · esc close",
+    }
+}
+
+/// A row of the settings menu, mapped from a click by
+/// [`settings_menu_choice_at_point`].
+pub(crate) enum SettingsChoice {
+    Theme,
+}
+
+/// Draw the settings menu: a centered chooser whose rows open the settings
+/// dialogs. Same table popup as the metadata menu.
+pub(crate) fn draw_settings_menu(frame: &mut Frame<'_>) {
+    let rows = settings_menu_rows();
+    // The menu always fits, so it never scrolls.
+    let mut scroll = 0;
+    draw_table_dialog(frame, &settings_menu_dialog(&rows), &mut scroll);
+}
+
+pub(crate) fn settings_menu_choice_at_point(
+    frame_area: Rect,
+    col: u16,
+    row: u16,
+) -> Option<SettingsChoice> {
+    let rows = settings_menu_rows();
+    let index = table_dialog_row_at_point(frame_area, &settings_menu_dialog(&rows), 0, col, row)?;
+    match index {
+        0 => Some(SettingsChoice::Theme),
+        _ => None,
+    }
+}
+
+pub(crate) fn settings_menu_close_at_point(frame_area: Rect, col: u16, row: u16) -> bool {
+    let rows = settings_menu_rows();
+    table_dialog_footer_at_point(frame_area, &settings_menu_dialog(&rows), 0, col, row)
 }
 
 const EDITOR_SHORTCUT_SECTIONS: [(&str, &[(&str, &str)]); 3] = [

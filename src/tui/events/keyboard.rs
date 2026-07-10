@@ -138,6 +138,8 @@ pub(super) fn key_to_action(
         }
         Overlay::None => browse_key_to_action(app, key, entry_view_available),
         Overlay::MetadataMenu => metadata_menu_key_to_action(key),
+        Overlay::SettingsMenu => settings_menu_key_to_action(key),
+        Overlay::ThemePicker(_) => theme_picker_key_to_action(key),
         Overlay::ConfirmDelete(_) => confirm_delete_key_to_action(key),
         Overlay::NewJournal(_) => new_journal_key_to_action(key),
         Overlay::EditMetadata(_) => tags_key_to_action(app, key),
@@ -163,6 +165,28 @@ fn metadata_menu_key_to_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('l') => Action::BeginEditLocation,
         _ => Action::CancelOverlay,
     })
+}
+
+/// Keys while the settings menu is open: `t` (its key hint) or Enter open the
+/// only row — the theme picker — and anything else dismisses the menu, matching
+/// the metadata menu's behavior.
+fn settings_menu_key_to_action(key: KeyEvent) -> Option<Action> {
+    Some(match key.code {
+        KeyCode::Char('t') | KeyCode::Enter => Action::OpenThemePicker,
+        _ => Action::CancelOverlay,
+    })
+}
+
+/// Keys while the theme picker is open. Esc routes to the dedicated cancel
+/// action (not the generic overlay close) so the previewed theme is reverted.
+fn theme_picker_key_to_action(key: KeyEvent) -> Option<Action> {
+    match key.code {
+        KeyCode::Esc => Some(Action::ThemePickerCancel),
+        KeyCode::Enter => Some(Action::ThemePickerConfirm),
+        KeyCode::Up => Some(Action::ThemePickerMoveUp),
+        KeyCode::Down => Some(Action::ThemePickerMoveDown),
+        _ => None,
+    }
 }
 
 /// Map a digit key to the image index it opens (`0`–`9`), gated on that image
@@ -316,6 +340,7 @@ fn browse_key_to_action(app: &App, key: KeyEvent, entry_view_available: bool) ->
         }
         KeyCode::Char('h') => Some(Action::ToggleHints),
         KeyCode::Char('j') => Some(Action::ToggleJournals),
+        KeyCode::Char(',') => Some(Action::OpenSettingsMenu),
         _ => None,
     }
 }

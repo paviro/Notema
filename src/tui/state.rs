@@ -313,6 +313,47 @@ pub(crate) fn ensure_selected_visible(state: &mut ListState, len: usize, viewpor
     *state.offset_mut() = next_offset.min(max_offset);
 }
 
+/// One row of the theme picker: a theme file's stem and its parse result,
+/// cached when the picker opens so selection moves don't re-read the disk.
+pub(crate) struct ThemePickerEntry {
+    pub(crate) name: String,
+    /// The resolved theme, or `None` when the file failed to parse (rendered
+    /// as broken and never installed).
+    pub(crate) theme: Option<crate::tui::theme::Theme>,
+}
+
+/// State for the theme-picker overlay. Selection moves preview by installing
+/// the highlighted theme; Esc restores [`Self::previous`].
+pub(crate) struct ThemePickerState {
+    pub(crate) entries: Vec<ThemePickerEntry>,
+    pub(crate) list: SelectableList,
+    /// The theme installed when the picker opened, restored on cancel.
+    pub(crate) previous: crate::tui::theme::Theme,
+    /// The configured theme name at open, marking the active row.
+    pub(crate) previous_name: String,
+}
+
+impl ThemePickerState {
+    /// The highlighted entry, if any.
+    pub(crate) fn selected_entry(&self) -> Option<&ThemePickerEntry> {
+        self.entries.get(self.selected_index()?)
+    }
+}
+
+impl ListNav for ThemePickerState {
+    fn list(&self) -> &SelectableList {
+        &self.list
+    }
+
+    fn list_mut(&mut self) -> &mut SelectableList {
+        &mut self.list
+    }
+
+    fn item_count(&self) -> usize {
+        self.entries.len()
+    }
+}
+
 /// State for the edit-mood overlay.
 pub(crate) struct EditMoodState {
     /// The mood score currently saved on the entry (None = not set).
@@ -348,6 +389,11 @@ pub(crate) enum Overlay {
     /// Reference popup listing the metadata shortcut keys. The keys work whether or
     /// not it is shown, so this only aids discovery.
     MetadataMenu,
+    /// The settings menu: a small chooser whose rows open the settings dialogs
+    /// (currently just the theme picker).
+    SettingsMenu,
+    /// The theme picker list, live-previewing the highlighted theme.
+    ThemePicker(ThemePickerState),
     ConfirmDelete(DeleteContext),
     NewJournal(TextInput),
     EditMetadata(EditMetadataState),

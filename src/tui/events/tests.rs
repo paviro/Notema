@@ -1302,3 +1302,80 @@ fn fold_leading_wheel_edge_cases() {
     let click = vec![Event::Mouse(mouse(down(), 0, 0))];
     assert_eq!(fold_leading_wheel(&click), (0, 0));
 }
+
+// ── Settings menu / theme picker routing ─────────────────────────────────────
+
+#[test]
+fn comma_opens_settings_in_browse_but_not_over_dialogs() {
+    let mut app = app_with_entries(1);
+    app.nav.focus = Focus::Entries;
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char(',')), true),
+        Some(Action::OpenSettingsMenu)
+    );
+
+    // With a dialog open the key belongs to that overlay, not settings.
+    app.begin_edit_tags();
+    assert_ne!(
+        keyboard::key_to_action(&app, key(KeyCode::Char(',')), true),
+        Some(Action::OpenSettingsMenu)
+    );
+}
+
+#[test]
+fn settings_menu_routes_enter_and_t_to_the_theme_picker() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings_menu();
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::OpenThemePicker)
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('t')), true),
+        Some(Action::OpenThemePicker)
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::CancelOverlay)
+    );
+}
+
+#[test]
+fn theme_picker_keys_route_to_dedicated_actions() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_theme_picker();
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Up), true),
+        Some(Action::ThemePickerMoveUp)
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Down), true),
+        Some(Action::ThemePickerMoveDown)
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::ThemePickerConfirm)
+    );
+    // Esc reverts through the dedicated cancel, not the generic overlay close.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::ThemePickerCancel)
+    );
+
+    // The picker's hint chips route to the same actions.
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::ThemePickerApply),
+        Some(Action::ThemePickerConfirm)
+    );
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::ThemePickerRevert),
+        Some(Action::ThemePickerCancel)
+    );
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::OpenSettings),
+        Some(Action::OpenSettingsMenu)
+    );
+}

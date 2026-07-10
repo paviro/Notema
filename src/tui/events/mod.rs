@@ -362,6 +362,20 @@ pub(crate) fn dispatch_action(
             )?;
         }
 
+        Action::OpenSettingsMenu => app.open_settings_menu(),
+        Action::OpenThemePicker => app.open_theme_picker(),
+        Action::ThemePickerMoveUp => {
+            navigate_open_dialog(terminal, app, |list| list.move_up())?;
+            app.theme_picker_preview();
+        }
+        Action::ThemePickerMoveDown => {
+            navigate_open_dialog(terminal, app, |list| list.move_down())?;
+            app.theme_picker_preview();
+        }
+        Action::ThemePickerSelect(index) => app.theme_picker_select(index),
+        Action::ThemePickerConfirm => app.theme_picker_confirm(),
+        Action::ThemePickerCancel => app.theme_picker_cancel(),
+
         Action::OpenImageViewer(index) => app.begin_image_viewer(index),
         Action::ImageViewerNext => app.image_viewer_step(1),
         Action::ImageViewerPrev => app.image_viewer_step(-1),
@@ -586,6 +600,10 @@ fn open_dialog_list_height(
         render::location_dialog_layout(area, render::location_list_rows(&state.list_labels()))
             .list
             .height
+    } else if let Some(state) = app.theme_picker_state() {
+        render::theme_picker_layout(area, state.entries.len())
+            .list
+            .height
     } else {
         0
     };
@@ -602,6 +620,9 @@ fn open_dialog_list_mut(app: &mut App) -> Option<&mut dyn ListNav> {
     }
     if app.edit_location_state().is_some() {
         return app.edit_location_state_mut().map(|s| s as &mut dyn ListNav);
+    }
+    if app.theme_picker_state().is_some() {
+        return app.theme_picker_state_mut().map(|s| s as &mut dyn ListNav);
     }
     None
 }

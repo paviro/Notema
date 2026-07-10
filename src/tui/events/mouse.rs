@@ -757,6 +757,39 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         };
     }
 
+    if matches!(app.overlay, Overlay::SettingsMenu) {
+        if render::settings_menu_close_at_point(area, col, row) {
+            return Some(Action::CancelOverlay);
+        }
+        return match render::settings_menu_choice_at_point(area, col, row)? {
+            render::SettingsChoice::Theme => Some(Action::OpenThemePicker),
+        };
+    }
+
+    if let Some(state) = app.theme_picker_state() {
+        let len = state.entries.len();
+        let selected = state.selected_index();
+        let offset = state.offset();
+        let layout = render::theme_picker_layout(area, len);
+        if let Some(action) =
+            dialog_hint_action(app, layout.hints, render::theme_picker_hints(), col, row)
+        {
+            return Some(action);
+        }
+        if render::point_in_rect(layout.list, col, row)
+            && let Some(index) = list_row_at(layout.list, col, row, offset, len)
+        {
+            // First click selects (and previews); a second click on the
+            // already-selected row confirms, like Enter.
+            return Some(if Some(index) == selected {
+                Action::ThemePickerConfirm
+            } else {
+                Action::ThemePickerSelect(index)
+            });
+        }
+        return None;
+    }
+
     if let Some((focus, input_is_empty)) = app
         .edit_metadata_state()
         .map(|s| (s.focus, s.input.as_str().trim().is_empty()))
@@ -952,6 +985,16 @@ fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16
         {
             state.scroll_by(delta, layout.list.height);
         }
+        return;
+    }
+
+    if let Some(len) = app.theme_picker_state().map(|s| s.entries.len()) {
+        let layout = render::theme_picker_layout(area, len);
+        if render::point_in_rect(layout.list, mouse.column, mouse.row)
+            && let Some(state) = app.theme_picker_state_mut()
+        {
+            state.scroll_by(delta, layout.list.height);
+        }
     }
 }
 
@@ -1038,6 +1081,9 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::OpenMetadataMenu if app.can_act_on_selected_entry() => {
             Some(Action::OpenMetadataMenu)
         }
+        render::HintId::OpenSettings => Some(Action::OpenSettingsMenu),
+        render::HintId::ThemePickerApply => Some(Action::ThemePickerConfirm),
+        render::HintId::ThemePickerRevert => Some(Action::ThemePickerCancel),
         render::HintId::HintsToggle => Some(Action::ToggleHints),
         render::HintId::ToggleJournals => Some(Action::ToggleJournals),
         // Clicking the tabs hint steps forward through the tabs (Right); scope

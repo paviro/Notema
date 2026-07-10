@@ -103,6 +103,15 @@ pub(crate) enum Action {
     LocationSelectRow,
     LocationSave,
     LocationClear,
+    // Settings menu + theme picker overlays
+    OpenSettingsMenu,
+    OpenThemePicker,
+    ThemePickerMoveUp,
+    ThemePickerMoveDown,
+    /// Select (and live-preview) the row at this index — mouse click.
+    ThemePickerSelect(usize),
+    ThemePickerConfirm,
+    ThemePickerCancel,
     // Image viewer overlay
     OpenImageViewer(usize),
     ImageViewerNext,

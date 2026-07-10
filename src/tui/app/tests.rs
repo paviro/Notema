@@ -1,4 +1,5 @@
 use super::*;
+use crate::tui::state::ListNav;
 use crate::tui::test_support::{app_with_journals, new_app, new_app_with_state};
 
 fn key_char(ch: char) -> crossterm::event::KeyEvent {
@@ -733,4 +734,124 @@ fn refresh_preserves_journal_pixel_scroll_offset() {
     app.refresh().unwrap();
 
     assert_eq!(app.nav.journal_list.offset(), 15);
+}
+
+// ── Settings menu / theme picker ──────────────────────────────────────────────
+
+#[test]
+fn theme_picker_opens_on_the_active_theme_with_bundled_entries() {
+    let mut app = app_with_journals(&["work"]);
+    app.config.ui.theme = "e-ink".to_string();
+
+    app.open_theme_picker();
+
+    let state = app.theme_picker_state().expect("picker open");
+    // The bundled themes were materialized and listed, sorted by name.
+    let names: Vec<&str> = state.entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["blossom", "classic", "e-ink", "fjord", "grove", "journal"]
+    );
+    assert!(state.entries.iter().all(|entry| entry.theme.is_some()));
+    // Selection seeds on the configured theme.
+    assert_eq!(
+        state.selected_index(),
+        names.iter().position(|n| *n == "e-ink")
+    );
+    assert_eq!(state.previous_name, "e-ink");
+}
+
+#[test]
+fn theme_picker_confirm_saves_the_config_and_closes() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_theme_picker();
+    let fjord = app
+        .theme_picker_state()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|entry| entry.name == "fjord")
+        .unwrap();
+
+    app.theme_picker_select(fjord);
+    app.theme_picker_confirm();
+
+    assert!(!app.has_overlay());
+    assert_eq!(app.config.ui.theme, "fjord");
+    // The change was persisted, not just held in memory.
+    let saved = crate::config::load_config(&app.config_path).unwrap();
+    assert_eq!(saved.ui.theme, "fjord");
+    assert!(
+        app.toasts
+            .items()
+            .iter()
+            .any(|toast| toast.message == "Theme set to fjord")
+    );
+}
+
+#[test]
+fn theme_picker_cancel_reverts_the_preview_and_leaves_config_untouched() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_theme_picker();
+    let previous = app.theme_picker_state().unwrap().previous;
+    let eink = app
+        .theme_picker_state()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|entry| entry.name == "e-ink")
+        .unwrap();
+
+    // Moving the selection previews immediately…
+    app.theme_picker_select(eink);
+    assert_ne!(crate::tui::theme::theme(), previous);
+
+    // …and Esc restores the open-time theme without touching the config.
+    app.theme_picker_cancel();
+
+    assert!(!app.has_overlay());
+    assert_eq!(crate::tui::theme::theme(), previous);
+    assert_eq!(app.config.ui.theme, crate::tui::theme::DEFAULT_THEME);
+    assert!(
+        !app.config_path.exists(),
+        "cancel must not write the config"
+    );
+}
+
+#[test]
+fn theme_picker_confirm_on_a_broken_theme_toasts_and_stays_open() {
+    let mut app = app_with_journals(&["work"]);
+    let themes = crate::tui::theme::themes_dir(&app.config_path);
+    fs::create_dir_all(&themes).unwrap();
+    fs::write(themes.join("busted.toml"), "colors = 12\n").unwrap();
+    app.open_theme_picker();
+    let busted = app
+        .theme_picker_state()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|entry| entry.name == "busted")
+        .unwrap();
+    assert!(
+        app.theme_picker_state().unwrap().entries[busted]
+            .theme
+            .is_none(),
+        "broken file should fail to parse"
+    );
+
+    let before = crate::tui::theme::theme();
+    app.theme_picker_select(busted);
+    // A broken row never previews.
+    assert_eq!(crate::tui::theme::theme(), before);
+
+    app.theme_picker_confirm();
+
+    assert!(app.theme_picker_state().is_some(), "picker stays open");
+    assert_eq!(app.config.ui.theme, crate::tui::theme::DEFAULT_THEME);
+    assert!(
+        app.toasts
+            .items()
+            .iter()
+            .any(|toast| toast.message.contains("broken"))
+    );
 }

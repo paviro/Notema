@@ -123,9 +123,15 @@ pub(crate) fn theme() -> Theme {
 }
 
 /// Swap the active theme; the next frame repaints with it. Used at startup,
-/// by live reload, and by the theme picker's preview.
+/// by live reload, and by the theme picker's preview. Under test it swaps the
+/// per-thread override instead, so parallel tests can't restyle each other.
 pub(crate) fn install(theme: Theme) {
-    *THEME.write().expect("theme lock") = Some(theme);
+    #[cfg(test)]
+    TEST_THEME.with(|cell| cell.set(Some(theme)));
+    #[cfg(not(test))]
+    {
+        *THEME.write().expect("theme lock") = Some(theme);
+    }
 }
 
 /// The dark/light mode resolved at startup, cached so live reload and the
@@ -494,6 +500,12 @@ fn ensure_bundled(dir: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Materialize any missing bundled theme files, so the theme picker lists them
+/// even when startup loading hasn't touched the directory yet.
+pub(crate) fn ensure_bundled_themes(config_path: &Path) -> Result<()> {
+    ensure_bundled(&themes_dir(config_path))
 }
 
 /// Load the named theme, materializing the bundled files first. Any failure

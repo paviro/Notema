@@ -2167,6 +2167,82 @@ fn editor_metadata_menu_hit_tests_rows() {
     assert!(found_mood);
 }
 
+// ── Settings menu / theme picker ─────────────────────────────────────────────
+
+#[test]
+fn settings_menu_lists_the_theme_row_and_hit_tests_it() {
+    let text = render_to_text(64, 20, chrome::draw_settings_menu);
+    assert!(text.contains("Settings"));
+    assert!(text.contains("Theme…"));
+    assert!(text.contains("enter select · esc close"));
+
+    let area = Rect::new(0, 0, 64, 20);
+    let mut found_theme = false;
+    let mut close_found = false;
+    for y in 0..area.height {
+        for x in 0..area.width {
+            if matches!(
+                chrome::settings_menu_choice_at_point(area, x, y),
+                Some(chrome::SettingsChoice::Theme)
+            ) {
+                found_theme = true;
+            }
+            close_found |= chrome::settings_menu_close_at_point(area, x, y);
+        }
+    }
+    assert!(found_theme);
+    assert!(close_found);
+}
+
+#[test]
+fn theme_picker_lists_bundled_themes_with_the_active_row_marked() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_theme_picker();
+
+    let rows = render_to_rows(90, 30, |frame| draw(frame, &mut app));
+    let text = rows.join("\n");
+
+    // Dialog frame with its title and hint row.
+    assert!(text.contains(" Theme "), "dialog title missing:\n{text}");
+    assert!(text.contains("enter  apply"));
+    assert!(text.contains("esc  revert"));
+    // Every bundled theme is listed; the configured one carries the ● marker.
+    for name in ["blossom", "classic", "e-ink", "fjord", "grove", "journal"] {
+        assert!(text.contains(name), "theme '{name}' missing:\n{text}");
+    }
+    assert!(text.contains("● journal"), "active marker missing:\n{text}");
+}
+
+#[test]
+fn theme_picker_renders_broken_rows_in_the_error_style() {
+    let mut app = app_with_journals(&["work"]);
+    let themes = crate::tui::theme::themes_dir(&app.config_path);
+    fs::create_dir_all(&themes).unwrap();
+    fs::write(themes.join("busted.toml"), "colors = 12\n").unwrap();
+    app.open_theme_picker();
+    let len = app.theme_picker_state().unwrap().entries.len();
+
+    let backend = render_app(app, 90, 30);
+    let buffer = backend.buffer();
+    let rows: Vec<String> = buffer
+        .content()
+        .chunks(90)
+        .map(|row| row.iter().map(|cell| cell.symbol()).collect())
+        .collect();
+    let (y, line) = rows
+        .iter()
+        .enumerate()
+        .find(|(_, line)| line.contains("busted (broken)"))
+        .expect("broken row rendered");
+    let x = line.find("busted").unwrap() as u16;
+
+    let error_fg = crate::tui::theme::theme().error().fg.unwrap();
+    assert_eq!(buffer[(x, y as u16)].fg, error_fg);
+    // The layout the mouse handler uses matches where the list was drawn.
+    let layout = theme_picker_layout(Rect::new(0, 0, 90, 30), len);
+    assert!(point_in_rect(layout.list, x, y as u16));
+}
+
 // ── Flat chrome (bg-layered themes) ──────────────────────────────────────────
 
 mod flat_chrome_tests {

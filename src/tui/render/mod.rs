@@ -38,13 +38,14 @@ pub(crate) use super::surface::{
     EntryListGeometry, EntryMetadataValues, PanelGeometry, entry_metadata_layout, point_in_rect,
 };
 pub(crate) use chrome::{
-    Hint, HintId, MetadataChoice, MetadataMenuMode, centered_rect_fixed_size, confirm_button_at,
-    container_block, count_label, draw_editor_discard_confirm, draw_editor_shortcuts,
-    draw_metadata_menu, draw_modal_frame, draw_toasts, editor_discard_choice_at_point,
-    editor_shortcut_close_at_point, editor_shortcut_hint_at_point, expanded_footer_height,
-    expanded_footer_hint_id_at_point, expanded_footer_lines, flat_chrome, footer_hint_id_at_point,
-    footer_lines, hint_id_at_wrapped, metadata_menu_choice_at_point, metadata_menu_close_at_point,
-    panel_block, panel_focus_stripe, render_centered_notice, render_scrollbar_if_needed,
+    Hint, HintId, MetadataChoice, MetadataMenuMode, SettingsChoice, centered_rect_fixed_size,
+    confirm_button_at, container_block, count_label, draw_editor_discard_confirm,
+    draw_editor_shortcuts, draw_metadata_menu, draw_modal_frame, draw_toasts,
+    editor_discard_choice_at_point, editor_shortcut_close_at_point, editor_shortcut_hint_at_point,
+    expanded_footer_height, expanded_footer_hint_id_at_point, expanded_footer_lines, flat_chrome,
+    footer_hint_id_at_point, footer_lines, hint_id_at_wrapped, metadata_menu_choice_at_point,
+    metadata_menu_close_at_point, panel_block, panel_focus_stripe, render_centered_notice,
+    render_scrollbar_if_needed, settings_menu_choice_at_point, settings_menu_close_at_point,
 };
 #[cfg(test)]
 pub(crate) use chrome::{
@@ -55,12 +56,12 @@ pub(crate) use dialogs::{
     confirm_delete_inner, feelings_dialog_hints, feelings_dialog_layout,
     feelings_selected_line_count, location_dialog_hints, location_dialog_layout,
     location_list_row_at, location_list_rows, metadata_dialog_hints, metadata_dialog_layout,
-    mood_dialog_hints, mood_dialog_layout,
+    mood_dialog_hints, mood_dialog_layout, theme_picker_hints, theme_picker_layout,
 };
 use dialogs::{
     draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_location_dialog,
     draw_edit_metadata_dialog, draw_edit_mood_dialog, draw_fetching_environment,
-    draw_new_journal_input,
+    draw_new_journal_input, draw_theme_picker,
 };
 use entries::draw_entry_list;
 use image_viewer::draw_image_viewer;
@@ -185,6 +186,14 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
 
     if matches!(app.overlay, crate::tui::state::Overlay::MetadataMenu) {
         draw_metadata_menu(frame, MetadataMenuMode::Viewer);
+    }
+
+    if matches!(app.overlay, crate::tui::state::Overlay::SettingsMenu) {
+        chrome::draw_settings_menu(frame);
+    }
+
+    if let Some(state) = app.theme_picker_state_mut() {
+        draw_theme_picker(frame, state);
     }
 
     if let Some(input) = app.new_journal_input_mut() {

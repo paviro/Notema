@@ -13,7 +13,7 @@ use crate::tui::app::{
     FeelingRow, LocationResolveStatus,
 };
 use crate::tui::entry_rows::wrap_text;
-use crate::tui::state::{DeleteContext, EditMoodState, ListNav};
+use crate::tui::state::{DeleteContext, EditMoodState, ListNav, ThemePickerState};
 use crate::tui::surface::metadata_value_rows;
 use crate::tui::text_input::TextInput;
 use crate::tui::theme::theme;
@@ -64,6 +64,11 @@ fn feelings_selected_rows(selected: &[String]) -> Vec<Vec<usize>> {
 pub(crate) fn feelings_selected_line_count(selected: &[String]) -> usize {
     feelings_selected_rows(selected).len().max(1)
 }
+
+const THEME_PICKER_HINTS: [Hint; 2] = [
+    Hint::new("apply", "enter", HintId::ThemePickerApply),
+    Hint::new("revert", "esc", HintId::ThemePickerRevert),
+];
 
 const MOOD_DIALOG_HINTS: [Hint; 5] = [
     Hint::new("decrease", "←", HintId::MoodDecrease),
@@ -185,6 +190,7 @@ const CONFIRM_DIALOG_WIDTH: u16 = 42;
 const NEW_JOURNAL_DIALOG_WIDTH: u16 = 56;
 const METADATA_DIALOG_MAX_VISIBLE_ROWS: u16 = 14;
 const FEELINGS_DIALOG_MAX_VISIBLE_ROWS: u16 = 16;
+const THEME_PICKER_MAX_VISIBLE_ROWS: u16 = 14;
 
 pub(crate) fn feelings_dialog_hints(focus: EditMetadataFocus) -> &'static [Hint] {
     match focus {
@@ -195,6 +201,10 @@ pub(crate) fn feelings_dialog_hints(focus: EditMetadataFocus) -> &'static [Hint]
 
 pub(crate) fn mood_dialog_hints() -> &'static [Hint] {
     &MOOD_DIALOG_HINTS
+}
+
+pub(crate) fn theme_picker_hints() -> &'static [Hint] {
+    &THEME_PICKER_HINTS
 }
 
 pub(crate) fn location_dialog_hints(
@@ -502,6 +512,99 @@ pub(crate) fn feelings_dialog_layout(
         selected,
         hints,
     }
+}
+
+fn theme_picker_hint_height(frame_area: Rect) -> u16 {
+    hint_height(
+        &THEME_PICKER_HINTS,
+        dialog_hint_width(frame_area, LIST_DIALOG_WIDTH),
+    )
+}
+
+fn theme_picker_area(frame_area: Rect, len: usize) -> Rect {
+    let hint_height = theme_picker_hint_height(frame_area);
+    let visible = (len as u16).clamp(1, THEME_PICKER_MAX_VISIBLE_ROWS);
+    // Borders (2) + the list + a blank spacer + the hint block.
+    let h = (3 + visible + hint_height).min(frame_area.height.saturating_sub(2));
+    super::centered_rect_fixed_size(LIST_DIALOG_WIDTH, h, frame_area)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ThemePickerLayout {
+    pub(crate) area: Rect,
+    pub(crate) list: Rect,
+    pub(crate) hints: Rect,
+}
+
+/// The theme picker's geometry, shared by the draw and the mouse hit-tests so
+/// the click map can't drift from the pixels.
+pub(crate) fn theme_picker_layout(frame_area: Rect, len: usize) -> ThemePickerLayout {
+    let area = theme_picker_area(frame_area, len);
+    let inner = dialog_inner(area);
+    let hint_height = theme_picker_hint_height(frame_area);
+    let list = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        // A blank spacer row separates the list from the hint block.
+        height: inner.height.saturating_sub(1 + hint_height),
+    };
+    let hints = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(hint_height),
+        width: inner.width,
+        height: hint_height,
+    };
+
+    ThemePickerLayout { area, list, hints }
+}
+
+pub(super) fn draw_theme_picker(frame: &mut Frame<'_>, state: &mut ThemePickerState) {
+    let layout = theme_picker_layout(frame.area(), state.entries.len());
+
+    state.normalize_list_state();
+    let len = state.entries.len();
+    let max_visible = layout.list.height;
+    let max_offset = len.saturating_sub(max_visible as usize);
+    let scroll = state.offset().min(max_offset);
+    state.list.set_offset(scroll);
+
+    let items: Vec<ListItem<'_>> = if state.entries.is_empty() {
+        vec![ListItem::new(Line::from(" (no themes found)"))]
+    } else {
+        state
+            .entries
+            .iter()
+            .map(|entry| {
+                // The configured theme's row carries the active marker; a file
+                // that failed to parse renders in the error style so picking it
+                // (a no-op preview, a toast on Enter) isn't a surprise.
+                let marker = if entry.name == state.previous_name {
+                    "●"
+                } else {
+                    " "
+                };
+                match entry.theme {
+                    Some(_) => ListItem::new(Line::from(format!("{marker} {}", entry.name))),
+                    None => ListItem::new(Line::from(Span::styled(
+                        format!("{marker} {} (broken)", entry.name),
+                        theme().error(),
+                    ))),
+                }
+            })
+            .collect()
+    };
+
+    draw_dialog_frame(frame, layout.area, "Theme", true);
+    let list = List::new(items)
+        .highlight_style(theme().selection())
+        .highlight_symbol(list_highlight_symbol())
+        .highlight_spacing(HighlightSpacing::Always);
+    let mut render_state =
+        list_state_for_render(state.selected_index(), scroll, layout.list.height, len > 0);
+    frame.render_stateful_widget(list, layout.list, &mut render_state);
+    render_hint_line(frame, theme_picker_hints(), layout.hints);
+    render_scrollbar_if_needed(frame, layout.area, len, max_visible, scroll);
 }
 
 #[derive(Clone, Copy)]
