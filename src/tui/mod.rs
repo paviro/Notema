@@ -18,7 +18,7 @@ mod worker;
 
 use crate::{AppResult, config::Config};
 use crossterm::{
-    cursor::Show,
+    cursor::{SetCursorStyle, Show},
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
     },
@@ -88,7 +88,12 @@ fn with_terminal(
 ) -> AppResult<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        SetCursorStyle::BlinkingBar
+    )?;
     let mut terminal_guard = TerminalRestoreGuard::new();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -366,7 +371,13 @@ impl Drop for TerminalRestoreGuard {
 
 fn restore_terminal(output: &mut impl Write) -> AppResult<()> {
     disable_raw_mode()?;
-    execute!(output, DisableMouseCapture, LeaveAlternateScreen, Show)?;
+    execute!(
+        output,
+        DisableMouseCapture,
+        LeaveAlternateScreen,
+        SetCursorStyle::DefaultUserShape,
+        Show
+    )?;
     Ok(())
 }
 

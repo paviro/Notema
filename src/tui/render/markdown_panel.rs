@@ -21,7 +21,7 @@ use std::path::Path;
 
 use crate::tui::{
     app::{App, EntryViewImageHits, Focus},
-    editor_state::EntryEditor,
+    editor_state::{EditorPrompt, EntryEditor},
     image::{digit_for_image, sole_image_ref},
     render::{
         count_label, entry_metadata_layout, panel_block, render_centered_notice,
@@ -113,8 +113,34 @@ pub(crate) fn draw_entry_editor(
         height: body_area.height.saturating_sub(top_margin),
     };
 
+    // While selecting, draw the reversed-block caret so the boundary character
+    // reads as part of the selection (a thin bar can't fill that cell); otherwise
+    // hide the widget caret and use the native bar cursor placed below.
+    let selecting = editor.textarea.selection_range().is_some();
+    editor.textarea.set_cursor_style(if selecting {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    });
+
     editor.text_rect = text_rect;
     frame.render_widget(&editor.textarea, text_rect);
+
+    // Native terminal bar cursor, only while typing without a selection and with
+    // no modal prompt over the editor. screen_cursor().row is the absolute wrapped
+    // row; subtracting the scroll top gives the viewport-relative row. Wrap mode
+    // has no horizontal scroll, so col maps directly. Valid only after render.
+    if !selecting && matches!(editor.prompt, EditorPrompt::None) {
+        let sc = editor.textarea.screen_cursor();
+        let scroll = editor.textarea.scroll_offset() as usize;
+        if let Some(rel) = sc.row.checked_sub(scroll) {
+            let x = text_rect.x + sc.col as u16;
+            let y = text_rect.y + rel as u16;
+            if x < text_rect.x + text_rect.width && y < text_rect.y + text_rect.height {
+                frame.set_cursor_position((x, y));
+            }
+        }
+    }
 
     // Scroll offset and wrapped-line count are only valid after the textarea has
     // rendered (it stores them during render), so read them here.
