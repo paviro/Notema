@@ -54,6 +54,8 @@ fn write_temp_then_rename(temp: &Path, path: &Path, content: &[u8], private: boo
             options.mode(0o600);
         }
     }
+    #[cfg(not(unix))]
+    let _ = private;
     let mut file = options.open(temp)?;
     file.write_all(content)?;
     file.sync_all()?;
