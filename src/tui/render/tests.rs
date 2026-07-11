@@ -2114,7 +2114,7 @@ fn internal_editor_shows_entry_location() {
 fn editor_shortcuts_collapses_when_short() {
     let has_grid = |h: u16| {
         render_to_text(64, h, |frame| {
-            super::chrome::draw_editor_shortcuts(frame, &mut 0)
+            super::menus::draw_editor_shortcuts(frame, &mut 0)
         })
         .contains('┼')
     };
@@ -2129,10 +2129,10 @@ fn editor_shortcuts_hit_test_action_rows() {
     let mut close_found = false;
     for y in 0..area.height {
         for x in 0..area.width {
-            if let Some(id) = super::chrome::editor_shortcut_hint_at_point(area, 0, x, y) {
+            if let Some(id) = super::menus::editor_shortcut_hint_at_point(area, 0, x, y) {
                 found.push(id);
             }
-            close_found |= super::chrome::editor_shortcut_close_at_point(area, 0, x, y);
+            close_found |= super::menus::editor_shortcut_close_at_point(area, 0, x, y);
         }
     }
 
@@ -2151,13 +2151,13 @@ fn editor_metadata_menu_hit_tests_rows() {
     let mut found_mood = false;
     for y in 0..area.height {
         for x in 0..area.width {
-            let mode = super::chrome::MetadataMenuMode::Editor;
-            match super::chrome::metadata_menu_choice_at_point(area, mode, x, y) {
-                Some(super::chrome::MetadataChoice::Metadata(MetadataKind::Tags)) => {
+            let mode = super::menus::MetadataMenuMode::Editor;
+            match super::menus::metadata_menu_choice_at_point(area, mode, x, y) {
+                Some(super::menus::MetadataChoice::Metadata(MetadataKind::Tags)) => {
                     found_tags = true;
                 }
-                Some(super::chrome::MetadataChoice::Feelings) => found_feelings = true,
-                Some(super::chrome::MetadataChoice::Mood) => found_mood = true,
+                Some(super::menus::MetadataChoice::Feelings) => found_feelings = true,
+                Some(super::menus::MetadataChoice::Mood) => found_mood = true,
                 _ => {}
             }
         }
@@ -2172,7 +2172,7 @@ fn editor_metadata_menu_hit_tests_rows() {
 
 #[test]
 fn settings_menu_lists_the_theme_row_and_hit_tests_it() {
-    let text = render_to_text(64, 20, |frame| chrome::draw_settings_menu(frame, None));
+    let text = render_to_text(64, 20, |frame| menus::draw_settings_menu(frame, None));
     assert!(text.contains("Settings"));
     assert!(text.contains("Theme…"));
     assert!(text.contains("enter select · esc close"));
@@ -2183,12 +2183,12 @@ fn settings_menu_lists_the_theme_row_and_hit_tests_it() {
     for y in 0..area.height {
         for x in 0..area.width {
             if matches!(
-                chrome::settings_menu_choice_at_point(area, x, y),
-                Some(chrome::SettingsChoice::Theme)
+                menus::settings_menu_choice_at_point(area, x, y),
+                Some(menus::SettingsChoice::Theme)
             ) {
                 found_theme = true;
             }
-            close_found |= chrome::settings_menu_close_at_point(area, x, y);
+            close_found |= menus::settings_menu_close_at_point(area, x, y);
         }
     }
     assert!(found_theme);
@@ -2619,7 +2619,7 @@ mod flat_chrome_tests {
         theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
         let theme = theme::test_flat_theme();
         let app = app_with_journals(&["alpha"]);
-        let text = chrome::footer_lines(&app, 120);
+        let text = footer::footer_lines(&app, 120);
         let spans: Vec<_> = text
             .lines
             .iter()
@@ -2755,8 +2755,8 @@ mod flat_chrome_tests {
         pin_flat();
         let theme = theme::test_flat_theme();
         let mut app = app_with_journals(&["alpha"]);
-        app.hover = crate::tui::state::HoverTarget::FooterHint(chrome::HintId::Quit);
-        let text = chrome::footer_lines(&app, 120);
+        app.hover = crate::tui::state::HoverTarget::FooterHint(footer::HintId::Quit);
+        let text = footer::footer_lines(&app, 120);
         let label = text
             .lines
             .iter()
@@ -2773,7 +2773,7 @@ mod flat_chrome_tests {
         let theme = theme::test_flat_theme();
         let mut app = app_with_journals(&["alpha"]);
         let label_style = |app: &App| {
-            chrome::footer_lines(app, 120)
+            footer::footer_lines(app, 120)
                 .lines
                 .iter()
                 .flat_map(|line| line.spans.iter())
@@ -2783,7 +2783,7 @@ mod flat_chrome_tests {
         };
 
         assert_eq!(label_style(&app), theme.muted());
-        app.hover = crate::tui::state::HoverTarget::FooterHint(chrome::HintId::Quit);
+        app.hover = crate::tui::state::HoverTarget::FooterHint(footer::HintId::Quit);
         assert_eq!(label_style(&app), theme.text());
         theme::set_chrome_override(None);
     }
@@ -2835,7 +2835,7 @@ mod flat_chrome_tests {
         );
 
         // Table dialog: the footer sits above the bottom padding row.
-        let text_rows = render_to_rows(64, 20, |frame| chrome::draw_settings_menu(frame, None));
+        let text_rows = render_to_rows(64, 20, |frame| menus::draw_settings_menu(frame, None));
         let footer_row = text_rows
             .iter()
             .position(|row| row.contains("esc close"))
@@ -2862,7 +2862,7 @@ mod flat_chrome_tests {
         // Two columns each side; padding + title + blank rows above, one
         // padding row below.
         assert_eq!(
-            chrome::dialog_inner(Rect::new(10, 5, 44, 20)),
+            frames::dialog_inner(Rect::new(10, 5, 44, 20)),
             Rect::new(12, 8, 40, 16)
         );
     }

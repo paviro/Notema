@@ -20,10 +20,11 @@ use crate::tui::theme::theme;
 
 use super::{
     chrome::{
-        Hint, HintId, centered_rect_fixed_size, dialog_frame_rows, dialog_inner, draw_dialog_frame,
-        flat_chrome, hint_height, hint_lines, list_highlight_symbol, render_confirm_buttons,
-        render_scrollbar_if_needed, separator_style,
+        centered_rect_fixed_size, flat_chrome, list_highlight_symbol, render_scrollbar_if_needed,
+        separator_style,
     },
+    footer::{Hint, HintId, hint_height, hint_lines},
+    frames::{dialog_frame_rows, dialog_inner, draw_dialog_frame, render_confirm_buttons},
     list_state_for_render,
     markdown_panel::MoodBar,
 };

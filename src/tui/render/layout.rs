@@ -6,7 +6,7 @@ use crate::tui::app::{
 };
 use crate::tui::surface::{EntryListGeometry, PanelGeometry};
 
-use super::chrome::footer_height;
+use super::footer::footer_height;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TuiLayout {

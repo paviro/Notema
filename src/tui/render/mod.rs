@@ -1,13 +1,17 @@
 mod chrome;
 mod dialogs;
 mod entries;
+mod footer;
+mod frames;
 mod image_viewer;
 pub(crate) mod insights;
 mod journals;
 mod layout;
 mod markdown_panel;
+mod menus;
 mod pending;
 mod table;
+mod toasts;
 mod unlock;
 
 use ratatui::{
@@ -38,20 +42,8 @@ pub(crate) use super::surface::{
     EntryListGeometry, EntryMetadataValues, PanelGeometry, entry_metadata_layout, point_in_rect,
 };
 pub(crate) use chrome::{
-    Hint, HintId, MetadataChoice, MetadataMenuMode, SettingsChoice, centered_rect_fixed_size,
-    confirm_button_at, container_block, count_label, draw_editor_discard_confirm,
-    draw_editor_shortcuts, draw_metadata_menu, draw_modal_frame, draw_toasts,
-    editor_discard_choice_at_point, editor_shortcut_close_at_point, editor_shortcut_hint_at_point,
-    expanded_footer_height, expanded_footer_hint_id_at_point, expanded_footer_lines, flat_chrome,
-    footer_hint_id_at_point, footer_lines, hint_id_at_wrapped, metadata_menu_choice_at_point,
-    metadata_menu_close_at_point, metadata_menu_row_at_point, panel_block, panel_focus_stripe,
-    render_centered_notice, render_scrollbar_if_needed, settings_menu_choice_at_point,
-    settings_menu_close_at_point, settings_menu_row_at_point, toast_at_point,
-};
-#[cfg(test)]
-pub(crate) use chrome::{
-    expanded_footer_text, footer_height, footer_hint_id_at, footer_text, hint_grid_text,
-    hint_height, toast_rects,
+    centered_rect_fixed_size, container_block, count_label, flat_chrome, panel_block,
+    panel_focus_stripe, render_centered_notice, render_scrollbar_if_needed,
 };
 pub(crate) use dialogs::{
     confirm_delete_inner, feelings_dialog_hints, feelings_dialog_layout,
@@ -65,6 +57,19 @@ use dialogs::{
     draw_new_journal_input, draw_theme_picker,
 };
 use entries::draw_entry_list;
+pub(crate) use footer::{
+    Hint, HintId, expanded_footer_height, expanded_footer_hint_id_at_point, expanded_footer_lines,
+    footer_hint_id_at_point, footer_lines, hint_id_at_wrapped,
+};
+#[cfg(test)]
+pub(crate) use footer::{
+    expanded_footer_text, footer_height, footer_hint_id_at, footer_text, hint_grid_text,
+    hint_height,
+};
+pub(crate) use frames::{
+    confirm_button_at, draw_editor_discard_confirm, draw_modal_frame,
+    editor_discard_choice_at_point,
+};
 use image_viewer::draw_image_viewer;
 use insights::draw_journal_insights;
 pub(crate) use insights::insights_tab_at;
@@ -76,9 +81,18 @@ pub(crate) use layout::{TuiLayout, tui_layout};
 #[cfg(test)]
 use markdown_panel::metadata_scrolls_with_body;
 use markdown_panel::{draw_entry_editor, draw_selected_entry_view};
+pub(crate) use menus::{
+    MetadataChoice, MetadataMenuMode, SettingsChoice, draw_editor_shortcuts, draw_metadata_menu,
+    editor_shortcut_close_at_point, editor_shortcut_hint_at_point, metadata_menu_choice_at_point,
+    metadata_menu_close_at_point, metadata_menu_row_at_point, settings_menu_choice_at_point,
+    settings_menu_close_at_point, settings_menu_row_at_point,
+};
 pub(crate) use pending::{
     AccessNotice, draw_disable_notice, draw_pending_notice, draw_pending_request,
 };
+#[cfg(test)]
+pub(crate) use toasts::toast_rects;
+pub(crate) use toasts::{draw_toasts, toast_at_point};
 pub(crate) use unlock::draw_unlock;
 
 pub(crate) fn list_state_for_render(
@@ -202,7 +216,7 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
     }
 
     if matches!(app.overlay, crate::tui::state::Overlay::SettingsMenu) {
-        chrome::draw_settings_menu(frame, hovered_dialog_row);
+        menus::draw_settings_menu(frame, hovered_dialog_row);
     }
 
     if let Some(state) = app.theme_picker_state_mut() {
