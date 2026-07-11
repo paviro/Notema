@@ -16,6 +16,9 @@ on light, dark, and monochrome/e-ink terminals.
   keyboard (arrows + vim keys) navigation, live rendered markdown, in-terminal
   image rendering, and entry metadata.
 - **Fuzzy search** across the whole corpus, including metadata.
+- **Themes** — TOML theme files with flat or bordered chrome, dark/light
+  variants, a live-preview picker, and hot reload on edit. See
+  [`docs/THEMES.md`](docs/THEMES.md).
 - **Rich metadata** per entry — tags, people, activities, feelings (from a
   fixed vocabulary), a mood score (-5…+5), and a location (name an address,
   enter coordinates, or grab the device's current GPS — geocoded via
@@ -350,6 +353,11 @@ default = "personal"            # optional
 
 [attachments]
 download_remote_images = true   # fetch remote image links referenced in entries
+
+[ui]
+theme = "blossom"               # a theme in <config-dir>/themes/ — see docs/THEMES.md
+color_mode = "auto"             # auto | dark | light theme variant
+chrome = "default"              # default | flat | bordered — default follows the theme
 
 [ui.layout.entry_viewer]
 body_center_vertically = true   # center a short entry in the viewer when it fits
