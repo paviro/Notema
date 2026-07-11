@@ -850,8 +850,16 @@ fn draw_toast(
             );
         }
     } else {
+        let surface = if hovered {
+            theme().hover()
+        } else {
+            Style::default().bg(theme().panel_bg())
+        };
         frame.render_widget(
-            Block::default().borders(Borders::ALL).border_style(accent),
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(accent)
+                .style(surface),
             area,
         );
     }
@@ -910,7 +918,12 @@ pub(crate) fn draw_dialog_frame(
             );
         }
     } else {
-        let mut block = Block::default().borders(Borders::ALL);
+        // The panel surface, not `Clear`'s terminal default: bordered chrome
+        // on a colored theme must float dialogs on the theme's own surface.
+        // Classic resolves it to the terminal default, so nothing changes.
+        let mut block = Block::default()
+            .borders(Borders::ALL)
+            .style(Style::default().bg(theme().panel_bg()));
         if !title.is_empty() {
             block = block.title(format!(" {title} "));
         }
@@ -1668,7 +1681,8 @@ fn draw_table_dialog(
         let block = Block::default()
             .title(format!(" {} ", dialog.title))
             .title_bottom(Line::from(format!(" {} ", metrics.footer)).centered())
-            .borders(Borders::ALL);
+            .borders(Borders::ALL)
+            .style(Style::default().bg(theme().panel_bg()));
         frame.render_widget(block, metrics.area);
     }
 
@@ -1725,6 +1739,8 @@ pub(crate) fn draw_modal_frame(frame: &mut Frame<'_>, title: &str, key_hint: &st
         });
     }
 
+    // Full-screen modal: the app background, like the flat branch.
+    frame.buffer_mut().set_style(area, base_style());
     let mut block = Block::default()
         .borders(Borders::ALL)
         .title_top(Line::from(format!(" {title} ")));

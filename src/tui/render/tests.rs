@@ -2512,6 +2512,28 @@ mod flat_chrome_tests {
     }
 
     #[test]
+    fn bordered_dialogs_on_colored_themes_carry_the_panel_surface() {
+        // A colored theme forced into bordered chrome must not fall back to
+        // the terminal-default background inside its dialogs (`Clear` alone
+        // would). Classic is unaffected: its panel is the terminal default.
+        theme::set_test_theme(theme::test_flat_theme());
+        theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
+        let panel_bg = theme::test_flat_theme().panel_bg();
+        let backend = render_backend(80, 24, |frame| {
+            dialogs::draw_edit_metadata_dialog(
+                frame,
+                &mut tags_state(),
+                crate::tui::state::HoverTarget::None,
+            )
+        });
+        let area = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2).area;
+        let border = &backend.buffer()[(area.x, area.y)];
+        assert_eq!(border.symbol(), "┌", "chrome override not applied");
+        let interior = &backend.buffer()[(area.x + 1, area.y + 1)];
+        assert_eq!(interior.bg, panel_bg);
+    }
+
+    #[test]
     fn hovered_dialog_row_lifts_even_when_it_is_the_hidden_selection() {
         pin_flat();
         let theme = theme::test_flat_theme();

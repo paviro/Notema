@@ -141,6 +141,11 @@ fn draw_search_field(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
         ..rect
     };
     frame.render_widget(Clear, pad);
+    // Repaint the theme's background over the cleared strip — `Clear` resets
+    // to the terminal default, which shows on colored themes.
+    frame
+        .buffer_mut()
+        .set_style(pad, Style::default().bg(theme().bg()));
     let focused = app.is_search_input_active() && !app.has_overlay() && app.editor.is_none();
     let hovered = matches!(
         app.hover,
