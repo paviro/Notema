@@ -171,14 +171,14 @@ pub(super) struct ThemeFile {
 struct ChromeSection {
     /// The theme's preferred chrome — a preference, not a mandate, because the
     /// `[ui] chrome` setting can force flat/bordered on any theme.
-    style: ChromeStyle,
+    default_style: ChromeStyle,
     scrim: f32,
 }
 
 impl Default for ChromeSection {
     fn default() -> Self {
         Self {
-            style: ChromeStyle::Bordered,
+            default_style: ChromeStyle::Bordered,
             scrim: 0.0,
         }
     }
@@ -611,7 +611,7 @@ impl ThemeFile {
             md_blockquote,
             syntax: markdown.syntax.resolve(mode, palette)?,
             glyphs,
-            chrome: self.chrome.style,
+            chrome: self.chrome.default_style,
             scrim: self.chrome.scrim,
         })
     }

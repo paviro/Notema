@@ -26,7 +26,7 @@ chrome = "default"       # default | flat | bordered — default follows the the
 - `color_mode = "auto"` queries the terminal background (OSC 10/11) once at
   startup; an unknown answer counts as dark.
 - `chrome` forces flat or bordered chrome on every theme; `default` uses each
-  theme's own `chrome.style`.
+  theme's own `chrome.default_style`.
 
 ## Picker and live reload
 
@@ -68,7 +68,7 @@ terminal-default look. `←` marks a key that inherits from another when omitted
 
 | Key | Form | Default |
 |---|---|---|
-| `style` | `"flat"` \| `"bordered"` | `bordered` |
+| `default_style` | `"flat"` \| `"bordered"` | `bordered` |
 | `scrim` | `0.0`–`1.0` | `0.0` |
 
 `flat` separates surfaces by background layers; `bordered` draws boxes.
@@ -204,5 +204,5 @@ distinguished by three distinct fill glyphs instead of hue.
 - **Bordered** — the classic drawn borders; focus reads through thick + bold
   border strokes, and the selection marker is `>`.
 
-Themes declare their preferred chrome in `chrome.style`; the `[ui] chrome`
+Themes declare their preferred chrome in `chrome.default_style`; the `[ui] chrome`
 setting (or `b` in the picker) forces one on every theme.

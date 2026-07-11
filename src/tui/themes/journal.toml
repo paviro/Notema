@@ -15,7 +15,7 @@
 # next launch.
 
 [chrome]
-style = "flat"   # "flat" separates surfaces by background, "bordered" draws boxes
+default_style = "flat"   # "flat" separates surfaces by background, "bordered" draws boxes
 scrim = 0.45     # how much the screen dims behind dialogs (0 = classic dim)
 
 [surfaces]

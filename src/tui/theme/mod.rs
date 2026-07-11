@@ -332,7 +332,7 @@ static THEME: SessionCell<Theme> = SessionCell::new();
 static THEME: SessionCell<Theme> = SessionCell::new(&THEME_SLOT);
 
 /// The user's chrome override (`[ui] chrome = "flat"|"bordered"`), applied on
-/// top of whatever the active theme declares as its `chrome.style`. `None`
+/// top of whatever the active theme declares as its `chrome.default_style`. `None`
 /// (= `default`) follows the theme. Runtime-writable so the theme picker can
 /// cycle it with live preview.
 #[cfg(not(test))]

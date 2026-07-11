@@ -533,11 +533,11 @@ fn ensure_bundled_writes_missing_but_never_overwrites() {
 
     // A user-edited file survives the next materialization untouched.
     let edited = themes.join("journal.toml");
-    fs::write(&edited, "[chrome]\nstyle = \"bordered\"\n").unwrap();
+    fs::write(&edited, "[chrome]\ndefault_style = \"bordered\"\n").unwrap();
     ensure_bundled(&themes).unwrap();
     assert_eq!(
         fs::read_to_string(&edited).unwrap(),
-        "[chrome]\nstyle = \"bordered\"\n"
+        "[chrome]\ndefault_style = \"bordered\"\n"
     );
 }
 
