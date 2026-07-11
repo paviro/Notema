@@ -1,0 +1,109 @@
+# Arcade — the coin-op cabinet: true-black CRT glass, Pac-Man yellow as the
+# hero, and the ghost quartet (red, cyan, pink, orange) for everything else.
+# Bordered chrome with chunky quadrant-block bezels and █ pixel furniture, so it
+# reads like sprite art in a dark arcade. Light mode is a sun-faded flyer.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "bordered"
+scrim = 0.5
+
+[palette]
+coin    = { dark = "#ffe000", light = "#8a6d00" }  # Pac-Man / marquee yellow
+inky    = { dark = "#00e5ff", light = "#0088a8" }  # ghost cyan
+pinky   = { dark = "#ff2d95", light = "#c01366" }  # ghost pink
+blinky  = { dark = "#ff1744", light = "#c4112f" }  # insert-coin red
+clyde   = { dark = "#ff9e22", light = "#a85e00" }  # ghost orange
+oneup   = { dark = "#00e676", light = "#1e8a4e" }  # 1UP green
+
+[surfaces]
+base    = { dark = "#000000", light = "#f4f2ea" }
+content = { dark = "#000000", light = "#f4f2ea" }
+dialog  = { dark = "#0e0e14", light = "#eae7db" }
+element = { dark = "#16161f", light = "#ded9c9" }
+
+[text]
+body  = { dark = "#f2f2f2", light = "#1a1a1a" }
+muted = { dark = "#7a7a8a", light = "#77726a" }
+
+[accents]
+primary   = "coin"
+secondary = "inky"
+tertiary  = "pinky"
+
+[status]
+success = "oneup"
+warning = "clyde"
+error   = "blinky"
+info    = "inky"
+
+# Calm charcoal bezels; the focused panel glows insert-coin red so the active
+# cabinet stands out without the whole screen shouting.
+[borders]
+normal        = { dark = "#3a3a4a", light = "#c4c0b2" }
+subtle        = { dark = "#1e1e28", light = "#d8d4c6" }
+focused       = "blinky"
+unfocused     = { dark = "#3a3a4a", light = "#c4c0b2" }
+divider_style = "tertiary"
+
+[borders.glyphs]
+top_left     = "▛"
+top_right    = "▜"
+bottom_left  = "▙"
+bottom_right = "▟"
+horizontal   = "━"
+vertical     = "┃"
+focus_stripe = "▌"
+
+[interaction]
+selection = { bg = "coin", fg = { dark = "#000000", light = "#f4f2ea" }, bold = true }
+hover     = { bg = { dark = "#1c1c26", light = "#e2ddcd" } }
+key_hint  = { fg = "inky", bold = true }
+
+[scrollbar]
+thumb = "coin"
+track = { dark = "#1e1e28", light = "#d8d4c6" }
+
+[scrollbar.glyphs]
+thumb = "█"
+track = "▒"
+
+[charts]
+positive = { glyph = "█", color = "oneup" }
+neutral  = { glyph = "▓", color = { dark = "#7a7a8a", light = "#77726a" } }
+negative = { glyph = "█", color = "blinky" }
+bar      = { glyph = "█", color = "inky" }
+track    = { glyph = "░", color = { dark = "#3a3a4a", light = "#c4c0b2" } }
+baseline = { color = { dark = "#3a3a4a", light = "#c4c0b2" } }
+
+[markdown]
+heading    = { fg = "coin", bold = true }
+link       = { fg = "inky", underlined = true }
+code       = "pinky"
+blockquote = { fg = { dark = "#7a7a8a", light = "#77726a" } }
+
+[markdown.syntax]
+comment     = { dark = "#7a7a8a", light = "#77726a" }
+keyword     = "blinky"
+string      = "oneup"
+string_escape = "clyde"
+number      = "coin"
+constant    = "coin"
+function    = "inky"
+type        = "pinky"
+property    = "inky"
+punctuation = { dark = "#7a7a8a", light = "#77726a" }
+attribute   = "clyde"
+tag         = "pinky"
+label       = "blinky"
+error       = "blinky"
+
+[toast.glyphs]
+edge = "█"
+
+[tabs]
+separator_style = "secondary"
+
+[tabs.glyphs]
+separator = "▪"

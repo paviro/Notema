@@ -30,7 +30,7 @@ use std::sync::RwLock;
 
 /// The bundled themes, embedded so the binary can materialize and fall back to
 /// them without touching the network or the repo.
-const BUNDLED: [(&str, &str); 15] = [
+const BUNDLED: [(&str, &str); 23] = [
     ("journal", include_str!("../themes/journal.toml")),
     ("classic", include_str!("../themes/classic.toml")),
     ("e-ink", include_str!("../themes/e-ink.toml")),
@@ -46,6 +46,14 @@ const BUNDLED: [(&str, &str); 15] = [
     ("crt", include_str!("../themes/crt.toml")),
     ("cyberpunk", include_str!("../themes/cyberpunk.toml")),
     ("vaporwave", include_str!("../themes/vaporwave.toml")),
+    ("matrix", include_str!("../themes/matrix.toml")),
+    ("tron", include_str!("../themes/tron.toml")),
+    ("eldritch", include_str!("../themes/eldritch.toml")),
+    ("hal", include_str!("../themes/hal.toml")),
+    ("gameboy", include_str!("../themes/gameboy.toml")),
+    ("wasteland", include_str!("../themes/wasteland.toml")),
+    ("arcade", include_str!("../themes/arcade.toml")),
+    ("deep-space", include_str!("../themes/deep-space.toml")),
 ];
 
 /// The theme `load` falls back to when the configured one is missing or broken.

@@ -8,10 +8,12 @@ the file stem is the theme name.
 
 Bundled themes: `blossom` (default), `journal`, `classic`, `e-ink`, `fjord`,
 `grove`, `matcha`, `tokyonight`, `catppuccin`, `rose-pine`, `dungeon`,
-`synthwave`, `crt`, `cyberpunk`, `vaporwave`. `classic` is the terminal-default
-look the app has without any theme; `e-ink` is pure black-and-white for
-monochrome displays; the last five are bold, high-color looks that lean on the
-accent, structural, and glyph tokens below.
+`synthwave`, `crt`, `cyberpunk`, `vaporwave`, `matrix`, `tron`, `eldritch`,
+`hal`, `gameboy`, `wasteland`, `arcade`, `deep-space`. `classic` is the
+terminal-default look the app has without any theme; `e-ink` is pure
+black-and-white for monochrome displays; the rest are bold, high-color looks
+(the last eight riffing on films and games) that lean on the accent,
+structural, and glyph tokens below.
 
 A missing or broken configured theme falls back to the built-in `blossom` with
 a warning on stderr — the app always starts.

@@ -1,0 +1,76 @@
+# Deep Space — drifting through a nebula: deep navy void, soft off-white stars,
+# with cyan and magenta glowing at the edges of sight. Flat chrome, calm and
+# roomy. Light mode is a pale ice-field. The quiet, "serious but fun" option.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "flat"
+scrim = 0.5
+
+[surfaces]
+base    = { dark = "#060a16", light = "#eef2fa" }
+content = { dark = "#0b1120", light = "#e2e8f4" }
+dialog  = { dark = "#10182b", light = "#d6deee" }
+element = { dark = "#161f38", light = "#ccd6e8" }
+
+[text]
+body  = { dark = "#dfe8f7", light = "#1a2436" }
+muted = { dark = "#6a7690", light = "#5c6880" }
+
+[accents]
+primary   = { dark = "#6cc6ff", light = "#1f6fa8" }
+secondary = { dark = "#ff7bd5", light = "#a83b86" }
+tertiary  = { dark = "#9d8cff", light = "#5544c4" }
+
+[status]
+success = { dark = "#5fd39a", light = "#2e7d5a" }
+warning = { dark = "#ffcf6c", light = "#a87e14" }
+error   = { dark = "#ff6b7d", light = "#c4364a" }
+info    = { dark = "#6cc6ff", light = "#1f6fa8" }
+
+[borders]
+normal        = { dark = "#22304a", light = "#bcc8dc" }
+subtle        = { dark = "#121a2c", light = "#d4dcea" }
+focused       = { dark = "#6cc6ff", light = "#1f6fa8" }
+unfocused     = { dark = "#22304a", light = "#bcc8dc" }
+divider_style = "tertiary"
+
+[interaction]
+selection = { bg = { dark = "#6cc6ff", light = "#1f6fa8" }, fg = { dark = "#060a16", light = "#ffffff" }, bold = true }
+hover     = { bg = { dark = "#16203a", light = "#d2dcec" } }
+key_hint  = { fg = { dark = "#ff7bd5", light = "#a83b86" }, bold = true }
+
+[scrollbar]
+thumb = { dark = "#6cc6ff", light = "#1f6fa8" }
+track = { dark = "#121a2c", light = "#d4dcea" }
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#5fd39a", light = "#2e7d5a" } }
+neutral  = { glyph = "▓", color = { dark = "#6a7690", light = "#5c6880" } }
+negative = { glyph = "▓", color = { dark = "#ff6b7d", light = "#c4364a" } }
+bar      = { glyph = "▓", color = { dark = "#6cc6ff", light = "#1f6fa8" } }
+track    = { glyph = "░", color = { dark = "#22304a", light = "#bcc8dc" } }
+baseline = { color = { dark = "#22304a", light = "#bcc8dc" } }
+
+[markdown]
+heading    = { fg = { dark = "#6cc6ff", light = "#1f6fa8" }, bold = true }
+link       = { fg = { dark = "#ff7bd5", light = "#a83b86" }, underlined = true }
+code       = { dark = "#9d8cff", light = "#5544c4" }
+blockquote = { fg = { dark = "#6a7690", light = "#5c6880" } }
+
+[markdown.syntax]
+comment     = { dark = "#6a7690", light = "#5c6880" }
+keyword     = { dark = "#ff7bd5", light = "#a83b86" }
+string      = { dark = "#5fd39a", light = "#2e7d5a" }
+string_escape = { dark = "#ffcf6c", light = "#a87e14" }
+number      = { dark = "#ffcf6c", light = "#a87e14" }
+constant    = { dark = "#ffcf6c", light = "#a87e14" }
+function    = { dark = "#6cc6ff", light = "#1f6fa8" }
+type        = { dark = "#9d8cff", light = "#5544c4" }
+property    = { dark = "#6cc6ff", light = "#1f6fa8" }
+punctuation = { dark = "#6a7690", light = "#5c6880" }
+attribute   = { dark = "#ffcf6c", light = "#a87e14" }
+tag         = { dark = "#6cc6ff", light = "#1f6fa8" }
+label       = { dark = "#ff7bd5", light = "#a83b86" }
+error       = { dark = "#ff6b7d", light = "#c4364a" }

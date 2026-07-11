@@ -1,0 +1,84 @@
+# Matrix — digital rain: neon green code cascading down pure-black glass, with
+# a near-white "rain head" leading each column. Flat chrome, glass-black
+# surfaces. Cousin of crt, but crt is a cozy bordered single-phosphor terminal;
+# this one is starker — flat, pure black, brighter green, and the white head.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "flat"
+scrim = 0.6
+
+[surfaces]
+base    = { dark = "#000000", light = "#f4faf4" }
+content = { dark = "#071007", light = "#e8f3e8" }
+dialog  = { dark = "#0b170b", light = "#dcecdc" }
+element = { dark = "#0f1f0f", light = "#d2e6d2" }
+
+[text]
+body  = { dark = "#00ff66", light = "#0a5f2a" }
+muted = { dark = "#0a8f3c", light = "#4e8b62" }
+
+[accents]
+primary   = { dark = "#00ff66", light = "#0a6f30" }
+secondary = { dark = "#d6ffe0", light = "#2f7d4a" }
+tertiary  = { dark = "#008f3c", light = "#4e8b62" }
+
+[status]
+success = { dark = "#00ff66", light = "#0a6f30" }
+warning = { dark = "#9dff3c", light = "#4d7a00" }
+error   = { dark = "#ff3355", light = "#c40028" }
+info    = { dark = "#00d488", light = "#00786b" }
+
+[borders]
+normal        = { dark = "#163a1e", light = "#b8d8c0" }
+subtle        = { dark = "#0d220f", light = "#d0e6d4" }
+focused       = { dark = "#00ff66", light = "#0a6f30" }
+unfocused     = { dark = "#163a1e", light = "#b8d8c0" }
+divider_style = "tertiary"
+
+[borders.glyphs]
+divider = "╌"
+
+[interaction]
+selection = { bg = { dark = "#00ff66", light = "#0a6f30" }, fg = { dark = "#000000", light = "#f4faf4" }, bold = true }
+hover     = { bg = { dark = "#12241a", light = "#cfe6d4" } }
+key_hint  = { fg = { dark = "#d6ffe0", light = "#2f7d4a" }, bold = true }
+
+[scrollbar]
+thumb = { dark = "#00ff66", light = "#0a6f30" }
+track = { dark = "#0d220f", light = "#d0e6d4" }
+
+[scrollbar.glyphs]
+thumb = "║"
+track = "╎"
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#00ff66", light = "#0a6f30" } }
+neutral  = { glyph = "▓", color = { dark = "#0a8f3c", light = "#4e8b62" } }
+negative = { glyph = "▓", color = { dark = "#ff3355", light = "#c40028" } }
+bar      = { glyph = "▓", color = { dark = "#00ff66", light = "#0a6f30" } }
+track    = { glyph = "░", color = { dark = "#163a1e", light = "#b8d8c0" } }
+baseline = { color = { dark = "#163a1e", light = "#b8d8c0" } }
+
+[markdown]
+heading    = { fg = { dark = "#00ff66", light = "#0a6f30" }, bold = true }
+link       = { fg = { dark = "#d6ffe0", light = "#2f7d4a" }, underlined = true }
+code       = { dark = "#008f3c", light = "#4e8b62" }
+blockquote = { fg = { dark = "#0a8f3c", light = "#4e8b62" } }
+
+[markdown.syntax]
+comment     = { dark = "#0a8f3c", light = "#4e8b62" }
+keyword     = { dark = "#d6ffe0", light = "#2f7d4a" }
+string      = { dark = "#00ff66", light = "#0a6f30" }
+string_escape = { dark = "#9dff3c", light = "#4d7a00" }
+number      = { dark = "#00d488", light = "#00786b" }
+constant    = { dark = "#00d488", light = "#00786b" }
+function    = { dark = "#00ff66", light = "#0a6f30" }
+type        = { dark = "#d6ffe0", light = "#2f7d4a" }
+property    = { dark = "#008f3c", light = "#4e8b62" }
+punctuation = { dark = "#0a8f3c", light = "#4e8b62" }
+attribute   = { dark = "#9dff3c", light = "#4d7a00" }
+tag         = { dark = "#00ff66", light = "#0a6f30" }
+label       = { dark = "#00d488", light = "#00786b" }
+error       = { dark = "#ff3355", light = "#c40028" }

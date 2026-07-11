@@ -1,0 +1,74 @@
+# Wasteland — the Pip-Boy glow: amber phosphor on charred black, irradiated
+# green for the good news and rust for the bad. Bordered chrome, plain lines,
+# vault-terminal feel. Light mode is sun-bleached survival-manual paper.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "bordered"
+scrim = 0.3
+
+[surfaces]
+base    = { dark = "#0a0603", light = "#f2e8d0" }
+content = { dark = "#0a0603", light = "#f2e8d0" }
+dialog  = { dark = "#140d05", light = "#e8dcbe" }
+element = { dark = "#1c1308", light = "#ddceac" }
+
+[text]
+body  = { dark = "#ffb000", light = "#5a3d0a" }
+muted = { dark = "#8a6a1a", light = "#8a6a2a" }
+
+[accents]
+primary = { dark = "#ffb000", light = "#8a5a00" }
+
+[status]
+success = { dark = "#5aff5a", light = "#2f7a2f" }
+warning = { dark = "#ff8c1a", light = "#a85400" }
+error   = { dark = "#ff3b1f", light = "#a82810" }
+info    = { dark = "#d4a850", light = "#7a5a1a" }
+
+[borders]
+style     = "plain"
+normal    = { dark = "#4a3410", light = "#c9b485" }
+subtle    = { dark = "#241806", light = "#e0d4b6" }
+focused   = { dark = "#ffb000", light = "#8a5a00" }
+unfocused = { dark = "#4a3410", light = "#c9b485" }
+
+[interaction]
+selection = { bg = { dark = "#ffb000", light = "#8a5a00" }, fg = { dark = "#0a0603", light = "#f2e8d0" }, bold = true }
+hover     = { bg = { dark = "#1f1508", light = "#e6d9bb" } }
+key_hint  = { fg = { dark = "#ffb000", light = "#8a5a00" }, bold = true }
+
+[scrollbar]
+thumb = { dark = "#ffb000", light = "#8a5a00" }
+track = { dark = "#241806", light = "#e0d4b6" }
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#5aff5a", light = "#2f7a2f" } }
+neutral  = { glyph = "▓", color = { dark = "#8a6a1a", light = "#8a6a2a" } }
+negative = { glyph = "▓", color = { dark = "#ff3b1f", light = "#a82810" } }
+bar      = { glyph = "▓", color = { dark = "#ffb000", light = "#8a5a00" } }
+track    = { glyph = "░", color = { dark = "#4a3410", light = "#c9b485" } }
+baseline = { color = { dark = "#4a3410", light = "#c9b485" } }
+
+[markdown]
+heading    = { fg = { dark = "#ffb000", light = "#8a5a00" }, bold = true }
+link       = { fg = { dark = "#5aff5a", light = "#2f7a2f" }, underlined = true }
+code       = { dark = "#ff8c1a", light = "#a85400" }
+blockquote = { fg = { dark = "#8a6a1a", light = "#8a6a2a" } }
+
+[markdown.syntax]
+comment     = { dark = "#8a6a1a", light = "#8a6a2a" }
+keyword     = { dark = "#ff8c1a", light = "#a85400" }
+string      = { dark = "#5aff5a", light = "#2f7a2f" }
+string_escape = { dark = "#d4a850", light = "#7a5a1a" }
+number      = { dark = "#d4a850", light = "#7a5a1a" }
+constant    = { dark = "#d4a850", light = "#7a5a1a" }
+function    = { dark = "#ffb000", light = "#8a5a00" }
+type        = { dark = "#d4a850", light = "#7a5a1a" }
+property    = { dark = "#ffb000", light = "#8a5a00" }
+punctuation = { dark = "#8a6a1a", light = "#8a6a2a" }
+attribute   = { dark = "#ff8c1a", light = "#a85400" }
+tag         = { dark = "#ffb000", light = "#8a5a00" }
+label       = { dark = "#ff3b1f", light = "#a82810" }
+error       = { dark = "#ff3b1f", light = "#a82810" }

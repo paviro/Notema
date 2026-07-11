@@ -1,0 +1,74 @@
+# HAL — 2001: a near-black void, cold white text, and a single unblinking red
+# eye. Bordered chrome, plain thin lines; restraint is the whole point — red
+# appears only where something is watching. Light mode is a clinical white.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "bordered"
+scrim = 0.4
+
+[surfaces]
+base    = { dark = "#060606", light = "#f6f6f6" }
+content = { dark = "#060606", light = "#f6f6f6" }
+dialog  = { dark = "#121212", light = "#ececec" }
+element = { dark = "#191919", light = "#e2e2e2" }
+
+[text]
+body  = { dark = "#e6e6e6", light = "#1a1a1a" }
+muted = { dark = "#6e6e6e", light = "#7a7a7a" }
+
+[accents]
+primary = { dark = "#ff2020", light = "#c00000" }
+
+[status]
+success = { dark = "#6f8f6f", light = "#3d6b3d" }
+warning = { dark = "#b39a5c", light = "#7a5f14" }
+error   = { dark = "#ff2020", light = "#c00000" }
+info    = { dark = "#7a8aa0", light = "#45526b" }
+
+[borders]
+style     = "plain"
+normal    = { dark = "#333333", light = "#cccccc" }
+subtle    = { dark = "#1e1e1e", light = "#e0e0e0" }
+focused   = { dark = "#ff2020", light = "#c00000" }
+unfocused = { dark = "#333333", light = "#cccccc" }
+
+[interaction]
+selection = { bg = { dark = "#ff2020", light = "#c00000" }, fg = { dark = "#060606", light = "#ffffff" }, bold = true }
+hover     = { bg = { dark = "#1c1c1c", light = "#e6e6e6" } }
+key_hint  = { fg = { dark = "#e6e6e6", light = "#1a1a1a" }, bold = true }
+
+[scrollbar]
+thumb = { dark = "#ff2020", light = "#c00000" }
+track = { dark = "#1e1e1e", light = "#e0e0e0" }
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#6f8f6f", light = "#3d6b3d" } }
+neutral  = { glyph = "▓", color = { dark = "#6e6e6e", light = "#7a7a7a" } }
+negative = { glyph = "▓", color = { dark = "#ff2020", light = "#c00000" } }
+bar      = { glyph = "▓", color = { dark = "#ff2020", light = "#c00000" } }
+track    = { glyph = "░", color = { dark = "#333333", light = "#cccccc" } }
+baseline = { color = { dark = "#333333", light = "#cccccc" } }
+
+[markdown]
+heading    = { fg = { dark = "#ff2020", light = "#c00000" }, bold = true }
+link       = { fg = { dark = "#7a8aa0", light = "#45526b" }, underlined = true }
+code       = { dark = "#ff2020", light = "#c00000" }
+blockquote = { fg = { dark = "#6e6e6e", light = "#7a7a7a" } }
+
+[markdown.syntax]
+comment     = { dark = "#6e6e6e", light = "#7a7a7a" }
+keyword     = { dark = "#ff2020", light = "#c00000" }
+string      = { dark = "#6f8f6f", light = "#3d6b3d" }
+string_escape = { dark = "#b39a5c", light = "#7a5f14" }
+number      = { dark = "#ff2020", light = "#c00000" }
+constant    = { dark = "#ff2020", light = "#c00000" }
+function    = { dark = "#e6e6e6", light = "#1a1a1a" }
+type        = { dark = "#7a8aa0", light = "#45526b" }
+property    = { dark = "#7a8aa0", light = "#45526b" }
+punctuation = { dark = "#6e6e6e", light = "#7a7a7a" }
+attribute   = { dark = "#b39a5c", light = "#7a5f14" }
+tag         = { dark = "#ff2020", light = "#c00000" }
+label       = { dark = "#ff2020", light = "#c00000" }
+error       = { dark = "#ff2020", light = "#c00000" }

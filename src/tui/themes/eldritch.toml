@@ -1,0 +1,76 @@
+# Eldritch — cosmic horror: a damp teal-black void, sickly pale-green ink, and
+# unnatural accents of void-violet and acid-green. Flat chrome. Light mode is a
+# faded, mildewed parchment. Something is wrong here, and it is beautiful.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "flat"
+scrim = 0.55
+
+[surfaces]
+base    = { dark = "#0a0e12", light = "#e8ece6" }
+content = { dark = "#0f1218", light = "#dce2da" }
+dialog  = { dark = "#14181f", light = "#d0d8cd" }
+element = { dark = "#191e27", light = "#c6cfc2" }
+
+[text]
+body  = { dark = "#c8d6b0", light = "#2a2f22" }
+muted = { dark = "#6f7a63", light = "#5e6a52" }
+
+[accents]
+primary   = { dark = "#7b5cff", light = "#5a3fd6" }
+secondary = { dark = "#8fff6b", light = "#3f7a1e" }
+tertiary  = { dark = "#2fb6a8", light = "#1c6f68" }
+
+[status]
+success = { dark = "#8fff6b", light = "#3f7a1e" }
+warning = { dark = "#d4a017", light = "#8a6d0d" }
+error   = { dark = "#d6409f", light = "#9c2f74" }
+info    = { dark = "#2fb6a8", light = "#1c6f68" }
+
+[borders]
+normal        = { dark = "#2e2a3e", light = "#c0c8b8" }
+subtle        = { dark = "#1a1826", light = "#d4dccb" }
+focused       = { dark = "#7b5cff", light = "#5a3fd6" }
+unfocused     = { dark = "#2e2a3e", light = "#c0c8b8" }
+divider_style = "tertiary"
+
+[interaction]
+selection = { bg = { dark = "#7b5cff", light = "#5a3fd6" }, fg = { dark = "#0a0e12", light = "#f4f6f0" }, bold = true }
+hover     = { bg = { dark = "#201c30", light = "#cfd6c6" } }
+key_hint  = { fg = { dark = "#8fff6b", light = "#3f7a1e" }, bold = true }
+
+[scrollbar]
+thumb = { dark = "#7b5cff", light = "#5a3fd6" }
+track = { dark = "#1a1826", light = "#d4dccb" }
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#8fff6b", light = "#3f7a1e" } }
+neutral  = { glyph = "▓", color = { dark = "#6f7a63", light = "#5e6a52" } }
+negative = { glyph = "▓", color = { dark = "#d6409f", light = "#9c2f74" } }
+bar      = { glyph = "▓", color = { dark = "#7b5cff", light = "#5a3fd6" } }
+track    = { glyph = "░", color = { dark = "#2e2a3e", light = "#c0c8b8" } }
+baseline = { color = { dark = "#2e2a3e", light = "#c0c8b8" } }
+
+[markdown]
+heading    = { fg = { dark = "#7b5cff", light = "#5a3fd6" }, bold = true }
+link       = { fg = { dark = "#2fb6a8", light = "#1c6f68" }, underlined = true }
+code       = { dark = "#8fff6b", light = "#3f7a1e" }
+blockquote = { fg = { dark = "#6f7a63", light = "#5e6a52" } }
+
+[markdown.syntax]
+comment     = { dark = "#6f7a63", light = "#5e6a52" }
+keyword     = { dark = "#7b5cff", light = "#5a3fd6" }
+string      = { dark = "#8fff6b", light = "#3f7a1e" }
+string_escape = { dark = "#d4a017", light = "#8a6d0d" }
+number      = { dark = "#d4a017", light = "#8a6d0d" }
+constant    = { dark = "#d4a017", light = "#8a6d0d" }
+function    = { dark = "#2fb6a8", light = "#1c6f68" }
+type        = { dark = "#d6409f", light = "#9c2f74" }
+property    = { dark = "#2fb6a8", light = "#1c6f68" }
+punctuation = { dark = "#6f7a63", light = "#5e6a52" }
+attribute   = { dark = "#d4a017", light = "#8a6d0d" }
+tag         = { dark = "#7b5cff", light = "#5a3fd6" }
+label       = { dark = "#d6409f", light = "#9c2f74" }
+error       = { dark = "#d6409f", light = "#9c2f74" }

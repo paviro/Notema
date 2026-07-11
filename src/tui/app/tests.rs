@@ -751,21 +751,29 @@ fn theme_picker_opens_on_the_active_theme_with_bundled_entries() {
     assert_eq!(
         names,
         vec![
+            "arcade",
             "blossom",
             "catppuccin",
             "classic",
             "crt",
             "cyberpunk",
+            "deep-space",
             "dungeon",
             "e-ink",
+            "eldritch",
             "fjord",
+            "gameboy",
             "grove",
+            "hal",
             "journal",
             "matcha",
+            "matrix",
             "rose-pine",
             "synthwave",
             "tokyonight",
+            "tron",
             "vaporwave",
+            "wasteland",
         ]
     );
     assert!(state.entries.iter().all(|entry| entry.theme.is_some()));

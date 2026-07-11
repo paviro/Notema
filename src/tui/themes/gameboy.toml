@@ -1,0 +1,82 @@
+# Game Boy — the DMG pocket LCD: four shades of pea-green and nothing else.
+# Light mode is the classic sunlit screen (pale green, dark ink); dark mode is
+# the dim backlit-off look. Single-hue like crt/e-ink, so meaning rides weight
+# and glyph — the chart series carry distinct fills to stay legible without hue.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "bordered"
+scrim = 0.2
+
+# The canonical DMG four: darkest → lightest.
+[palette]
+shell   = { dark = "#0f380f", light = "#9bbc0f" }
+frame   = { dark = "#306230", light = "#8bac0f" }
+screen  = { dark = "#8bac0f", light = "#306230" }
+ink     = { dark = "#9bbc0f", light = "#0f380f" }
+
+[surfaces]
+base    = "shell"
+content = "shell"
+dialog  = { dark = "#143f14", light = "#8bac0f" }
+element = { dark = "#1a481a", light = "#7e9c0c" }
+
+[text]
+body  = "ink"
+muted = { dark = "#6b8c14", light = "#4a6b1a" }
+
+[accents]
+primary = "ink"
+
+[status]
+success = "ink"
+warning = "screen"
+info    = { dark = "#6b8c14", light = "#4a6b1a" }
+error   = "frame"
+
+[borders]
+style     = "plain"
+normal    = "frame"
+subtle    = { dark = "#1a481a", light = "#7e9c0c" }
+focused   = "ink"
+unfocused = "frame"
+
+[interaction]
+selection = { bg = "ink", fg = "shell", bold = true }
+hover     = { bg = { dark = "#1f5020", light = "#83a40d" } }
+key_hint  = { fg = "ink", bold = true }
+
+[scrollbar]
+thumb = "ink"
+track = { dark = "#1a481a", light = "#7e9c0c" }
+
+[charts]
+positive = { glyph = "█", color = "ink" }
+neutral  = { glyph = "▒", color = { dark = "#6b8c14", light = "#4a6b1a" } }
+negative = { glyph = "░", color = "frame" }
+bar      = { glyph = "▓", color = "screen" }
+track    = { glyph = "░", color = "frame" }
+baseline = { color = "frame" }
+
+[markdown]
+heading    = { fg = "ink", bold = true }
+link       = { fg = "ink", underlined = true }
+code       = "screen"
+blockquote = { fg = { dark = "#6b8c14", light = "#4a6b1a" } }
+
+[markdown.syntax]
+comment     = { dark = "#6b8c14", light = "#4a6b1a" }
+keyword     = "ink"
+string      = "screen"
+string_escape = "screen"
+number      = "screen"
+constant    = "screen"
+function    = "ink"
+type        = "screen"
+property    = "screen"
+punctuation = { dark = "#6b8c14", light = "#4a6b1a" }
+attribute   = "screen"
+tag         = "ink"
+label       = "frame"
+error       = "frame"
