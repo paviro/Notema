@@ -404,6 +404,12 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
 
     terminal.draw(|frame| render::draw(frame, &mut app))?;
     let mut overlay_was_visible = app.has_overlay();
+    // iTerm2 can miss the mouse-capture enable sent during terminal setup: its
+    // motion-tracking area is rebuilt on a main-thread side effect that races
+    // session startup, leaving hover dead until a focus change rebuilds it.
+    // Re-asserting capture once startup has settled forces that rebuild;
+    // redundant DECSETs are harmless on other terminals.
+    let mut reassert_mouse_capture_at = Some(Instant::now() + Duration::from_millis(250));
     // When set, a watched file change is pending; reload once the filesystem has
     // been quiet until this deadline (coalesces import-time write storms). The
     // accumulated changed paths let the reload touch only affected entries.
@@ -414,6 +420,10 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
     let mut pending_events: VecDeque<Event> = VecDeque::new();
 
     loop {
+        if reassert_mouse_capture_at.is_some_and(|at| Instant::now() >= at) {
+            reassert_mouse_capture_at = None;
+            execute!(io::stdout(), EnableMouseCapture)?;
+        }
         // A newly finished image build makes the frame stale; repaint below.
         let images_ready = app.image.runtime.poll_results();
         // A finished geocode lookup updates the open location dialog; repaint too.
