@@ -1733,38 +1733,62 @@ fn draw_table_dialog(
 }
 
 /// Draw the full-screen "journal chrome" frame shared by the startup modals
-/// (unlock, device-access request, and the enroll/awaiting/disable notices): a
-/// bordered block titled top-left with the screen name and, when `key_hint` is
-/// non-empty, bottom-right with its key hints. Clears the screen first and
-/// returns the inner area to lay the modal's content into.
-pub(crate) fn draw_modal_frame(frame: &mut Frame<'_>, title: &str, key_hint: &str) -> Rect {
+/// (unlock, device-access request, and the enroll/awaiting/disable notices)
+/// and the image viewer: a bordered block titled top-left with the screen
+/// name and, when non-empty, `status` bottom-left and `key_hint` bottom-right.
+/// Clears the screen first and returns the inner area to lay the modal's
+/// content into.
+pub(crate) fn draw_modal_frame(
+    frame: &mut Frame<'_>,
+    title: &str,
+    status: &str,
+    key_hint: &str,
+) -> Rect {
     let area = frame.area();
     frame.render_widget(Clear, area);
 
     if flat_chrome() {
-        // No outer border: the screen name and hints float on the app
-        // background, quiet in the corners like a status bar.
+        // No outer border: the screen name and hints sit on full-width
+        // element-surface bars along the top and bottom, like status bars.
         frame.buffer_mut().set_style(area, base_style());
+        let bar = Style::default().bg(theme().element_bg());
+        let top_bar = Rect {
+            height: 1.min(area.height),
+            ..area
+        };
+        frame.buffer_mut().set_style(top_bar, bar);
         let top = Rect {
             x: area.x + 1,
-            y: area.y,
             width: area.width.saturating_sub(2),
-            height: 1.min(area.height),
+            ..top_bar
         };
         frame.render_widget(
             Paragraph::new(Span::styled(format!(" {title} "), theme().muted())),
             top,
         );
-        if !key_hint.is_empty() && area.height > 1 {
-            let bottom = Rect {
+        if area.height > 1 && (!status.is_empty() || !key_hint.is_empty()) {
+            let bottom_bar = Rect {
                 y: area.y + area.height - 1,
+                ..top_bar
+            };
+            frame.buffer_mut().set_style(bottom_bar, bar);
+            let bottom = Rect {
+                y: bottom_bar.y,
                 ..top
             };
-            frame.render_widget(
-                Paragraph::new(Span::styled(format!(" {key_hint} "), theme().muted()))
-                    .alignment(Alignment::Right),
-                bottom,
-            );
+            if !status.is_empty() {
+                frame.render_widget(
+                    Paragraph::new(Span::styled(format!(" {status} "), theme().muted())),
+                    bottom,
+                );
+            }
+            if !key_hint.is_empty() {
+                frame.render_widget(
+                    Paragraph::new(Span::styled(format!(" {key_hint} "), theme().muted()))
+                        .alignment(Alignment::Right),
+                    bottom,
+                );
+            }
         }
         return area.inner(Margin {
             vertical: 1,
@@ -1779,6 +1803,9 @@ pub(crate) fn draw_modal_frame(frame: &mut Frame<'_>, title: &str, key_hint: &st
         .border_set(theme().glyphs().borders.border_set())
         .border_style(theme().dialog_border())
         .title_top(Line::from(format!(" {title} ")));
+    if !status.is_empty() {
+        block = block.title_bottom(Line::from(format!(" {status} ")));
+    }
     if !key_hint.is_empty() {
         block = block.title_bottom(Line::from(format!(" {key_hint} ")).right_aligned());
     }

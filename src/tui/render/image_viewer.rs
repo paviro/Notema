@@ -1,14 +1,12 @@
 use ratatui::{
     Frame,
     layout::{Alignment, Rect},
-    text::Line,
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::Paragraph,
 };
 
 use crate::tui::{
     image::{ImageRuntime, ImageStatus, viewer_image_size},
     state::ImageViewerState,
-    theme::theme,
 };
 
 /// Draw the fullscreen image viewer. The image number is 1-based to match the
@@ -19,23 +17,14 @@ pub(super) fn draw_image_viewer(
     images: &ImageRuntime,
 ) {
     let area = frame.area();
-    frame.render_widget(Clear, area);
-    // The theme's background layer, not `Clear`'s terminal default.
-    frame
-        .buffer_mut()
-        .set_style(area, super::chrome::base_style());
-
     let count = state.assets.len();
     let index = state.index.min(count.saturating_sub(1));
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_set(theme().glyphs().borders.border_set())
-        .border_style(theme().dialog_border())
-        .title_top(Line::from(" Image Viewer "))
-        .title_bottom(Line::from(format!(" Image {} of {count} ", index + 1)))
-        .title_bottom(Line::from(" ←/→ navigate · esc close ").right_aligned());
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let inner = super::draw_modal_frame(
+        frame,
+        "Image Viewer",
+        &format!("Image {} of {count}", index + 1),
+        "←/→ navigate · esc close",
+    );
 
     let Some(asset) = state.assets.get(index) else {
         return;
