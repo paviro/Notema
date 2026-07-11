@@ -116,20 +116,33 @@ Focused titles, current-item markers, the flat focus stripe.
 | Key | Form | Default |
 |---|---|---|
 | `style` | `plain` \| `rounded` \| `double` \| `thick` \| `ascii` | `plain` |
+| `focused_style` | same names | thick promotion |
 | `normal` | token | ANSI `244` |
 | `subtle` | token | ANSI `240` |
 | `focused` | token | terminal ink (rendered BOLD) |
 | `unfocused` | token | terminal ink |
+| `focus_stripe` | glyph | `┃` (flat-chrome focused edge, drawn in `focused`) |
+| `divider` | glyph | `━` (month headers, "Archived") |
 
 `style` picks the box-drawing set for panels, cards, and table grids. Focused
-panels also thicken their border (except `ascii`, which carries focus on
-weight alone). `normal` outlines cards, `subtle` draws inter-row table rules.
+panels also thicken their border (except `ascii` and custom sets, which carry
+focus on weight alone); `focused_style` replaces that promotion with a set of
+your choosing. `normal` outlines cards, `subtle` draws inter-row table rules.
+
+### `[borders.glyphs]` / `[borders.focused_glyphs]` — custom sets
+
+Per-character overrides on `style` (and on the focused set): `top_left`,
+`top_right`, `bottom_left`, `bottom_right`, `horizontal`, `vertical`. Omitted
+keys inherit the base style's character; table junctions (`├ ┤ ┬ ┴ ┼`) always
+do. See `synthwave.toml` (✦ corners on heavy lines) and `vaporwave.toml`
+(dotted edges, rounded corners).
 
 ### `[interaction]`
 
 | Key | Default | Notes |
 |---|---|---|
 | `selection` | inverted (REVERSED) | a `bg` requires an explicit `fg` |
+| `selection_marker` | follows the chrome: `●` flat, `>` bordered | the glyph before a selected row |
 | `hover` | `element` lifted one step | `bg`-only is fine — it layers under the row's ink |
 | `button` | ← `selection` | a `bg` requires an explicit `fg` |
 | `key_hint` | inverted + bold | the footer/dialog key chips |
@@ -142,6 +155,9 @@ weight alone). `normal` outlines cards, `subtle` draws inter-row table rules.
 |---|---|
 | `thumb` | ← `borders.focused` |
 | `track` | terminal default |
+
+`[scrollbar.glyphs]` sets the characters: `thumb` (`█`), `track` (`║`),
+`up` (`▲`), `down` (`▼`).
 
 ### `[charts]`
 
@@ -178,15 +194,17 @@ Sixteen color keys: `comment`, `keyword`, `string`, `string_escape`, `number`,
 that category as plain code; omitting the whole table disables highlighting
 entirely (the classic look).
 
-### `[glyphs]` — identity characters
+### `[toast]`
 
 | Key | Default |
 |---|---|
-| `selection_marker` | follows the chrome: `●` flat, `>` bordered |
-| `focus_stripe` | `┃` (focused panel edge, flat chrome) |
-| `toast_edge` | `┃` (toast card accents) |
-| `tab_separator` | `·` |
-| `divider` | `━` (month headers, "Archived") |
+| `edge` | `┃` (toast card accents, flat chrome) |
+
+### `[tabs]`
+
+| Key | Default |
+|---|---|
+| `separator` | `·` (between tab labels) |
 
 ## The monochrome contract
 

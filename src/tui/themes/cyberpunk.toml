@@ -1,0 +1,92 @@
+# Cyberpunk — Night City yellow on black glass, red glitches, pink chrome.
+# Heavy borders with quadrant-block corners for that angular HUD look.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "flat"
+scrim = 0.6
+
+[surfaces]
+background = { dark = "#0d0c0f", light = "#f2efe4" }
+panel      = { dark = "#14121a", light = "#e9e5d6" }
+dialog     = { dark = "#1a1721", light = "#e0dbc8" }
+element    = { dark = "#211d2b", light = "#d7d2bd" }
+
+[text]
+body  = { dark = "#e8e3d5", light = "#26221a" }
+muted = { dark = "#877f93", light = "#847d6d" }
+
+[accents]
+primary = { dark = "#fcee0a", light = "#7a6f00" }
+
+[status]
+success = { dark = "#9dff00", light = "#4d7a00" }
+warning = { dark = "#ff9e1f", light = "#a86200" }
+error   = { dark = "#ff003c", light = "#c40030" }
+info    = { dark = "#00f0ff", light = "#00707d" }
+
+[borders]
+focus_stripe = "▌"
+normal    = { dark = "#453d57", light = "#c3bba3" }
+subtle    = { dark = "#2a2536", light = "#d9d3c0" }
+focused   = { dark = "#fcee0a", light = "#7a6f00" }
+unfocused = { dark = "#453d57", light = "#c3bba3" }
+
+[borders.glyphs]
+top_left     = "▛"
+top_right    = "▜"
+bottom_left  = "▙"
+bottom_right = "▟"
+horizontal   = "━"
+vertical     = "┃"
+
+[interaction]
+selection = { bg = { dark = "#fcee0a", light = "#7a6f00" }, fg = { dark = "#0d0c0f", light = "#f7f4e8" }, bold = true }
+selection_marker = "▶"
+hover     = { bg = { dark = "#2d2739", light = "#cdc7b0" } }
+key_hint  = { fg = { dark = "#00f0ff", light = "#00707d" }, bold = true }
+
+[scrollbar]
+thumb = { dark = "#fcee0a", light = "#7a6f00" }
+track = { dark = "#2a2536", light = "#d9d3c0" }
+
+[scrollbar.glyphs]
+thumb = "▮"
+track = "╏"
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#9dff00", light = "#4d7a00" } }
+neutral  = { glyph = "▓", color = { dark = "#877f93", light = "#847d6d" } }
+negative = { glyph = "▓", color = { dark = "#ff003c", light = "#c40030" } }
+bar      = { glyph = "▓", color = { dark = "#fcee0a", light = "#7a6f00" } }
+track    = { glyph = "░", color = { dark = "#453d57", light = "#c3bba3" } }
+baseline = { color = { dark = "#453d57", light = "#c3bba3" } }
+
+[markdown]
+heading    = { fg = { dark = "#fcee0a", light = "#7a6f00" }, bold = true }
+link       = { fg = { dark = "#00f0ff", light = "#00707d" }, underlined = true }
+code       = { dark = "#ff5ea0", light = "#b02565" }
+blockquote = { fg = { dark = "#877f93", light = "#847d6d" } }
+
+[markdown.syntax]
+comment     = { dark = "#877f93", light = "#847d6d" }
+keyword     = { dark = "#ff003c", light = "#c40030" }
+string      = { dark = "#9dff00", light = "#4d7a00" }
+string_escape = { dark = "#ff9e1f", light = "#a86200" }
+number      = { dark = "#fcee0a", light = "#7a6f00" }
+constant    = { dark = "#fcee0a", light = "#7a6f00" }
+function    = { dark = "#00f0ff", light = "#00707d" }
+type        = { dark = "#ff5ea0", light = "#b02565" }
+property    = { dark = "#ff5ea0", light = "#b02565" }
+punctuation = { dark = "#877f93", light = "#847d6d" }
+attribute   = { dark = "#ff9e1f", light = "#a86200" }
+tag         = { dark = "#ff003c", light = "#c40030" }
+label       = { dark = "#ff003c", light = "#c40030" }
+error       = { dark = "#ff003c", light = "#c40030" }
+
+[toast]
+edge = "▌"
+
+[tabs]
+separator = "/"

@@ -1,0 +1,86 @@
+# Vaporwave — pastel pink, mint, and lavender on a dusky purple, with
+# dotted-edge rounded-corner cards. Light mode is seafoam-and-blush.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "flat"
+scrim = 0.45
+
+[surfaces]
+background = { dark = "#171225", light = "#faf2f7" }
+panel      = { dark = "#1e1830", light = "#f3e8f2" }
+dialog     = { dark = "#262040", light = "#ecdfee" }
+element    = { dark = "#2e2750", light = "#e4d5e9" }
+
+[text]
+body  = { dark = "#f0e0f5", light = "#5a3d66" }
+muted = { dark = "#9384ad", light = "#a58ab0" }
+
+[accents]
+primary = { dark = "#ff9de2", light = "#b04f96" }
+
+[status]
+success = { dark = "#9ff5c8", light = "#2e8a63" }
+warning = { dark = "#ffcf9e", light = "#ad6b1f" }
+error   = { dark = "#ff9eb3", light = "#c04a67" }
+info    = { dark = "#8ae8ff", light = "#2a7f99" }
+
+[borders]
+divider = "┄"
+normal    = { dark = "#4a3f70", light = "#d5bcd8" }
+subtle    = { dark = "#2e2750", light = "#e8d8e8" }
+focused   = { dark = "#ff9de2", light = "#b04f96" }
+unfocused = { dark = "#4a3f70", light = "#d5bcd8" }
+
+[borders.glyphs]
+top_left     = "╭"
+top_right    = "╮"
+bottom_left  = "╰"
+bottom_right = "╯"
+horizontal   = "┄"
+vertical     = "┆"
+
+[interaction]
+selection = { bg = { dark = "#ff9de2", light = "#b04f96" }, fg = { dark = "#171225", light = "#ffffff" }, bold = true }
+selection_marker = "◦"
+hover     = { bg = { dark = "#3a3260", light = "#dccae0" } }
+key_hint  = { fg = { dark = "#f0e0f5", light = "#5a3d66" }, bold = true }
+
+[scrollbar]
+track = { dark = "#2e2750", light = "#e8d8e8" }
+
+[scrollbar.glyphs]
+track = "┆"
+up = "△"
+down = "▽"
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#9ff5c8", light = "#2e8a63" } }
+neutral  = { glyph = "▓", color = { dark = "#9384ad", light = "#a58ab0" } }
+negative = { glyph = "▓", color = { dark = "#ff9eb3", light = "#c04a67" } }
+bar      = { glyph = "▓", color = { dark = "#8ae8ff", light = "#2a7f99" } }
+track    = { glyph = "░", color = { dark = "#4a3f70", light = "#d5bcd8" } }
+baseline = { color = { dark = "#4a3f70", light = "#d5bcd8" } }
+
+[markdown]
+heading    = { fg = { dark = "#ff9de2", light = "#b04f96" }, bold = true }
+link       = { fg = { dark = "#8ae8ff", light = "#2a7f99" }, underlined = true }
+code       = { dark = "#c9b1ff", light = "#7857b8" }
+blockquote = { fg = { dark = "#9384ad", light = "#a58ab0" } }
+
+[markdown.syntax]
+comment     = { dark = "#9384ad", light = "#a58ab0" }
+keyword     = { dark = "#ff9de2", light = "#b04f96" }
+string      = { dark = "#9ff5c8", light = "#2e8a63" }
+string_escape = { dark = "#ffcf9e", light = "#ad6b1f" }
+number      = { dark = "#ffcf9e", light = "#ad6b1f" }
+constant    = { dark = "#ffcf9e", light = "#ad6b1f" }
+function    = { dark = "#8ae8ff", light = "#2a7f99" }
+type        = { dark = "#c9b1ff", light = "#7857b8" }
+property    = { dark = "#c9b1ff", light = "#7857b8" }
+punctuation = { dark = "#9384ad", light = "#a58ab0" }
+attribute   = { dark = "#ffcf9e", light = "#ad6b1f" }
+tag         = { dark = "#ff9de2", light = "#b04f96" }
+label       = { dark = "#ff9eb3", light = "#c04a67" }
+error       = { dark = "#ff9eb3", light = "#c04a67" }

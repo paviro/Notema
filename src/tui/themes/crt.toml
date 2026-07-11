@@ -1,0 +1,73 @@
+# CRT — green phosphor on black glass, ASCII borders like a real dumb
+# terminal. Single-hue like e-ink: meaning rides weight, glyph, and inversion
+# (chart series differ by fill glyph). Light mode is a paper terminal.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "bordered"
+scrim = 0.0
+
+[palette]
+phosphor = { dark = "#33ff66", light = "#175f2d" }
+dim      = { dark = "#1d9944", light = "#4e8b62" }
+glass    = { dark = "#020a04", light = "#eef7ee" }
+
+[surfaces]
+background = "glass"
+panel      = "glass"
+dialog     = { dark = "#07160c", light = "#e0efe0" }
+element    = { dark = "#0b2112", light = "#d5e8d5" }
+
+[text]
+body  = "phosphor"
+muted = "dim"
+
+[accents]
+primary = "phosphor"
+
+[status]
+success = "phosphor"
+warning = "phosphor"
+error   = "phosphor"
+info    = "phosphor"
+
+[borders]
+style = "ascii"
+divider = "╌"
+normal    = "dim"
+subtle    = "dim"
+focused   = "phosphor"
+unfocused = "dim"
+
+[interaction]
+selection = { bg = "phosphor", fg = "glass", bold = true }
+selection_marker = ">"
+hover     = { bg = { dark = "#0b2112", light = "#d5e8d5" } }
+key_hint  = { bg = "phosphor", fg = "glass", bold = true }
+
+[scrollbar]
+track = "dim"
+
+[scrollbar.glyphs]
+thumb = "#"
+track = "|"
+up = "^"
+down = "v"
+
+[charts]
+positive = { glyph = "█", color = "phosphor" }
+neutral  = { glyph = "▒", color = "dim" }
+negative = { glyph = "░", color = "phosphor" }
+bar      = { glyph = "▓", color = "phosphor" }
+track    = { glyph = "░", color = "dim" }
+baseline = { color = "dim" }
+
+[markdown]
+heading    = { fg = "phosphor", bold = true }
+link       = { fg = "phosphor", underlined = true }
+code       = { fg = "phosphor", bold = true }
+blockquote = "dim"
+
+[tabs]
+separator = "/"

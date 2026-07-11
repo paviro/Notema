@@ -1,0 +1,75 @@
+# Dungeon — parchment and torchlight. Double-line castle walls, gold accents,
+# blood-red errors; light mode is ink on parchment paper.
+#
+# See journal.toml for the accepted color/style forms.
+
+[chrome]
+default_style = "bordered"
+scrim = 0.3
+
+[surfaces]
+background = { dark = "#140f08", light = "#f0e6cc" }
+panel      = { dark = "#140f08", light = "#f0e6cc" }
+dialog     = { dark = "#1d1610", light = "#e6d9b8" }
+element    = { dark = "#241c12", light = "#ddcfa9" }
+
+[text]
+body  = { dark = "#e6d3a3", light = "#3b2f1b" }
+muted = { dark = "#937f57", light = "#7d6a45" }
+
+[accents]
+primary = { dark = "#d9a821", light = "#8a6d0d" }
+
+[status]
+success = { dark = "#7fa055", light = "#4e6b2e" }
+warning = { dark = "#e08f3d", light = "#9c5f14" }
+error   = { dark = "#c14b42", light = "#96322a" }
+info    = { dark = "#7a94bd", light = "#43608c" }
+
+[borders]
+style = "double"
+focused_style = "thick"
+divider = "═"
+normal    = { dark = "#5c4a2e", light = "#b5a273" }
+subtle    = { dark = "#3a2f1e", light = "#cfc09a" }
+focused   = { dark = "#d9a821", light = "#8a6d0d" }
+unfocused = { dark = "#5c4a2e", light = "#b5a273" }
+
+[interaction]
+selection = { bg = { dark = "#d9a821", light = "#8a6d0d" }, fg = { dark = "#140f08", light = "#f7efdb" }, bold = true }
+selection_marker = "⚔"
+hover     = { bg = { dark = "#2b2115", light = "#e2d4ac" } }
+key_hint  = { fg = { dark = "#e6d3a3", light = "#3b2f1b" }, bold = true }
+
+[scrollbar]
+track = { dark = "#3a2f1e", light = "#cfc09a" }
+
+[charts]
+positive = { glyph = "▓", color = { dark = "#7fa055", light = "#4e6b2e" } }
+neutral  = { glyph = "▓", color = { dark = "#937f57", light = "#7d6a45" } }
+negative = { glyph = "▓", color = { dark = "#c14b42", light = "#96322a" } }
+bar      = { glyph = "▓", color = { dark = "#d9a821", light = "#8a6d0d" } }
+track    = { glyph = "░", color = { dark = "#5c4a2e", light = "#b5a273" } }
+baseline = { color = { dark = "#5c4a2e", light = "#b5a273" } }
+
+[markdown]
+heading    = { fg = { dark = "#d9a821", light = "#8a6d0d" }, bold = true }
+link       = { fg = { dark = "#7a94bd", light = "#43608c" }, underlined = true }
+code       = { dark = "#e08f3d", light = "#9c5f14" }
+blockquote = { fg = { dark = "#937f57", light = "#7d6a45" } }
+
+[markdown.syntax]
+comment     = { dark = "#937f57", light = "#7d6a45" }
+keyword     = { dark = "#e08f3d", light = "#9c5f14" }
+string      = { dark = "#7fa055", light = "#4e6b2e" }
+string_escape = { dark = "#d9a821", light = "#8a6d0d" }
+number      = { dark = "#d9a821", light = "#8a6d0d" }
+constant    = { dark = "#d9a821", light = "#8a6d0d" }
+function    = { dark = "#e6d3a3", light = "#3b2f1b" }
+type        = { dark = "#7a94bd", light = "#43608c" }
+property    = { dark = "#7a94bd", light = "#43608c" }
+punctuation = { dark = "#937f57", light = "#7d6a45" }
+attribute   = { dark = "#e08f3d", light = "#9c5f14" }
+tag         = { dark = "#c14b42", light = "#96322a" }
+label       = { dark = "#c14b42", light = "#96322a" }
+error       = { dark = "#c14b42", light = "#96322a" }

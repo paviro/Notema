@@ -152,7 +152,7 @@ pub(crate) fn panel_block(
     let mut block = Block::default()
         .title(panel_title(title, focused))
         .borders(Borders::ALL)
-        .border_set(theme().glyphs().borders.block_set(focused));
+        .border_set(theme().glyphs().block_set(focused));
 
     if focused {
         block = block.border_style(theme().focus_border());
@@ -221,9 +221,18 @@ pub(crate) fn render_vertical_scrollbar(
     area: Rect,
     state: &mut ScrollbarState,
 ) {
+    let glyphs = theme().glyphs();
+    let thumb = glyphs.scrollbar_thumb.to_string();
+    let track = glyphs.scrollbar_track.to_string();
+    let up = glyphs.scrollbar_up.to_string();
+    let down = glyphs.scrollbar_down.to_string();
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .thumb_symbol(&thumb)
         .thumb_style(theme().scrollbar_thumb())
-        .track_style(theme().scrollbar_track());
+        .track_symbol(Some(&track))
+        .track_style(theme().scrollbar_track())
+        .begin_symbol(Some(&up))
+        .end_symbol(Some(&down));
     frame.render_stateful_widget(
         scrollbar,
         area.inner(Margin {

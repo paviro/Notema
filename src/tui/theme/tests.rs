@@ -135,7 +135,7 @@ fn button_rejects_bg_without_fg() {
 #[test]
 fn glyphs_resolve_and_default() {
     let theme = parse(
-        "[borders]\nstyle = \"rounded\"\n[glyphs]\nselection_marker = \"▶\"\nfocus_stripe = \"█\"",
+        "[borders]\nstyle = \"rounded\"\nfocus_stripe = \"█\"\n[interaction]\nselection_marker = \"▶\"",
         Mode::Dark,
     )
     .unwrap();
@@ -158,8 +158,8 @@ fn glyphs_resolve_and_default() {
 
 #[test]
 fn glyph_tokens_must_be_one_character() {
-    let err = parse("[glyphs]\nfocus_stripe = \"ab\"", Mode::Dark).unwrap_err();
-    assert!(err.to_string().contains("glyphs.focus_stripe"), "{err:#}");
+    let err = parse("[borders]\nfocus_stripe = \"ab\"", Mode::Dark).unwrap_err();
+    assert!(err.to_string().contains("borders.focus_stripe"), "{err:#}");
 }
 
 #[test]
@@ -215,6 +215,54 @@ fn border_glyph_sets_cover_focus_and_ascii() {
     assert_eq!(BorderGlyphs::Ascii.block_set(false).top_left, "+");
     assert_eq!(BorderGlyphs::Ascii.block_set(true).top_left, "+");
     assert_eq!(BorderGlyphs::Ascii.line_set().cross, "+");
+}
+
+#[test]
+fn scrollbar_glyphs_resolve_and_keep_their_defaults() {
+    let theme = parse(
+        "[scrollbar.glyphs]\nthumb = \"#\"\ntrack = \"|\"\nup = \"^\"\ndown = \"v\"",
+        Mode::Dark,
+    )
+    .unwrap();
+    assert_eq!(theme.glyphs().scrollbar_thumb, '#');
+    assert_eq!(theme.glyphs().scrollbar_track, '|');
+    assert_eq!(theme.glyphs().scrollbar_up, '^');
+    assert_eq!(theme.glyphs().scrollbar_down, 'v');
+    // The defaults are ratatui's own vertical set, so bare themes don't change.
+    let bare = parse("", Mode::Dark).unwrap();
+    assert_eq!(bare.glyphs().scrollbar_thumb, '█');
+    assert_eq!(bare.glyphs().scrollbar_track, '║');
+    assert_eq!(bare.glyphs().scrollbar_up, '▲');
+    assert_eq!(bare.glyphs().scrollbar_down, '▼');
+}
+
+#[test]
+fn custom_border_glyphs_overlay_the_base_style() {
+    let theme = parse(
+        "[borders]\nstyle = \"rounded\"\n[borders.glyphs]\ntop_left = \"✦\"\nhorizontal = \"┄\"",
+        Mode::Dark,
+    )
+    .unwrap();
+    let set = theme.glyphs().borders.border_set();
+    assert_eq!(set.top_left, "✦");
+    assert_eq!(set.horizontal_top, "┄");
+    assert_eq!(set.horizontal_bottom, "┄");
+    // Omitted keys inherit the base style's glyph; junctions always do.
+    assert_eq!(set.top_right, "╮");
+    assert_eq!(theme.glyphs().borders.line_set().cross, "┼");
+    // A custom set has no thick variant, so focus keeps it (like ascii).
+    assert_eq!(theme.glyphs().block_set(true).top_left, "✦");
+    assert!(parse("[borders.glyphs]\nhorizontal = \"--\"", Mode::Dark).is_err());
+}
+
+#[test]
+fn focused_border_style_replaces_the_thick_promotion() {
+    let theme = parse("[borders]\nfocused_style = \"double\"", Mode::Dark).unwrap();
+    assert_eq!(theme.glyphs().block_set(false).top_left, "┌");
+    assert_eq!(theme.glyphs().block_set(true).top_left, "╔");
+    // Without the token the classic thick promotion stands.
+    let bare = parse("", Mode::Dark).unwrap();
+    assert_eq!(bare.glyphs().block_set(true).top_left, "┏");
 }
 
 #[test]

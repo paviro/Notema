@@ -60,7 +60,7 @@ pub(crate) fn draw_journal_insights(frame: &mut Frame<'_>, area: Rect, app: &mut
         let mut block = Block::default()
             .title(tabs_title_line(tab, focused, hovered_tab, inner_width))
             .borders(Borders::ALL)
-            .border_set(theme().glyphs().borders.block_set(focused));
+            .border_set(theme().glyphs().block_set(focused));
         if focused {
             block = block.border_style(theme().focus_border());
         } else {

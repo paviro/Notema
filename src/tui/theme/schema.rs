@@ -7,7 +7,7 @@ use ratatui::style::{Color, Modifier, Style};
 use serde::Deserialize;
 use std::{collections::BTreeMap, str::FromStr};
 
-use super::{BorderGlyphs, ChromeStyle, Fill, Glyphs, Mode, Syntax, Theme};
+use super::{BorderGlyphs, ChromeStyle, CustomBorderSet, Fill, Glyphs, Mode, Syntax, Theme};
 
 pub(super) fn parse(text: &str, mode: Mode) -> Result<Theme> {
     let file: ThemeFile = toml::from_str(text).context("parsing theme TOML")?;
@@ -163,7 +163,8 @@ pub(super) struct ThemeFile {
     scrollbar: ScrollbarSection,
     charts: ChartsSection,
     markdown: MarkdownSection,
-    glyphs: GlyphsSection,
+    toast: ToastSection,
+    tabs: TabsSection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -223,16 +224,121 @@ struct StatusSection {
 struct BordersSection {
     /// The box-drawing character set every border is drawn with.
     style: Option<BorderGlyphs>,
+    /// Per-glyph overrides on `style` — a theme's own character set. Omitted
+    /// keys inherit the base style's glyph.
+    glyphs: Option<BorderGlyphsSection>,
+    /// The set focused panels switch to, replacing the default thick promotion.
+    focused_style: Option<BorderGlyphs>,
+    /// Per-glyph overrides for the focused set, layered on `focused_style` (or
+    /// the base set when no `focused_style` is given).
+    focused_glyphs: Option<BorderGlyphsSection>,
     normal: Option<TokenSpec>,
     subtle: Option<TokenSpec>,
     focused: Option<TokenSpec>,
     unfocused: Option<TokenSpec>,
+    /// The stripe down a focused panel's left edge — the flat-chrome stand-in
+    /// for the focused border, drawn in the `focused` color.
+    focus_stripe: Option<String>,
+    /// The rule of section dividers (month headers, "Archived").
+    divider: Option<String>,
+}
+
+/// A custom border character set: corners plus edges. Junction characters
+/// (tees, cross) always inherit from the base style — tables need them, but
+/// six keys cover what a box is made of.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct BorderGlyphsSection {
+    top_left: Option<String>,
+    top_right: Option<String>,
+    bottom_left: Option<String>,
+    bottom_right: Option<String>,
+    horizontal: Option<String>,
+    vertical: Option<String>,
+}
+
+/// ratatui border sets hold `&'static str`, so parsed glyphs are interned
+/// once per distinct character — the picker and live reload re-parse themes
+/// constantly, and leaking per parse would grow without bound.
+fn intern_glyph(glyph: char) -> &'static str {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<BTreeMap<char, &'static str>>> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(Mutex::default)
+        .lock()
+        .expect("glyph intern lock");
+    cache
+        .entry(glyph)
+        .or_insert_with(|| glyph.to_string().leak())
+}
+
+impl BorderGlyphsSection {
+    /// Overlay this section's glyphs on `base`, producing a custom set.
+    fn resolve(&self, base: BorderGlyphs, token: &str) -> Result<BorderGlyphs> {
+        let mut border = base.border_set();
+        let mut line = base.line_set();
+        let glyph = |spec: &Option<String>, key: &str| -> Result<Option<&'static str>> {
+            spec.as_deref()
+                .map(|spec| parse_glyph(spec, &format!("{token}.{key}")).map(intern_glyph))
+                .transpose()
+        };
+        if let Some(g) = glyph(&self.top_left, "top_left")? {
+            border.top_left = g;
+            line.top_left = g;
+        }
+        if let Some(g) = glyph(&self.top_right, "top_right")? {
+            border.top_right = g;
+            line.top_right = g;
+        }
+        if let Some(g) = glyph(&self.bottom_left, "bottom_left")? {
+            border.bottom_left = g;
+            line.bottom_left = g;
+        }
+        if let Some(g) = glyph(&self.bottom_right, "bottom_right")? {
+            border.bottom_right = g;
+            line.bottom_right = g;
+        }
+        if let Some(g) = glyph(&self.horizontal, "horizontal")? {
+            border.horizontal_top = g;
+            border.horizontal_bottom = g;
+            line.horizontal = g;
+        }
+        if let Some(g) = glyph(&self.vertical, "vertical")? {
+            border.vertical_left = g;
+            border.vertical_right = g;
+            line.vertical = g;
+        }
+        Ok(BorderGlyphs::Custom(intern_border_set(CustomBorderSet {
+            border,
+            line,
+        })))
+    }
+}
+
+/// Like [`intern_glyph`], but for whole resolved sets — leaked once per
+/// distinct set so [`BorderGlyphs`] can carry a `Copy` reference.
+fn intern_border_set(set: CustomBorderSet) -> &'static CustomBorderSet {
+    use std::sync::{Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<Vec<&'static CustomBorderSet>>> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(Mutex::default)
+        .lock()
+        .expect("border set intern lock");
+    if let Some(hit) = cache.iter().find(|cached| ***cached == set) {
+        return hit;
+    }
+    let leaked: &'static CustomBorderSet = Box::leak(Box::new(set));
+    cache.push(leaked);
+    leaked
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct InteractionSection {
     selection: Option<StyleSpec>,
+    /// The marker before a selected list row; omitted follows the chrome
+    /// (`●` flat, `>` bordered).
+    selection_marker: Option<String>,
     hover: Option<StyleSpec>,
     button: Option<StyleSpec>,
     key_hint: Option<StyleSpec>,
@@ -245,6 +351,17 @@ struct InteractionSection {
 struct ScrollbarSection {
     thumb: Option<TokenSpec>,
     track: Option<TokenSpec>,
+    glyphs: ScrollbarGlyphsSection,
+}
+
+/// The scrollbar's characters, defaulting to ratatui's own vertical set.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ScrollbarGlyphsSection {
+    thumb: Option<String>,
+    track: Option<String>,
+    up: Option<String>,
+    down: Option<String>,
 }
 
 /// The zero baseline of signed column charts: glyph and color together.
@@ -332,16 +449,19 @@ impl SyntaxSection {
     }
 }
 
-/// The theme's identity glyphs — the ones that aren't chart furniture (those
-/// live in `[charts]`) or the border set (`borders.style`).
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct GlyphsSection {
-    selection_marker: Option<String>,
-    focus_stripe: Option<String>,
-    toast_edge: Option<String>,
-    tab_separator: Option<String>,
-    divider: Option<String>,
+struct ToastSection {
+    /// The accent edges of a toast card (flat chrome).
+    edge: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct TabsSection {
+    /// The separator between tab labels; always rendered with a space each
+    /// side so the strip's width math stays fixed.
+    separator: Option<String>,
 }
 
 /// A single-character glyph value.
@@ -536,22 +656,39 @@ impl ThemeFile {
             spec.as_deref()
                 .map_or(Ok(default), |spec| parse_glyph(spec, token))
         };
+        let base_borders = borders.style.unwrap_or_default();
+        let border_glyphs = match &borders.glyphs {
+            Some(section) => section.resolve(base_borders, "borders.glyphs")?,
+            None => base_borders,
+        };
+        let focused_borders = match &borders.focused_glyphs {
+            Some(section) => Some(section.resolve(
+                borders.focused_style.unwrap_or(border_glyphs),
+                "borders.focused_glyphs",
+            )?),
+            None => borders.focused_style,
+        };
+        let scrollbar_glyphs = &self.scrollbar.glyphs;
         let glyphs = Glyphs {
-            selection_marker: self
-                .glyphs
+            selection_marker: interaction
                 .selection_marker
                 .as_deref()
-                .map(|spec| parse_glyph(spec, "glyphs.selection_marker"))
+                .map(|spec| parse_glyph(spec, "interaction.selection_marker"))
                 .transpose()?,
-            focus_stripe: glyph(&self.glyphs.focus_stripe, '┃', "glyphs.focus_stripe")?,
-            toast_edge: glyph(&self.glyphs.toast_edge, '┃', "glyphs.toast_edge")?,
-            tab_separator: glyph(&self.glyphs.tab_separator, '·', "glyphs.tab_separator")?,
-            divider: glyph(&self.glyphs.divider, '━', "glyphs.divider")?,
+            focus_stripe: glyph(&borders.focus_stripe, '┃', "borders.focus_stripe")?,
+            toast_edge: glyph(&self.toast.edge, '┃', "toast.edge")?,
+            tab_separator: glyph(&self.tabs.separator, '·', "tabs.separator")?,
+            divider: glyph(&borders.divider, '━', "borders.divider")?,
             chart_baseline: glyph(&charts.baseline.glyph, '┈', "charts.baseline.glyph")?,
             chart_groove: glyph(&charts.groove, '·', "charts.groove")?,
             bar_center: glyph(&charts.bar_center, '│', "charts.bar_center")?,
             mood_fill: glyph(&charts.mood_stroke, '─', "charts.mood_stroke")?,
-            borders: borders.style.unwrap_or_default(),
+            scrollbar_thumb: glyph(&scrollbar_glyphs.thumb, '█', "scrollbar.glyphs.thumb")?,
+            scrollbar_track: glyph(&scrollbar_glyphs.track, '║', "scrollbar.glyphs.track")?,
+            scrollbar_up: glyph(&scrollbar_glyphs.up, '▲', "scrollbar.glyphs.up")?,
+            scrollbar_down: glyph(&scrollbar_glyphs.down, '▼', "scrollbar.glyphs.down")?,
+            borders: border_glyphs,
+            focused_borders,
         };
 
         let status = &self.status;

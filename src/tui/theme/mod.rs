@@ -30,7 +30,7 @@ use std::sync::RwLock;
 
 /// The bundled themes, embedded so the binary can materialize and fall back to
 /// them without touching the network or the repo.
-const BUNDLED: [(&str, &str); 10] = [
+const BUNDLED: [(&str, &str); 15] = [
     ("journal", include_str!("../themes/journal.toml")),
     ("classic", include_str!("../themes/classic.toml")),
     ("e-ink", include_str!("../themes/e-ink.toml")),
@@ -41,6 +41,11 @@ const BUNDLED: [(&str, &str); 10] = [
     ("catppuccin", include_str!("../themes/catppuccin.toml")),
     ("matcha", include_str!("../themes/matcha.toml")),
     ("rose-pine", include_str!("../themes/rose-pine.toml")),
+    ("dungeon", include_str!("../themes/dungeon.toml")),
+    ("synthwave", include_str!("../themes/synthwave.toml")),
+    ("crt", include_str!("../themes/crt.toml")),
+    ("cyberpunk", include_str!("../themes/cyberpunk.toml")),
+    ("vaporwave", include_str!("../themes/vaporwave.toml")),
 ];
 
 /// The theme `load` falls back to when the configured one is missing or broken.
@@ -82,6 +87,18 @@ pub(crate) enum BorderGlyphs {
     Double,
     Thick,
     Ascii,
+    /// A theme-authored set (`[borders.glyphs]`), assembled by the schema.
+    /// Never spellable as `style = "custom"` — it only exists resolved.
+    #[serde(skip)]
+    Custom(&'static CustomBorderSet),
+}
+
+/// The ratatui sets a `[borders.glyphs]` table resolves to, interned by the
+/// schema so [`BorderGlyphs`] stays pointer-sized and `Copy`.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct CustomBorderSet {
+    pub(super) border: ratatui::symbols::border::Set<'static>,
+    pub(super) line: ratatui::symbols::line::Set<'static>,
 }
 
 /// The `+-|` sets for [`BorderGlyphs::Ascii`], for terminals or looks that
@@ -121,6 +138,7 @@ impl BorderGlyphs {
             BorderGlyphs::Double => border::DOUBLE,
             BorderGlyphs::Thick => border::THICK,
             BorderGlyphs::Ascii => ASCII_BORDER_SET,
+            BorderGlyphs::Custom(set) => set.border,
         }
     }
 
@@ -134,14 +152,22 @@ impl BorderGlyphs {
             BorderGlyphs::Double => line::DOUBLE,
             BorderGlyphs::Thick => line::THICK,
             BorderGlyphs::Ascii => ASCII_LINE_SET,
+            BorderGlyphs::Custom(set) => set.line,
         }
     }
 
     /// The `Block` border set for a panel, thickened when focused — thickness
-    /// is how focus survives monochrome. Ascii has no thick variant; there
-    /// focus is carried by the bold border style alone.
+    /// is how focus survives monochrome. Ascii and custom sets have no thick
+    /// variant; there focus is carried by the bold border style alone.
     pub(crate) fn block_set(self, focused: bool) -> ratatui::symbols::border::Set<'static> {
-        if focused && self != BorderGlyphs::Ascii {
+        let promotes = matches!(
+            self,
+            BorderGlyphs::Plain
+                | BorderGlyphs::Rounded
+                | BorderGlyphs::Double
+                | BorderGlyphs::Thick
+        );
+        if focused && promotes {
             BorderGlyphs::Thick.border_set()
         } else {
             self.border_set()
@@ -225,8 +251,31 @@ pub(crate) struct Glyphs {
     pub(crate) bar_center: char,
     /// The stroke of the mood bar's fill (`charts.mood_stroke`).
     pub(crate) mood_fill: char,
-    /// The box-drawing set for borders, cards, and table grids (`borders.style`).
+    /// The scrollbar's draggable handle (`glyphs.scrollbar_thumb`).
+    pub(crate) scrollbar_thumb: char,
+    /// The scrollbar's track behind the handle (`glyphs.scrollbar_track`).
+    pub(crate) scrollbar_track: char,
+    /// The arrow capping the scrollbar's top (`glyphs.scrollbar_up`).
+    pub(crate) scrollbar_up: char,
+    /// The arrow capping the scrollbar's bottom (`glyphs.scrollbar_down`).
+    pub(crate) scrollbar_down: char,
+    /// The box-drawing set for borders, cards, and table grids (`borders.style`
+    /// or `[borders.glyphs]`).
     pub(crate) borders: BorderGlyphs,
+    /// What a focused panel's border is drawn with (`borders.focused_style` /
+    /// `[borders.focused_glyphs]`). `None` keeps the classic thick promotion.
+    pub(crate) focused_borders: Option<BorderGlyphs>,
+}
+
+impl Glyphs {
+    /// The border set for a panel: the theme's focus override when focused,
+    /// otherwise the base set with its thick promotion.
+    pub(crate) fn block_set(self, focused: bool) -> ratatui::symbols::border::Set<'static> {
+        match (focused, self.focused_borders) {
+            (true, Some(borders)) => borders.border_set(),
+            _ => self.borders.block_set(focused),
+        }
+    }
 }
 
 /// A fully resolved theme: plain styles and colors, no variants left.

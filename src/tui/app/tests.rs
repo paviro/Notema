@@ -754,13 +754,18 @@ fn theme_picker_opens_on_the_active_theme_with_bundled_entries() {
             "blossom",
             "catppuccin",
             "classic",
+            "crt",
+            "cyberpunk",
+            "dungeon",
             "e-ink",
             "fjord",
             "grove",
             "journal",
             "matcha",
             "rose-pine",
+            "synthwave",
             "tokyonight",
+            "vaporwave",
         ]
     );
     assert!(state.entries.iter().all(|entry| entry.theme.is_some()));
