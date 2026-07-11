@@ -14,7 +14,7 @@ use crate::tui::app::{
 };
 use crate::tui::entry_rows::wrap_text;
 use crate::tui::state::{DeleteContext, EditMoodState, HoverTarget, ListNav, ThemePickerState};
-use crate::tui::surface::metadata_value_rows;
+use crate::tui::surface::{metadata_value_rows, surface_outer_width};
 use crate::tui::text_input::TextInput;
 use crate::tui::theme::theme;
 
@@ -54,16 +54,18 @@ const SELECTED_LABEL: &str = "Selected: ";
 /// metadata-row layout: the "Selected: " label reserves the first row's leading
 /// width, values are separated by " | ", and each row is a list of indices into
 /// `selected`. Empty when nothing is picked (rendered as "Selected: none").
-fn feelings_selected_rows(selected: &[String]) -> Vec<Vec<usize>> {
-    let width = LIST_DIALOG_WIDTH.saturating_sub(2).max(1);
+fn feelings_selected_rows(selected: &[String], width: u16) -> Vec<Vec<usize>> {
     metadata_value_rows(SELECTED_LABEL.len() as u16, width, selected)
 }
 
 /// Number of lines the "Selected: …" footer occupies once wrapped — at least one
 /// (the "Selected: none" line when nothing is picked). Used both to size the dialog
 /// and to render it, so the reserved height always matches the drawn lines.
-pub(crate) fn feelings_selected_line_count(selected: &[String]) -> usize {
-    feelings_selected_rows(selected).len().max(1)
+fn feelings_selected_line_count(frame_area: Rect, selected: &[String]) -> usize {
+    let area = centered_rect_fixed_size(LIST_DIALOG_WIDTH, 1, frame_area);
+    feelings_selected_rows(selected, dialog_inner(area).width)
+        .len()
+        .max(1)
 }
 
 /// The picker's hint row, with the chrome and mode hints' labels reflecting
@@ -157,17 +159,15 @@ const LOCATION_DIALOG_NAME_HINTS: [Hint; 5] = [
 const LIST_DIALOG_WIDTH: u16 = 44;
 const LOCATION_DIALOG_WIDTH: u16 = 66;
 const LOCATION_DIALOG_MAX_VISIBLE_ROWS: u16 = 8;
-/// Text width available to a wrapped list row: the inner width less the border,
-/// the selection-cursor column, and one leading pad column.
-const LOCATION_LIST_WRAP_WIDTH: usize = (LOCATION_DIALOG_WIDTH - 4) as usize;
 /// Cap the lines a single (wrapped) list row may occupy.
 const LOCATION_LIST_MAX_ITEM_LINES: usize = 3;
 
 /// Wrap a list label into its display lines (at least one).
-fn location_row_lines(label: &str) -> Vec<String> {
+fn location_row_lines(label: &str, list_width: u16) -> Vec<String> {
+    let marker_width = UnicodeWidthStr::width(list_highlight_symbol().as_str()) as u16;
     let lines = wrap_text(
         label,
-        LOCATION_LIST_WRAP_WIDTH,
+        list_width.saturating_sub(marker_width).max(1) as usize,
         LOCATION_LIST_MAX_ITEM_LINES,
     );
     if lines.is_empty() {
@@ -179,10 +179,12 @@ fn location_row_lines(label: &str) -> Vec<String> {
 
 /// Total rows the list occupies once every label is wrapped — what the dialog is
 /// sized to, so multi-line rows aren't clipped.
-pub(crate) fn location_list_rows(labels: &[String]) -> usize {
+fn location_list_rows(frame_area: Rect, labels: &[String]) -> usize {
+    let area = centered_rect_fixed_size(LOCATION_DIALOG_WIDTH, 1, frame_area);
+    let list_width = dialog_inner(area).width;
     labels
         .iter()
-        .map(|label| location_row_lines(label).len())
+        .map(|label| location_row_lines(label, list_width).len())
         .sum::<usize>()
         .max(1)
 }
@@ -202,7 +204,7 @@ pub(crate) fn location_list_row_at(
     }
     let mut line = 0usize;
     for (index, label) in labels.iter().enumerate().skip(offset) {
-        line += location_row_lines(label).len();
+        line += location_row_lines(label, list.width).len();
         if relative < line {
             return Some(index);
         }
@@ -294,8 +296,7 @@ pub(crate) fn mood_dialog_area(frame_area: Rect) -> Rect {
 
 fn dialog_hint_width(frame_area: Rect, width: u16) -> u16 {
     let area = super::centered_rect_fixed_size(width, 1, frame_area);
-    let inner = dialog_inner(area);
-    inner.width.saturating_sub(1)
+    dialog_inner(area).width
 }
 
 fn tag_dialog_hint_height(frame_area: Rect) -> u16 {
@@ -359,7 +360,8 @@ pub(crate) struct LocationDialogLayout {
     pub(crate) hints: Rect,
 }
 
-pub(crate) fn location_dialog_layout(frame_area: Rect, list_rows: usize) -> LocationDialogLayout {
+pub(crate) fn location_dialog_layout(frame_area: Rect, labels: &[String]) -> LocationDialogLayout {
+    let list_rows = location_list_rows(frame_area, labels);
     let area = location_dialog_area(frame_area, list_rows);
     let inner = dialog_inner(area);
     let hint_height = location_dialog_hint_height(frame_area);
@@ -478,8 +480,9 @@ pub(crate) struct FeelingsDialogLayout {
 pub(crate) fn feelings_dialog_layout(
     frame_area: Rect,
     all_len: usize,
-    selected_lines: usize,
+    selected: &[String],
 ) -> FeelingsDialogLayout {
+    let selected_lines = feelings_selected_line_count(frame_area, selected);
     let area = feelings_dialog_area(frame_area, all_len, selected_lines);
     let inner = dialog_inner(area);
     let hint_height = feelings_dialog_hint_height(frame_area);
@@ -605,7 +608,7 @@ pub(super) fn draw_theme_picker(
     state.list.set_offset(scroll);
 
     let items: Vec<ListItem<'_>> = if state.entries.is_empty() {
-        vec![ListItem::new(Line::from(" (no themes found)"))]
+        vec![ListItem::new(Line::from("(no themes found)"))]
     } else {
         state
             .entries
@@ -753,11 +756,9 @@ fn render_search_field(
         rect,
     );
 
-    // Leave one blank column before the dialog border so the underlined field
-    // doesn't run flush against it.
     let field = Rect {
         x: rect.x + prefix_w,
-        width: rect.width.saturating_sub(prefix_w).saturating_sub(1),
+        width: rect.width.saturating_sub(prefix_w),
         ..rect
     };
     value.render_in(frame, field, focused, hovered);
@@ -792,11 +793,6 @@ fn render_lines_in_area<'a>(
 }
 
 fn render_separator(frame: &mut Frame<'_>, area: Rect) {
-    let area = Rect {
-        x: area.x.saturating_add(1),
-        width: area.width.saturating_sub(2),
-        ..area
-    };
     if area.width == 0 {
         return;
     }
@@ -807,19 +803,10 @@ fn render_separator(frame: &mut Frame<'_>, area: Rect) {
     );
 }
 
-fn hint_content_area(area: Rect) -> Rect {
-    Rect {
-        x: area.x.saturating_add(1),
-        width: area.width.saturating_sub(1),
-        ..area
-    }
-}
-
 fn render_hint_line(frame: &mut Frame<'_>, hints: &[Hint], area: Rect, hover: HoverTarget) {
-    let content = hint_content_area(area);
     frame.render_widget(
-        Paragraph::new(hint_lines(hints, content.width, hovered_hint(hover))),
-        content,
+        Paragraph::new(hint_lines(hints, area.width, hovered_hint(hover))),
+        area,
     );
 }
 
@@ -852,8 +839,7 @@ pub(super) fn draw_fetching_environment(frame: &mut Frame<'_>, started: Instant)
         ".".repeat(dots),
         " ".repeat(3 - dots)
     );
-    // Border (2) + a space of padding each side (2) around the fixed-width text.
-    let width = message.width() as u16 + 4;
+    let width = surface_outer_width(message.width() as u16);
     let area = centered_rect_fixed_size(width, 1 + dialog_frame_rows(), frame.area());
     let inner = draw_dialog_frame(frame, area, "", false);
     frame.render_widget(Paragraph::new(message).alignment(Alignment::Center), inner);
@@ -894,7 +880,7 @@ fn confirm_delete_area(frame_area: Rect, ctx: &DeleteContext) -> Rect {
     let width = CONFIRM_DIALOG_WIDTH.max(
         message
             .lines()
-            .map(|l| l.len() as u16 + 4)
+            .map(|line| surface_outer_width(line.len() as u16))
             .max()
             .unwrap_or(0),
     );
@@ -979,9 +965,9 @@ pub(super) fn draw_edit_metadata_dialog(
 
     let items: Vec<ListItem<'_>> = if state.filtered.is_empty() {
         let text = if state.input.is_empty() {
-            format!(" (no {title} yet)").to_lowercase()
+            format!("(no {title} yet)").to_lowercase()
         } else {
-            " (no matches)".to_string()
+            "(no matches)".to_string()
         };
         vec![ListItem::new(Line::from(text))]
     } else {
@@ -1118,7 +1104,7 @@ pub(super) fn draw_edit_location_dialog(
     let labels = state.list_labels();
     let item_count = labels.len();
     // Size the dialog to the wrapped row span so multi-line rows aren't clipped.
-    let layout = location_dialog_layout(frame.area(), location_list_rows(&labels));
+    let layout = location_dialog_layout(frame.area(), &labels);
 
     state.normalize_list_state();
     let max_visible = layout.list.height;
@@ -1162,20 +1148,20 @@ pub(super) fn draw_edit_location_dialog(
     let status_line = match &state.status {
         LocationResolveStatus::Idle => {
             match state.resolved.as_ref().and_then(|l| l.display_label()) {
-                Some(label) => Line::from(vec![Span::raw("  "), Span::styled(label, dim)]),
+                Some(label) => Line::from(Span::styled(label, dim)),
                 None => Line::from(Span::styled(
-                    "  Enter a place, address, or \"lat, lon\", then press enter",
+                    "Enter a place, address, or \"lat, lon\", then press enter",
                     dim,
                 )),
             }
         }
-        LocationResolveStatus::Resolving => Line::from(Span::styled("  Resolving…", dim)),
-        LocationResolveStatus::NoMatch => Line::from(Span::styled("  No matches found", dim)),
-        LocationResolveStatus::Error(error) => Line::from(Span::styled(format!("  {error}"), dim)),
+        LocationResolveStatus::Resolving => Line::from(Span::styled("Resolving…", dim)),
+        LocationResolveStatus::NoMatch => Line::from(Span::styled("No matches found", dim)),
+        LocationResolveStatus::Error(error) => Line::from(Span::styled(error.clone(), dim)),
         LocationResolveStatus::Resolved => {
             match state.resolved.as_ref().and_then(|l| l.display_label()) {
-                Some(label) => Line::from(vec![Span::styled("  ✓ ", bold), Span::raw(label)]),
-                None => Line::from(Span::styled("  Resolved", dim)),
+                Some(label) => Line::from(vec![Span::styled("✓ ", bold), Span::raw(label)]),
+                None => Line::from(Span::styled("Resolved", dim)),
             }
         }
     };
@@ -1198,9 +1184,9 @@ pub(super) fn draw_edit_location_dialog(
     // clipping them.
     let items: Vec<ListItem<'_>> = if labels.is_empty() {
         let text = if showing_candidates {
-            " (no matches)"
+            "(no matches)"
         } else {
-            " (no saved places yet)"
+            "(no saved places yet)"
         };
         vec![ListItem::new(Line::from(text))]
     } else {
@@ -1212,9 +1198,9 @@ pub(super) fn draw_edit_location_dialog(
             .iter()
             .enumerate()
             .map(|(index, label)| {
-                let lines: Vec<Line<'static>> = location_row_lines(label)
+                let lines: Vec<Line<'static>> = location_row_lines(label, layout.list.width)
                     .into_iter()
-                    .map(|line| Line::from(format!(" {line}")))
+                    .map(Line::from)
                     .collect();
                 let item = ListItem::new(lines);
                 if Some(index) == hovered_row && Some(index) != shown_selection {
@@ -1253,8 +1239,7 @@ pub(super) fn draw_edit_feelings_dialog(
     hover: HoverTarget,
 ) {
     let rows = state.visible_rows();
-    let selected_line_count = feelings_selected_line_count(&state.selected);
-    let layout = feelings_dialog_layout(frame.area(), rows.len(), selected_line_count);
+    let layout = feelings_dialog_layout(frame.area(), rows.len(), &state.selected);
     let filtering = state.is_filtering();
     let list_focused = state.focus == EditMetadataFocus::List;
     let input_focused = state.focus == EditMetadataFocus::Input;
@@ -1271,7 +1256,7 @@ pub(super) fn draw_edit_feelings_dialog(
     // highlight is hidden and the selected row must still hover.
     let shown_selection = state.selected_index().filter(|_| list_focused);
     let items: Vec<ListItem<'_>> = if rows.is_empty() {
-        vec![ListItem::new(Line::from(" (no matches)"))]
+        vec![ListItem::new(Line::from("(no matches)"))]
     } else {
         rows.iter()
             .enumerate()
@@ -1344,13 +1329,11 @@ pub(super) fn draw_edit_feelings_dialog(
         hover,
     );
 
-    // The summary lines get a leading pad space; the "Selected:" label is bold and
-    // its continuation lines align under the first.
+    // The "Selected:" label is bold and continuation lines align under it.
     let bold = theme().heading();
-    let selected_rows = feelings_selected_rows(&state.selected);
+    let selected_rows = feelings_selected_rows(&state.selected, layout.selected.width);
     let summary: Vec<Line<'_>> = if selected_rows.is_empty() {
         vec![Line::from(vec![
-            Span::raw(" "),
             Span::styled("Selected:", bold),
             Span::raw(" none"),
         ])]
@@ -1366,12 +1349,11 @@ pub(super) fn draw_edit_feelings_dialog(
                     .join(" | ");
                 if index == 0 {
                     Line::from(vec![
-                        Span::raw(" "),
                         Span::styled("Selected:", bold),
                         Span::raw(format!(" {joined}")),
                     ])
                 } else {
-                    Line::from(format!(" {joined}"))
+                    Line::from(joined)
                 }
             })
             .collect()
@@ -1394,14 +1376,15 @@ mod tests {
     fn location_list_row_at_maps_wrapped_rows() {
         let long = "Some very long place name that keeps going ".repeat(3);
         let labels = vec!["First".to_string(), long.clone(), "Third".to_string()];
-        let l0 = location_row_lines(&labels[0]).len();
-        let l1 = location_row_lines(&labels[1]).len();
+        let list_width = LOCATION_DIALOG_WIDTH - 4;
+        let l0 = location_row_lines(&labels[0], list_width).len();
+        let l1 = location_row_lines(&labels[1], list_width).len();
         assert!(l1 > 1, "long label should wrap onto multiple lines");
 
         let list = Rect {
             x: 0,
             y: 10,
-            width: LOCATION_DIALOG_WIDTH,
+            width: list_width,
             height: 40,
         };
 
@@ -1417,9 +1400,55 @@ mod tests {
         let third_start = 10 + (l0 + l1) as u16;
         assert_eq!(location_list_row_at(list, &labels, 0, third_start), Some(2));
         // A click past the last rendered row misses.
-        let past = third_start + location_row_lines(&labels[2]).len() as u16;
+        let past = third_start + location_row_lines(&labels[2], list_width).len() as u16;
         assert_eq!(location_list_row_at(list, &labels, 0, past), None);
         // Scrolled: the first visible row is the label at `offset`.
         assert_eq!(location_list_row_at(list, &labels, 1, 10), Some(1));
+    }
+
+    #[test]
+    fn narrow_location_layout_sizes_and_hit_tests_from_its_actual_width() {
+        let frame_area = Rect::new(0, 0, 30, 24);
+        let labels = vec![
+            "A long place name that wraps on a narrow terminal".to_string(),
+            "Another place name that also wraps across rows".to_string(),
+        ];
+        let layout = location_dialog_layout(frame_area, &labels);
+        let first_height = location_row_lines(&labels[0], layout.list.width).len();
+        let total_rows: usize = labels
+            .iter()
+            .map(|label| location_row_lines(label, layout.list.width).len())
+            .sum();
+
+        assert_eq!(location_list_rows(frame_area, &labels), total_rows);
+        assert_eq!(layout.list.height as usize, total_rows);
+        assert_eq!(
+            location_list_row_at(
+                layout.list,
+                &labels,
+                0,
+                layout.list.y + first_height as u16 - 1,
+            ),
+            Some(0),
+        );
+        assert_eq!(
+            location_list_row_at(layout.list, &labels, 0, layout.list.y + first_height as u16,),
+            Some(1),
+        );
+    }
+
+    #[test]
+    fn feelings_summary_height_uses_the_final_dialog_width() {
+        let frame_area = Rect::new(0, 0, 30, 24);
+        let selected = vec![
+            "overwhelmed".to_string(),
+            "appreciative".to_string(),
+            "self-conscious".to_string(),
+        ];
+        let layout = feelings_dialog_layout(frame_area, 4, &selected);
+        let rows = feelings_selected_rows(&selected, layout.selected.width);
+
+        assert_eq!(layout.selected.height as usize, rows.len());
+        assert!(rows.len() > 1);
     }
 }

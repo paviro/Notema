@@ -618,8 +618,11 @@ impl ThemeFile {
         let muted_ink = muted.add_modifier(Modifier::DIM);
         let divider_style = style(&borders.divider_style, muted_ink, "borders.divider_style")?;
         let card_border = style(&borders.card, border, "borders.card")?;
-        let tab_separator_style =
-            style(&self.tabs.separator_style, muted_ink, "tabs.separator_style")?;
+        let tab_separator_style = style(
+            &self.tabs.separator_style,
+            muted_ink,
+            "tabs.separator_style",
+        )?;
         // The thumb inherits the focused-border hue (it marks the scrollable,
         // interactable panel); the track stays terminal-default quiet.
         let scrollbar_thumb = style(&self.scrollbar.thumb, border_active, "scrollbar.thumb")?;

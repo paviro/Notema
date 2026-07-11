@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::tui::surface::point_in_rect;
+use crate::tui::surface::{point_in_rect, surface_content_inner};
 use crate::tui::theme::theme;
 
 use super::chrome::{centered_rect_fixed_size, clear_surface, flat_chrome};
@@ -32,13 +32,14 @@ pub(crate) fn dialog_frame_rows() -> u16 {
 pub(crate) fn dialog_inner(area: Rect) -> Rect {
     // Saturating per-axis (unlike `Rect::inner`, which zeroes the whole rect):
     // sizing helpers probe with height-1 rects and still need the real width.
-    let (horizontal, top) = if flat_chrome() { (2, 3) } else { (1, 1) };
-    Rect {
-        x: area.x.saturating_add(horizontal),
+    let top = if flat_chrome() { 3 } else { 1 };
+    let frame_inner = Rect {
+        x: area.x.saturating_add(1),
         y: area.y.saturating_add(top),
-        width: area.width.saturating_sub(horizontal * 2),
+        width: area.width.saturating_sub(2),
         height: area.height.saturating_sub(dialog_frame_rows()),
-    }
+    };
+    surface_content_inner(frame_inner)
 }
 
 /// Clear and frame a dialog, returning its content rect (always
@@ -55,10 +56,11 @@ pub(crate) fn draw_dialog_frame(
     let title = title.trim();
     if flat_chrome() {
         // The title sits below a blank padding row, off the card's edge.
+        let content = dialog_inner(area);
         let top = Rect {
-            x: area.x + 2,
+            x: content.x,
             y: area.y + 1.min(area.height.saturating_sub(1)),
-            width: area.width.saturating_sub(4),
+            width: content.width,
             height: 1.min(area.height),
         };
         if !title.is_empty() {

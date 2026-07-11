@@ -1031,8 +1031,7 @@ fn click_on_feeling_dialog_header_expands_then_feeling_toggles() {
     let feelings_layout = |app: &App| {
         let state = app.edit_feeling_state().unwrap();
         let all_len = state.item_count();
-        let selected_lines = render::feelings_selected_line_count(&state.selected);
-        render::feelings_dialog_layout(Rect::new(0, 0, 120, 20), all_len, selected_lines)
+        render::feelings_dialog_layout(Rect::new(0, 0, 120, 20), all_len, &state.selected)
     };
 
     // Clicking the first (header) row folds that group open.

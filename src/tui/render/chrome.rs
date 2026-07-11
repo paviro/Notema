@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     buffer::Buffer,
-    layout::{Alignment, Constraint, Flex, Layout, Margin, Rect},
+    layout::{Alignment, Constraint, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -9,6 +9,7 @@ use ratatui::{
     },
 };
 
+use crate::tui::surface::scrollbar_bar_rect;
 use crate::tui::theme::{ChromeStyle, theme};
 
 /// True when the active theme separates surfaces by background layers instead
@@ -235,14 +236,7 @@ pub(crate) fn render_vertical_scrollbar(
         .begin_style(theme().scrollbar_arrow())
         .end_symbol(Some(&down))
         .end_style(theme().scrollbar_arrow());
-    frame.render_stateful_widget(
-        scrollbar,
-        area.inner(Margin {
-            vertical: 1,
-            horizontal: 0,
-        }),
-        state,
-    );
+    frame.render_stateful_widget(scrollbar, scrollbar_bar_rect(area), state);
 }
 
 pub(crate) fn render_scrollbar_if_needed(

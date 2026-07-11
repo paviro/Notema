@@ -46,9 +46,8 @@ pub(crate) use chrome::{
     panel_focus_stripe, render_centered_notice, render_scrollbar_if_needed,
 };
 pub(crate) use dialogs::{
-    confirm_delete_inner, feelings_dialog_hints, feelings_dialog_layout,
-    feelings_selected_line_count, location_dialog_hints, location_dialog_layout,
-    location_list_row_at, location_list_rows, metadata_dialog_hints, metadata_dialog_layout,
+    confirm_delete_inner, feelings_dialog_hints, feelings_dialog_layout, location_dialog_hints,
+    location_dialog_layout, location_list_row_at, metadata_dialog_hints, metadata_dialog_layout,
     mood_dialog_hints, mood_dialog_layout, theme_picker_hints, theme_picker_layout,
 };
 use dialogs::{

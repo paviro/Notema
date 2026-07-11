@@ -1,5 +1,7 @@
 use ratatui::layout::Rect;
 
+pub(crate) use crate::tui::surface::scrollbar_bar_rect;
+
 pub(crate) fn viewer_scroll(requested: u16, line_count: usize, height: u16) -> u16 {
     let max_scroll = line_count
         .saturating_sub(height as usize)
@@ -17,19 +19,6 @@ pub(crate) fn scrollbar_position(scroll: usize, line_count: usize, height: u16) 
         .saturating_mul(line_count.saturating_sub(1))
         .checked_div(max_scroll)
         .unwrap_or(0)
-}
-
-/// The interactive vertical-scrollbar track for a panel `area`, matching where
-/// `render_vertical_scrollbar` draws it: the panel's rightmost column, inset by one
-/// row top and bottom (`Margin { vertical: 1 }`). A zero-height rect means there is
-/// no draggable track.
-pub(crate) fn scrollbar_bar_rect(area: Rect) -> Rect {
-    Rect {
-        x: area.x.saturating_add(area.width.saturating_sub(1)),
-        y: area.y.saturating_add(1),
-        width: 1,
-        height: area.height.saturating_sub(2),
-    }
 }
 
 /// The thumb's rows within a scrollbar `bar`, replicating ratatui's `Scrollbar`

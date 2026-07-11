@@ -788,11 +788,7 @@ fn overlay_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarge
     }
 
     if let Some(state) = app.edit_feeling_state() {
-        let layout = render::feelings_dialog_layout(
-            area,
-            state.item_count(),
-            render::feelings_selected_line_count(&state.selected),
-        );
+        let layout = render::feelings_dialog_layout(area, state.item_count(), &state.selected);
         if render::point_in_rect(layout.list, col, row)
             && let Some(index) =
                 list_row_at(layout.list, col, row, state.offset(), state.item_count())
@@ -804,7 +800,7 @@ fn overlay_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarge
 
     if let Some(state) = app.edit_location_state() {
         let labels = state.list_labels();
-        let layout = render::location_dialog_layout(area, render::location_list_rows(&labels));
+        let layout = render::location_dialog_layout(area, &labels);
         if render::point_in_rect(layout.list, col, row)
             && let Some(index) =
                 render::location_list_row_at(layout.list, &labels, state.offset(), row)
@@ -1105,13 +1101,10 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
     }
 
     if let Some(focus) = app.edit_feeling_state().map(|s| s.focus) {
-        let (all_len, selected_lines) = app.edit_feeling_state().map_or((0, 1), |s| {
-            (
-                s.item_count(),
-                render::feelings_selected_line_count(&s.selected),
-            )
-        });
-        let layout = render::feelings_dialog_layout(area, all_len, selected_lines);
+        let layout = app.edit_feeling_state().map_or_else(
+            || render::feelings_dialog_layout(area, 0, &[]),
+            |state| render::feelings_dialog_layout(area, state.item_count(), &state.selected),
+        );
         if let Some(action) = dialog_hint_action(
             app,
             layout.hints,
@@ -1124,7 +1117,8 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         if render::point_in_rect(layout.list, col, row) {
             if let Some(state) = app.edit_feeling_state_mut() {
                 state.focus = EditMetadataFocus::List;
-                if let Some(index) = list_row_at(layout.list, col, row, state.offset(), all_len)
+                if let Some(index) =
+                    list_row_at(layout.list, col, row, state.offset(), state.item_count())
                     && index < state.item_count()
                 {
                     // Clicking a header folds it; clicking a feeling toggles it.
@@ -1162,9 +1156,10 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         .edit_location_state()
         .map(|s| (s.focus, s.query_looked_up))
     {
-        let labels = app.edit_location_state().map(|s| s.list_labels());
-        let list_rows = labels.as_deref().map_or(1, render::location_list_rows);
-        let layout = render::location_dialog_layout(area, list_rows);
+        let labels = app
+            .edit_location_state()
+            .map_or_else(Vec::new, |state| state.list_labels());
+        let layout = render::location_dialog_layout(area, &labels);
         if let Some(action) = dialog_hint_action(
             app,
             layout.hints,
@@ -1188,9 +1183,7 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         }
         if render::point_in_rect(layout.list, col, row) {
             let offset = app.edit_location_state().map_or(0, |s| s.offset());
-            let index = labels
-                .as_deref()
-                .and_then(|labels| render::location_list_row_at(layout.list, labels, offset, row));
+            let index = render::location_list_row_at(layout.list, &labels, offset, row);
             if let Some(state) = app.edit_location_state_mut() {
                 state.focus = EditLocationFocus::List;
                 if let Some(index) = index {
@@ -1241,13 +1234,10 @@ fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16
     }
 
     if app.edit_feeling_state().is_some() {
-        let (all_len, selected_lines) = app.edit_feeling_state().map_or((0, 1), |s| {
-            (
-                s.item_count(),
-                render::feelings_selected_line_count(&s.selected),
-            )
-        });
-        let layout = render::feelings_dialog_layout(area, all_len, selected_lines);
+        let layout = app.edit_feeling_state().map_or_else(
+            || render::feelings_dialog_layout(area, 0, &[]),
+            |state| render::feelings_dialog_layout(area, state.item_count(), &state.selected),
+        );
         if render::point_in_rect(layout.list, mouse.column, mouse.row)
             && let Some(state) = app.edit_feeling_state_mut()
         {
@@ -1257,7 +1247,7 @@ fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16
     }
 
     if let Some(labels) = app.edit_location_state().map(|s| s.list_labels()) {
-        let layout = render::location_dialog_layout(area, render::location_list_rows(&labels));
+        let layout = render::location_dialog_layout(area, &labels);
         if render::point_in_rect(layout.list, mouse.column, mouse.row)
             && let Some(state) = app.edit_location_state_mut()
         {

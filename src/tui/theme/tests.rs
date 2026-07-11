@@ -155,7 +155,10 @@ fn new_tokens_resolve_explicit_values() {
         theme.scrollbar_track().fg,
         Some(Color::Rgb(0x22, 0x33, 0x44))
     );
-    assert_eq!(theme.scrollbar_arrow().fg, Some(Color::Rgb(0x40, 0x40, 0x40)));
+    assert_eq!(
+        theme.scrollbar_arrow().fg,
+        Some(Color::Rgb(0x40, 0x40, 0x40))
+    );
     assert_eq!(theme.md_heading3().fg, Some(Color::Rgb(0x55, 0x66, 0x77)));
 }
 
@@ -237,7 +240,10 @@ fn glyphs_resolve_and_default() {
 #[test]
 fn glyph_tokens_must_be_one_character() {
     let err = parse("[borders.glyphs]\nfocus_stripe = \"ab\"", Mode::Dark).unwrap_err();
-    assert!(err.to_string().contains("borders.glyphs.focus_stripe"), "{err:#}");
+    assert!(
+        err.to_string().contains("borders.glyphs.focus_stripe"),
+        "{err:#}"
+    );
 }
 
 #[test]

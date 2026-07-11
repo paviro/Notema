@@ -591,15 +591,11 @@ fn open_dialog_list_height(
             .list
             .height
     } else if let Some(state) = app.edit_feeling_state() {
-        render::feelings_dialog_layout(
-            area,
-            state.item_count(),
-            render::feelings_selected_line_count(&state.selected),
-        )
-        .list
-        .height
+        render::feelings_dialog_layout(area, state.item_count(), &state.selected)
+            .list
+            .height
     } else if let Some(state) = app.edit_location_state() {
-        render::location_dialog_layout(area, render::location_list_rows(&state.list_labels()))
+        render::location_dialog_layout(area, &state.list_labels())
             .list
             .height
     } else if let Some(state) = app.theme_picker_state() {

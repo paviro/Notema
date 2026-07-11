@@ -5,6 +5,7 @@ use crate::{
         app::{EditMetadataFocus, EditMetadataState, Focus, INLINE_ENTRY_VIEW_MIN_WIDTH, Mode},
         state::MetadataKind,
         test_support::{app_with_entries, app_with_entry, app_with_journals, new_app},
+        theme,
     },
 };
 use journal_core::{Entry, EntryEncryptionState, SearchHit};
@@ -646,10 +647,25 @@ fn scrollbar_position_stays_at_start_when_content_fits() {
 
 #[test]
 fn scrollbar_bar_rect_matches_rendered_track() {
-    // Panel at (2, 3) sized 20×10: bar on the rightmost column, inset one row
-    // top and bottom (Margin { vertical: 1 }).
-    let bar = scrollbar_bar_rect(Rect::new(2, 3, 20, 10));
-    assert_eq!(bar, Rect::new(21, 4, 1, 8));
+    let area = Rect::new(2, 3, 20, 10);
+    theme::set_test_theme(theme::test_flat_theme());
+    theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Flat));
+    let flat_bar = scrollbar_bar_rect(area);
+    let flat_content = PanelGeometry::new(area).content;
+    assert_eq!(flat_bar, Rect::new(20, 4, 1, 8));
+    assert_eq!(flat_content.x + flat_content.width, flat_bar.x - 1);
+    assert_eq!(flat_bar.x + flat_bar.width + 1, area.x + area.width);
+
+    theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
+    let bordered_bar = scrollbar_bar_rect(area);
+    let bordered_content = PanelGeometry::new(area).content;
+    assert_eq!(bordered_bar, Rect::new(21, 4, 1, 8));
+    assert_eq!(bordered_content.x, area.x + 2);
+    assert_eq!(
+        bordered_content.x + bordered_content.width,
+        bordered_bar.x - 1
+    );
+    theme::set_chrome_override(None);
 }
 
 #[test]
@@ -718,7 +734,7 @@ fn list_dialogs_keep_preferred_width_until_they_hit_edges() {
     assert_eq!(narrow_tags.area.width, 40);
 
     // 15 group headers + 155 feelings = 170 rows; the list caps at its max visible rows.
-    let wide_feelings = feelings_dialog_layout(Rect::new(0, 0, 120, 30), 170, 1);
+    let wide_feelings = feelings_dialog_layout(Rect::new(0, 0, 120, 30), 170, &[]);
     assert_eq!(wide_feelings.area.width, 44);
     assert_eq!(wide_feelings.list.height, 16);
 
@@ -2267,6 +2283,14 @@ mod flat_chrome_tests {
         )
     }
 
+    fn many_tags_state() -> EditMetadataState {
+        let all_values: Vec<_> = (0..20)
+            .map(|index| (format!("tag-{index:02}"), index))
+            .collect();
+        let filtered = (0..all_values.len()).collect();
+        EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new(), 20)
+    }
+
     #[test]
     fn dialogs_drop_borders_for_a_title_row_with_esc_hint() {
         pin_flat();
@@ -2294,6 +2318,26 @@ mod flat_chrome_tests {
         let area = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2).area;
         let cell = &backend.buffer()[(area.x + 1, area.y + 1)];
         assert_eq!(cell.bg, dialog_bg);
+    }
+
+    #[test]
+    fn bordered_dialog_list_keeps_one_cell_before_the_frame_and_scrollbar() {
+        pin_flat();
+        theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
+        let frame_area = Rect::new(0, 0, 80, 20);
+        let layout = metadata_dialog_layout(frame_area, 20);
+        let backend = render_backend(frame_area.width, frame_area.height, |frame| {
+            dialogs::draw_edit_metadata_dialog(frame, &mut many_tags_state(), HoverTarget::None)
+        });
+        let bar = scrollbar_bar_rect(layout.area);
+        let row = layout.list.y;
+
+        assert_eq!(layout.list.x, layout.area.x + 2);
+        assert_eq!(layout.list.x + layout.list.width, bar.x - 1);
+        assert_eq!(backend.buffer()[(layout.area.x + 1, row)].symbol(), " ");
+        assert_eq!(backend.buffer()[(bar.x - 1, row)].symbol(), " ");
+        assert_ne!(backend.buffer()[(bar.x, row)].symbol(), " ");
+        theme::set_chrome_override(None);
     }
 
     #[test]
@@ -2665,22 +2709,26 @@ mod flat_chrome_tests {
     fn scrollbars_carry_the_scrollbar_tokens_on_both_chromes() {
         use ratatui::widgets::ScrollbarState;
         theme::set_test_theme(theme::test_flat_theme());
-        theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
         let theme = theme::test_flat_theme();
-        let backend = render_backend(4, 12, |frame| {
-            let mut state = ScrollbarState::default()
-                .content_length(100)
-                .viewport_content_length(10)
-                .position(0);
-            chrome::render_vertical_scrollbar(frame, frame.area(), &mut state);
-        });
-        // The bar sits in the last column with a one-row vertical margin and
-        // an arrow on each end; the thumb hugs the top at position 0, the
-        // track fills the rest.
-        let thumb = &backend.buffer()[(3u16, 2u16)];
-        let track = &backend.buffer()[(3u16, 9u16)];
-        assert_eq!(thumb.fg, theme.scrollbar_thumb().fg.unwrap());
-        assert_eq!(track.fg, theme.scrollbar_track().fg.unwrap());
+        for (chrome_override, scrollbar_x) in [
+            (crate::tui::theme::ChromeStyle::Flat, 2),
+            (crate::tui::theme::ChromeStyle::Bordered, 3),
+        ] {
+            theme::set_chrome_override(Some(chrome_override));
+            let backend = render_backend(4, 12, |frame| {
+                let mut state = ScrollbarState::default()
+                    .content_length(100)
+                    .viewport_content_length(10)
+                    .position(0);
+                chrome::render_vertical_scrollbar(frame, frame.area(), &mut state);
+            });
+            // One vertical margin row and an arrow on each end; the thumb hugs
+            // the top at position 0 and the track fills the rest.
+            let thumb = &backend.buffer()[(scrollbar_x, 2u16)];
+            let track = &backend.buffer()[(scrollbar_x, 9u16)];
+            assert_eq!(thumb.fg, theme.scrollbar_thumb().fg.unwrap());
+            assert_eq!(track.fg, theme.scrollbar_track().fg.unwrap());
+        }
         theme::set_chrome_override(None);
     }
 
@@ -2884,14 +2932,26 @@ mod flat_chrome_tests {
     }
 
     #[test]
-    fn dialog_inner_widens_margins_in_flat_chrome() {
+    fn dialog_inner_uses_the_shared_surface_gutter_in_both_chromes() {
         pin_flat();
-        // Two columns each side; padding + title + blank rows above, one
-        // padding row below.
-        assert_eq!(
-            frames::dialog_inner(Rect::new(10, 5, 44, 20)),
-            Rect::new(12, 8, 40, 16)
-        );
+        let area = Rect::new(10, 5, 44, 20);
+        for (chrome, expected) in [
+            (
+                crate::tui::theme::ChromeStyle::Flat,
+                Rect::new(12, 8, 39, 16),
+            ),
+            (
+                crate::tui::theme::ChromeStyle::Bordered,
+                Rect::new(12, 6, 40, 18),
+            ),
+        ] {
+            theme::set_chrome_override(Some(chrome));
+            let inner = frames::dialog_inner(area);
+            assert_eq!(inner, expected);
+            assert_eq!(inner.x, area.x + 2);
+            assert_eq!(inner.x + inner.width, scrollbar_bar_rect(area).x - 1);
+        }
+        theme::set_chrome_override(None);
     }
 
     #[test]

@@ -32,7 +32,7 @@ use crate::tui::app::{App, InsightsScrollGeometry};
 use crate::tui::entry_rows::text_width;
 use crate::tui::render::{render_centered_notice, render_scrollbar_if_needed};
 use crate::tui::state::HoverTarget;
-use crate::tui::surface::panel_content_inner;
+use crate::tui::surface::surface_content_inner;
 use crate::tui::theme::theme;
 
 pub(crate) fn draw_journal_insights(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
@@ -89,7 +89,7 @@ pub(crate) fn draw_journal_insights(frame: &mut Frame<'_>, area: Rect, app: &mut
     // margin so content doesn't butt up against the border/tab strip. Tabs whose
     // first section is a heading already open with their own blank row, so they
     // skip this margin to avoid a doubled gap above the first title.
-    let padded = panel_content_inner(content);
+    let padded = surface_content_inner(content);
     let content = if tab.leads_with_heading() {
         padded
     } else {

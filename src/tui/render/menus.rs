@@ -12,7 +12,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::table;
 use crate::tui::state::MetadataKind;
-use crate::tui::surface::point_in_rect;
+use crate::tui::surface::{point_in_rect, surface_outer_width};
 use crate::tui::theme::theme;
 
 use super::chrome::{
@@ -468,8 +468,8 @@ fn table_dialog_metrics(frame_area: Rect, dialog: &TableDialog, scroll: u16) -> 
     } else {
         dialog.footer.to_string()
     };
-    let border_label = |text: &str| UnicodeWidthStr::width(text) as u16 + 4;
-    let outer_w = (content_w + 4)
+    let border_label = |text: &str| surface_outer_width(UnicodeWidthStr::width(text) as u16);
+    let outer_w = surface_outer_width(content_w)
         .max(border_label(dialog.title))
         .max(border_label(&footer))
         .min(frame_area.width);

@@ -1,7 +1,10 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use unicode_width::UnicodeWidthStr;
 
-use crate::tui::entry_rows::wrap_text_hanging;
+use crate::tui::{
+    entry_rows::wrap_text_hanging,
+    theme::{ChromeStyle, theme},
+};
 
 /// Per-entry box chrome consumed horizontally: a left/right border plus one
 /// space of padding on each side (`│ … │`).
@@ -16,7 +19,7 @@ pub(crate) struct PanelGeometry {
 impl PanelGeometry {
     pub(crate) fn new(area: Rect) -> Self {
         let inner = panel_inner(area);
-        let content = panel_content_inner(inner);
+        let content = surface_content_inner(inner);
         Self { area, content }
     }
 }
@@ -78,13 +81,41 @@ pub(crate) fn panel_inner(area: Rect) -> Rect {
     }
 }
 
-pub(crate) fn panel_content_inner(area: Rect) -> Rect {
+/// Apply the shared horizontal content gutter inside a frame's inner rect.
+/// Content always stays one cell off the left frame and one cell before the
+/// scrollbar. Flat chrome also reserves the blank surface-edge column after
+/// its inset scrollbar.
+pub(crate) fn surface_content_inner(area: Rect) -> Rect {
     let pad = 1;
+    let right_pad = pad + u16::from(theme().chrome() == ChromeStyle::Flat);
     Rect {
         x: area.x.saturating_add(pad),
-        width: area.width.saturating_sub(pad * 2).max(1),
+        width: area.width.saturating_sub(pad + right_pad).max(1),
         ..area
     }
+}
+
+/// The vertical scrollbar column shared by drawing and mouse hit-testing.
+/// Bordered chrome uses the right border; flat chrome leaves one blank column
+/// between the scrollbar and the surface edge.
+pub(crate) fn scrollbar_bar_rect(area: Rect) -> Rect {
+    let right_padding = u16::from(theme().chrome() == ChromeStyle::Flat);
+    Rect {
+        x: area
+            .x
+            .saturating_add(area.width.saturating_sub(1 + right_padding)),
+        y: area.y.saturating_add(1),
+        width: 1,
+        height: area.height.saturating_sub(2),
+    }
+}
+
+/// Outer width required for `content_width` cells plus the shared gutters,
+/// frame/scrollbar column, and the flat surface-edge column when present.
+pub(crate) fn surface_outer_width(content_width: u16) -> u16 {
+    content_width
+        .saturating_add(4)
+        .saturating_add(u16::from(theme().chrome() == ChromeStyle::Flat))
 }
 
 pub(crate) fn point_in_rect(area: Rect, x: u16, y: u16) -> bool {
