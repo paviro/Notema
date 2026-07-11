@@ -172,14 +172,25 @@ enum StripLevel {
     Initial,
 }
 
-/// Total strip width for a label function: a leading space, every label, and a
-/// 3-cell ` · ` between each.
+/// Cells of leading space before the first tab label. Flat chrome indents by two
+/// to line the strip up with the other columns' padded titles (which gained an
+/// extra leading space); bordered chrome keeps the single space off the corner.
+fn strip_leading() -> u16 {
+    if crate::tui::render::flat_chrome() {
+        2
+    } else {
+        1
+    }
+}
+
+/// Total strip width for a label function: the leading space(s), every label, and
+/// a 3-cell ` · ` between each.
 fn strip_width(label: impl Fn(InsightsTab) -> &'static str) -> usize {
     let labels: usize = InsightsTab::ALL
         .iter()
         .map(|tab| text_width(label(*tab)))
         .sum();
-    1 + labels + 3 * (InsightsTab::ALL.len() - 1)
+    strip_leading() as usize + labels + 3 * (InsightsTab::ALL.len() - 1)
 }
 
 /// Pick the widest label set that fits `width`: full titles, then short titles,
@@ -210,7 +221,7 @@ fn tab_label(tab: InsightsTab, width: u16) -> &'static str {
 /// [`insights_tab_at`] so drawing and hit-testing never drift.
 fn tab_strip_segments(width: u16) -> Vec<(InsightsTab, Range<u16>)> {
     let mut segments = Vec::with_capacity(InsightsTab::ALL.len());
-    let mut x: u16 = 1; // leading space
+    let mut x: u16 = strip_leading(); // leading space(s)
     for (index, tab) in InsightsTab::ALL.iter().enumerate() {
         if index > 0 {
             x += 3; // " · "
@@ -232,7 +243,7 @@ fn tabs_title_line(
     hovered: Option<InsightsTab>,
     width: u16,
 ) -> Line<'static> {
-    let mut spans = vec![Span::raw(" ")];
+    let mut spans = vec![Span::raw(" ".repeat(strip_leading() as usize))];
     for (index, tab) in InsightsTab::ALL.iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled(

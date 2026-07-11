@@ -197,13 +197,15 @@ pub(crate) fn panel_title(title: &str, focused: bool) -> Line<'static> {
     let label = format!(" {title} ");
     if flat_chrome() {
         // No border to thicken, so the title itself carries focus: accent+bold
-        // when focused, receding to muted otherwise.
+        // when focused, receding to muted otherwise. An extra leading space
+        // indents the title clear of the card's left edge (and the focus
+        // stripe) so it lines up with the padded content below.
         let style = if focused {
             theme().primary().add_modifier(Modifier::BOLD)
         } else {
             theme().muted()
         };
-        return Line::from(Span::styled(label, style));
+        return Line::from(Span::styled(format!(" {label}"), style));
     }
     if focused {
         Line::from(Span::styled(label, theme().selection()))
