@@ -778,10 +778,12 @@ fn mood_bar_cells(width: u16, score: i8) -> Vec<(String, Style)> {
 
 /// The markdown renderer's colors, fed from the theme's markdown tokens. The
 /// crate couples elements to a handful of slots: `primary` colors H1 headings
-/// and inline links, `secondary` H3, `accent_yellow` inline code, `muted` the
-/// rules/prefixes; the JSON-tree slots follow the closest `[markdown.syntax]`
-/// categories. Tokens without a color resolve to `Reset`, so a theme with no
-/// `[markdown]` colors renders exactly the plain classic output.
+/// (`md_heading`), `secondary` H3 (`md_heading3`), `info` links (`md_link`),
+/// `accent_yellow` inline code (`md_code`), `muted` the blockquote rules and
+/// prefixes (`md_blockquote`); the JSON-tree slots follow the closest
+/// `[markdown.syntax]` categories. Tokens without a color resolve to `Reset`,
+/// so a theme with no `[markdown]` colors renders exactly the plain classic
+/// output.
 pub(crate) fn markdown_theme() -> ThemeConfig {
     let theme = theme();
     let fg = |style: Style| adapt_color(style.fg);

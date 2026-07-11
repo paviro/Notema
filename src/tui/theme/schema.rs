@@ -418,18 +418,25 @@ impl ThemeFile {
         let scrollbar_track = style(&self.scrollbar.track, Style::default(), "scrollbar.track")?;
 
         let interaction = &self.interaction;
-        let selection = match &interaction.selection {
+        // Selection and buttons fill their whole row/chip, so a bg that
+        // replaces the row's ink must bring a readable fg with it.
+        let readable_fill = |spec: &Option<StyleSpec>, fallback: Style, token: &str| match spec {
             Some(spec) => {
                 if spec.bg.is_some() && spec.fg.is_none() {
                     bail!(
-                        "`interaction.selection` sets a bg without an fg; pick a readable \
-                         foreground explicitly"
+                        "`{token}` sets a bg without an fg; pick a readable \
+                             foreground explicitly"
                     );
                 }
-                spec.resolve(mode, palette, "interaction.selection")?
+                spec.resolve(mode, palette, token)
             }
-            None => Style::default().add_modifier(Modifier::REVERSED),
+            None => Ok(fallback),
         };
+        let selection = readable_fill(
+            &interaction.selection,
+            Style::default().add_modifier(Modifier::REVERSED),
+            "interaction.selection",
+        )?;
         // Unlike selection, a bg-only hover is fine: it layers under the
         // row's existing foreground instead of replacing it. The default
         // *lifts* the element surface rather than reusing it: element is what
@@ -440,20 +447,8 @@ impl ThemeFile {
             Some(spec) => spec.resolve(mode, palette, "interaction.hover")?,
             None => Style::default().bg(lift(element, mode)),
         };
-        // Buttons are selection-colored unless a theme splits them; the same
-        // readable-fill rule applies.
-        let button = match &interaction.button {
-            Some(spec) => {
-                if spec.bg.is_some() && spec.fg.is_none() {
-                    bail!(
-                        "`interaction.button` sets a bg without an fg; pick a readable \
-                         foreground explicitly"
-                    );
-                }
-                spec.resolve(mode, palette, "interaction.button")?
-            }
-            None => selection,
-        };
+        // Buttons are selection-colored unless a theme splits them.
+        let button = readable_fill(&interaction.button, selection, "interaction.button")?;
         let key_hint = match &interaction.key_hint {
             Some(spec) => spec.resolve(mode, palette, "interaction.key_hint")?,
             None => Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD),

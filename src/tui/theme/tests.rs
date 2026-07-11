@@ -321,7 +321,7 @@ fn terminal_default_matches_the_original_styles() {
     );
     assert_eq!(theme.muted(), Style::default().add_modifier(Modifier::DIM));
     assert_eq!(theme.primary(), Style::default().fg(Color::Cyan));
-    assert_eq!(theme.bar_fill(), Style::default().fg(Color::Cyan));
+    assert_eq!(theme.chart_bar().style, Style::default().fg(Color::Cyan));
     assert_eq!(
         theme.positive(),
         Style::default()

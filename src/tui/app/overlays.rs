@@ -195,13 +195,13 @@ impl App {
     pub(crate) fn open_theme_picker(&mut self) {
         use crate::tui::state::{SelectableList, ThemePickerEntry, ThemePickerState};
 
-        if let Err(err) = crate::tui::theme::ensure_bundled_themes(&self.config_path) {
+        let dir = crate::tui::theme::themes_dir(&self.config_path);
+        if let Err(err) = crate::tui::theme::ensure_bundled(&dir) {
             self.toast(
                 ToastVariant::Error,
                 format!("Couldn't prepare themes: {err:#}"),
             );
         }
-        let dir = crate::tui::theme::themes_dir(&self.config_path);
         let mode = crate::tui::theme::mode();
         let mut entries: Vec<ThemePickerEntry> = std::fs::read_dir(&dir)
             .into_iter()

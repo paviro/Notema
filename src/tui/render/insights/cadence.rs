@@ -57,7 +57,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics) {
                 label: period.name.clone(),
                 fill: period.count as f32 / max as f32,
                 value: period.count.to_string(),
-                style: theme().bar_fill(),
+                style: theme().chart_bar().style,
             })
             .collect();
         draw_bars(frame, body, &bars);

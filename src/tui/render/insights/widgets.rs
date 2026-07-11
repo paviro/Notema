@@ -566,7 +566,7 @@ pub(crate) fn draw_histogram(frame: &mut Frame<'_>, area: Rect, values: &[usize]
             let cell = filled.saturating_sub(lower).min(8);
             spans.push(Span::styled(
                 ramp_cell(cell).to_string(),
-                theme().bar_fill(),
+                theme().chart_bar().style,
             ));
         }
         lines.push(Line::from(spans));

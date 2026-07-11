@@ -175,6 +175,7 @@ impl Syntax {
     /// Whether the theme colors any category at all. Plain themes skip the
     /// highlighter entirely, keeping their classic un-highlighted code blocks.
     pub(crate) fn any_color(self) -> bool {
+        // Keep this list in sync with the struct fields.
         [
             self.comment,
             self.keyword,
@@ -648,11 +649,6 @@ impl Theme {
 
     // --- charts ---
 
-    /// Alias of the count/frequency bar fill's style.
-    pub(crate) fn bar_fill(self) -> Style {
-        self.bar.style
-    }
-
     /// The filled part of count/frequency bars.
     pub(crate) fn chart_bar(self) -> Fill {
         self.bar
@@ -803,7 +799,7 @@ pub(crate) fn themes_dir(config_path: &Path) -> PathBuf {
 
 /// Write every bundled theme that isn't on disk yet. Existing files are never
 /// touched — user edits win over bundled updates.
-fn ensure_bundled(dir: &Path) -> Result<()> {
+pub(crate) fn ensure_bundled(dir: &Path) -> Result<()> {
     for (name, text) in BUNDLED {
         let path = dir.join(format!("{name}.toml"));
         if !path.exists() {
@@ -814,16 +810,9 @@ fn ensure_bundled(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Materialize any missing bundled theme files, so the theme picker lists them
-/// even when startup loading hasn't touched the directory yet.
-pub(crate) fn ensure_bundled_themes(config_path: &Path) -> Result<()> {
-    ensure_bundled(&themes_dir(config_path))
-}
-
 /// Load the named theme, materializing the bundled files first. Any failure
 /// (missing file, bad TOML, unknown color) falls back to the built-in
 /// [`DEFAULT_THEME`] with a warning on stderr — the app always starts.
-#[allow(dead_code)] // wired up when startup loading lands
 pub(crate) fn load(config_path: &Path, name: &str, mode: Mode) -> Theme {
     match try_load(config_path, name, mode) {
         Ok(theme) => theme,
