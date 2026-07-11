@@ -6,7 +6,7 @@
 # See journal.toml for the accepted color/style forms.
 
 [chrome]
-default_style = "bordered"
+default = "bordered"
 scrim = 0.0
 
 [palette]

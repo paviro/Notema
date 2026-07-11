@@ -271,8 +271,9 @@ impl App {
         self.theme_picker_preview();
     }
 
-    /// Cycle the chrome override (auto → flat → bordered → auto), previewing
-    /// live — `theme()` applies it on read, so the next frame re-chromes.
+    /// Cycle the chrome override (default → flat → bordered → default),
+    /// previewing live — `theme()` applies it on read, so the next frame
+    /// re-chromes.
     /// Persisted on confirm; cancel restores the value from open time.
     pub(crate) fn theme_picker_cycle_chrome(&mut self) {
         use crate::tui::theme::{ChromeStyle, chrome_override, set_chrome_override};
@@ -303,7 +304,7 @@ impl App {
         crate::tui::theme::install(theme);
         self.config.ui.theme = name.clone();
         self.config.ui.chrome = match crate::tui::theme::chrome_override() {
-            None => crate::config::ChromeMode::Auto,
+            None => crate::config::ChromeMode::Default,
             Some(crate::tui::theme::ChromeStyle::Flat) => crate::config::ChromeMode::Flat,
             Some(crate::tui::theme::ChromeStyle::Bordered) => crate::config::ChromeMode::Bordered,
         };

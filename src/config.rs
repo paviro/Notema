@@ -57,8 +57,8 @@ pub struct UiSection {
     /// background, or are pinned to one variant.
     #[serde(default)]
     pub color_mode: ColorMode,
-    /// Chrome style: `auto` uses each theme's own `default_style`; `flat` or
-    /// `bordered` force that chrome on every theme.
+    /// Chrome style: `default` uses each theme's own `chrome.default`; `flat`
+    /// or `bordered` force that chrome on every theme.
     #[serde(default)]
     pub chrome: ChromeMode,
     #[serde(default)]
@@ -91,22 +91,22 @@ pub enum ColorMode {
     Light,
 }
 
-/// The `[ui] chrome` setting: `auto` follows the active theme's
-/// `default_style`; `flat`/`bordered` force that chrome on every theme.
+/// The `[ui] chrome` setting: `default` follows the active theme's
+/// `chrome.default`; `flat`/`bordered` force that chrome on every theme.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ChromeMode {
     #[default]
-    Auto,
+    Default,
     Flat,
     Bordered,
 }
 
 impl ChromeMode {
-    /// The forced [`ChromeStyle`], or `None` for `Auto`.
+    /// The forced [`ChromeStyle`], or `None` for `Default`.
     pub(crate) fn forced_style(self) -> Option<crate::tui::theme::ChromeStyle> {
         match self {
-            ChromeMode::Auto => None,
+            ChromeMode::Default => None,
             ChromeMode::Flat => Some(crate::tui::theme::ChromeStyle::Flat),
             ChromeMode::Bordered => Some(crate::tui::theme::ChromeStyle::Bordered),
         }

@@ -118,8 +118,8 @@ thread_local! {
 }
 
 /// The user's chrome override (`[ui] chrome = "flat"|"bordered"`), applied on
-/// top of whatever the active theme declares as its `default_style`. `None`
-/// (= `auto`) follows the theme. Runtime-writable so the theme picker can
+/// top of whatever the active theme declares as its `chrome.default`. `None`
+/// (= `default`) follows the theme. Runtime-writable so the theme picker can
 /// cycle it with live preview.
 #[cfg(not(test))]
 static CHROME_OVERRIDE: RwLock<Option<ChromeStyle>> = RwLock::new(None);
@@ -132,7 +132,7 @@ thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
-/// The forced chrome style, or `None` when following the theme (`auto`).
+/// The forced chrome style, or `None` when following the theme (`default`).
 pub(crate) fn chrome_override() -> Option<ChromeStyle> {
     #[cfg(test)]
     return TEST_CHROME_OVERRIDE.with(std::cell::Cell::get);
@@ -784,17 +784,15 @@ struct ThemeFile {
 #[serde(default, deny_unknown_fields)]
 struct ChromeSection {
     /// The theme's preferred chrome. A *default* because the `[ui] chrome`
-    /// setting can force flat/bordered on any theme; `style` stays accepted
-    /// so theme files from before the rename keep parsing.
-    #[serde(alias = "style")]
-    default_style: ChromeStyle,
+    /// setting can force flat/bordered on any theme.
+    default: ChromeStyle,
     scrim: f32,
 }
 
 impl Default for ChromeSection {
     fn default() -> Self {
         Self {
-            default_style: ChromeStyle::Bordered,
+            default: ChromeStyle::Bordered,
             scrim: 0.0,
         }
     }
@@ -1053,7 +1051,7 @@ impl ThemeFile {
             md_link,
             md_code,
             md_blockquote,
-            chrome: self.chrome.default_style,
+            chrome: self.chrome.default,
             scrim: self.chrome.scrim,
         })
     }
@@ -1080,20 +1078,6 @@ mod tests {
                     panic!("bundled theme '{name}' failed to resolve ({mode:?}): {err:#}")
                 });
             }
-        }
-    }
-
-    #[test]
-    fn chrome_style_key_accepts_old_and_new_names() {
-        // `default_style` is the documented key; `style` must keep parsing so
-        // theme files materialized before the rename don't break.
-        for key in ["default_style", "style"] {
-            let theme = parse(
-                &format!("[chrome]\n{key} = \"flat\"\nscrim = 0.2"),
-                Mode::Dark,
-            )
-            .unwrap_or_else(|err| panic!("`{key}` failed to parse: {err:#}"));
-            assert_eq!(theme.chrome(), ChromeStyle::Flat);
         }
     }
 

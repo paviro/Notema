@@ -3,7 +3,7 @@
 # See journal.toml for the accepted color/style forms.
 
 [chrome]
-default_style = "flat"
+default = "flat"
 scrim = 0.45
 
 [colors]

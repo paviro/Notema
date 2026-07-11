@@ -70,7 +70,7 @@ pub(crate) fn feelings_selected_line_count(selected: &[String]) -> usize {
 pub(crate) fn theme_picker_hints() -> [Hint; 3] {
     use crate::tui::theme::ChromeStyle;
     let chrome = match crate::tui::theme::chrome_override() {
-        None => Hint::new("chrome: auto", "b", HintId::ThemePickerChrome),
+        None => Hint::new("chrome: default", "b", HintId::ThemePickerChrome),
         Some(ChromeStyle::Flat) => Hint::new("chrome: flat", "b", HintId::ThemePickerChrome),
         Some(ChromeStyle::Bordered) => {
             Hint::new("chrome: bordered", "b", HintId::ThemePickerChrome)
