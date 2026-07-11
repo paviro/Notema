@@ -206,6 +206,37 @@ fn accents_are_referenceable_by_name_in_any_token() {
 }
 
 #[test]
+fn palette_references_resolve_transitively() {
+    // An accent that names a [palette] entry, referenced in turn by another
+    // token, resolves all the way through — a named hue can be reused without
+    // every reference having to spell out the final color.
+    let theme = parse(
+        "[palette]\n\
+         hero = \"#ff2d95\"\n\
+         [accents]\n\
+         tertiary = \"hero\"\n\
+         [borders]\n\
+         divider_style = \"tertiary\"",
+        Mode::Dark,
+    )
+    .unwrap();
+    assert_eq!(theme.divider_style().fg, Some(Color::Rgb(0xff, 0x2d, 0x95)));
+
+    // A reference cycle can't loop forever; it falls through to a parse error.
+    assert!(
+        parse(
+            "[palette]\n\
+             a = \"b\"\n\
+             b = \"a\"\n\
+             [borders]\n\
+             divider_style = \"a\"",
+            Mode::Dark,
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn button_rejects_bg_without_fg() {
     let err = parse("[interaction]\nbutton = { bg = \"#aabbcc\" }", Mode::Dark).unwrap_err();
     assert!(err.to_string().contains("interaction.button"), "{err:#}");

@@ -38,10 +38,18 @@ impl ColorSpec {
     }
 
     fn resolve(&self, mode: Mode, palette: &Palette, token: &str) -> Result<Color> {
-        let name = self.pick(mode);
-        // Palette entries may themselves be dark/light variants, but not
-        // reference other entries — one level keeps lookups cycle-free.
-        let name = palette.get(name).map_or(name, |entry| entry.pick(mode));
+        let mut name = self.pick(mode);
+        // Follow palette references transitively so an accent alias that points
+        // at another [palette] entry (e.g. `tertiary` → a named hue) resolves
+        // the same as naming that entry directly. A bounded hop count — one per
+        // entry — keeps a self-referential palette from looping forever; a cycle
+        // just falls through to `parse_color` and errors.
+        for _ in 0..=palette.len() {
+            match palette.get(name) {
+                Some(entry) => name = entry.pick(mode),
+                None => break,
+            }
+        }
         parse_color(name).with_context(|| format!("in `{token}`"))
     }
 }

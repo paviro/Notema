@@ -51,8 +51,8 @@ loads.
   `{ dark = "...", light = "..." }`; the variant is resolved once at load by
   `color_mode`.
 - **Palette**: `[palette]` defines named colors reused by name elsewhere.
-  Entries may themselves be `{ dark, light }` pairs but cannot reference other
-  entries.
+  Entries may themselves be `{ dark, light }` pairs and may reference other
+  entries (resolved transitively; a reference cycle is an error).
 - **Token**: a bare color (used as the foreground) or a style table
   `{ fg, bg, bold, dim, reversed, underlined }`.
 - **Fill**: `{ glyph = "▓", color = "..." }` — a repeated chart character plus
