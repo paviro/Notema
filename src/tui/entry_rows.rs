@@ -511,16 +511,20 @@ pub(crate) fn entry_box_lines(
 
     let time = (!time.is_empty()).then_some(time);
     if crate::tui::render::flat_chrome() {
-        // Flat card, same line count as the bordered box so heights (and with
-        // them the cache, scroll, and hit-test math) are chrome-agnostic: the
-        // border rows become text rows carrying the same labels — day and time
-        // in the header, word count / journal flags in the footer, all muted
-        // so the metadata frames the preview without competing with it.
-        let mut lines = vec![card_edge_line(
-            box_width,
-            date_label.map(|label| (label, theme().muted())),
-            time.map(|label| (label, theme().muted())),
-        )];
+        // Flat card: the border rows become text rows carrying the same
+        // labels — day and time in the header, word count / journal flags in
+        // the footer, all muted so the metadata frames the preview without
+        // competing with it. A blank padding row above and below keeps the
+        // labels off the card's edge; the card background comes from the
+        // list-item style, which fills blank rows too.
+        let mut lines = vec![
+            Line::from(String::new()),
+            card_edge_line(
+                box_width,
+                date_label.map(|label| (label, theme().muted())),
+                time.map(|label| (label, theme().muted())),
+            ),
+        ];
         for text in wrap_text(preview, inner_width, ENTRY_BOX_PREVIEW_LINES) {
             lines.push(card_inner_line(text, inner_width));
         }
@@ -529,6 +533,7 @@ pub(crate) fn entry_box_lines(
             footer_left.map(|label| (label, theme().muted())),
             footer_right.map(|label| (label, theme().muted())),
         ));
+        lines.push(Line::from(String::new()));
         return lines;
     }
 

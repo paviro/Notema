@@ -2469,7 +2469,7 @@ mod flat_chrome_tests {
     }
 
     #[test]
-    fn entry_cards_embed_the_border_labels_and_keep_box_heights() {
+    fn entry_cards_embed_the_border_labels_inside_padding() {
         pin_flat();
         let flat = rendered_lines(&entry_box_lines(
             Some("Sunday 05"),
@@ -2489,9 +2489,12 @@ mod flat_chrome_tests {
             40,
         ));
 
-        // Same height in both chromes: the cache/scroll/hit-test math must be
-        // chrome-agnostic.
-        assert_eq!(flat.len(), bordered.len());
+        // The flat card pads one blank row above the header and below the
+        // footer so the labels sit off the card's edge; heights are per-row
+        // metadata, so differing from the bordered box is fine.
+        assert_eq!(flat.len(), bordered.len() + 2);
+        assert_eq!(flat.first().unwrap().trim(), "");
+        assert_eq!(flat.last().unwrap().trim(), "");
 
         // No border glyphs anywhere in the card.
         for line in &flat {
@@ -2501,9 +2504,9 @@ mod flat_chrome_tests {
             );
         }
         // The border labels move into the header and footer rows.
-        assert!(flat[0].starts_with("  Sunday 05"));
-        assert!(flat[0].trim_end().ends_with("14:30"));
-        let footer = flat.last().unwrap();
+        assert!(flat[1].starts_with("  Sunday 05"));
+        assert!(flat[1].trim_end().ends_with("14:30"));
+        let footer = &flat[flat.len() - 2];
         assert!(footer.starts_with("  2 words ★"));
         assert!(footer.trim_end().ends_with("Archived"));
     }
