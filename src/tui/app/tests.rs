@@ -754,16 +754,12 @@ fn theme_picker_opens_on_the_active_theme_with_bundled_entries() {
             "blossom",
             "catppuccin",
             "classic",
-            "dracula",
             "e-ink",
             "fjord",
             "grove",
-            "gruvbox",
             "journal",
-            "nord",
-            "one-dark",
+            "matcha",
             "rose-pine",
-            "solarized",
             "tokyonight",
         ]
     );

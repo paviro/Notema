@@ -25,7 +25,7 @@ use std::{
 
 /// The bundled themes, embedded so the binary can materialize and fall back to
 /// them without touching the network or the repo.
-const BUNDLED: [(&str, &str); 14] = [
+const BUNDLED: [(&str, &str); 10] = [
     ("journal", include_str!("themes/journal.toml")),
     ("classic", include_str!("themes/classic.toml")),
     ("e-ink", include_str!("themes/e-ink.toml")),
@@ -34,16 +34,12 @@ const BUNDLED: [(&str, &str); 14] = [
     ("grove", include_str!("themes/grove.toml")),
     ("tokyonight", include_str!("themes/tokyonight.toml")),
     ("catppuccin", include_str!("themes/catppuccin.toml")),
-    ("gruvbox", include_str!("themes/gruvbox.toml")),
-    ("nord", include_str!("themes/nord.toml")),
+    ("matcha", include_str!("themes/matcha.toml")),
     ("rose-pine", include_str!("themes/rose-pine.toml")),
-    ("dracula", include_str!("themes/dracula.toml")),
-    ("one-dark", include_str!("themes/one-dark.toml")),
-    ("solarized", include_str!("themes/solarized.toml")),
 ];
 
 /// The theme `load` falls back to when the configured one is missing or broken.
-pub(crate) const DEFAULT_THEME: &str = "journal";
+pub(crate) const DEFAULT_THEME: &str = "blossom";
 
 /// Which variant of a `{ dark, light }` color a load resolves to. Detected from
 /// the terminal background once at startup and cached for the session.
@@ -75,6 +71,7 @@ pub(crate) enum ChromeStyle {
 pub(crate) struct Theme {
     bg: Color,
     panel: Color,
+    dialog: Color,
     element: Color,
     text: Style,
     muted: Style,
@@ -263,6 +260,11 @@ impl Theme {
     /// Elevated surfaces: panels, dialogs, notices, toasts.
     pub(crate) fn panel_bg(self) -> Color {
         self.panel
+    }
+
+    /// Dialog surfaces, defaulting to the panel surface unless a theme splits them.
+    pub(crate) fn dialog_bg(self) -> Color {
+        self.dialog
     }
 
     /// Interactive surfaces sitting on a panel: inputs, active controls.
@@ -784,6 +786,7 @@ impl Default for ChromeSection {
 struct ColorsSection {
     bg: Option<ColorSpec>,
     panel: Option<ColorSpec>,
+    dialog: Option<ColorSpec>,
     element: Option<ColorSpec>,
     text: Option<TokenSpec>,
     muted: Option<TokenSpec>,
@@ -859,6 +862,7 @@ impl ThemeFile {
         let colors = &self.colors;
         let bg = color(&colors.bg, Color::Reset, "colors.bg")?;
         let panel = color(&colors.panel, bg, "colors.panel")?;
+        let dialog = color(&colors.dialog, panel, "colors.dialog")?;
         let element = color(&colors.element, panel, "colors.element")?;
         let text = style(&colors.text, Style::default(), "colors.text")?;
         let muted = style(&colors.muted, Style::default(), "colors.muted")?;
@@ -978,6 +982,7 @@ impl ThemeFile {
         Ok(Theme {
             bg,
             panel,
+            dialog,
             element,
             text,
             muted,
@@ -1057,8 +1062,11 @@ mod tests {
         // `default_style` is the documented key; `style` must keep parsing so
         // theme files materialized before the rename don't break.
         for key in ["default_style", "style"] {
-            let theme = parse(&format!("[chrome]\n{key} = \"flat\"\nscrim = 0.2"), Mode::Dark)
-                .unwrap_or_else(|err| panic!("`{key}` failed to parse: {err:#}"));
+            let theme = parse(
+                &format!("[chrome]\n{key} = \"flat\"\nscrim = 0.2"),
+                Mode::Dark,
+            )
+            .unwrap_or_else(|err| panic!("`{key}` failed to parse: {err:#}"));
             assert_eq!(theme.chrome(), ChromeStyle::Flat);
         }
     }
@@ -1070,7 +1078,11 @@ mod tests {
         set_chrome_override(Some(ChromeStyle::Bordered));
         assert_eq!(theme().chrome(), ChromeStyle::Bordered, "override ignored");
         set_chrome_override(None);
-        assert_eq!(theme().chrome(), ChromeStyle::Flat, "auto must follow the theme");
+        assert_eq!(
+            theme().chrome(),
+            ChromeStyle::Flat,
+            "auto must follow the theme"
+        );
     }
 
     #[test]
@@ -1087,6 +1099,35 @@ mod tests {
         )
         .unwrap();
         assert_eq!(light.hover().bg, Some(Color::Rgb(0xc9, 0xc9, 0xc9)));
+    }
+
+    #[test]
+    fn dialog_defaults_to_panel_for_existing_theme_files() {
+        let theme = parse(
+            "[colors]\nbg = \"#101010\"\npanel = \"#181818\"",
+            Mode::Dark,
+        )
+        .unwrap();
+        assert_eq!(theme.dialog, theme.panel);
+    }
+
+    #[test]
+    fn flat_bundled_themes_split_dialogs_from_panels() {
+        for (name, text) in BUNDLED {
+            for mode in [Mode::Dark, Mode::Light] {
+                let theme = parse(text, mode).unwrap();
+                if theme.chrome == ChromeStyle::Flat {
+                    assert_ne!(
+                        theme.dialog, theme.panel,
+                        "'{name}' dialog matches panel ({mode:?})"
+                    );
+                    assert_ne!(
+                        theme.dialog, theme.element,
+                        "'{name}' dialog matches element ({mode:?})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1209,6 +1250,17 @@ mod tests {
             for color in [theme.bg, theme.panel, theme.element] {
                 assert!(ink_or_paper(color), "e-ink surface {color:?} ({mode:?})");
             }
+            assert_ne!(
+                theme.dialog, theme.bg,
+                "e-ink dialog should lift off the main background ({mode:?})"
+            );
+            assert_eq!(
+                theme.dialog,
+                match mode {
+                    Mode::Dark => Color::Rgb(0x1a, 0x1a, 0x1a),
+                    Mode::Light => Color::Rgb(0xf2, 0xf2, 0xf2),
+                }
+            );
             // Series identity must survive without hue: three distinct glyphs.
             let glyphs = [
                 theme.chart_positive.glyph,

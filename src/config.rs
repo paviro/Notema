@@ -538,7 +538,7 @@ mod tests {
         let config = load_config(&path).unwrap();
 
         assert!(config.attachments.download_remote_images);
-        assert_eq!(config.ui.theme, "journal");
+        assert_eq!(config.ui.theme, crate::tui::theme::DEFAULT_THEME);
         assert_eq!(config.ui.color_mode, ColorMode::Auto);
         assert!(config.ui.layout.entry_viewer.body_center_vertically);
         assert_eq!(config.ui.layout.entry_viewer.body_max_width, 100);

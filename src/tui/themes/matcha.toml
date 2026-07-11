@@ -1,4 +1,4 @@
-# Gruvbox — based on morhetz/gruvbox (dark / light, medium contrast).
+# Matcha — a warm paper theme with a soft green accent.
 #
 # See journal.toml for the accepted color/style forms.
 
@@ -9,6 +9,7 @@ scrim = 0.45
 [colors]
 bg      = { dark = "#282828", light = "#fbf1c7" }
 panel   = { dark = "#32302f", light = "#f2e5bc" }
+dialog  = { dark = "#373433", light = "#efe0b7" }
 element = { dark = "#3c3836", light = "#ebdbb2" }
 
 text  = { dark = "#ebdbb2", light = "#3c3836" }

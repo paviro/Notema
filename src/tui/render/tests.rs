@@ -2211,7 +2211,7 @@ fn theme_picker_lists_bundled_themes_with_the_active_row_marked() {
     for name in ["blossom", "classic", "e-ink", "fjord", "grove", "journal"] {
         assert!(text.contains(name), "theme '{name}' missing:\n{text}");
     }
-    assert!(text.contains("● journal"), "active marker missing:\n{text}");
+    assert!(text.contains("● blossom"), "active marker missing:\n{text}");
 }
 
 #[test]
@@ -2279,15 +2279,19 @@ mod flat_chrome_tests {
     }
 
     #[test]
-    fn dialog_surface_carries_the_panel_background() {
+    fn dialog_surface_carries_the_dialog_background() {
         pin_flat();
-        let panel_bg = theme::test_flat_theme().panel_bg();
+        let dialog_bg = theme::test_flat_theme().dialog_bg();
         let backend = render_backend(80, 24, |frame| {
-            dialogs::draw_edit_metadata_dialog(frame, &mut tags_state(), crate::tui::state::HoverTarget::None)
+            dialogs::draw_edit_metadata_dialog(
+                frame,
+                &mut tags_state(),
+                crate::tui::state::HoverTarget::None,
+            )
         });
         let area = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2).area;
         let cell = &backend.buffer()[(area.x + 1, area.y + 1)];
-        assert_eq!(cell.bg, panel_bg);
+        assert_eq!(cell.bg, dialog_bg);
     }
 
     #[test]
@@ -2296,7 +2300,11 @@ mod flat_chrome_tests {
         let selection = theme::test_flat_theme().selection();
         let layout = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2);
         let backend = render_backend(80, 24, |frame| {
-            dialogs::draw_edit_metadata_dialog(frame, &mut tags_state(), crate::tui::state::HoverTarget::None)
+            dialogs::draw_edit_metadata_dialog(
+                frame,
+                &mut tags_state(),
+                crate::tui::state::HoverTarget::None,
+            )
         });
         let rendered: String = backend
             .buffer()
@@ -2512,13 +2520,13 @@ mod flat_chrome_tests {
     }
 
     #[test]
-    fn bordered_dialogs_on_colored_themes_carry_the_panel_surface() {
+    fn bordered_dialogs_on_colored_themes_carry_the_dialog_surface() {
         // A colored theme forced into bordered chrome must not fall back to
         // the terminal-default background inside its dialogs (`Clear` alone
         // would). Classic is unaffected: its panel is the terminal default.
         theme::set_test_theme(theme::test_flat_theme());
         theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
-        let panel_bg = theme::test_flat_theme().panel_bg();
+        let dialog_bg = theme::test_flat_theme().dialog_bg();
         let backend = render_backend(80, 24, |frame| {
             dialogs::draw_edit_metadata_dialog(
                 frame,
@@ -2530,7 +2538,7 @@ mod flat_chrome_tests {
         let border = &backend.buffer()[(area.x, area.y)];
         assert_eq!(border.symbol(), "┌", "chrome override not applied");
         let interior = &backend.buffer()[(area.x + 1, area.y + 1)];
-        assert_eq!(interior.bg, panel_bg);
+        assert_eq!(interior.bg, dialog_bg);
     }
 
     #[test]
@@ -2604,7 +2612,11 @@ mod flat_chrome_tests {
         };
         assert_eq!(row_text(area.y).trim(), "", "top padding row not blank");
         assert!(row_text(area.y + 1).contains("Edit Tags"));
-        assert_eq!(row_text(area.y + 2).trim(), "", "no blank row under the title");
+        assert_eq!(
+            row_text(area.y + 2).trim(),
+            "",
+            "no blank row under the title"
+        );
         assert_eq!(
             row_text(area.y + area.height - 1).trim(),
             "",
@@ -2617,12 +2629,20 @@ mod flat_chrome_tests {
             .iter()
             .position(|row| row.contains("esc close"))
             .expect("settings footer");
-        assert_eq!(text_rows[footer_row + 1].trim(), "", "no padding under the footer");
+        assert_eq!(
+            text_rows[footer_row + 1].trim(),
+            "",
+            "no padding under the footer"
+        );
         let title_row = text_rows
             .iter()
             .position(|row| row.contains("Settings"))
             .expect("settings title");
-        assert_eq!(text_rows[title_row - 1].trim(), "", "no padding above the title");
+        assert_eq!(
+            text_rows[title_row - 1].trim(),
+            "",
+            "no padding above the title"
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@ scrim = 0.45
 [colors]
 bg      = { dark = "#101418", light = "#eceff4" }
 panel   = { dark = "#161b22", light = "#e5e9f0" }
+dialog  = { dark = "#1b2129", light = "#dfe4ed" }
 element = { dark = "#1f2630", light = "#d8dee9" }
 
 text  = { dark = "#d8dee9", light = "#2e3440" }

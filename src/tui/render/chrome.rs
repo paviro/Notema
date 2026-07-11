@@ -901,7 +901,7 @@ pub(crate) fn dialog_inner(area: Rect) -> Rect {
 
 /// Clear and frame a dialog, returning its content rect (always
 /// [`dialog_inner`] of `area`). Bordered chrome draws the classic titled box;
-/// flat chrome paints a panel-colored surface with a bold title row and, when
+/// flat chrome paints a dialog-colored surface with a bold title row and, when
 /// `esc_hint` is set, a muted `esc` dismiss hint on the right.
 pub(crate) fn draw_dialog_frame(
     frame: &mut Frame<'_>,
@@ -913,7 +913,7 @@ pub(crate) fn draw_dialog_frame(
     let title = title.trim();
     if flat_chrome() {
         frame.render_widget(
-            Block::new().style(Style::default().bg(theme().panel_bg())),
+            Block::new().style(Style::default().bg(theme().dialog_bg())),
             area,
         );
         // The title sits below a blank padding row, off the card's edge.
@@ -936,12 +936,12 @@ pub(crate) fn draw_dialog_frame(
             );
         }
     } else {
-        // The panel surface, not `Clear`'s terminal default: bordered chrome
+        // The dialog surface, not `Clear`'s terminal default: bordered chrome
         // on a colored theme must float dialogs on the theme's own surface.
-        // Classic resolves it to the terminal default, so nothing changes.
+        // Classic resolves it through panel to the terminal default.
         let mut block = Block::default()
             .borders(Borders::ALL)
-            .style(Style::default().bg(theme().panel_bg()));
+            .style(Style::default().bg(theme().dialog_bg()));
         if !title.is_empty() {
             block = block.title(format!(" {title} "));
         }
@@ -1714,7 +1714,7 @@ fn draw_table_dialog(
             .title(format!(" {} ", dialog.title))
             .title_bottom(Line::from(format!(" {} ", metrics.footer)).centered())
             .borders(Borders::ALL)
-            .style(Style::default().bg(theme().panel_bg()));
+            .style(Style::default().bg(theme().dialog_bg()));
         frame.render_widget(block, metrics.area);
     }
 
