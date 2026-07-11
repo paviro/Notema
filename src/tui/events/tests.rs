@@ -1464,7 +1464,7 @@ fn settings_menu_hover_targets_its_rows() {
         .find(|(col, row)| render::settings_menu_row_at_point(area, *col, *row) == Some(0))
         .expect("settings menu has a hoverable row");
     assert!(mouse::update_hover(&mut app, point.0, point.1, area));
-    assert_eq!(app.hover, HoverTarget::SettingsRow(0));
+    assert_eq!(app.hover, HoverTarget::DialogRow(0));
 }
 
 // ── Toast interaction ─────────────────────────────────────────────────────────
@@ -1480,12 +1480,7 @@ fn clicking_a_toast_dismisses_it() {
 
     // Click the second toast: only it disappears.
     let target = rects[1];
-    mouse_in_area(
-        &mut app,
-        mouse(down(), target.x + 1, target.y + 1),
-        120,
-        30,
-    );
+    mouse_in_area(&mut app, mouse(down(), target.x + 1, target.y + 1), 120, 30);
     let remaining: Vec<_> = app
         .toasts
         .items()
@@ -1510,4 +1505,51 @@ fn hovering_a_toast_targets_it_over_everything() {
     assert!(mouse::update_hover(&mut app, rect.x + 1, rect.y + 1, area));
     // Even with the picker open, the topmost toast wins the probe.
     assert_eq!(app.hover, HoverTarget::Toast(0));
+}
+
+#[test]
+fn dialog_list_hover_targets_rows_without_selecting() {
+    let mut app = app_with_entries(1);
+    app.begin_edit_tags();
+    set_tag_dialog_items(&mut app, 5);
+    let area = Rect::new(0, 0, 120, 20);
+    let layout = render::metadata_dialog_layout(area, 5);
+
+    // The third row: hover targets it, but selection and toggles stay put.
+    assert!(mouse::update_hover(
+        &mut app,
+        layout.list.x,
+        layout.list.y + 2,
+        area
+    ));
+    assert_eq!(app.hover, HoverTarget::DialogRow(2));
+    let state = app.edit_metadata_state().unwrap();
+    assert_eq!(state.selected_index(), Some(0));
+    assert!(state.selected.is_empty());
+}
+
+#[test]
+fn confirm_delete_hover_targets_the_buttons() {
+    let mut app = app_with_entries(1);
+    let ctx = crate::tui::state::DeleteContext::Entry { has_body: true };
+    app.overlay =
+        crate::tui::state::Overlay::ConfirmDelete(crate::tui::state::DeleteContext::Entry {
+            has_body: true,
+        });
+    let area = Rect::new(0, 0, 120, 20);
+    let inner = render::confirm_delete_inner(area, &ctx);
+
+    // Probe every cell of the buttons row until each button is found.
+    let mut saw = (false, false);
+    for col in inner.x..inner.x + inner.width {
+        for row in inner.y..inner.y + inner.height {
+            mouse::update_hover(&mut app, col, row, area);
+            match app.hover {
+                HoverTarget::ConfirmButton(true) => saw.0 = true,
+                HoverTarget::ConfirmButton(false) => saw.1 = true,
+                _ => {}
+            }
+        }
+    }
+    assert!(saw.0 && saw.1, "both confirm buttons hoverable: {saw:?}");
 }

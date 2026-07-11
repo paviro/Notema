@@ -51,7 +51,12 @@ pub(crate) enum HoverTarget {
     Entry(usize),
     FooterHint(crate::tui::render::HintId),
     ThemePickerRow(usize),
-    SettingsRow(usize),
+    /// A row in whichever list/menu dialog is open (settings menu, metadata
+    /// menu, edit-metadata/feelings/location lists) — only one is ever open,
+    /// so the index needs no dialog discriminant.
+    DialogRow(usize),
+    /// A confirm dialog's yes (`true`) / no (`false`) button.
+    ConfirmButton(bool),
     Toast(usize),
 }
 

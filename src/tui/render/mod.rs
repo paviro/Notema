@@ -40,13 +40,14 @@ pub(crate) use super::surface::{
 pub(crate) use chrome::{
     Hint, HintId, MetadataChoice, MetadataMenuMode, SettingsChoice, centered_rect_fixed_size,
     confirm_button_at, container_block, count_label, draw_editor_discard_confirm,
-    draw_editor_shortcuts, draw_metadata_menu, draw_modal_frame, draw_toasts, toast_at_point,
+    draw_editor_shortcuts, draw_metadata_menu, draw_modal_frame, draw_toasts,
     editor_discard_choice_at_point, editor_shortcut_close_at_point, editor_shortcut_hint_at_point,
     expanded_footer_height, expanded_footer_hint_id_at_point, expanded_footer_lines, flat_chrome,
     footer_hint_id_at_point, footer_lines, hint_id_at_wrapped, metadata_menu_choice_at_point,
-    metadata_menu_close_at_point, panel_block, panel_focus_stripe, render_centered_notice,
+    metadata_menu_close_at_point, metadata_menu_row_at_point, panel_block, panel_focus_stripe,
+    render_centered_notice,
     render_scrollbar_if_needed, settings_menu_choice_at_point, settings_menu_close_at_point,
-    settings_menu_row_at_point,
+    settings_menu_row_at_point, toast_at_point,
 };
 #[cfg(test)]
 pub(crate) use chrome::{
@@ -68,9 +69,9 @@ use entries::draw_entry_list;
 use image_viewer::draw_image_viewer;
 use insights::draw_journal_insights;
 pub(crate) use insights::insights_tab_at;
-use journals::draw_journals;
 #[cfg(test)]
 pub(crate) use journals::JOURNAL_BOX_HEIGHT;
+use journals::draw_journals;
 pub(crate) use journals::{journal_list_rect, journal_row_height};
 pub(crate) use layout::{TuiLayout, tui_layout};
 #[cfg(test)]
@@ -183,28 +184,30 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
         chrome::scrim(frame.buffer_mut(), area);
     }
 
+    let hover = app.hover;
+    let hovered_dialog_row = match hover {
+        crate::tui::state::HoverTarget::DialogRow(index) => Some(index),
+        _ => None,
+    };
+    let hovered_button = match hover {
+        crate::tui::state::HoverTarget::ConfirmButton(yes) => Some(yes),
+        _ => None,
+    };
+
     if let crate::tui::state::Overlay::ConfirmDelete(ctx) = &app.overlay {
-        draw_confirm_delete(frame, ctx);
+        draw_confirm_delete(frame, ctx, hover);
     }
 
     if matches!(app.overlay, crate::tui::state::Overlay::MetadataMenu) {
-        draw_metadata_menu(frame, MetadataMenuMode::Viewer);
+        draw_metadata_menu(frame, MetadataMenuMode::Viewer, hovered_dialog_row);
     }
 
     if matches!(app.overlay, crate::tui::state::Overlay::SettingsMenu) {
-        let hovered = match app.hover {
-            crate::tui::state::HoverTarget::SettingsRow(index) => Some(index),
-            _ => None,
-        };
-        chrome::draw_settings_menu(frame, hovered);
+        chrome::draw_settings_menu(frame, hovered_dialog_row);
     }
 
-    let hovered_theme_row = match app.hover {
-        crate::tui::state::HoverTarget::ThemePickerRow(index) => Some(index),
-        _ => None,
-    };
     if let Some(state) = app.theme_picker_state_mut() {
-        draw_theme_picker(frame, state, hovered_theme_row);
+        draw_theme_picker(frame, state, hover);
     }
 
     if let Some(input) = app.new_journal_input_mut() {
@@ -212,19 +215,19 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
     }
 
     if let Some(state) = app.edit_metadata_state_mut() {
-        draw_edit_metadata_dialog(frame, state);
+        draw_edit_metadata_dialog(frame, state, hover);
     }
 
     if let Some(state) = app.edit_feeling_state_mut() {
-        draw_edit_feelings_dialog(frame, state);
+        draw_edit_feelings_dialog(frame, state, hover);
     }
 
     if let Some(state) = app.edit_mood_state() {
-        draw_edit_mood_dialog(frame, state);
+        draw_edit_mood_dialog(frame, state, hover);
     }
 
     if let Some(state) = app.edit_location_state_mut() {
-        draw_edit_location_dialog(frame, state);
+        draw_edit_location_dialog(frame, state, hover);
     }
 
     if let Some(state) = app.image_viewer_state() {
@@ -237,9 +240,11 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
 
     if let Some(editor) = app.editor.as_mut() {
         match &mut editor.prompt {
-            EditorPrompt::MetadataMenu => draw_metadata_menu(frame, MetadataMenuMode::Editor),
+            EditorPrompt::MetadataMenu => {
+                draw_metadata_menu(frame, MetadataMenuMode::Editor, hovered_dialog_row)
+            }
             EditorPrompt::Help { scroll } => draw_editor_shortcuts(frame, scroll),
-            EditorPrompt::ConfirmDiscard => draw_editor_discard_confirm(frame),
+            EditorPrompt::ConfirmDiscard => draw_editor_discard_confirm(frame, hovered_button),
             EditorPrompt::None => {}
         }
     }

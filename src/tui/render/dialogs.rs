@@ -13,7 +13,7 @@ use crate::tui::app::{
     FeelingRow, LocationResolveStatus,
 };
 use crate::tui::entry_rows::wrap_text;
-use crate::tui::state::{DeleteContext, EditMoodState, ListNav, ThemePickerState};
+use crate::tui::state::{DeleteContext, EditMoodState, HoverTarget, ListNav, ThemePickerState};
 use crate::tui::surface::metadata_value_rows;
 use crate::tui::text_input::TextInput;
 use crate::tui::theme::theme;
@@ -21,7 +21,7 @@ use crate::tui::theme::theme;
 use super::{
     chrome::{
         Hint, HintId, centered_rect_fixed_size, dialog_inner, draw_dialog_frame, flat_chrome,
-        hint_height, hint_lines, list_highlight_symbol, render_confirm_buttons,
+        hint_height, hint_lines_hovered, list_highlight_symbol, render_confirm_buttons,
         render_scrollbar_if_needed, separator_style,
     },
     list_state_for_render,
@@ -562,8 +562,12 @@ pub(crate) fn theme_picker_layout(frame_area: Rect, len: usize) -> ThemePickerLa
 pub(super) fn draw_theme_picker(
     frame: &mut Frame<'_>,
     state: &mut ThemePickerState,
-    hovered_row: Option<usize>,
+    hover: HoverTarget,
 ) {
+    let hovered_row = match hover {
+        HoverTarget::ThemePickerRow(index) => Some(index),
+        _ => None,
+    };
     let layout = theme_picker_layout(frame.area(), state.entries.len());
 
     state.normalize_list_state();
@@ -615,7 +619,7 @@ pub(super) fn draw_theme_picker(
     let mut render_state =
         list_state_for_render(state.selected_index(), scroll, layout.list.height, len > 0);
     frame.render_stateful_widget(list, layout.list, &mut render_state);
-    render_hint_line(frame, theme_picker_hints(), layout.hints);
+    render_hint_line(frame, theme_picker_hints(), layout.hints, hover);
     render_scrollbar_if_needed(frame, layout.area, len, max_visible, scroll);
 }
 
@@ -767,9 +771,33 @@ fn hint_content_area(area: Rect) -> Rect {
     }
 }
 
-fn render_hint_line(frame: &mut Frame<'_>, hints: &[Hint], area: Rect) {
+fn render_hint_line(frame: &mut Frame<'_>, hints: &[Hint], area: Rect, hover: HoverTarget) {
     let content = hint_content_area(area);
-    frame.render_widget(Paragraph::new(hint_lines(hints, content.width)), content);
+    frame.render_widget(
+        Paragraph::new(hint_lines_hovered(
+            hints,
+            content.width,
+            hovered_hint(hover),
+        )),
+        content,
+    );
+}
+
+/// The hint chip a hover targets, if any — dialog hint bars share the footer's
+/// [`HoverTarget::FooterHint`] since the chips are the same clickable kind.
+fn hovered_hint(hover: HoverTarget) -> Option<crate::tui::render::HintId> {
+    match hover {
+        HoverTarget::FooterHint(id) => Some(id),
+        _ => None,
+    }
+}
+
+/// The dialog list/menu row a hover targets, if any.
+fn hovered_dialog_row(hover: HoverTarget) -> Option<usize> {
+    match hover {
+        HoverTarget::DialogRow(index) => Some(index),
+        _ => None,
+    }
 }
 
 // ── Dialog draw functions ─────────────────────────────────────────────────────
@@ -831,7 +859,7 @@ pub(crate) fn confirm_delete_inner(frame_area: Rect, ctx: &DeleteContext) -> Rec
     dialog_inner(confirm_delete_area(frame_area, ctx))
 }
 
-pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext) {
+pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext, hover: HoverTarget) {
     let (_, message) = confirm_delete_content(ctx);
     let area = confirm_delete_area(frame.area(), ctx);
     let inner = draw_dialog_frame(frame, area, "Confirm Delete", true);
@@ -845,7 +873,11 @@ pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext) {
         };
         frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), line_area);
     }
-    render_confirm_buttons(frame, inner, "Delete (y)", "Cancel (n)");
+    let hovered_button = match hover {
+        HoverTarget::ConfirmButton(yes) => Some(yes),
+        _ => None,
+    };
+    render_confirm_buttons(frame, inner, "Delete (y)", "Cancel (n)", hovered_button);
 }
 
 pub(super) fn draw_new_journal_input(frame: &mut Frame<'_>, input: &mut TextInput) {
@@ -870,7 +902,11 @@ pub(super) fn draw_new_journal_input(frame: &mut Frame<'_>, input: &mut TextInpu
     frame.render_widget(Paragraph::new("Enter saves | Esc cancels"), hint);
 }
 
-pub(super) fn draw_edit_metadata_dialog(frame: &mut Frame<'_>, state: &mut EditMetadataState) {
+pub(super) fn draw_edit_metadata_dialog(
+    frame: &mut Frame<'_>,
+    state: &mut EditMetadataState,
+    hover: HoverTarget,
+) {
     let layout = metadata_dialog_layout(frame.area(), state.filtered.len());
     let title = state.kind.title();
 
@@ -892,14 +928,21 @@ pub(super) fn draw_edit_metadata_dialog(frame: &mut Frame<'_>, state: &mut EditM
         };
         vec![ListItem::new(Line::from(text))]
     } else {
+        let hovered_row = hovered_dialog_row(hover);
         state
             .filtered
             .iter()
-            .map(|idx| {
+            .enumerate()
+            .map(|(index, idx)| {
                 let (tag, freq) = &state.all_values[*idx];
                 let checked = state.selected.iter().any(|t| t.eq_ignore_ascii_case(tag));
                 let marker = if checked { "[x]" } else { "[ ]" };
-                ListItem::new(Line::from(format!("{marker} {tag} ({freq})")))
+                let item = ListItem::new(Line::from(format!("{marker} {tag} ({freq})")));
+                if Some(index) == hovered_row && Some(index) != state.selected_index() {
+                    item.style(theme().hover())
+                } else {
+                    item
+                }
             })
             .collect()
     };
@@ -937,11 +980,16 @@ pub(super) fn draw_edit_metadata_dialog(frame: &mut Frame<'_>, state: &mut EditM
         frame,
         metadata_dialog_hints(state.focus, state.input.as_str().trim().is_empty()),
         layout.hints,
+        hover,
     );
     render_scrollbar_if_needed(frame, layout.area, list_lines, max_visible, scroll);
 }
 
-pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState) {
+pub(super) fn draw_edit_mood_dialog(
+    frame: &mut Frame<'_>,
+    state: &EditMoodState,
+    hover: HoverTarget,
+) {
     let layout = mood_dialog_layout(frame.area());
 
     draw_dialog_frame(frame, layout.area, "Edit Mood", true);
@@ -995,11 +1043,15 @@ pub(super) fn draw_edit_mood_dialog(frame: &mut Frame<'_>, state: &EditMoodState
 
     // Hint line
     if layout.hints.y < layout.inner.y + layout.inner.height {
-        render_hint_line(frame, mood_dialog_hints(), layout.hints);
+        render_hint_line(frame, mood_dialog_hints(), layout.hints, hover);
     }
 }
 
-pub(super) fn draw_edit_location_dialog(frame: &mut Frame<'_>, state: &mut EditLocationState) {
+pub(super) fn draw_edit_location_dialog(
+    frame: &mut Frame<'_>,
+    state: &mut EditLocationState,
+    hover: HoverTarget,
+) {
     let showing_candidates = state.showing_candidates();
     let labels = state.list_labels();
     let item_count = labels.len();
@@ -1082,14 +1134,21 @@ pub(super) fn draw_edit_location_dialog(frame: &mut Frame<'_>, state: &mut EditL
         };
         vec![ListItem::new(Line::from(text))]
     } else {
+        let hovered_row = hovered_dialog_row(hover);
         labels
             .iter()
-            .map(|label| {
+            .enumerate()
+            .map(|(index, label)| {
                 let lines: Vec<Line<'static>> = location_row_lines(label)
                     .into_iter()
                     .map(|line| Line::from(format!(" {line}")))
                     .collect();
-                ListItem::new(lines)
+                let item = ListItem::new(lines);
+                if Some(index) == hovered_row && Some(index) != state.selected_index() {
+                    item.style(theme().hover())
+                } else {
+                    item
+                }
             })
             .collect()
     };
@@ -1110,11 +1169,16 @@ pub(super) fn draw_edit_location_dialog(frame: &mut Frame<'_>, state: &mut EditL
         frame,
         location_dialog_hints(state.focus, state.query_looked_up),
         layout.hints,
+        hover,
     );
     render_scrollbar_if_needed(frame, layout.area, item_count, max_visible, scroll);
 }
 
-pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditFeelingState) {
+pub(super) fn draw_edit_feelings_dialog(
+    frame: &mut Frame<'_>,
+    state: &mut EditFeelingState,
+    hover: HoverTarget,
+) {
     let rows = state.visible_rows();
     let selected_line_count = feelings_selected_line_count(&state.selected);
     let layout = feelings_dialog_layout(frame.area(), rows.len(), selected_line_count);
@@ -1129,39 +1193,48 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
     let scroll = state.offset().min(max_offset);
     state.list.set_offset(scroll);
 
+    let hovered_row = hovered_dialog_row(hover);
     let items: Vec<ListItem<'_>> = if rows.is_empty() {
         vec![ListItem::new(Line::from(" (no matches)"))]
     } else {
         rows.iter()
-            .map(|row| match *row {
-                FeelingRow::Header { group } => {
-                    let g = &state.groups[group];
-                    let bold = theme().heading();
-                    // Disclosure marker trails the name so it never collides with the
-                    // list's leading `>` selection cursor. ▾ open, ▸ collapsed.
-                    let disclosure = if state.expanded[group] { '▾' } else { '▸' };
-                    let mut spans = vec![Span::styled(g.name, bold)];
-                    // The selected-count badge is lighter than the category name.
-                    let selected = state.group_selected_count(group);
-                    if selected > 0 {
-                        spans.push(Span::raw(format!(" ({selected})")));
+            .enumerate()
+            .map(|(index, row)| {
+                let item = match *row {
+                    FeelingRow::Header { group } => {
+                        let g = &state.groups[group];
+                        let bold = theme().heading();
+                        // Disclosure marker trails the name so it never collides with the
+                        // list's leading `>` selection cursor. ▾ open, ▸ collapsed.
+                        let disclosure = if state.expanded[group] { '▾' } else { '▸' };
+                        let mut spans = vec![Span::styled(g.name, bold)];
+                        // The selected-count badge is lighter than the category name.
+                        let selected = state.group_selected_count(group);
+                        if selected > 0 {
+                            spans.push(Span::raw(format!(" ({selected})")));
+                        }
+                        spans.push(Span::styled(format!(" {disclosure}"), bold));
+                        ListItem::new(Line::from(spans))
                     }
-                    spans.push(Span::styled(format!(" {disclosure}"), bold));
-                    ListItem::new(Line::from(spans))
-                }
-                FeelingRow::Feeling { group, feeling } => {
-                    let g = &state.groups[group];
-                    let name = g.feelings[feeling].name;
-                    let checked = state.selected.iter().any(|value| value == name);
-                    let marker = if checked { "[x]" } else { "[ ]" };
-                    // While filtering the headers are hidden, so tag each match with
-                    // its group for context.
-                    let text = if filtering {
-                        format!("{marker} {name}  ({})", g.name)
-                    } else {
-                        format!("   {marker} {name}")
-                    };
-                    ListItem::new(Line::from(text))
+                    FeelingRow::Feeling { group, feeling } => {
+                        let g = &state.groups[group];
+                        let name = g.feelings[feeling].name;
+                        let checked = state.selected.iter().any(|value| value == name);
+                        let marker = if checked { "[x]" } else { "[ ]" };
+                        // While filtering the headers are hidden, so tag each match with
+                        // its group for context.
+                        let text = if filtering {
+                            format!("{marker} {name}  ({})", g.name)
+                        } else {
+                            format!("   {marker} {name}")
+                        };
+                        ListItem::new(Line::from(text))
+                    }
+                };
+                if Some(index) == hovered_row && Some(index) != state.selected_index() {
+                    item.style(theme().hover())
+                } else {
+                    item
                 }
             })
             .collect()
@@ -1227,7 +1300,12 @@ pub(super) fn draw_edit_feelings_dialog(frame: &mut Frame<'_>, state: &mut EditF
             .collect()
     };
     render_lines_in_area(frame, summary, layout.selected);
-    render_hint_line(frame, feelings_dialog_hints(state.focus), layout.hints);
+    render_hint_line(
+        frame,
+        feelings_dialog_hints(state.focus),
+        layout.hints,
+        hover,
+    );
     render_scrollbar_if_needed(frame, layout.area, list_lines, max_visible, scroll);
 }
 

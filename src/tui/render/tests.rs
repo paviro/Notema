@@ -52,7 +52,7 @@ fn render_app(mut app: App, width: u16, height: u16) -> TestBackend {
 
 fn render_edit_tags_dialog_text(mut state: EditMetadataState, width: u16, height: u16) -> String {
     render_to_text(width, height, |frame| {
-        dialogs::draw_edit_metadata_dialog(frame, &mut state)
+        dialogs::draw_edit_metadata_dialog(frame, &mut state, crate::tui::state::HoverTarget::None)
     })
 }
 
@@ -76,6 +76,7 @@ fn render_confirm_delete_rows(width: u16, height: u16) -> Vec<String> {
         dialogs::draw_confirm_delete(
             frame,
             &crate::tui::state::DeleteContext::Entry { has_body: true },
+            crate::tui::state::HoverTarget::None,
         )
     })
 }
@@ -759,7 +760,7 @@ fn feelings_dialog_folds_groups_and_marks_disclosure() {
     let mut state = EditFeelingState::new(GROUPS, vec!["calm".into()]);
     state.expanded[1] = true;
     let rows = render_to_rows(60, 24, |frame| {
-        dialogs::draw_edit_feelings_dialog(frame, &mut state)
+        dialogs::draw_edit_feelings_dialog(frame, &mut state, crate::tui::state::HoverTarget::None)
     });
 
     // Collapsed group: header keeps its stored casing (no all-caps), carries a
@@ -804,7 +805,7 @@ fn feelings_dialog_shows_no_matches_when_filter_is_empty() {
     state.rebuild_filter();
 
     let rows = render_to_rows(60, 24, |frame| {
-        dialogs::draw_edit_feelings_dialog(frame, &mut state)
+        dialogs::draw_edit_feelings_dialog(frame, &mut state, crate::tui::state::HoverTarget::None)
     });
     assert!(
         rows.iter().any(|row| row.contains("(no matches)")),
@@ -2282,7 +2283,7 @@ mod flat_chrome_tests {
         pin_flat();
         let panel_bg = theme::test_flat_theme().panel_bg();
         let backend = render_backend(80, 24, |frame| {
-            dialogs::draw_edit_metadata_dialog(frame, &mut tags_state())
+            dialogs::draw_edit_metadata_dialog(frame, &mut tags_state(), crate::tui::state::HoverTarget::None)
         });
         let area = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2).area;
         let cell = &backend.buffer()[(area.x + 1, area.y + 1)];
@@ -2295,7 +2296,7 @@ mod flat_chrome_tests {
         let selection = theme::test_flat_theme().selection();
         let layout = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2);
         let backend = render_backend(80, 24, |frame| {
-            dialogs::draw_edit_metadata_dialog(frame, &mut tags_state())
+            dialogs::draw_edit_metadata_dialog(frame, &mut tags_state(), crate::tui::state::HoverTarget::None)
         });
         let rendered: String = backend
             .buffer()

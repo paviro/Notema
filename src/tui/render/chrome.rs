@@ -1051,23 +1051,29 @@ pub(crate) fn confirm_button_rects(inner: Rect) -> (Rect, Rect) {
     (yes, no)
 }
 
-/// Draw the two confirm buttons as reversed + bold chips on the last row of `inner`.
+/// Draw the two confirm buttons as reversed + bold chips on the last row of
+/// `inner`. The hovered button underlines as the click affordance — the chips
+/// are already filled/reversed, so a surface change wouldn't read.
 pub(crate) fn render_confirm_buttons(
     frame: &mut Frame<'_>,
     inner: Rect,
     yes_label: &str,
     no_label: &str,
+    hovered: Option<bool>,
 ) {
     let (yes, no) = confirm_button_rects(inner);
-    for (area, label) in [(yes, yes_label), (no, no_label)] {
+    for (area, label, is_yes) in [(yes, yes_label, true), (no, no_label, false)] {
         // Flat chrome draws opencode-style filled chips; bordered keeps the
         // bracketed reversed buttons. Same rects either way, so the click
         // targets from `confirm_button_rects` stay valid.
-        let (text, style) = if flat_chrome() {
+        let (text, mut style) = if flat_chrome() {
             (format!(" {label} "), theme().button())
         } else {
             (format!("[ {label} ]"), key_chip_style())
         };
+        if hovered == Some(is_yes) {
+            style = style.add_modifier(Modifier::UNDERLINED);
+        }
         frame.render_widget(
             Paragraph::new(Span::styled(text, style)).alignment(Alignment::Center),
             area,
@@ -1089,7 +1095,7 @@ pub(crate) fn confirm_button_at(inner: Rect, col: u16, row: u16) -> Option<bool>
 
 /// Draw the internal editor's "Discard changes?" confirmation as a centered
 /// modal, matching the confirm-delete dialog's look.
-pub(crate) fn draw_editor_discard_confirm(frame: &mut Frame<'_>) {
+pub(crate) fn draw_editor_discard_confirm(frame: &mut Frame<'_>, hovered_button: Option<bool>) {
     let area = editor_discard_confirm_area(frame.area());
     let inner = draw_dialog_frame(frame, area, "Discard Changes", true);
     let line = Rect {
@@ -1101,7 +1107,7 @@ pub(crate) fn draw_editor_discard_confirm(frame: &mut Frame<'_>) {
         Paragraph::new("Discard unsaved changes?").alignment(Alignment::Center),
         line,
     );
-    render_confirm_buttons(frame, inner, "Discard (y)", "Keep (n)");
+    render_confirm_buttons(frame, inner, "Discard (y)", "Keep (n)", hovered_button);
 }
 
 pub(crate) fn editor_discard_confirm_area(frame_area: Rect) -> Rect {
@@ -1160,11 +1166,31 @@ impl MetadataMenuMode {
 /// Draw the "Add metadata" chooser: a centered popup whose highlighted letters open
 /// the tags/people/activities/feelings/mood dialogs, laid out as a table matching
 /// the insights tabs. Shared by the internal editor and the entry viewer.
-pub(crate) fn draw_metadata_menu(frame: &mut Frame<'_>, mode: MetadataMenuMode) {
+pub(crate) fn draw_metadata_menu(
+    frame: &mut Frame<'_>,
+    mode: MetadataMenuMode,
+    hovered_row: Option<usize>,
+) {
     let rows = metadata_menu_rows();
     // The chooser always fits, so it never scrolls.
     let mut scroll = 0;
-    draw_table_dialog(frame, &metadata_menu_dialog(&rows, mode), &mut scroll, None);
+    draw_table_dialog(
+        frame,
+        &metadata_menu_dialog(&rows, mode),
+        &mut scroll,
+        hovered_row,
+    );
+}
+
+/// The metadata-menu data row under `(col, row)`, for hover highlighting.
+pub(crate) fn metadata_menu_row_at_point(
+    frame_area: Rect,
+    mode: MetadataMenuMode,
+    col: u16,
+    row: u16,
+) -> Option<usize> {
+    let rows = metadata_menu_rows();
+    table_dialog_row_at_point(frame_area, &metadata_menu_dialog(&rows, mode), 0, col, row)
 }
 
 pub(crate) enum MetadataChoice {
@@ -1235,7 +1261,12 @@ pub(crate) fn draw_settings_menu(frame: &mut Frame<'_>, hovered_row: Option<usiz
     let rows = settings_menu_rows();
     // The menu always fits, so it never scrolls.
     let mut scroll = 0;
-    draw_table_dialog(frame, &settings_menu_dialog(&rows), &mut scroll, hovered_row);
+    draw_table_dialog(
+        frame,
+        &settings_menu_dialog(&rows),
+        &mut scroll,
+        hovered_row,
+    );
 }
 
 /// The settings-menu data row under `(col, row)`, for hover highlighting.

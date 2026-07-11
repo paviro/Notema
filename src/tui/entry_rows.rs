@@ -318,7 +318,10 @@ pub(crate) fn journal_card_lines(
     let (content, used) = take_width(name, inner_width);
     let pad_row = || Line::from(Span::styled(" ".repeat(box_width), style));
     let name_row = Line::from(Span::styled(
-        format!("  {content}{}", " ".repeat(box_width.saturating_sub(used + 2))),
+        format!(
+            "  {content}{}",
+            " ".repeat(box_width.saturating_sub(used + 2))
+        ),
         style,
     ));
     vec![pad_row(), name_row, pad_row(), Line::from(String::new())]

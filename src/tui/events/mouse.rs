@@ -628,20 +628,11 @@ fn hover_target_at(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
     }
 
     if app.has_overlay() {
-        if matches!(app.overlay, Overlay::SettingsMenu) {
-            if let Some(index) = render::settings_menu_row_at_point(area, col, row) {
-                return HoverTarget::SettingsRow(index);
-            }
-        } else if let Some(state) = app.theme_picker_state() {
-            let layout = render::theme_picker_layout(area, state.entries.len());
-            if render::point_in_rect(layout.list, col, row)
-                && let Some(index) =
-                    list_row_at(layout.list, col, row, state.offset(), state.entries.len())
-            {
-                return HoverTarget::ThemePickerRow(index);
-            }
-        }
-        return HoverTarget::None;
+        return overlay_hover_target(app, col, row, area);
+    }
+
+    if editor_prompt_is_open(app) {
+        return editor_prompt_hover_target(app, col, row, area);
     }
 
     // The footer first: it overlays nothing, so it can't shadow a list row.
@@ -654,7 +645,7 @@ fn hover_target_at(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
         return HoverTarget::None;
     }
 
-    if app.editor.is_some() || editor_prompt_is_open(app) {
+    if app.editor.is_some() {
         return HoverTarget::None;
     }
 
@@ -690,6 +681,130 @@ fn hover_target_at(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
     }
 
     HoverTarget::None
+}
+
+/// The hover target inside the open overlay, mirroring [`overlay_left_click`]'s
+/// per-dialog geometry: list/menu rows, confirm buttons, and hint chips.
+fn overlay_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
+    let hint = |hints_area: Rect, hints: &[render::Hint]| -> Option<HoverTarget> {
+        render::point_in_rect(hints_area, col, row)
+            .then(|| {
+                render::hint_id_at_wrapped(
+                    hints,
+                    hints_area.x + 1,
+                    hints_area.y,
+                    hints_area.width.saturating_sub(1),
+                    col,
+                    row,
+                )
+            })
+            .flatten()
+            .map(HoverTarget::FooterHint)
+    };
+
+    match &app.overlay {
+        Overlay::SettingsMenu => {
+            if let Some(index) = render::settings_menu_row_at_point(area, col, row) {
+                return HoverTarget::DialogRow(index);
+            }
+        }
+        Overlay::MetadataMenu => {
+            if let Some(index) =
+                render::metadata_menu_row_at_point(area, render::MetadataMenuMode::Viewer, col, row)
+            {
+                return HoverTarget::DialogRow(index);
+            }
+        }
+        Overlay::ConfirmDelete(ctx) => {
+            let inner = render::confirm_delete_inner(area, ctx);
+            if let Some(yes) = render::confirm_button_at(inner, col, row) {
+                return HoverTarget::ConfirmButton(yes);
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(state) = app.theme_picker_state() {
+        let layout = render::theme_picker_layout(area, state.entries.len());
+        if render::point_in_rect(layout.list, col, row)
+            && let Some(index) =
+                list_row_at(layout.list, col, row, state.offset(), state.entries.len())
+        {
+            return HoverTarget::ThemePickerRow(index);
+        }
+        return hint(layout.hints, render::theme_picker_hints()).unwrap_or_default();
+    }
+
+    if let Some(state) = app.edit_metadata_state() {
+        let layout = render::metadata_dialog_layout(area, state.filtered.len());
+        if render::point_in_rect(layout.list, col, row)
+            && let Some(index) = list_row_at(layout.list, col, row, state.offset(), state.filtered.len())
+        {
+            return HoverTarget::DialogRow(index);
+        }
+        let hints =
+            render::metadata_dialog_hints(state.focus, state.input.as_str().trim().is_empty());
+        return hint(layout.hints, hints).unwrap_or_default();
+    }
+
+    if let Some(state) = app.edit_feeling_state() {
+        let layout = render::feelings_dialog_layout(
+            area,
+            state.item_count(),
+            render::feelings_selected_line_count(&state.selected),
+        );
+        if render::point_in_rect(layout.list, col, row)
+            && let Some(index) = list_row_at(layout.list, col, row, state.offset(), state.item_count())
+        {
+            return HoverTarget::DialogRow(index);
+        }
+        return hint(layout.hints, render::feelings_dialog_hints(state.focus)).unwrap_or_default();
+    }
+
+    if let Some(state) = app.edit_location_state() {
+        let labels = state.list_labels();
+        let layout = render::location_dialog_layout(area, render::location_list_rows(&labels));
+        if render::point_in_rect(layout.list, col, row)
+            && let Some(index) =
+                render::location_list_row_at(layout.list, &labels, state.offset(), row)
+        {
+            return HoverTarget::DialogRow(index);
+        }
+        let hints = render::location_dialog_hints(state.focus, state.query_looked_up);
+        return hint(layout.hints, hints).unwrap_or_default();
+    }
+
+    if app.edit_mood_state().is_some() {
+        let layout = render::mood_dialog_layout(area);
+        return hint(layout.hints, render::mood_dialog_hints()).unwrap_or_default();
+    }
+
+    HoverTarget::None
+}
+
+/// The hover target inside an open editor prompt (they float like overlays but
+/// live on the editor, not `app.overlay`).
+fn editor_prompt_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
+    match app.editor.as_ref().map(|editor| &editor.prompt) {
+        Some(EditorPrompt::ConfirmDiscard) => {
+            match render::editor_discard_choice_at_point(area, col, row) {
+                Some(yes) => HoverTarget::ConfirmButton(yes),
+                None => HoverTarget::None,
+            }
+        }
+        Some(EditorPrompt::MetadataMenu) => {
+            match render::metadata_menu_row_at_point(
+                area,
+                render::MetadataMenuMode::Editor,
+                col,
+                row,
+            ) {
+                Some(index) => HoverTarget::DialogRow(index),
+                None => HoverTarget::None,
+            }
+        }
+        _ => HoverTarget::None,
+    }
 }
 
 // ── Footer click ──────────────────────────────────────────────────────────────

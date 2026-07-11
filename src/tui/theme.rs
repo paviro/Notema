@@ -995,10 +995,9 @@ mod tests {
             for mode in [Mode::Dark, Mode::Light] {
                 let theme = parse(text, mode).unwrap();
                 match (theme.selection.fg, theme.selection.bg) {
-                    (Some(fg), Some(bg)) => assert_ne!(
-                        fg, bg,
-                        "'{name}' selection is same-on-same ({mode:?})"
-                    ),
+                    (Some(fg), Some(bg)) => {
+                        assert_ne!(fg, bg, "'{name}' selection is same-on-same ({mode:?})")
+                    }
                     // Without pinned colors the inversion must carry contrast.
                     _ => assert!(
                         theme.selection.add_modifier.contains(Modifier::REVERSED),

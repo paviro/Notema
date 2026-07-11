@@ -61,10 +61,7 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
         crate::tui::state::HoverTarget::Entry(index) => Some(index),
         _ => None,
     };
-    let selected = app
-        .nav
-        .selected_entry_index
-        .filter(|_| highlight_active);
+    let selected = app.nav.selected_entry_index.filter(|_| highlight_active);
     let items: Vec<_> = if hovered.is_some() && hovered != selected {
         items
             .into_iter()
