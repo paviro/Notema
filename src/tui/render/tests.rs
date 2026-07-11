@@ -2591,6 +2591,32 @@ mod flat_chrome_tests {
     }
 
     #[test]
+    fn dialogs_repaint_the_theme_ink_after_clearing() {
+        // `Clear` resets cells to the terminal's own colors; the dialog frame
+        // must re-establish the theme's text fg along with its surface, or
+        // unstyled dialog text renders in the terminal's ink — near-white on a
+        // light-mode dialog on a dark terminal.
+        for chrome in [
+            None,
+            Some(crate::tui::theme::ChromeStyle::Flat),
+            Some(crate::tui::theme::ChromeStyle::Bordered),
+        ] {
+            theme::set_test_theme(theme::test_flat_theme());
+            theme::set_chrome_override(chrome);
+            let ink = theme::theme().text().fg.expect("flat theme has body ink");
+            let backend = render_backend(80, 24, |frame| {
+                frames::draw_dialog_frame(frame, Rect::new(10, 5, 40, 10), "Title", false);
+            });
+            let interior = &backend.buffer()[(12, 10)];
+            assert_eq!(
+                interior.fg, ink,
+                "dialog interior lost the theme ink ({chrome:?})"
+            );
+        }
+        theme::set_chrome_override(None);
+    }
+
+    #[test]
     fn entry_body_cache_rebuilds_when_the_theme_changes() {
         // The rendered body bakes in markdown colors, glyphs, and syntax
         // highlighting; the picker's live preview swaps themes without

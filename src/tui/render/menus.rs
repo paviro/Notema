@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -15,7 +15,9 @@ use crate::tui::state::MetadataKind;
 use crate::tui::surface::point_in_rect;
 use crate::tui::theme::theme;
 
-use super::chrome::{centered_rect_fixed_size, flat_chrome, render_scrollbar_if_needed};
+use super::chrome::{
+    centered_rect_fixed_size, clear_surface, flat_chrome, render_scrollbar_if_needed,
+};
 use super::footer::{HintId, key_chip_style, key_chip_text};
 use super::frames::{dialog_frame_rows, dialog_inner, draw_dialog_frame};
 
@@ -581,14 +583,13 @@ fn draw_table_dialog(
             bottom,
         );
     } else {
-        frame.render_widget(Clear, metrics.area);
+        clear_surface(frame, metrics.area, theme().dialog_bg());
         let block = Block::default()
             .title(format!(" {} ", dialog.title))
             .title_bottom(Line::from(format!(" {} ", metrics.footer)).centered())
             .borders(Borders::ALL)
             .border_set(theme().glyphs().borders.border_set())
-            .border_style(theme().dialog_border())
-            .style(Style::default().bg(theme().dialog_bg()));
+            .border_style(theme().dialog_border());
         frame.render_widget(block, metrics.area);
     }
 

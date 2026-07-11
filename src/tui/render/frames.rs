@@ -6,13 +6,13 @@ use ratatui::{
     layout::{Alignment, Margin, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 
 use crate::tui::surface::point_in_rect;
 use crate::tui::theme::theme;
 
-use super::chrome::{base_style, centered_rect_fixed_size, flat_chrome};
+use super::chrome::{centered_rect_fixed_size, clear_surface, flat_chrome};
 use super::footer::key_chip_style;
 
 /// Rows a dialog's frame consumes above and below its content: the two border
@@ -51,13 +51,9 @@ pub(crate) fn draw_dialog_frame(
     title: &str,
     esc_hint: bool,
 ) -> Rect {
-    frame.render_widget(Clear, area);
+    clear_surface(frame, area, theme().dialog_bg());
     let title = title.trim();
     if flat_chrome() {
-        frame.render_widget(
-            Block::new().style(Style::default().bg(theme().dialog_bg())),
-            area,
-        );
         // The title sits below a blank padding row, off the card's edge.
         let top = Rect {
             x: area.x + 2,
@@ -78,14 +74,10 @@ pub(crate) fn draw_dialog_frame(
             );
         }
     } else {
-        // The dialog surface, not `Clear`'s terminal default: bordered chrome
-        // on a colored theme must float dialogs on the theme's own surface.
-        // Classic resolves it through panel to the terminal default.
         let mut block = Block::default()
             .borders(Borders::ALL)
             .border_set(theme().glyphs().borders.border_set())
-            .border_style(theme().dialog_border())
-            .style(Style::default().bg(theme().dialog_bg()));
+            .border_style(theme().dialog_border());
         if !title.is_empty() {
             block = block.title(format!(" {title} "));
         }
@@ -201,12 +193,11 @@ pub(crate) fn draw_modal_frame(
     key_hint: &str,
 ) -> Rect {
     let area = frame.area();
-    frame.render_widget(Clear, area);
+    clear_surface(frame, area, theme().bg());
 
     if flat_chrome() {
         // No outer border: the screen name and hints sit on full-width
         // element-surface bars along the top and bottom, like status bars.
-        frame.buffer_mut().set_style(area, base_style());
         let bar = Style::default().bg(theme().element_bg());
         let top_bar = Rect {
             height: 1.min(area.height),
@@ -252,8 +243,6 @@ pub(crate) fn draw_modal_frame(
         });
     }
 
-    // Full-screen modal: the app background, like the flat branch.
-    frame.buffer_mut().set_style(area, base_style());
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_set(theme().glyphs().borders.border_set())

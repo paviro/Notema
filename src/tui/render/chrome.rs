@@ -21,11 +21,27 @@ pub(crate) fn flat_chrome() -> bool {
 /// text color, so spans without an explicit fg stay readable on it. A no-op
 /// under terminal-default themes (both components are `Reset`/absent).
 pub(crate) fn base_style() -> Style {
-    let mut style = Style::default().bg(theme().bg());
+    surface_style(theme().bg())
+}
+
+/// A surface fill: the given background plus the theme's text color, so spans
+/// without an explicit fg stay readable on it.
+pub(crate) fn surface_style(bg: Color) -> Style {
+    let mut style = Style::default().bg(bg);
     if let Some(fg) = theme().text().fg {
         style = style.fg(fg);
     }
     style
+}
+
+/// Wipe `area` and repaint it as a themed surface, in one step. `Clear` resets
+/// cells to the *terminal's* colors — a light-mode surface on a dark terminal
+/// would show unstyled text in the terminal's near-white ink — so every
+/// overlay must re-establish the ink+bg invariant before drawing content;
+/// pairing the two here makes that impossible to forget.
+pub(crate) fn clear_surface(frame: &mut Frame<'_>, area: Rect, bg: Color) {
+    frame.render_widget(ratatui::widgets::Clear, area);
+    frame.buffer_mut().set_style(area, surface_style(bg));
 }
 
 /// Dim everything drawn so far, so an overlay rendered afterwards floats on a

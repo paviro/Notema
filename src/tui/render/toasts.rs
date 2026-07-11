@@ -6,7 +6,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 
 use crate::tui::app::App;
@@ -14,7 +14,7 @@ use crate::tui::state::ToastVariant;
 use crate::tui::surface::point_in_rect;
 use crate::tui::theme::theme;
 
-use super::chrome::flat_chrome;
+use super::chrome::{clear_surface, flat_chrome};
 use super::footer::clamp_u16;
 
 /// Widest a toast gets; narrower terminals shrink it further.
@@ -104,7 +104,6 @@ fn draw_toast(
     lines: &[String],
     hovered: bool,
 ) {
-    frame.render_widget(Clear, area);
     let accent = toast_style(variant);
     let text: Vec<Line<'static>> = lines
         .iter()
@@ -120,12 +119,10 @@ fn draw_toast(
         // The element surface, not the panel one: toasts float over panels
         // that already carry `panel_bg`, so on the same color only the edge
         // stripes would separate them.
-        let surface = if hovered {
-            theme().hover()
-        } else {
-            Style::default().bg(theme().element_bg())
-        };
-        frame.render_widget(Block::new().style(surface), area);
+        clear_surface(frame, area, theme().element_bg());
+        if hovered {
+            frame.buffer_mut().set_style(area, theme().hover());
+        }
         for edge_x in [area.x, area.right().saturating_sub(1)] {
             let edge = theme().glyphs().toast_edge.to_string();
             let stripe: Vec<Line<'static>> = (0..area.height)
@@ -141,16 +138,12 @@ fn draw_toast(
             );
         }
     } else {
-        let surface = if hovered {
-            theme().hover()
-        } else {
-            Style::default().bg(theme().panel_bg())
-        };
+        clear_surface(frame, area, theme().panel_bg());
+        if hovered {
+            frame.buffer_mut().set_style(area, theme().hover());
+        }
         frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(accent)
-                .style(surface),
+            Block::default().borders(Borders::ALL).border_style(accent),
             area,
         );
     }
