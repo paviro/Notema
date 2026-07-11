@@ -1460,7 +1460,7 @@ fn theme_picker_hover_moves_selection_for_live_preview() {
     } else {
         offset
     };
-    let layout = render::theme_picker_layout(area, len);
+    let layout = render::theme_picker_layout(area, len, state.mode_switchable());
 
     let row = layout.list.y + (target - offset) as u16;
     assert!(mouse::update_hover(&mut app, layout.list.x + 1, row, area));
@@ -1664,4 +1664,42 @@ fn theme_picker_confirm_persists_the_color_mode() {
     // The saved config round-trips the setting.
     let loaded = crate::config::load_config(&app.config_path).unwrap();
     assert_eq!(loaded.ui.color_mode, ColorMode::Dark);
+}
+
+#[test]
+fn theme_picker_hides_the_mode_switch_on_mode_agnostic_themes() {
+    use crate::config::ColorMode;
+    let mut app = app_with_journals(&["work"]);
+    app.open_theme_picker();
+
+    // classic resolves identically in both modes, so the switch would be a
+    // no-op there; blossom has real variants.
+    let position = |app: &crate::tui::app::App, name: &str| {
+        app.theme_picker_state()
+            .unwrap()
+            .entries
+            .iter()
+            .position(|entry| entry.name == name)
+            .unwrap_or_else(|| panic!("bundled theme '{name}' listed"))
+    };
+    let classic = position(&app, "classic");
+    app.theme_picker_select(classic);
+    let state = app.theme_picker_state().unwrap();
+    assert!(!state.mode_switchable());
+    assert!(
+        render::theme_picker_hints(state.mode_switchable())
+            .iter()
+            .all(|hint| hint.id != render::HintId::ThemePickerMode),
+        "mode hint should be hidden on classic"
+    );
+    // The key is a no-op while the hint is hidden.
+    app.theme_picker_cycle_mode();
+    assert_eq!(crate::tui::theme::color_mode(), ColorMode::Auto);
+
+    // A variant theme shows the switch again.
+    let blossom = position(&app, "blossom");
+    app.theme_picker_select(blossom);
+    assert!(app.theme_picker_state().unwrap().mode_switchable());
+
+    app.theme_picker_cancel();
 }

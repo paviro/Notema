@@ -67,8 +67,9 @@ pub(crate) fn feelings_selected_line_count(selected: &[String]) -> usize {
 }
 
 /// The picker's hint row, with the chrome and mode hints' labels reflecting
-/// the live `[ui]` settings so cycling them reads back immediately.
-pub(crate) fn theme_picker_hints() -> [Hint; 4] {
+/// the live `[ui]` settings so cycling them reads back immediately. The mode
+/// hint only shows when the highlighted theme has dark/light variants.
+pub(crate) fn theme_picker_hints(mode_switchable: bool) -> Vec<Hint> {
     use crate::config::ColorMode;
     use crate::tui::theme::ChromeStyle;
     let chrome = match crate::tui::theme::chrome_override() {
@@ -78,17 +79,19 @@ pub(crate) fn theme_picker_hints() -> [Hint; 4] {
             Hint::new("chrome: bordered", "b", HintId::ThemePickerChrome)
         }
     };
-    let mode = match crate::tui::theme::color_mode() {
-        ColorMode::Auto => Hint::new("mode: auto", "m", HintId::ThemePickerMode),
-        ColorMode::Dark => Hint::new("mode: dark", "m", HintId::ThemePickerMode),
-        ColorMode::Light => Hint::new("mode: light", "m", HintId::ThemePickerMode),
-    };
-    [
+    let mut hints = vec![
         Hint::new("apply", "enter", HintId::ThemePickerApply),
         chrome,
-        mode,
-        Hint::new("revert", "esc", HintId::ThemePickerRevert),
-    ]
+    ];
+    if mode_switchable {
+        hints.push(match crate::tui::theme::color_mode() {
+            ColorMode::Auto => Hint::new("mode: auto", "m", HintId::ThemePickerMode),
+            ColorMode::Dark => Hint::new("mode: dark", "m", HintId::ThemePickerMode),
+            ColorMode::Light => Hint::new("mode: light", "m", HintId::ThemePickerMode),
+        });
+    }
+    hints.push(Hint::new("revert", "esc", HintId::ThemePickerRevert));
+    hints
 }
 
 const MOOD_DIALOG_HINTS: [Hint; 5] = [
@@ -533,15 +536,15 @@ pub(crate) fn feelings_dialog_layout(
     }
 }
 
-fn theme_picker_hint_height(frame_area: Rect) -> u16 {
+fn theme_picker_hint_height(frame_area: Rect, mode_switchable: bool) -> u16 {
     hint_height(
-        &theme_picker_hints(),
+        &theme_picker_hints(mode_switchable),
         dialog_hint_width(frame_area, LIST_DIALOG_WIDTH),
     )
 }
 
-fn theme_picker_area(frame_area: Rect, len: usize) -> Rect {
-    let hint_height = theme_picker_hint_height(frame_area);
+fn theme_picker_area(frame_area: Rect, len: usize, mode_switchable: bool) -> Rect {
+    let hint_height = theme_picker_hint_height(frame_area, mode_switchable);
     let visible = (len as u16).clamp(1, THEME_PICKER_MAX_VISIBLE_ROWS);
     // The frame + the list + a blank spacer + the hint block.
     let h =
@@ -558,10 +561,14 @@ pub(crate) struct ThemePickerLayout {
 
 /// The theme picker's geometry, shared by the draw and the mouse hit-tests so
 /// the click map can't drift from the pixels.
-pub(crate) fn theme_picker_layout(frame_area: Rect, len: usize) -> ThemePickerLayout {
-    let area = theme_picker_area(frame_area, len);
+pub(crate) fn theme_picker_layout(
+    frame_area: Rect,
+    len: usize,
+    mode_switchable: bool,
+) -> ThemePickerLayout {
+    let area = theme_picker_area(frame_area, len, mode_switchable);
     let inner = dialog_inner(area);
-    let hint_height = theme_picker_hint_height(frame_area);
+    let hint_height = theme_picker_hint_height(frame_area, mode_switchable);
     let list = Rect {
         x: inner.x,
         y: inner.y,
@@ -588,7 +595,7 @@ pub(super) fn draw_theme_picker(
         HoverTarget::ThemePickerRow(index) => Some(index),
         _ => None,
     };
-    let layout = theme_picker_layout(frame.area(), state.entries.len());
+    let layout = theme_picker_layout(frame.area(), state.entries.len(), state.mode_switchable());
 
     state.normalize_list_state();
     let len = state.entries.len();
@@ -641,7 +648,12 @@ pub(super) fn draw_theme_picker(
     let mut render_state =
         list_state_for_render(state.selected_index(), scroll, layout.list.height, len > 0);
     frame.render_stateful_widget(list, layout.list, &mut render_state);
-    render_hint_line(frame, &theme_picker_hints(), layout.hints, hover);
+    render_hint_line(
+        frame,
+        &theme_picker_hints(state.mode_switchable()),
+        layout.hints,
+        hover,
+    );
     render_scrollbar_if_needed(frame, layout.area, len, max_visible, scroll);
 }
 

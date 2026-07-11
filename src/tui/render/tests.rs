@@ -2221,7 +2221,8 @@ fn theme_picker_renders_broken_rows_in_the_error_style() {
     fs::create_dir_all(&themes).unwrap();
     fs::write(themes.join("busted.toml"), "surfaces = 12\n").unwrap();
     app.open_theme_picker();
-    let len = app.theme_picker_state().unwrap().entries.len();
+    let state = app.theme_picker_state().unwrap();
+    let (len, mode_switchable) = (state.entries.len(), state.mode_switchable());
 
     let backend = render_app(app, 90, 30);
     let buffer = backend.buffer();
@@ -2240,7 +2241,7 @@ fn theme_picker_renders_broken_rows_in_the_error_style() {
     let error_fg = crate::tui::theme::theme().error().fg.unwrap();
     assert_eq!(buffer[(x, y as u16)].fg, error_fg);
     // The layout the mouse handler uses matches where the list was drawn.
-    let layout = theme_picker_layout(Rect::new(0, 0, 90, 30), len);
+    let layout = theme_picker_layout(Rect::new(0, 0, 90, 30), len, mode_switchable);
     assert!(point_in_rect(layout.list, x, y as u16));
 }
 

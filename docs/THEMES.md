@@ -33,8 +33,9 @@ chrome = "default"       # default | flat | bordered — default follows the the
 `,` opens the settings menu; `t` (or Enter) opens the theme picker. Up/Down
 previews the highlighted theme live, `b` cycles the chrome override
 (default → flat → bordered), `m` cycles the color mode
-(auto → dark → light), Enter applies and saves to `config.toml`, Esc reverts
-theme, chrome, and mode. Broken theme files are listed but can't be applied.
+(auto → dark → light; hidden on themes without dark/light variants), Enter
+applies and saves to `config.toml`, Esc reverts theme, chrome, and mode.
+Broken theme files are listed but can't be applied.
 
 Edits to the **active** theme's file hot-reload (debounced ~400 ms). A broken
 edit shows an error toast and keeps the current theme; the next valid save

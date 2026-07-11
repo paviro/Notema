@@ -213,9 +213,17 @@ impl App {
                     return None;
                 }
                 let name = path.file_stem()?.to_str()?.to_string();
+                let dark = crate::tui::theme::load_file(&path, crate::tui::theme::Mode::Dark).ok();
+                let light =
+                    crate::tui::theme::load_file(&path, crate::tui::theme::Mode::Light).ok();
+                let mode_agnostic = dark == light;
                 Some(ThemePickerEntry {
-                    theme: crate::tui::theme::load_file(&path, mode).ok(),
+                    theme: match mode {
+                        crate::tui::theme::Mode::Dark => dark,
+                        crate::tui::theme::Mode::Light => light,
+                    },
                     name,
+                    mode_agnostic,
                 })
             })
             .collect();
@@ -291,6 +299,13 @@ impl App {
     /// and the highlighted one re-installs.
     pub(crate) fn theme_picker_cycle_mode(&mut self) {
         use crate::config::ColorMode;
+        // No-op on rows where the switch is hidden (its hint is gone too).
+        if !self
+            .theme_picker_state()
+            .is_some_and(|state| state.mode_switchable())
+        {
+            return;
+        }
         crate::tui::theme::set_color_mode(match crate::tui::theme::color_mode() {
             ColorMode::Auto => ColorMode::Dark,
             ColorMode::Dark => ColorMode::Light,

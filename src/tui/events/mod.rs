@@ -603,7 +603,7 @@ fn open_dialog_list_height(
             .list
             .height
     } else if let Some(state) = app.theme_picker_state() {
-        render::theme_picker_layout(area, state.entries.len())
+        render::theme_picker_layout(area, state.entries.len(), state.mode_switchable())
             .list
             .height
     } else {

@@ -354,6 +354,9 @@ pub(crate) struct ThemePickerEntry {
     /// The resolved theme, or `None` when the file failed to parse (rendered
     /// as broken and never installed).
     pub(crate) theme: Option<crate::tui::theme::Theme>,
+    /// Whether the file resolves identically in dark and light mode (classic,
+    /// broken files) — the picker hides its mode switch on such rows.
+    pub(crate) mode_agnostic: bool,
 }
 
 /// State for the theme-picker overlay. Selection moves preview by installing
@@ -377,6 +380,14 @@ impl ThemePickerState {
     /// The highlighted entry, if any.
     pub(crate) fn selected_entry(&self) -> Option<&ThemePickerEntry> {
         self.entries.get(self.selected_index()?)
+    }
+
+    /// Whether the mode switch applies to the highlighted row: hidden when
+    /// the theme resolves the same in both modes, so the picker never offers
+    /// a control that does nothing.
+    pub(crate) fn mode_switchable(&self) -> bool {
+        self.selected_entry()
+            .is_some_and(|entry| !entry.mode_agnostic)
     }
 }
 

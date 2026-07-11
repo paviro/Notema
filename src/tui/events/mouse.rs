@@ -759,14 +759,19 @@ fn overlay_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarge
     }
 
     if let Some(state) = app.theme_picker_state() {
-        let layout = render::theme_picker_layout(area, state.entries.len());
+        let layout =
+            render::theme_picker_layout(area, state.entries.len(), state.mode_switchable());
         if render::point_in_rect(layout.list, col, row)
             && let Some(index) =
                 list_row_at(layout.list, col, row, state.offset(), state.entries.len())
         {
             return HoverTarget::ThemePickerRow(index);
         }
-        return hint(layout.hints, &render::theme_picker_hints()).unwrap_or_default();
+        return hint(
+            layout.hints,
+            &render::theme_picker_hints(state.mode_switchable()),
+        )
+        .unwrap_or_default();
     }
 
     if let Some(state) = app.edit_metadata_state() {
@@ -1038,10 +1043,15 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         let len = state.entries.len();
         let selected = state.selected_index();
         let offset = state.offset();
-        let layout = render::theme_picker_layout(area, len);
-        if let Some(action) =
-            dialog_hint_action(app, layout.hints, &render::theme_picker_hints(), col, row)
-        {
+        let mode_switchable = state.mode_switchable();
+        let layout = render::theme_picker_layout(area, len, mode_switchable);
+        if let Some(action) = dialog_hint_action(
+            app,
+            layout.hints,
+            &render::theme_picker_hints(mode_switchable),
+            col,
+            row,
+        ) {
             return Some(action);
         }
         if render::point_in_rect(layout.list, col, row)
@@ -1256,8 +1266,11 @@ fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16
         return;
     }
 
-    if let Some(len) = app.theme_picker_state().map(|s| s.entries.len()) {
-        let layout = render::theme_picker_layout(area, len);
+    if let Some((len, mode_switchable)) = app
+        .theme_picker_state()
+        .map(|s| (s.entries.len(), s.mode_switchable()))
+    {
+        let layout = render::theme_picker_layout(area, len, mode_switchable);
         if render::point_in_rect(layout.list, mouse.column, mouse.row)
             && let Some(state) = app.theme_picker_state_mut()
         {
