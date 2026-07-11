@@ -830,10 +830,13 @@ fn draw_toast(
         height: area.height.saturating_sub(2),
     };
     if flat_chrome() {
+        // The element surface, not the panel one: toasts float over panels
+        // that already carry `panel_bg`, so on the same color only the edge
+        // stripes would separate them.
         let surface = if hovered {
             theme().hover()
         } else {
-            Style::default().bg(theme().panel_bg())
+            Style::default().bg(theme().element_bg())
         };
         frame.render_widget(Block::new().style(surface), area);
         for edge_x in [area.x, area.right().saturating_sub(1)] {

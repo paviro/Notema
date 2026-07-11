@@ -2554,6 +2554,12 @@ mod flat_chrome_tests {
             message_row.contains("Entry saved"),
             "row was: {message_row}"
         );
+        // The card sits on the element surface — one step off the panels it
+        // floats over, so it separates without relying on the edge stripes.
+        assert_eq!(
+            buffer[(80u16, 2u16)].bg,
+            theme::test_flat_theme().element_bg()
+        );
         // Padding rows above and below the message stay blank.
         for y in [1u16, 3u16] {
             let row: String = (75..117).map(|x| buffer[(x as u16, y)].symbol()).collect();
