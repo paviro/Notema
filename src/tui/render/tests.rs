@@ -2586,10 +2586,49 @@ mod flat_chrome_tests {
     }
 
     #[test]
-    fn dialog_inner_widens_margins_and_pads_below_the_title_in_flat_chrome() {
+    fn flat_dialogs_pad_the_title_and_footer_off_the_card_edge() {
         pin_flat();
-        // Two columns of side margin; the top loses the title row plus one
-        // padding row, the bottom keeps its single margin row.
+        // Regular dialog: blank row, then the title row.
+        let backend = render_backend(80, 24, |frame| {
+            dialogs::draw_edit_metadata_dialog(
+                frame,
+                &mut tags_state(),
+                crate::tui::state::HoverTarget::None,
+            )
+        });
+        let area = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2).area;
+        let row_text = |y: u16| -> String {
+            (area.x..area.x + area.width)
+                .map(|x| backend.buffer()[(x, y)].symbol())
+                .collect()
+        };
+        assert_eq!(row_text(area.y).trim(), "", "top padding row not blank");
+        assert!(row_text(area.y + 1).contains("Edit Tags"));
+        assert_eq!(
+            row_text(area.y + area.height - 1).trim(),
+            "",
+            "bottom padding row not blank"
+        );
+
+        // Table dialog: the footer sits above the bottom padding row.
+        let text_rows = render_to_rows(64, 20, |frame| chrome::draw_settings_menu(frame, None));
+        let footer_row = text_rows
+            .iter()
+            .position(|row| row.contains("esc close"))
+            .expect("settings footer");
+        assert_eq!(text_rows[footer_row + 1].trim(), "", "no padding under the footer");
+        let title_row = text_rows
+            .iter()
+            .position(|row| row.contains("Settings"))
+            .expect("settings title");
+        assert_eq!(text_rows[title_row - 1].trim(), "", "no padding above the title");
+    }
+
+    #[test]
+    fn dialog_inner_widens_margins_in_flat_chrome() {
+        pin_flat();
+        // Two columns each side; a padding row + the title row above, one
+        // padding row below.
         assert_eq!(
             chrome::dialog_inner(Rect::new(10, 5, 44, 20)),
             Rect::new(12, 7, 40, 17)

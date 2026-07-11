@@ -874,10 +874,9 @@ fn draw_toast(
 }
 
 /// Rows a dialog's frame consumes above and below its content: the two border
-/// rows in bordered chrome; the title row, a padding row under it, and the
-/// bottom margin row in flat chrome — flat titles are text, so content flush
-/// against them reads cramped. Dialog height computations add this to their
-/// content rows so the inner rect from [`dialog_inner`] always fits.
+/// rows when bordered; flat trades them for a blank padding row plus the
+/// title row on top and a blank padding row below, so nothing sits on the
+/// card's edge. Sizing helpers add this to their content rows.
 pub(crate) fn dialog_frame_rows() -> u16 {
     if flat_chrome() { 3 } else { 2 }
 }
@@ -885,18 +884,17 @@ pub(crate) fn dialog_frame_rows() -> u16 {
 /// A dialog's content rect within its outer `area`. Draw functions and mouse
 /// hit-tests both derive geometry from this one place, so they can never
 /// drift apart. Bordered chrome insets by the border; flat chrome trades the
-/// side borders for a wider breathing margin and pads one row under the
-/// title (see [`dialog_frame_rows`]).
+/// side borders for a wider breathing margin, with a blank padding row above
+/// the title and below the content.
 pub(crate) fn dialog_inner(area: Rect) -> Rect {
     // Saturating per-axis (unlike `Rect::inner`, which zeroes the whole rect):
     // sizing helpers probe with height-1 rects and still need the real width.
-    let horizontal = if flat_chrome() { 2 } else { 1 };
-    let top = if flat_chrome() { 2 } else { 1 };
+    let (horizontal, top) = if flat_chrome() { (2, 2) } else { (1, 1) };
     Rect {
         x: area.x.saturating_add(horizontal),
         y: area.y.saturating_add(top),
         width: area.width.saturating_sub(horizontal * 2),
-        height: area.height.saturating_sub(top + 1),
+        height: area.height.saturating_sub(dialog_frame_rows()),
     }
 }
 
@@ -917,9 +915,10 @@ pub(crate) fn draw_dialog_frame(
             Block::new().style(Style::default().bg(theme().panel_bg())),
             area,
         );
+        // The title sits below a blank padding row, off the card's edge.
         let top = Rect {
             x: area.x + 2,
-            y: area.y,
+            y: area.y + 1.min(area.height.saturating_sub(1)),
             width: area.width.saturating_sub(4),
             height: 1.min(area.height),
         };
@@ -1139,8 +1138,8 @@ pub(crate) fn draw_editor_discard_confirm(frame: &mut Frame<'_>, hovered_button:
 }
 
 pub(crate) fn editor_discard_confirm_area(frame_area: Rect) -> Rect {
-    // Frame + the message row, a blank row, and the buttons row.
-    centered_rect_fixed_size(42, dialog_frame_rows() + 3, frame_area)
+    // Message + blank + buttons, inside the frame.
+    centered_rect_fixed_size(42, 3 + dialog_frame_rows(), frame_area)
 }
 
 pub(crate) fn editor_discard_choice_at_point(frame_area: Rect, col: u16, row: u16) -> Option<bool> {
@@ -1571,17 +1570,25 @@ struct TableDialogMetrics {
 }
 
 fn table_dialog_metrics(frame_area: Rect, dialog: &TableDialog, scroll: u16) -> TableDialogMetrics {
+    // Rows the frame takes around the table: the two border rows (which carry
+    // the title and footer) when bordered; flat pads the title and gives the
+    // footer its own row above the bottom padding.
+    let frame_rows = if flat_chrome() {
+        dialog_frame_rows() + 1
+    } else {
+        dialog_frame_rows()
+    };
     let (grid_lines, grid_w) = grid_table(dialog.headers, dialog.rows, dialog.key_col);
     let avail_h = frame_area.height.saturating_sub(2).max(3);
-    let (lines, content_w, grid) = if grid_lines.len() as u16 + 2 <= avail_h {
+    let (lines, content_w, grid) = if grid_lines.len() as u16 + frame_rows <= avail_h {
         (grid_lines, grid_w, true)
     } else {
         let (compact_lines, compact_w) = compact_table(dialog.headers, dialog.rows, dialog.key_col);
         (compact_lines, compact_w, false)
     };
     let total = lines.len() as u16;
-    let outer_h = (total + dialog_frame_rows()).min(avail_h);
-    let footer = if total > outer_h.saturating_sub(dialog_frame_rows()) {
+    let outer_h = (total + frame_rows).min(avail_h);
+    let footer = if total > outer_h.saturating_sub(frame_rows) {
         format!("↑↓ scroll · {}", dialog.footer)
     } else {
         dialog.footer.to_string()
@@ -1592,12 +1599,16 @@ fn table_dialog_metrics(frame_area: Rect, dialog: &TableDialog, scroll: u16) -> 
         .max(border_label(&footer))
         .min(frame_area.width);
     let area = centered_rect_fixed_size(outer_w, outer_h, frame_area);
-    let inner = dialog_inner(area);
-    let content_w = content_w.min(inner.width);
+    let mut content = dialog_inner(area);
+    if flat_chrome() {
+        // The last inner row belongs to the footer.
+        content.height = content.height.saturating_sub(1);
+    }
+    let content_w = content_w.min(content.width);
     let content = Rect {
-        x: inner.x + (inner.width - content_w) / 2,
+        x: content.x + (content.width - content_w) / 2,
         width: content_w,
-        ..inner
+        ..content
     };
     let max_offset = total.saturating_sub(content.height);
     TableDialogMetrics {
@@ -1684,9 +1695,10 @@ fn draw_table_dialog(
 
     if flat_chrome() {
         draw_dialog_frame(frame, metrics.area, dialog.title, false);
-        // The footer moves from the bottom border to the bottom margin row.
+        // The footer moves from the bottom border to its own row above the
+        // bottom padding.
         let bottom = Rect {
-            y: metrics.area.y + metrics.area.height.saturating_sub(1),
+            y: metrics.area.y + metrics.area.height.saturating_sub(2),
             height: 1,
             ..metrics.area
         };
