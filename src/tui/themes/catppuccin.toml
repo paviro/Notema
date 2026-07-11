@@ -28,7 +28,7 @@ info    = { dark = "#89dceb", light = "#04a5e5" }
 [borders]
 normal    = { dark = "#45475a", light = "#bcc0cc" }
 subtle    = { dark = "#313244", light = "#ccd0da" }
-focused   = { dark = "#585b70", light = "#9ca0b0" }
+focused   = { dark = "#cba6f7", light = "#8839ef" }
 unfocused = { dark = "#45475a", light = "#bcc0cc" }
 
 [interaction]

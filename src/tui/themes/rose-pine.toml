@@ -26,10 +26,10 @@ error   = { dark = "#eb6f92", light = "#b4637a" }
 info    = { dark = "#3e8fb0", light = "#286983" }
 
 [borders]
-normal    = { dark = "#403d52", light = "#dfdad9" }
+normal    = { dark = "#403d52", light = "#cbbdc4" }
 subtle    = { dark = "#26233a", light = "#ece5dd" }
-focused   = { dark = "#524f67", light = "#9893a5" }
-unfocused = { dark = "#403d52", light = "#dfdad9" }
+focused   = { dark = "#ebbcba", light = "#d7827e" }
+unfocused = { dark = "#403d52", light = "#cbbdc4" }
 
 [interaction]
 selection = { bg = { dark = "#ebbcba", light = "#d7827e" }, fg = { dark = "#191724", light = "#ffffff" }, bold = true }
