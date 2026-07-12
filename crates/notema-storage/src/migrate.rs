@@ -613,8 +613,10 @@ fn disabled_path_for_timestamp(path: &Path, stem: &str, ext: &str, timestamp: &s
     }
 
     for _ in 0..32 {
-        let candidate =
-            parent.join(format!("{stem}.disabled-{timestamp}-{}.{ext}", storage::random_id(6)));
+        let candidate = parent.join(format!(
+            "{stem}.disabled-{timestamp}-{}.{ext}",
+            storage::random_id(6)
+        ));
         if !candidate.exists() {
             return candidate;
         }
