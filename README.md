@@ -1,10 +1,21 @@
-# Notema 間
+<h1 align="center">Notema&nbsp;間</h1>
 
-**Notema** (/noʊˈteɪmɑ/) is a terminal-based Markdown journaling app with optional
-end-to-end encryption, and multi-device syncing through file-syncing tools you
-already use, such as Syncthing, Nextcloud, or Dropbox. Its name combines *note* with
-the Japanese concept of 間 (*ma*), evoking the pause, interval, or space between
-things—in time as well as on the page.
+<p align="center">
+  <i>A terminal-based Markdown journaling app with optional end-to-end encryption and multi-device sync.</i>
+</p>
+
+<p align="center">
+  <a href="https://github.com/paviro/notema/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/paviro/notema?style=flat-square&label=release"></a>
+  <a href="https://github.com/paviro/notema/actions/workflows/ci.yml"><img alt="continuous integration" src="https://img.shields.io/github/actions/workflow/status/paviro/notema/ci.yml?branch=main&style=flat-square&label=CI"></a>
+  <a href="https://interoperable-europe.ec.europa.eu/collection/eupl/eupl-text-eupl-12"><img alt="license" src="https://img.shields.io/badge/license-EUPL--1.2-blue?style=flat-square"></a>
+</p>
+
+<hr>
+
+**Notema** (/noʊˈteɪmɑ/) combines *note* with the Japanese concept of 間 (*ma*) —
+the pause, interval, or space between things, in time as well as on the page. Sync
+runs through file-syncing tools you already use, such as Syncthing, Nextcloud, or
+Dropbox.
 
 Entries are plain markdown files with TOML front-matter, organized by date on
 disk. Nothing is locked into a proprietary format — your journal is just a folder
