@@ -968,7 +968,10 @@ fn finalize_line(characters: &[StyledCharacter]) -> WrappedLine {
         {
             span.content.to_mut().push(character.character);
         } else {
-            spans.push(Span::styled(character.character.to_string(), character.style));
+            spans.push(Span::styled(
+                character.character.to_string(),
+                character.style,
+            ));
         }
         match (run, character.link) {
             (Some((id, _)), Some(current)) if id == current => {}
@@ -1176,7 +1179,9 @@ mod wrap_tests {
         assert_eq!(visible[1].trim_end(), "");
         assert!(!visible[1].contains('│'), "{visible:?}");
         assert!(
-            visible.iter().any(|line| line == "  │ This is a blockquote"),
+            visible
+                .iter()
+                .any(|line| line == "  │ This is a blockquote"),
             "{visible:?}"
         );
     }

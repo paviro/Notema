@@ -620,7 +620,12 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
     /// line it occupies, each covering a non-empty column span.
     #[test]
     fn a_wrapping_link_name_is_clickable_on_every_row() {
-        let body = build_body_lines("[the quick brown fox](https://example.com)", 10, None, false);
+        let body = build_body_lines(
+            "[the quick brown fox](https://example.com)",
+            10,
+            None,
+            false,
+        );
 
         assert!(body.links.len() >= 2);
         // Every segment belongs to the same link, so hovering any row highlights
