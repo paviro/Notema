@@ -12,7 +12,7 @@
 
 <hr>
 
-**Notema** (/noʊˈteɪmɑ/) combines *note* with the Japanese concept of 間 (*ma*) —
+**Notema** (/noʊˈtɛ.mɑː/) combines *note* with the Japanese concept of 間 (*ma*) —
 the pause, interval, or space between things, in time as well as on the page. Sync
 runs through file-syncing tools you already use, such as Syncthing, Nextcloud, or
 Dropbox.
