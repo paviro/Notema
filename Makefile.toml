@@ -332,8 +332,8 @@ dependencies = [
 ]
 
 # The release command: every artifact buildable on a Mac — all standard platform
-# binaries plus the signed+notarized macOS FUSE builds. (Linux FUSE binaries are
-# built separately on Linux: release-fuse-linux.)
+# binaries plus the signed+notarized Apple Silicon FUSE build. Every other
+# platform builds FUSE natively (see the FUSE section).
 [tasks.release]
 description = "Build, sign, package and notarize every release artifact buildable on a Mac"
 dependencies = [
@@ -465,9 +465,8 @@ xcrun notarytool submit "$ZIP_PATH" --apple-id "$APPLE_USERNAME" --password "$AP
 # fuse-t installed to build and run. Zips are `<platform>-fuse.zip`; builds go to
 # `target/fuse/` so they don't clobber the standard artifacts.
 #
-# `release` builds only the Apple Silicon FUSE artifact: pkg-config can't
-# cross-compile libfuse3, so an Intel or universal FUSE binary can't be built
-# from an Apple Silicon host. Intel Macs build `build-fuse-macos-intel` natively.
+# `release` builds only the Apple Silicon FUSE artifact. Every other platform
+# builds FUSE natively with `cargo build --release --features fuse`.
 # ------------------------------------------------------------------------------
 
 [tasks.build-fuse-macos-silicon]
@@ -476,10 +475,6 @@ command = "cargo"
 args = ["build", "--release", "--features", "fuse", "--target", "aarch64-apple-darwin"]
 env = { CARGO_TARGET_DIR = "target/fuse" }
 env_files = ["./.env"]
-
-# macOS only: releases are built on a Mac, and the FUSE feature links libfuse3
-# (C), which doesn't cross-compile to Linux without a sysroot. Build the Linux
-# FUSE binary natively on Linux (see README).
 
 # Signing (macOS FUSE binaries)
 [tasks.sign-fuse-macos-silicon]
@@ -549,116 +544,7 @@ dependencies = [
     "notarize-fuse-macos-silicon"
 ]
 
-# Intel macOS FUSE, built natively on an Intel Mac (needs macFUSE or fuse-t).
-# Not in the release aggregates: libfuse3 can't cross-compile to x86_64. Unsigned
-# zip, like the Linux FUSE tasks.
-[tasks.build-fuse-macos-intel]
-description = "Build Intel macOS with FUSE (run on an Intel Mac)"
-command = "cargo"
-args = ["build", "--release", "--features", "fuse", "--target", "x86_64-apple-darwin"]
-env = { CARGO_TARGET_DIR = "target/fuse" }
-env_files = ["./.env"]
-
-[tasks.package-fuse-macos-intel]
-description = "Package Intel macOS FUSE binary (unsigned)"
-dependencies = ["create-release-dir", "build-fuse-macos-intel"]
-script = '''
-BINARY_NAME="notema"
-PLATFORM="apple-darwin-x86_64-fuse"
-cp "target/fuse/x86_64-apple-darwin/release/${BINARY_NAME}" "release/"
-cd release
-zip "${PLATFORM}.zip" "${BINARY_NAME}"
-rm "${BINARY_NAME}"
-'''
-
-# ------------------------------------------------------------------------------
-# Linux FUSE builds — run natively on Linux (needs libfuse3-dev). Not part of the
-# macOS release command: the libfuse3 (C) link doesn't cross-compile from a Mac.
-# ------------------------------------------------------------------------------
-
-[tasks.build-fuse-arm64-musl]
-description = "Build ARM64 musl Linux with FUSE"
-command = "cargo"
-args = ["build", "--release", "--features", "fuse", "--target", "aarch64-unknown-linux-musl"]
-env = { CARGO_TARGET_DIR = "target/fuse" }
-
-[tasks.build-fuse-arm64-gnu]
-description = "Build ARM64 glibc Linux with FUSE"
-command = "cargo"
-args = ["build", "--release", "--features", "fuse", "--target", "aarch64-unknown-linux-gnu"]
-env = { CARGO_TARGET_DIR = "target/fuse" }
-
-[tasks.build-fuse-x86-gnu]
-description = "Build x86_64 glibc Linux with FUSE"
-command = "cargo"
-args = ["build", "--release", "--features", "fuse", "--target", "x86_64-unknown-linux-gnu"]
-env = { CARGO_TARGET_DIR = "target/fuse" }
-
-[tasks.build-fuse-x86-musl]
-description = "Build x86_64 musl Linux with FUSE"
-command = "cargo"
-args = ["build", "--release", "--features", "fuse", "--target", "x86_64-unknown-linux-musl"]
-env = { CARGO_TARGET_DIR = "target/fuse" }
-
-[tasks.package-fuse-arm64-musl]
-description = "Package ARM64 musl Linux FUSE binary"
-dependencies = ["create-release-dir", "build-fuse-arm64-musl"]
-script = '''
-BINARY_NAME="notema"
-PLATFORM="linux-musl-aarch64-fuse"
-cp "target/fuse/aarch64-unknown-linux-musl/release/${BINARY_NAME}" "release/"
-cd release
-zip "${PLATFORM}.zip" "${BINARY_NAME}"
-rm "${BINARY_NAME}"
-'''
-
-[tasks.package-fuse-arm64-gnu]
-description = "Package ARM64 glibc Linux FUSE binary"
-dependencies = ["create-release-dir", "build-fuse-arm64-gnu"]
-script = '''
-BINARY_NAME="notema"
-PLATFORM="linux-gnu-aarch64-fuse"
-cp "target/fuse/aarch64-unknown-linux-gnu/release/${BINARY_NAME}" "release/"
-cd release
-zip "${PLATFORM}.zip" "${BINARY_NAME}"
-rm "${BINARY_NAME}"
-'''
-
-[tasks.package-fuse-x86-gnu]
-description = "Package x86_64 glibc Linux FUSE binary"
-dependencies = ["create-release-dir", "build-fuse-x86-gnu"]
-script = '''
-BINARY_NAME="notema"
-PLATFORM="linux-gnu-x86_64-fuse"
-cp "target/fuse/x86_64-unknown-linux-gnu/release/${BINARY_NAME}" "release/"
-cd release
-zip "${PLATFORM}.zip" "${BINARY_NAME}"
-rm "${BINARY_NAME}"
-'''
-
-[tasks.package-fuse-x86-musl]
-description = "Package x86_64 musl Linux FUSE binary"
-dependencies = ["create-release-dir", "build-fuse-x86-musl"]
-script = '''
-BINARY_NAME="notema"
-PLATFORM="linux-musl-x86_64-fuse"
-cp "target/fuse/x86_64-unknown-linux-musl/release/${BINARY_NAME}" "release/"
-cd release
-zip "${PLATFORM}.zip" "${BINARY_NAME}"
-rm "${BINARY_NAME}"
-'''
-
-# One command for Linux hosts: build + package every Linux FUSE artifact.
-[tasks.release-fuse-linux]
-description = "Build and package all Linux FUSE artifacts (Linux host, libfuse3-dev)"
-dependencies = [
-    "run-tests",
-    "build-fuse-arm64-musl",
-    "build-fuse-arm64-gnu",
-    "build-fuse-x86-gnu",
-    "build-fuse-x86-musl",
-    "package-fuse-arm64-musl",
-    "package-fuse-arm64-gnu",
-    "package-fuse-x86-gnu",
-    "package-fuse-x86-musl"
-]
+# Every other platform builds FUSE natively with `cargo build --release
+# --features fuse` (needs libfuse3/macFUSE/fuse-t installed). Only the Apple
+# Silicon artifact is prebuilt, since it's the one that gets signed and
+# notarized for release.
