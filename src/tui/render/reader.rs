@@ -320,12 +320,10 @@ fn build_body_lines(
         };
 
         if !buffer.is_empty() {
-            // A trailing blank source line leaves the buffer ending in a single
-            // `\n`, which the renderer collapses; add a second so the gap before
-            // the label survives.
-            if buffer.ends_with('\n') {
-                buffer.push('\n');
-            }
+            // The renderer trims trailing blank lines from each chunk, so a blank
+            // source line before the image would otherwise vanish. Note whether
+            // the source had that gap and re-emit it explicitly after the chunk.
+            let had_gap = buffer.ends_with('\n');
             append_chunk(
                 &mut lines,
                 &mut links,
@@ -333,6 +331,9 @@ fn build_body_lines(
                 &mut group_base,
                 render_text_chunk(&buffer, width, show_urls),
             );
+            if had_gap {
+                lines.push(Line::from(""));
+            }
             buffer.clear();
         }
         after_image = true;
@@ -505,6 +506,7 @@ mod image_tests {
             vec![
                 String::new(),
                 "Text above".to_string(),
+                String::new(),
                 "[Image 1: a shot - click here or press 1]".to_string(),
                 String::new(),
                 "[Image 2 - click here or press 2]".to_string(),
@@ -512,7 +514,27 @@ mod image_tests {
                 "Text below".to_string(),
             ],
         );
-        assert_eq!(body.images, vec![(2, 0), (4, 1)]);
+        assert_eq!(body.images, vec![(3, 0), (5, 1)]);
+    }
+
+    /// A lone `==` in prose must not turn the highlight on for the rest of the
+    /// document; the state resets at every block boundary.
+    #[test]
+    fn unpaired_highlight_marker_does_not_leak_past_its_block() {
+        use ratatui::style::Modifier;
+        let body = build_body_lines("a == b\n\nplain paragraph", 40, None, true);
+        let plain = body
+            .lines
+            .iter()
+            .find(|line| line_text(line).contains("plain"))
+            .expect("the later paragraph renders");
+        assert!(
+            plain
+                .spans
+                .iter()
+                .all(|span| !span.style.add_modifier.contains(Modifier::REVERSED)),
+            "highlight leaked into a later block"
+        );
     }
 
     /// Without an entry path (no selected entry) the body renders untouched.

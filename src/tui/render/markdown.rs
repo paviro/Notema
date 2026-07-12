@@ -400,6 +400,11 @@ impl MarkdownTerminalRenderer {
             self.emit_blank_line();
         }
         self.separate_next_block = false;
+        // A `==highlight==` never spans block boundaries; without this reset an
+        // unpaired `==` (e.g. a lone one in prose) would leak the highlight style
+        // into every following block. The editor highlighter is likewise
+        // per-line-conservative, so this keeps reader and editor in agreement.
+        self.highlight_open = false;
     }
 
     fn push_style(&mut self, style: Style) {
