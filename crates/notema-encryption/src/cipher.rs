@@ -122,8 +122,7 @@ impl EncryptionRecipients {
 
     pub fn encrypt_to_file(&self, plaintext: &PlaintextBytes, output: &Path) -> Result<()> {
         let ciphertext = self.encrypt(plaintext)?;
-        fs::write(output, ciphertext.as_bytes())?;
-        Ok(())
+        crate::files::atomic_write(output, ciphertext.as_bytes())
     }
 }
 

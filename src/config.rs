@@ -317,15 +317,11 @@ pub(crate) fn save_state(config_path: &Path, state: &State) -> AppResult<()> {
 
 /// Write `text` to `path` atomically: a same-directory temp file plus a rename, so
 /// a crash mid-write leaves the previous file intact rather than a truncated one.
-/// Also used by the theme engine to materialize the bundled theme files.
+/// Also used by the theme engine to materialize the bundled theme files. Backed by
+/// the shared write-fsync-rename-fsync primitive, whose temp names are unique per
+/// process so two notema instances saving state can't clobber each other's temp.
 pub(crate) fn write_toml_atomic(path: &Path, text: &str) -> AppResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temp = path.with_extension("toml.tmp");
-    fs::write(&temp, text)?;
-    fs::rename(&temp, path)?;
-    Ok(())
+    Ok(notema_encryption::atomic_write(path, text.as_bytes())?)
 }
 
 /// What `load_or_setup_with_path` resolved: a store ready to open in the TUI. An
