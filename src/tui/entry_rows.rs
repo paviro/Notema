@@ -782,7 +782,15 @@ pub(crate) fn ensure_row_visible(
     }
 
     if row_start < *scroll {
-        *scroll = row_start;
+        // If nothing selectable sits above this row, it's the topmost entry —
+        // scroll to 0 so the leading spacer/divider rows are revealed too,
+        // rather than stopping at the row's own start and hiding the blank line
+        // above it.
+        let selectable_above = rows
+            .iter()
+            .take_while(|row| row.item_index != selected_entry_index)
+            .any(|row| row.item_index.is_some());
+        *scroll = if selectable_above { row_start } else { 0 };
     } else {
         let row_end = row_start.saturating_add(row_height as usize);
         let viewport_end = scroll.saturating_add(viewport_height as usize);
@@ -833,6 +841,31 @@ mod tests {
 
         assert_eq!(scroll, 100_000 - 20);
         assert!(scroll > u16::MAX as usize);
+    }
+
+    #[test]
+    fn ensure_row_visible_reveals_leading_spacer_for_first_entry() {
+        // A leading blank spacer (item_index: None) precedes the entries, so the
+        // first entry sits at pixel 1. Scrolling up onto it must snap to 0 so the
+        // spacer comes into view, rather than stopping at the row's own start.
+        let mut rows = vec![RowMeta {
+            item_index: None,
+            height: 1,
+        }];
+        rows.extend((0..10).map(|index| RowMeta {
+            item_index: Some(index),
+            height: 3,
+        }));
+
+        let mut scroll = 5usize;
+        ensure_row_visible(&mut scroll, &rows, Some(0), 6);
+        assert_eq!(scroll, 0);
+
+        // Selecting a later entry still stops at that entry's start (no over-eager
+        // snap to the top).
+        let mut scroll = 20usize;
+        ensure_row_visible(&mut scroll, &rows, Some(1), 6);
+        assert_eq!(scroll, 4);
     }
 
     fn line_text(line: &Line<'_>) -> String {
