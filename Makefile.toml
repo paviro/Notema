@@ -6,7 +6,6 @@ main_project_member = "."
 
 # Default environment variables
 [env]
-CARGO_BUILD_PROFILE = "release"
 ANDROID_API = "24"
 ANDROID_SDK_ROOT = "/opt/homebrew/share/android-commandlinetools"
 TERMUX_TARGET = "aarch64-linux-android"
@@ -15,10 +14,6 @@ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "aarch64-unknown-linux-gnu-gcc"
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "x86_64-unknown-linux-gnu-gcc"
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "x86_64-unknown-linux-musl-gcc"
 CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "x86_64-w64-mingw32-gcc"
-
-# Production profile environment
-[env.production]
-CARGO_BUILD_PROFILE = "release"
 
 # Android / Termux targets
 [tasks.build-termux]
@@ -185,7 +180,7 @@ dependencies = [
 [tasks.run-tests]
 description = "Execute the full test suite before building releases"
 command = "cargo"
-args = ["test"]
+args = ["test", "--workspace"]
 
 [tasks.clean-all]
 description = "Clean all build artifacts"

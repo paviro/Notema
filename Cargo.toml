@@ -88,7 +88,6 @@ notema-domain = { path = "crates/notema-domain" }
 notema-encryption = { path = "crates/notema-encryption" }
 notema-fuse = { path = "crates/notema-fuse" }
 notema-import = { path = "crates/notema-import" }
-notema-seed = { path = "crates/notema-seed" }
 notema-storage = { path = "crates/notema-storage" }
 
 [workspace.lints.rust]
