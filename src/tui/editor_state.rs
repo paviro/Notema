@@ -59,6 +59,9 @@ pub(crate) struct EntryEditor {
     pub(crate) pending_environment: Option<u64>,
     /// The landed environment for the current location, attached to the entry on save.
     pub(crate) environment: Option<crate::tui::environment::Environment>,
+    /// The body text the syntax highlighting was last computed for, so the map is
+    /// only recomputed when the body actually changes rather than every frame.
+    last_highlight_src: Option<String>,
 }
 
 impl EntryEditor {
@@ -81,6 +84,7 @@ impl EntryEditor {
             environment_request_id: 0,
             pending_environment: None,
             environment: None,
+            last_highlight_src: None,
         }
     }
 
@@ -98,6 +102,18 @@ impl EntryEditor {
             environment_request_id: 0,
             pending_environment: None,
             environment: None,
+            last_highlight_src: None,
+        }
+    }
+
+    /// Recompute markdown syntax highlighting and hand it to the textarea, but only
+    /// when the body changed since the last call. Cheap to call every frame.
+    pub(crate) fn refresh_syntax_highlight(&mut self) {
+        let body = self.text();
+        if self.last_highlight_src.as_deref() != Some(body.as_str()) {
+            let spans = super::editor_highlight::highlight_body(&body);
+            self.textarea.set_syntax_spans(spans);
+            self.last_highlight_src = Some(body);
         }
     }
 

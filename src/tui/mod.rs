@@ -1,4 +1,5 @@
 mod app;
+mod editor_highlight;
 mod editor_state;
 mod entry_rows;
 mod environment;

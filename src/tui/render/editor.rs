@@ -25,6 +25,11 @@ pub(crate) fn draw_entry_editor(
     frame.render_widget(block, area);
     super::panel_focus_stripe(frame, area, true);
 
+    // Refresh markdown syntax styling before the textarea renders (it reads the
+    // spans during render). No-op unless the body changed since the last frame.
+    // Done here, ahead of the immutable metadata borrow taken just below.
+    editor.refresh_syntax_highlight();
+
     // Same builder the viewer uses, from the buffered metadata — so location and
     // every other front-matter field show in edit mode too.
     let metadata = EntryMetadata::from_metadata(&editor.metadata);
