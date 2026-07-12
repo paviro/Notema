@@ -47,10 +47,18 @@ fn handle_editor_key(
 ) -> AppResult<DispatchOutcome> {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
-    if matches!(editor_prompt(app), Some(EditorPrompt::ConfirmDiscard)) {
+    if let Some(EditorPrompt::ConfirmDiscard { discard_selected }) = editor_prompt(app) {
+        let selected = *discard_selected;
         let action = match key.code {
-            KeyCode::Char('y' | 'Y') | KeyCode::Enter => Some(Action::EditorDiscard),
+            KeyCode::Char('y' | 'Y') => Some(Action::EditorDiscard),
             KeyCode::Char('n' | 'N') | KeyCode::Esc => Some(Action::EditorClosePrompt),
+            KeyCode::Left => Some(Action::ConfirmSelect(true)),
+            KeyCode::Right => Some(Action::ConfirmSelect(false)),
+            KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {
+                Some(Action::ConfirmSelect(!selected))
+            }
+            KeyCode::Enter if selected => Some(Action::EditorDiscard),
+            KeyCode::Enter => Some(Action::EditorClosePrompt),
             _ => None,
         };
         if let Some(action) = action {
@@ -135,7 +143,7 @@ pub(super) fn key_to_action(app: &App, key: KeyEvent, reader_available: bool) ->
         Overlay::MetadataMenu => metadata_menu_key_to_action(key),
         Overlay::SettingsMenu => settings_menu_key_to_action(key),
         Overlay::ThemePicker(_) => theme_picker_key_to_action(key),
-        Overlay::ConfirmDelete(_) => confirm_delete_key_to_action(key),
+        Overlay::ConfirmDelete(_, selected) => confirm_delete_key_to_action(key, *selected),
         Overlay::NewJournal(_) => new_journal_key_to_action(key),
         Overlay::EditMetadata(_) => tags_key_to_action(app, key),
         Overlay::EditFeelings(_) => feelings_key_to_action(app, key),
@@ -443,10 +451,19 @@ fn search_key_to_action(app: &App, key: KeyEvent, reader_available: bool) -> Opt
     }
 }
 
-fn confirm_delete_key_to_action(key: KeyEvent) -> Option<Action> {
+/// `selected` is the highlighted button (`true` = Delete): Enter commits it,
+/// arrows move it, and the `y`/`n` shortcuts still fire directly.
+fn confirm_delete_key_to_action(key: KeyEvent, selected: bool) -> Option<Action> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => Some(Action::ConfirmDelete),
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Some(Action::CancelOverlay),
+        KeyCode::Left => Some(Action::ConfirmSelect(true)),
+        KeyCode::Right => Some(Action::ConfirmSelect(false)),
+        KeyCode::Up | KeyCode::Down | KeyCode::Tab | KeyCode::BackTab => {
+            Some(Action::ConfirmSelect(!selected))
+        }
+        KeyCode::Enter if selected => Some(Action::ConfirmDelete),
+        KeyCode::Enter => Some(Action::CancelOverlay),
         _ => None,
     }
 }

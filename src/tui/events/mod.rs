@@ -208,6 +208,7 @@ fn apply_action(
         Action::OpenReaderLink(target) => open_reader_link(app, &target)?,
         Action::BeginDelete => app.begin_confirm_delete(),
         Action::ConfirmDelete => confirm_delete(app)?,
+        Action::ConfirmSelect(yes) => set_confirm_selection(app, yes),
         Action::CancelOverlay => {
             if app.has_overlay() {
                 if matches!(app.overlay, Overlay::NewJournal(_)) {
@@ -521,9 +522,26 @@ fn set_editor_prompt(app: &mut App, prompt: EditorPrompt) {
     }
 }
 
+/// Point whichever confirm dialog is open at `yes` (the destructive button).
+fn set_confirm_selection(app: &mut App, yes: bool) {
+    if let Overlay::ConfirmDelete(_, selected) = &mut app.overlay {
+        *selected = yes;
+    } else if let Some(EditorPrompt::ConfirmDiscard { discard_selected }) =
+        app.editor.as_mut().map(|editor| &mut editor.prompt)
+    {
+        *discard_selected = yes;
+    }
+}
+
 fn request_editor_discard(app: &mut App) {
     if app.editor.as_ref().is_some_and(|editor| editor.is_dirty()) {
-        set_editor_prompt(app, EditorPrompt::ConfirmDiscard);
+        // Default the selection to Keep so a stray Enter never discards.
+        set_editor_prompt(
+            app,
+            EditorPrompt::ConfirmDiscard {
+                discard_selected: false,
+            },
+        );
     } else {
         app.cancel_editor();
     }
@@ -594,7 +612,7 @@ fn end_editor_selection(app: &mut App) {
 fn confirm_delete(app: &mut App) -> AppResult<()> {
     let is_journal = matches!(
         &app.overlay,
-        Overlay::ConfirmDelete(crate::tui::state::DeleteContext::Journal { .. })
+        Overlay::ConfirmDelete(crate::tui::state::DeleteContext::Journal { .. }, _)
     );
     if is_journal {
         delete_selected_journal(app)?;

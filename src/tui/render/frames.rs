@@ -12,7 +12,7 @@ use ratatui::{
 use crate::tui::surface::{point_in_rect, surface_content_inner};
 use crate::tui::theme::theme;
 
-use super::chrome::{centered_rect_fixed_size, clear_surface, flat_chrome};
+use super::chrome::{centered_rect_fixed_size, clear_surface, flat_chrome, surface_style};
 use super::footer::key_chip_style;
 
 /// Rows a dialog's frame consumes above and below its content: the two border
@@ -113,25 +113,36 @@ pub(crate) fn confirm_button_rects(inner: Rect) -> (Rect, Rect) {
     (yes, no)
 }
 
-/// Draw the two confirm buttons as reversed + bold chips on the last row of
-/// `inner`. The hovered button underlines as the click affordance — the chips
-/// are already filled/reversed, so a surface change wouldn't read.
+/// Draw the two confirm buttons on the last row of `inner`. `selected` is the
+/// keyboard-highlighted button (`true` = yes); `hovered` overrides it. The
+/// active button gets the accent chip, the other the neutral surface, and a
+/// hovered button takes the `button_hover` patch on top.
 pub(crate) fn render_confirm_buttons(
     frame: &mut Frame<'_>,
     inner: Rect,
     yes_label: &str,
     no_label: &str,
+    selected: bool,
     hovered: Option<bool>,
 ) {
     let (yes, no) = confirm_button_rects(inner);
+    let active = hovered.unwrap_or(selected);
     for (area, label, is_yes) in [(yes, yes_label, true), (no, no_label, false)] {
-        // Flat chrome draws opencode-style filled chips; bordered keeps the
-        // bracketed reversed buttons. Same rects either way, so the click
-        // targets from `confirm_button_rects` stay valid.
-        let (text, mut style) = if flat_chrome() {
-            (format!(" {label} "), theme().button())
+        // Flat chrome pads a filled chip; bordered brackets it. Same rects either
+        // way, so the click targets from `confirm_button_rects` stay valid.
+        let text = if flat_chrome() {
+            format!(" {label} ")
         } else {
-            (format!("[ {label} ]"), key_chip_style())
+            format!("[ {label} ]")
+        };
+        let mut style = if is_yes == active {
+            if flat_chrome() {
+                theme().button()
+            } else {
+                key_chip_style()
+            }
+        } else {
+            surface_style(theme().element_bg()).patch(theme().muted())
         };
         if hovered == Some(is_yes) {
             style = style.patch(theme().button_hover());
@@ -157,7 +168,11 @@ pub(crate) fn confirm_button_at(inner: Rect, col: u16, row: u16) -> Option<bool>
 
 /// Draw the internal editor's "Discard changes?" confirmation as a centered
 /// modal, matching the confirm-delete dialog's look.
-pub(crate) fn draw_editor_discard_confirm(frame: &mut Frame<'_>, hovered_button: Option<bool>) {
+pub(crate) fn draw_editor_discard_confirm(
+    frame: &mut Frame<'_>,
+    selected: bool,
+    hovered: Option<bool>,
+) {
     let area = editor_discard_confirm_area(frame.area());
     let inner = draw_dialog_frame(frame, area, "Discard Changes", true);
     let line = Rect {
@@ -169,7 +184,7 @@ pub(crate) fn draw_editor_discard_confirm(frame: &mut Frame<'_>, hovered_button:
         Paragraph::new("Discard unsaved changes?").alignment(Alignment::Center),
         line,
     );
-    render_confirm_buttons(frame, inner, "Discard (y)", "Keep (n)", hovered_button);
+    render_confirm_buttons(frame, inner, "Discard", "Keep", selected, hovered);
 }
 
 pub(crate) fn editor_discard_confirm_area(frame_area: Rect) -> Rect {

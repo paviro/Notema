@@ -882,7 +882,12 @@ pub(crate) fn confirm_delete_inner(frame_area: Rect, ctx: &DeleteContext) -> Rec
     dialog_inner(confirm_delete_area(frame_area, ctx))
 }
 
-pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext, hover: HoverTarget) {
+pub(super) fn draw_confirm_delete(
+    frame: &mut Frame<'_>,
+    ctx: &DeleteContext,
+    selected: bool,
+    hovered: Option<bool>,
+) {
     let (_, message) = confirm_delete_content(ctx);
     let area = confirm_delete_area(frame.area(), ctx);
     let inner = draw_dialog_frame(frame, area, "Confirm Delete", true);
@@ -896,11 +901,7 @@ pub(super) fn draw_confirm_delete(frame: &mut Frame<'_>, ctx: &DeleteContext, ho
         };
         frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), line_area);
     }
-    let hovered_button = match hover {
-        HoverTarget::ConfirmButton(yes) => Some(yes),
-        _ => None,
-    };
-    render_confirm_buttons(frame, inner, "Delete (y)", "Cancel (n)", hovered_button);
+    render_confirm_buttons(frame, inner, "Delete", "Cancel", selected, hovered);
 }
 
 pub(super) fn draw_new_journal_input(

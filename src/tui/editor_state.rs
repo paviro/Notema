@@ -20,8 +20,9 @@ pub(crate) enum EditorTarget {
 pub(crate) enum EditorPrompt {
     /// Typing normally.
     None,
-    /// Answering the "Discard changes?" confirmation dialog.
-    ConfirmDiscard,
+    /// Answering the "Discard changes?" confirmation dialog. `discard_selected`
+    /// is the highlighted button: `true` for Discard, `false` for Keep.
+    ConfirmDiscard { discard_selected: bool },
     /// The "Add metadata" chooser: the next letter picks a dialog (t/p/a/f/m).
     MetadataMenu,
     /// The shortcut-reference overlay, scrolled to `scroll`.

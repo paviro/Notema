@@ -1570,10 +1570,10 @@ fn dialog_list_hover_targets_rows_without_selecting() {
 fn confirm_delete_hover_targets_the_buttons() {
     let mut app = app_with_entries(1);
     let ctx = crate::tui::state::DeleteContext::Entry { has_body: true };
-    app.overlay =
-        crate::tui::state::Overlay::ConfirmDelete(crate::tui::state::DeleteContext::Entry {
-            has_body: true,
-        });
+    app.overlay = crate::tui::state::Overlay::ConfirmDelete(
+        crate::tui::state::DeleteContext::Entry { has_body: true },
+        false,
+    );
     let area = Rect::new(0, 0, 120, 20);
     let inner = render::confirm_delete_inner(area, &ctx);
 
@@ -1590,6 +1590,38 @@ fn confirm_delete_hover_targets_the_buttons() {
         }
     }
     assert!(saw.0 && saw.1, "both confirm buttons hoverable: {saw:?}");
+}
+
+#[test]
+fn confirm_delete_enter_commits_the_selected_button() {
+    let mut app = app_with_entries(1);
+    app.begin_confirm_delete();
+
+    // Safe default: Cancel is selected, so a bare Enter cancels rather than deletes.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::CancelOverlay)
+    );
+    // The y/n shortcuts still fire directly, whatever the selection.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('y')), true),
+        Some(Action::ConfirmDelete)
+    );
+    // Left picks the destructive button, Right the safe one.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Left), true),
+        Some(Action::ConfirmSelect(true))
+    );
+
+    // With Delete selected, Enter commits the delete.
+    app.overlay = crate::tui::state::Overlay::ConfirmDelete(
+        crate::tui::state::DeleteContext::Entry { has_body: true },
+        true,
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::ConfirmDelete)
+    );
 }
 
 #[test]

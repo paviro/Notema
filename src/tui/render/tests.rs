@@ -77,7 +77,8 @@ fn render_confirm_delete_rows(width: u16, height: u16) -> Vec<String> {
         dialogs::draw_confirm_delete(
             frame,
             &crate::tui::state::DeleteContext::Entry { has_body: true },
-            crate::tui::state::HoverTarget::None,
+            false,
+            None,
         )
     })
 }

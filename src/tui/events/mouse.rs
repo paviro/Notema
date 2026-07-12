@@ -47,7 +47,7 @@ fn editor_prompt_mouse_action(app: &App, mouse: MouseEvent, area: Rect) -> Optio
     let prompt = app.editor.as_ref().map(|editor| &editor.prompt)?;
     match prompt {
         EditorPrompt::None => None,
-        EditorPrompt::ConfirmDiscard => match mouse.kind {
+        EditorPrompt::ConfirmDiscard { .. } => match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 render::editor_discard_choice_at_point(area, mouse.column, mouse.row).map(
                     |discard| {
@@ -808,7 +808,7 @@ fn overlay_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarge
                 return HoverTarget::DialogRow(index);
             }
         }
-        Overlay::ConfirmDelete(ctx) => {
+        Overlay::ConfirmDelete(ctx, _) => {
             let inner = render::confirm_delete_inner(area, ctx);
             if let Some(yes) = render::confirm_button_at(inner, col, row) {
                 return HoverTarget::ConfirmButton(yes);
@@ -882,7 +882,7 @@ fn overlay_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarge
 /// live on the editor, not `app.overlay`).
 fn editor_prompt_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
     match app.editor.as_ref().map(|editor| &editor.prompt) {
-        Some(EditorPrompt::ConfirmDiscard) => {
+        Some(EditorPrompt::ConfirmDiscard { .. }) => {
             match render::editor_discard_choice_at_point(area, col, row) {
                 Some(yes) => HoverTarget::ConfirmButton(yes),
                 None => HoverTarget::None,
@@ -1252,7 +1252,7 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         return None;
     }
 
-    if let Overlay::ConfirmDelete(ctx) = &app.overlay {
+    if let Overlay::ConfirmDelete(ctx, _) = &app.overlay {
         let inner = render::confirm_delete_inner(area, ctx);
         return match render::confirm_button_at(inner, col, row) {
             Some(true) => Some(Action::ConfirmDelete),

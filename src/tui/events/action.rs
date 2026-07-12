@@ -76,6 +76,9 @@ pub(crate) enum Action {
     OpenReaderLink(String),
     BeginDelete,
     ConfirmDelete,
+    /// Move the selected button in whichever confirm dialog is open (delete
+    /// overlay or editor discard prompt). `true` selects the destructive button.
+    ConfirmSelect(bool),
     // Cancel / close — covers Esc across all overlays
     CancelOverlay,
     OpenMetadataMenu,

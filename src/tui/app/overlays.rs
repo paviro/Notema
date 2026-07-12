@@ -151,7 +151,8 @@ impl App {
             .selected_entry()
             .map(|e| !e.body.trim().is_empty())
             .unwrap_or(false);
-        self.overlay = Overlay::ConfirmDelete(DeleteContext::Entry { has_body });
+        // Default the selection to Cancel so a stray Enter never deletes.
+        self.overlay = Overlay::ConfirmDelete(DeleteContext::Entry { has_body }, false);
     }
 
     fn begin_confirm_delete_journal(&mut self) {
@@ -171,11 +172,14 @@ impl App {
             .iter()
             .filter(|e| e.journal == name && e.body.trim().is_empty())
             .count();
-        self.overlay = Overlay::ConfirmDelete(DeleteContext::Journal {
-            name,
-            trash_count,
-            delete_count,
-        });
+        self.overlay = Overlay::ConfirmDelete(
+            DeleteContext::Journal {
+                name,
+                trash_count,
+                delete_count,
+            },
+            false,
+        );
     }
 
     /// Open the metadata-shortcuts reference popup, if the selected entry can be

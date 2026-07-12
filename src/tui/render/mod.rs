@@ -217,8 +217,8 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
         _ => None,
     };
 
-    if let crate::tui::state::Overlay::ConfirmDelete(ctx) = &app.overlay {
-        draw_confirm_delete(frame, ctx, hover);
+    if let crate::tui::state::Overlay::ConfirmDelete(ctx, selected) = &app.overlay {
+        draw_confirm_delete(frame, ctx, *selected, hovered_button);
     }
 
     if matches!(app.overlay, crate::tui::state::Overlay::MetadataMenu) {
@@ -267,7 +267,9 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
                 draw_metadata_menu(frame, MetadataMenuMode::Editor, hovered_dialog_row)
             }
             EditorPrompt::Help { scroll } => draw_editor_shortcuts(frame, scroll),
-            EditorPrompt::ConfirmDiscard => draw_editor_discard_confirm(frame, hovered_button),
+            EditorPrompt::ConfirmDiscard { discard_selected } => {
+                draw_editor_discard_confirm(frame, *discard_selected, hovered_button)
+            }
             EditorPrompt::None => {}
         }
     }

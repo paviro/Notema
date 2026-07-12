@@ -514,7 +514,9 @@ pub(crate) enum Overlay {
     SettingsMenu,
     /// The theme picker list, live-previewing the highlighted theme.
     ThemePicker(ThemePickerState),
-    ConfirmDelete(DeleteContext),
+    /// The delete confirmation. The `bool` is the highlighted button: `true`
+    /// for Delete, `false` for Cancel.
+    ConfirmDelete(DeleteContext, bool),
     NewJournal(TextInput),
     EditMetadata(EditMetadataState),
     EditFeelings(EditFeelingState),
