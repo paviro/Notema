@@ -1,11 +1,9 @@
 # Architecture
 
-Notema is a workspace because its reusable policy-free layers have different
-dependency and platform boundaries. The executable, CLI, and TUI stay in the
-root package; they are one application and share navigation, configuration,
-background work, and presentation state.
+Notema is a Cargo workspace. Reusable logic lives in `notema-*` library crates; the
+application is the root package.
 
-## Workspace boundaries
+## Workspace crates
 
 | Package | Owns | Must not own |
 |---|---|---|
@@ -25,49 +23,42 @@ Dependencies point toward `notema-domain`. `notema-storage` may use
 analytics. Import and context never depend on storage. FUSE reaches storage
 through its public facade.
 
-The current crate count is deliberate. Splitting the TUI into widget, app, or
-media crates would expose internal state without creating an independent reuse
-or platform boundary. Combining encryption with storage would make its path-free
-cryptographic API harder to audit. Combining analytics with domain would mix
-derived reports into the persisted model.
-
 ## Application flow
 
 Keyboard and mouse handlers translate input into `Action` values. Only
-`dispatch_action` applies application mutations. Feature reducers called by the
-dispatcher may mutate state; input translation and rendering may not create a
-second mutation path. `DispatchOutcome` is the event loop control result.
+`dispatch_action` mutates application state; the feature reducers it calls may
+mutate, but input translation and rendering may not. `DispatchOutcome` is the
+event loop control result.
 
-The TUI keeps panel focus separate from row selection. Journals and entries form
-a visible selection trail toward Preview. Preview and Insights scrolling is
-independent from list selection. Render caches are keyed by the data, width, and
-theme inputs that can invalidate them.
+Panel focus is separate from row selection, and Reader and Insights scroll
+independently of it. Render caches are keyed on the data, width, and theme
+inputs that can invalidate them.
 
-Dialogs use the same action dispatcher for keyboard and pointer input. List rows,
-buttons, text fields, scrollbars, and editor prompts are intentionally clickable;
-hover may preview a row but must not commit it.
+Dialogs share the action dispatcher. UI elements are clickable, but hover only
+highlights that a row is clickable and never commits it.
 
 ## Persistence
 
-Every persisted TOML document has `schema_version = 1`: entries, config, state,
-themes, identities, pending requests, rosters, and trust pins. Unsupported
-versions fail instead of being guessed. There is no migration layer before the
-first release.
+Every persisted TOML document carries `schema_version = 1`. Unsupported versions
+fail rather than being guessed.
 
-Malformed entry front matter does not hide the body. The entry is readable with
-a warning; body-only edits preserve the raw front matter, while metadata edits
-are blocked. Valid metadata edits retain unknown TOML keys recursively.
+Malformed entry front matter does not hide the body. The entry stays readable
+with a warning, but editing it is blocked, since every edit touches metadata.
+An edit only rewrites the fields Notema owns; any other keys in the front
+matter, including ones nested inside known tables, are left as they were.
 
-Config and theme files reject unknown keys because they are user-authored policy
-documents where a typo should fail loudly. Invalid machine-written state is
-renamed aside and recreated.
+Config and theme files reject unknown keys: they are hand-edited, so a typo
+should fail loudly rather than be silently ignored. Invalid machine-written
+state is renamed aside and recreated.
 
 ## Platform code
 
 Linux, Android, and macOS location providers are selected at compile time.
-`notema-locate` is bundled only for macOS. FUSE is an optional application
-feature and requires libfuse3 headers and libraries; the standard binary has no
-FUSE dependency.
+`notema-locate` ships only on macOS: a bare CLI binary can't obtain CoreLocation
+authorization there, so the location code lives in a separate helper that ships
+wrapped in a signed `.app`.
 
-Unsafe Rust is confined to `notema-fuse`, at the C callback boundary. The rest
-of the workspace forbids unsafe code.
+FUSE is an optional feature requiring libfuse3 headers and libraries; the
+standard binary has no FUSE dependency. Its unsafe Rust is confined to the C
+callback boundary in `notema-fuse`; the rest of the workspace forbids unsafe
+code.

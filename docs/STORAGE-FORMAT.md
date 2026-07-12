@@ -1,48 +1,50 @@
 # Storage format
 
-`journal` stores everything as plain files on disk — no database, no proprietary
-container. This document specifies that on-disk format so other tools can read and
-write entries, and so you can recover your data with standard utilities even
-without this app. There has not been a release yet; version `1` is the only
-supported schema and there are no migrations.
+Entries are plain files on disk — no database, no proprietary container. Any tool
+can read and write them, and the standard `age` CLI can recover encrypted entries
+without this app.
 
-## Directory layout
-
-Entries live under the **journal root** (the folder you chose at setup, e.g.
-`~/Journals`), bucketed by journal name and date:
+## Journal layout
 
 ```
 <journal_root>/
-├── personal/                                       # one directory per journal
-│   └── 2026/07/05/                                 # YYYY / MM / DD of creation
-│       ├── 2026-07-05T14-30-00-<id>.md             # an entry (.md.age when encrypted)
-│       └── 2026-07-05T14-30-00-<id>.assets/        # images/files referenced by that entry
-└── .age/                                           # present only when encryption is on
-    ├── devices.toml                                # signed device roster
-    └── pending-<id>.toml                           # join requests awaiting approval
+├── personal/                                  # one directory per journal
+│   └── 2026/07/05/                            # YYYY/MM/DD of creation
+│       ├── 2026-07-05T14-30-00-<id>.md        # entry (.md.age when encrypted)
+│       └── 2026-07-05T14-30-00-<id>.assets/   # files referenced by the entry
+├── work.archived/                             # archived journal (dir renamed)
+├── .trash/                                    # deleted entries and journals
+│   └── personal/2026/07/05/…                  # mirrors the journal tree
+└── .age/                                      # only when encryption is on
+    ├── devices.toml                           # signed device roster
+    └── pending-<id>.toml                      # join requests awaiting approval
 ```
 
-- Entry filename: `<YYYY-MM-DDTHH-MM-SS>-<id>.md`, where `<id>` is a 12-character
-  [nanoid](https://github.com/ai/nanoid). The timestamp encodes the creation time.
-- When encryption is enabled, entry files are `age`-encrypted and named `.md.age`.
-- Per-entry assets sit in a sibling directory named `<entry-stem>.assets/`.
+- Filename: `<YYYY-MM-DDTHH-MM-SS>-<id>.md`. `<id>` is a 12-character
+  [nanoid](https://github.com/ai/nanoid); the timestamp is the creation time.
+- Encrypted entries are `age`-encrypted and named `.md.age`.
+- Each entry's assets sit in a sibling `<entry-stem>.assets/` directory.
+- A journal is archived by appending `.archived` to its directory name; the name
+  without the suffix is what's shown. The entries inside are untouched.
+- Deleting in the app moves the entry (with its assets) into
+  `.trash/<journal>/…`, keeping its path so it can be restored; deleting a whole
+  journal moves the directory to `.trash/<journal>`.
 
-Per-device settings and this device's private key are **not** in the journal root
-— they live in the config directory (`~/.config/notema/`, see below) and are
-never synced.
+Per-device settings and this device's private key live in the config directory
+(`~/.config/notema/`), never in the journal root and never synced.
 
 ## Entry file
 
-An entry is a UTF-8 Markdown file: a TOML **front matter** block fenced by `+++`
-lines, a blank line, then the Markdown body.
+UTF-8 Markdown: a TOML front-matter block fenced by `+++`, a blank line, then the
+body.
 
 ```markdown
 +++
 schema_version = 1
-activities = ["coding"]
+tags = ["work", "release"]
 feelings = ["focused", "proud"]
 people = ["Alice"]
-tags = ["work", "release"]
+activities = ["coding"]
 mood = 3
 starred = true
 
@@ -52,59 +54,55 @@ edited_at = "2026-07-05T14:30:00+02:00"
 timezone = "Europe/Berlin"
 writing_seconds = 320
 
+[location]
+name = "Tempelhofer Feld"
+road = "Tempelhofer Damm"
+city = "Berlin"
+state = "Berlin"
+country = "Germany"
+latitude = 52.4730
+longitude = 13.4050
+
+[weather]
+condition = "Partly cloudy"
+temperature_celsius = 21.4
+feels_like_celsius = 21.0
+dew_point_celsius = 12.3
+humidity = 0.58              # 0–1 fraction
+pressure_mb = 1013.2
+cloud_cover = 0.40           # 0–1 fraction
+visibility_km = 24.0
+precipitation_mm = 0.0
+wind_speed_kph = 11.5
+wind_gust_kph = 23.0
+wind_direction = 245.0       # compass bearing the wind blows from
+source = "open-meteo"
+
+[air_quality]
+european_aqi = 32
+us_aqi = 41
+pm2_5 = 6.8                  # µg/m³
+pm10 = 12.1
+carbon_monoxide = 142.0
+nitrogen_dioxide = 9.4
+ozone = 78.0
+sulphur_dioxide = 1.2
+uv_index = 5.4
+grass_pollen = 18.0          # grains/m³, Europe only
+birch_pollen = 0.0
+ragweed_pollen = 0.0
+source = "open-meteo"
+
+[celestial]
+moon_phase = 0.62            # 0–1 cycle fraction
+moon_phase_name = "Waning gibbous"
+sunrise = "2026-07-05T05:03:00+02:00"
+sunset = "2026-07-05T21:28:00+02:00"
+day_length_seconds = 59100
+
 [import]
 source = "dayone"
 id = "UUID"
-
-[location]
-name = "Twin Peaks"
-house_number = "501"
-road = "Twin Peaks Blvd"
-suburb = "Twin Peaks"
-postcode = "94114"
-city = "San Francisco"
-county = "San Francisco County"
-state = "California"
-country = "United States"
-latitude = 37.7544
-longitude = -122.4477
-
-[weather]
-condition = "partly-cloudy"
-temperature_celsius = 19.9
-feels_like_celsius = 19.5
-dew_point_celsius = 12.4
-humidity = 0.62
-pressure_mb = 1013.2
-cloud_cover = 0.4
-visibility_km = 12.5
-precipitation_mm = 0.0
-wind_speed_kph = 12.0
-wind_gust_kph = 28.0
-wind_direction = 210.0
-source = "Open-Meteo"
-
-[air_quality]
-european_aqi = 42
-us_aqi = 55
-pm2_5 = 12.4
-pm10 = 18.0
-carbon_monoxide = 210.0
-nitrogen_dioxide = 14.2
-ozone = 68.0
-sulphur_dioxide = 2.1
-uv_index = 6.2
-birch_pollen = 0.0
-grass_pollen = 24.0
-ragweed_pollen = 0.0
-source = "Open-Meteo"
-
-[celestial]
-moon_phase = 0.5
-moon_phase_name = "full"
-sunrise = "2026-07-05T05:51:00+02:00"
-sunset = "2026-07-05T21:29:00+02:00"
-day_length_seconds = 56280
 +++
 
 # Entry body
@@ -112,66 +110,55 @@ day_length_seconds = 56280
 Markdown content here.
 ```
 
-- The block starts with a line that is exactly `+++` and ends at the next line that
-  is exactly `+++`. Both LF and CRLF line endings are accepted.
-- A single blank line separates the closing fence from the body.
-- A file with no `+++` front matter is treated as all body, no metadata.
-- `schema_version = 1` is required. A different or missing version is reported as
-  unsupported.
-- Unknown keys survive metadata edits. Optional known fields may be omitted.
-- Malformed or unsupported front matter leaves the Markdown body readable with a
-  warning. Body-only edits preserve the raw front matter. Metadata edits are
-  blocked until the front matter is fixed.
+Parsing rules:
 
-### Front matter fields
+- The front matter is delimited by two fence lines, each containing only `+++`
+  (LF or CRLF line endings). One blank line then separates the closing fence from
+  the body.
+- A file with no front matter is treated as all body.
+- `schema_version = 1` is required; any other or missing value is unsupported.
+- Unknown keys survive edits. Optional fields may be omitted.
+- Malformed front matter still shows the body, with a warning, but editing the
+  entry in the app is blocked until you fix it by hand.
 
-The flattened user metadata comes first (TOML requires scalars before tables),
-then the system/import tables.
+### Fields
 
-| Key            | Type            | Meaning |
-|----------------|-----------------|---------|
-| `schema_version` | integer       | Required; currently `1`. |
-| `activities`   | array of string | Free-form activities. |
-| `feelings`     | array of string | From a fixed vocabulary (below); unknown values are dropped on read. |
-| `people`       | array of string | Free-form people references. |
-| `tags`         | array of string | Free-form tags. |
-| `mood`         | integer         | Overall mood, clamped to `-5..=5`. Out-of-range or non-integer values are dropped to “no mood” rather than failing the parse. |
-| `starred`      | boolean         | Whether the entry is flagged as a favorite. Omitted when false. |
-| `[datetime]`   | table           | `created_at` (RFC 3339; falls back to the filename date if missing), `edited_at` (RFC 3339; only genuine human edits move it — not encryption or asset rewrites), `timezone` (IANA zone name the entry was authored in, e.g. `Europe/Berlin` — capture-only, complements the offset in `created_at`), and `writing_seconds` (accumulated editor-open time, whole seconds; seeded from Day One's `editingTime` and grown by native edits that change the body). |
-| `[import]`     | table           | Provenance of an imported entry: `source` (e.g. `dayone`) and `id` (the source's identifier). Absent for entries created in the app. Used to skip re-importing. |
-| `[location]`   | table           | Where the entry was written. Fields are OpenStreetMap / Nominatim address keys, stored one-to-one — optional `name` (a place/venue label), `house_number`, `road`, `neighbourhood`, `quarter`, `suburb`, `borough`, `city_district`, `city`, `town`, `village`, `municipality`, `hamlet`, `postcode`, `county`, `state_district`, `province`, `region`, `state`, `country`, `latitude`, `longitude`. Only the keys a geocode returns are stored (the rest omitted). Two more are set only when the coordinates come from a device "grab GPS": `accuracy_m` (horizontal accuracy in metres) and `source` (the provider slug, e.g. `corelocation`, `geoclue`, `termux`). Set in the app via the location dialog; Day One import maps its coarse placemark onto `name`/`city`/`state`/`country`. Displayed but not searched. |
-| `[weather]`    | table           | Weather at the time of writing — fetched from Open-Meteo when a location is set, or captured on Day One import. All optional: `condition` (a slug, e.g. `partly-cloudy`), `temperature_celsius`, `feels_like_celsius`, `dew_point_celsius`, `humidity` (0–1), `pressure_mb`, `cloud_cover` (0–1), `visibility_km`, `precipitation_mm`, `wind_speed_kph`, `wind_gust_kph`, `wind_direction` (degrees), and `source` (provider, for attribution). Capture-only, stored not surfaced. |
-| `[air_quality]`| table           | Air quality and UV at the time of writing — fetched from Open-Meteo's air-quality endpoint (a separate provider than `[weather]`, so an entry may carry one without the other). All optional: `european_aqi`, `us_aqi`, `pm2_5`, `pm10` (µg/m³), `carbon_monoxide`, `nitrogen_dioxide`, `ozone`, `sulphur_dioxide` (µg/m³), `uv_index`, `birch_pollen`, `grass_pollen`, `ragweed_pollen` (grains/m³, Europe only), and `source` (provider, for attribution). Capture-only. |
-| `[celestial]`  | table           | Sun/moon at the time of writing — computed locally when a location is set, or captured on Day One import. All optional: `moon_phase` (0–1), `moon_phase_name`, `sunrise`, `sunset`, `day_length_seconds` (sunset − sunrise). Capture-only. |
+The plain top-level fields come first, then the `[table]` sections.
 
-All list fields are plural; timestamps are RFC 3339 with an offset.
+| Key | Type | Meaning |
+|---|---|---|
+| `schema_version` | int | Required; `1`. |
+| `tags`, `people`, `activities` | string[] | Free-form. |
+| `feelings` | string[] | Fixed vocabulary (below); unknown values dropped on read. |
+| `mood` | int | Clamped to `-5..=5`; invalid values become "no mood". |
+| `starred` | bool | Favorite flag; omitted when false. |
+| `[datetime]` | table | `created_at`, `edited_at` (RFC 3339; `edited_at` moves only on real body/metadata edits, not on re-encryption), `timezone` (IANA zone name), `writing_seconds` (accumulated editor-open time). |
+| `[location]` | table | OpenStreetMap / Nominatim address keys (`name`, `road`, `city`, `state`, `country`, …) plus `latitude`, `longitude`. A device GPS grab also sets `accuracy_m` and `source`. Displayed, not searched. |
+| `[weather]` | table | Captured from Open-Meteo when a location is set: `condition`, temperatures, `humidity`, `pressure_mb`, wind, precipitation, `source`. Capture-only. |
+| `[air_quality]` | table | Open-Meteo air-quality endpoint: `european_aqi`/`us_aqi`, `pm2_5`/`pm10`, gases, `uv_index`, pollen (Europe), `source`. Capture-only. |
+| `[celestial]` | table | Computed locally: `moon_phase`, `moon_phase_name`, `sunrise`, `sunset`, `day_length_seconds`. Capture-only. |
+| `[import]` | table | Imported entries only: `source` (e.g. `dayone`) and `id`. Used to skip re-imports. |
 
 ### Feelings vocabulary
 
-`feelings` values are normalized to lowercase and must be one of:
+Normalized to lowercase and matched against a fixed vocabulary (plus per-feeling
+aliases); values outside it are dropped on read. The canonical list lives in
+[`crates/notema-domain/src/feelings.rs`](../crates/notema-domain/src/feelings.rs).
 
-```
-calm, content, grateful, hopeful, joyful, excited, energized, focused, proud,
-relieved, curious, okay, mixed, tired, bored, sad, lonely, anxious, stressed,
-overwhelmed, frustrated, angry, guilty, numb
-```
-
-Values outside this list are silently dropped when an entry is read.
-
-## Config and state files
+## Config and state
 
 Both live in the config directory (`$XDG_CONFIG_HOME/notema/` or
-`~/.config/notema/`) and are never synced. Both require `schema_version = 1`.
-Unknown keys are rejected so misspelled settings do not silently do nothing.
+`~/.config/notema/`, `~/Library/Application Support/de.paviro.notema/` on macOS),
+require `schema_version = 1`, reject unknown keys, and are never synced.
 
-`config.toml` — user-authored settings:
+`config.toml` — user settings:
 
 ```toml
 schema_version = 1
 
 [journal]
-path = "~/Journals"               # tilde is expanded on load
-default = "work"                  # optional
+path = "~/Journals"             # tilde expanded on load
+default = "work"                # optional
 
 [editor]
 start_fullscreen = false
@@ -179,18 +166,22 @@ start_fullscreen = false
 [attachments]
 download_remote_images = true
 
+[ui]
+theme = "blossom"               # theme file in <config>/themes/, without .toml
+color_mode = "auto"             # auto | dark | light
+chrome = "default"              # default | flat | bordered
+
 [ui.layout.reader]
-body_center_vertically = true     # center a short entry when it fits, no scrollbar
-body_max_width = 100              # cap the body width in cells (0 = no cap)
-show_link_urls = false            # show each link's target URL as a faint (url) after its name
+body_center_vertically = true
+body_max_width = 100            # cells; 0 = no cap
+show_link_urls = false
 ```
 
-`state.toml` — machine-written session state (kept separate so it never clutters
-your settings), including UI toggles flipped from inside the TUI:
+`state.toml` — machine-written session state, kept out of your settings:
 
 ```toml
 schema_version = 1
-last_journal = "personal"         # journal reselected on next launch
+last_journal = "personal"
 
 [ui]
 show_hints = true
@@ -199,57 +190,24 @@ show_journals = true
 
 ## Encryption files
 
-When encryption is on, only ciphertext and public key material live in the synced
-`.age/` folder; private keys never leave the device.
+Encryption splits its state in two: public material that syncs with the journal,
+and private keys that never leave the device.
 
-- `.age/devices.toml` — the **signed device roster**, schema version `1`: an append-only log of
-  Ed25519-signed `[[operation]]` entries (`genesis`/`add`/`revoke`/`rename`) naming
-  each device's age public key (`enc_key`), signing public key (`sign_key`), and
-  label. Verified from the genesis on every read; a tampered or rolled-back log is
-  rejected wholesale.
-- `.age/pending-<id>.toml` — a schema-versioned join request from a not-yet-approved device.
-- `~/.config/notema/identity.toml` — **this device's private keys**, schema version `1` (never
-  synced). A TOML file holding `device_name` plus either `plain_keys` (mode-0600
-  cleartext when no passphrase) or `encrypted_keys` (age ASCII armor when a
-  passphrase is set). Inside is a small bundle: `x25519` (the age secret key) and
-  `ed25519` (the signing seed, hex).
-- `~/.config/notema/devices-trust.toml` — this device's local trust pins
-  (genesis + last-seen head hash), never synced.
+**Synced, in the journal's `.age/` folder** (public only):
 
-## Emergency recovery with the `age` CLI
+- `devices.toml` — the signed device roster: an append-only log of Ed25519-signed
+  `genesis`/`add`/`revoke`/`rename` operations, each naming a device's age public
+  key, signing key, and label. Verified from genesis on every read; a tampered or
+  rolled-back log is rejected whole.
+- `pending-<id>.toml` — a join request from a not-yet-approved device.
 
-If you ever need to read encrypted entries without this app, you can with the
-standard [`age`](https://age-encryption.org) tool. Everything hinges on the age
-secret key inside `identity.toml`.
+**Local, in the config directory** (never synced):
 
-**1. Get your age secret key** (`AGE-SECRET-KEY-1…`) out of `identity.toml`:
+- `identity.toml` — this device's private keys: `device_name` plus either
+  `plain_keys` (mode-0600 cleartext) or `encrypted_keys` (age armor when a
+  passphrase is set). Holds `x25519` (the age secret) and `ed25519` (the signing
+  seed).
+- `devices-trust.toml` — local trust pins (genesis + last-seen head hash).
 
-- *No passphrase* — the file contains a `plain_keys` block; read the `x25519`
-  value directly. Put it in a keyfile:
-
-  ```bash
-  # copy the AGE-SECRET-KEY-1... value from identity.toml into key.txt
-  printf 'AGE-SECRET-KEY-1...\n' > key.txt
-  ```
-
-- *Passphrase-protected* — the file contains an `encrypted_keys` block that is a
-  standalone age file in ASCII armor (`-----BEGIN AGE ENCRYPTED FILE-----`). Copy
-  that whole armored block (fences included) into `bundle.age`, then decrypt it
-  with your passphrase to reveal the `x25519` secret key:
-
-  ```bash
-  age --decrypt bundle.age            # prompts for the passphrase, prints the key bundle
-  ```
-
-  Copy the resulting `AGE-SECRET-KEY-1…` line into `key.txt` as above.
-
-**2. Decrypt an entry** with that key:
-
-```bash
-age --decrypt --identity key.txt \
-  "personal/2026/07/05/2026-07-05T14-30-00-<id>.md.age"
-```
-
-The output is the plaintext `.md` entry — front matter and body — exactly as
-documented above. The same key decrypts every entry the journal encrypted to this
-device.
+Decrypting entries by hand with the `age` CLI is covered in
+[`docs/ENCRYPTION.md`](ENCRYPTION.md#recovery-without-the-app).

@@ -1,0 +1,57 @@
+# Install and build
+
+## Prebuilt binaries
+
+Grab a binary for your platform from the [releases page](https://github.com/paviro/notema/releases).
+
+**Standard builds cover:**
+
+- Android/Termux (ARM64)
+- Linux (x86_64 and ARM64, glibc and musl)
+- Windows (x86_64)
+- macOS (universal — Intel + Apple Silicon)
+
+These have no FUSE dependency and run everywhere. The `mount` command needs a
+`-fuse` build; the only prebuilt one is for Apple Silicon macOS, and other
+platforms build it from source (both below).
+
+## Build from source
+
+Needs a Rust toolchain (edition 2024).
+
+```bash
+cargo install --path .
+# or
+cargo build --release      # binary at target/release/notema
+```
+
+Cross-compilation targets live in `Makefile.toml`, driven by
+[`cargo-make`](https://github.com/sagiegurari/cargo-make):
+
+```bash
+cargo make build-termux            # Android/Termux ARM64
+cargo make build-x86-gnu           # x86_64 Linux (glibc)
+cargo make build-macos-universal   # Intel + Apple Silicon
+cargo make build-windows-gnu       # Windows x86_64
+```
+
+## FUSE builds
+
+The `mount` command needs a build with the `fuse` feature. It links the system
+libfuse3 (C), so each FUSE binary is currently built natively on its own
+platform, and a FUSE provider must be installed to build and run.
+
+**Apple Silicon macOS** is the only prebuilt FUSE artifact (signed and notarized):
+download the `apple-darwin-aarch64-fuse` zip from releases. Install a FUSE
+provider first — [fuse-t](https://www.fuse-t.org) is kext-free (nothing to
+approve) and is what this is tested with; [macFUSE](https://macfuse.io) probably also works.
+The mounted volume shows up in Finder as **Journals**.
+
+Everywhere else, build it natively. Install a FUSE provider first — `libfuse3-dev`
+on Linux, fuse-t or macFUSE on macOS — then:
+
+```bash
+cargo build --release --features fuse
+```
+
+See [`docs/FUSE.md`](FUSE.md) for mount usage and caveats.
