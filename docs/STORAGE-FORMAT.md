@@ -167,7 +167,7 @@ start_fullscreen = false
 download_remote_images = true
 
 [ui]
-theme = "blossom"               # theme file in <config>/themes/, without .toml
+theme = "journal"               # theme file in <config>/themes/, without .toml
 color_mode = "auto"             # auto | dark | light
 chrome = "default"              # default | flat | bordered
 

@@ -2210,6 +2210,10 @@ fn settings_menu_lists_the_theme_row_and_hit_tests_it() {
 #[test]
 fn theme_picker_lists_bundled_themes_with_the_active_row_marked() {
     let mut app = app_with_journals(&["work"]);
+    // Pin a configured theme near the top of the sorted list so the active row
+    // is on screen without scrolling — keeps this test independent of whatever
+    // the default theme happens to be (the list caps at 14 visible rows).
+    app.config.ui.theme = "blossom".to_string();
     app.open_theme_picker();
 
     let rows = render_to_rows(90, 30, |frame| draw(frame, &mut app));
@@ -2219,8 +2223,9 @@ fn theme_picker_lists_bundled_themes_with_the_active_row_marked() {
     assert!(text.contains(" Theme "), "dialog title missing:\n{text}");
     assert!(text.contains("enter  apply"));
     assert!(text.contains("esc  revert"));
-    // Every bundled theme is listed; the configured one carries the ● marker.
-    for name in ["blossom", "classic", "eclipse", "fjord", "grove", "journal"] {
+    // The bundled themes at the top of the list render; the configured one
+    // carries the ● marker.
+    for name in ["blossom", "classic", "eclipse", "fjord", "grove"] {
         assert!(text.contains(name), "theme '{name}' missing:\n{text}");
     }
     assert!(text.contains("● blossom"), "active marker missing:\n{text}");
@@ -2550,7 +2555,10 @@ mod flat_chrome_tests {
 
         let backend = render_app(app, 140, 30);
         let cell = &backend.buffer()[(col, insights.area.y)];
-        assert_eq!(cell.fg, theme.primary().fg.unwrap());
+        // The active tab is styled with the `secondary` accent (see theme docs);
+        // it only equalled `primary` back when the default theme left secondary
+        // inheriting primary.
+        assert_eq!(cell.fg, theme.secondary().fg.unwrap());
         assert_ne!(cell.bg, theme.selection().bg.unwrap());
     }
 

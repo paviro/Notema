@@ -5,7 +5,7 @@ file stem, written to `<config-dir>/themes/` on first use (`~/.config/notema/the
 on Linux, `~/Library/Application Support/de.paviro.notema/themes/` on macOS) and
 never touched again, so your edits survive upgrades. Switch or preview them live in
 the in-app picker; if the configured theme is missing or broken the app warns on
-stderr and always falls back to `blossom`.
+stderr and always falls back to `journal`.
 
 `classic` is the plain terminal-default look and the safest pick for e-ink displays;
 `eclipse` is pure black-and-white and suits e-ink too, wherever the terminal renders
@@ -21,12 +21,12 @@ definition.
 <table>
   <tr>
     <td align="center" width="50%">
-      <a href="../src/tui/themes/blossom.toml"><b>blossom</b></a> — <sub>default</sub><br>
-      <img src="../.github/assets/themes/blossom.svg" alt="blossom theme" width="100%">
+      <a href="../src/tui/themes/journal.toml"><b>journal</b></a> — <sub>default</sub><br>
+      <img src="../.github/assets/themes/journal.svg" alt="journal theme" width="100%">
     </td>
     <td align="center" width="50%">
-      <a href="../src/tui/themes/journal.toml"><b>journal</b></a><br>
-      <img src="../.github/assets/themes/journal.svg" alt="journal theme" width="100%">
+      <a href="../src/tui/themes/blossom.toml"><b>blossom</b></a><br>
+      <img src="../.github/assets/themes/blossom.svg" alt="blossom theme" width="100%">
     </td>
   </tr>
   <tr>

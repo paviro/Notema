@@ -60,7 +60,7 @@ const BUNDLED: [(&str, &str); 26] = [
 ];
 
 /// The theme `load` falls back to when the configured one is missing or broken.
-pub(crate) const DEFAULT_THEME: &str = "blossom";
+pub(crate) const DEFAULT_THEME: &str = "journal";
 
 /// Which variant of a `{ dark, light }` color a load resolves to. Detected from
 /// the terminal background once at startup and cached for the session.
