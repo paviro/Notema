@@ -1,0 +1,9 @@
+# Advisories acknowledged for `cargo audit`. Each must be justified in
+# docs/AUDIT.md with an owner and a review date. Keeping the ignore here (rather
+# than a CI-only --ignore flag) means a local `cargo audit --deny warnings`
+# reproduces CI exactly.
+[advisories]
+ignore = [
+    # proc-macro-error2 unmaintained, pulled in transitively by age. See AUDIT.md.
+    "RUSTSEC-2026-0173",
+]

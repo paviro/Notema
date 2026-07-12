@@ -43,6 +43,24 @@ cargo make run-tests               # full workspace test suite
 
 See [BUILDING.md](BUILDING.md) for prerequisites and the FUSE variants.
 
+## Seeding development data
+
+`notema-seed` is a dev-only tool (outside the shipped binary's dependency graph)
+that fills a store with generated entries — handy for exercising the TUI or the
+benchmarks against a realistic corpus. It writes into a real store, so point it
+at a throwaway directory, not your journal:
+
+```bash
+cargo run -p notema-seed -- \
+  --root /tmp/notema-dev/journals \
+  --config-dir /tmp/notema-dev \
+  --count 750
+```
+
+`--journal` names the journal to fill (default `Sample`), `--days` spreads the
+creation dates, and `--seed <n>` makes the data set reproducible. Run
+`cargo run -p notema-seed -- --help` for the full list.
+
 ## Benchmarks
 
 Benchmarks are deterministic and run as plain timed binaries (`harness = false`)

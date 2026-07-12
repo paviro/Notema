@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 env:
@@ -32,6 +33,10 @@ jobs:
       - run: cargo check --workspace --all-targets --locked
       - if: ${{ !cancelled() }}
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The fuse feature is cfg-gated out of the default build; check it compiles
+      # so the mount wiring can't rot unnoticed.
+      - if: ${{ !cancelled() }}
+        run: cargo clippy -p notema --features fuse --locked -- -D warnings
       - if: ${{ !cancelled() }}
         run: cargo test --workspace --locked
       - if: ${{ !cancelled() }}
@@ -45,7 +50,9 @@ jobs:
         with:
           toolchain: 1.96.0
       - run: cargo install cargo-audit --version 0.22.1 --locked
-      - run: cargo audit --deny warnings --ignore RUSTSEC-2026-0173
+      # Acknowledged advisories live in .cargo/audit.toml (see docs/AUDIT.md), so
+      # the same `cargo audit` a developer runs locally reproduces this result.
+      - run: cargo audit --deny warnings
 
   macos:
     runs-on: macos-latest
@@ -56,6 +63,16 @@ jobs:
           toolchain: 1.96.0
       - run: brew install pkg-config
       - run: brew install --cask fuse-t
+      - run: cargo check --workspace --all-targets --locked
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.0
+      # No FUSE on Windows; check the standard (non-fuse) build compiles.
       - run: cargo check --workspace --all-targets --locked
 
   android-check:
