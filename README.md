@@ -87,3 +87,9 @@ See [`LICENCE`](LICENCE) (EUPL v1.2).
 
 Run `notema licenses` to print these credits with the full license texts of every
 third-party Rust dependency.
+
+## Disclaimer
+
+This was built for personal use and relies heavily on AI-generated code. While I've
+tested everything and use it daily, I take no responsibility for any issues you might
+encounter. Use at your own risk.
