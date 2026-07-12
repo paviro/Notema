@@ -1,24 +1,11 @@
-# Themes
+# Theme reference
 
-Themes are TOML files in `<config-dir>/themes/` (`~/.config/notema/themes/` on
-Linux, `~/Library/Application Support/de.paviro.notema/themes/` on macOS). Any
-`.toml` file is a theme, named after its file stem.
+The file format and full token reference for writing your own themes. For the
+bundled themes — where they live, and what they look like — see the
+[gallery](THEMES.md).
 
-Bundled themes are written on first use and never touched again, so your edits
-survive upgrades. Each theme needs `schema_version = 1`; other versions or unknown
-keys are rejected. If the configured theme is missing or broken, the app warns on
-stderr and falls back to `blossom` — it always starts. Broken themes are also
-flagged as broken in the theme picker.
-
-**Bundled:** `blossom` (default), `journal`, `classic`, `eclipse`, `fjord`,
-`grove`, `matcha`, `indigo`, `maple`, `celadon`, `tokyonight`, `lavender`,
-`rose-pine`, `dungeon`, `synthwave`, `crt`, `cyberpunk`, `vaporwave`, `matrix`,
-`tron`, `eldritch`, `hal`, `gameboy`, `wasteland`, `arcade`, `deep-space`.
-`classic` is the plain terminal-default look; `eclipse` is pure black-and-white,
-the rest are high-color. For e-ink displays `classic` is the safest choice.
-`eclipse` suits them too, but only where the terminal renders its inversions
-faithfully — some emulators (Termux among them) don't.
-
+Any `.toml` file in the themes directory is a theme, named after its file stem.
+Each theme needs `schema_version = 1`; other versions or unknown keys are rejected.
 
 ## Value forms
 

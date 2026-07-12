@@ -73,7 +73,8 @@ sees ciphertext and can't read your entries.
 - [Encryption](docs/ENCRYPTION.md) — setup, adding devices, key management
 - [Mounting (FUSE)](docs/FUSE.md) — browse an encrypted journal as a filesystem
 - [Storage format](docs/STORAGE-FORMAT.md) — on-disk layout, front-matter, config, recovery
-- [Themes](docs/THEMES.md) — theme files and the full token reference
+- [Themes](docs/THEMES.md) — gallery of the bundled themes
+- [Theme reference](docs/THEME-REFERENCE.md) — theme file format and the full token reference
 - [Building](docs/BUILDING.md) — from source, cross-compile, FUSE builds
 - [Architecture](docs/ARCHITECTURE.md) — crate layout and dependency rules
 - [Development](docs/DEVELOPMENT.md) — checks, cross-builds, running the benchmarks

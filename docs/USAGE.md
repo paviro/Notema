@@ -58,7 +58,8 @@ themes are listed but can't be applied.
 
 Edits to the **active** theme hot-reload (debounced ~400 ms). A broken edit shows
 an error toast and keeps the current theme; the next valid save loads. Writing your
-own themes is covered in [THEMES.md](THEMES.md).
+own themes is covered in [THEME-REFERENCE.md](THEME-REFERENCE.md); see
+[THEMES.md](THEMES.md) for the bundled gallery.
 
 ## Import from Day One
 
