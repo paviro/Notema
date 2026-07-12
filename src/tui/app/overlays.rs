@@ -200,7 +200,7 @@ impl App {
         if let Err(err) = crate::tui::theme::ensure_bundled(&dir) {
             self.toast(
                 ToastVariant::Error,
-                format!("Couldn't prepare themes: {err:#}"),
+                format!("Couldn't prepare themes: {}", crate::tui::concise_error(&err)),
             );
         }
         let mode = crate::tui::theme::mode();
@@ -351,7 +351,7 @@ impl App {
         if let Err(err) = crate::config::save_config(&self.config_path, &self.config) {
             self.toast(
                 ToastVariant::Error,
-                format!("Couldn't save config: {err:#}"),
+                format!("Couldn't save config: {}", crate::tui::concise_error(&err)),
             );
             return;
         }
