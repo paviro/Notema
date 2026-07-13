@@ -435,7 +435,7 @@ fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> 
 
 fn device_rotate_command(cli: &Cli) -> AppResult<()> {
     let (mut store, passphrase) = open_unlocked_store_with_passphrase(cli)?;
-    let summary = store.rotate_identity(passphrase.as_ref(), encryption_cli::cli_progress())?;
+    let summary = store.rotate_identity(passphrase.as_ref(), encryption_cli::cli_progress("files"))?;
     println!(
         "Rotated this device's key and re-encrypted {} file(s).",
         summary.migrated_files
@@ -539,7 +539,7 @@ fn device_revoke_command(cli: &Cli, name: &str, skip_confirm: bool) -> AppResult
         return Ok(());
     }
     let store = open_unlocked_store(cli)?;
-    let summary = store.revoke_recipient(name, encryption_cli::cli_progress())?;
+    let summary = store.revoke_recipient(name, encryption_cli::cli_progress("files"))?;
     println!(
         "Revoked '{name}' and re-encrypted {} file(s).",
         summary.migrated_files
@@ -589,7 +589,7 @@ fn device_approve_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<(
     }
 
     for request in select_requests(pending, args, "approve")? {
-        let summary = store.approve_pending(&request, encryption_cli::cli_progress())?;
+        let summary = store.approve_pending(&request, encryption_cli::cli_progress("files"))?;
         println!(
             "Approved '{}' and re-encrypted {} file(s).",
             request.recipient.name, summary.migrated_files
@@ -645,7 +645,10 @@ fn import_dayone_command(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
             .failures
             .push(format!("{}: {}", warning.entry_id, warning.message));
     }
-    for entry in batch.entries {
+    let total = batch.entries.len();
+    let mut progress = encryption_cli::cli_progress("entries");
+    for (idx, entry) in batch.entries.into_iter().enumerate() {
+        progress(idx, total);
         if !seen.insert(entry.provenance.clone()) {
             report.skipped_duplicate += 1;
             continue;
@@ -687,6 +690,7 @@ fn import_dayone_command(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
             }
         }
     }
+    progress(total, total);
 
     println!(
         "{}",

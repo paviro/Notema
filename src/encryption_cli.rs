@@ -6,14 +6,14 @@ use notema_storage::JournalStore;
 /// A progress sink for CLI migrations that drives an `indicatif` bar. A fresh
 /// bar is created at the start of each pass (a `(0, total)` tick) — so a
 /// two-pass operation like rotation shows a bar per pass — and cleared when the
-/// pass completes.
-pub(crate) fn cli_progress() -> impl FnMut(usize, usize) {
+/// pass completes. `unit` labels the counter (e.g. `files`, `entries`).
+pub(crate) fn cli_progress(unit: &'static str) -> impl FnMut(usize, usize) {
     let mut bar: Option<ProgressBar> = None;
     move |done, total| {
         if done == 0 {
             let fresh = ProgressBar::new(total as u64);
             fresh.set_style(
-                ProgressStyle::with_template("{bar:40} {pos}/{len} files")
+                ProgressStyle::with_template(&format!("{{bar:40}} {{pos}}/{{len}} {unit}"))
                     .unwrap_or_else(|_| ProgressStyle::default_bar()),
             );
             bar = Some(fresh);
@@ -53,7 +53,7 @@ pub(crate) fn encrypt_store(
     } else {
         println!("No journal encryption identity configured; generating an age identity.");
         let (name, passphrase) = prompts::resolve_new_identity_options(device_name, no_passphrase)?;
-        let summary = store.enable_encryption(&name, passphrase.as_ref(), cli_progress())?;
+        let summary = store.enable_encryption(&name, passphrase.as_ref(), cli_progress("files"))?;
         let recipient = summary.recipient;
         println!(
             "Encrypted journal store at {}",
@@ -69,7 +69,7 @@ pub(crate) fn encrypt_store(
         return Ok(());
     };
 
-    store.encrypt_store(cli_progress())?;
+    store.encrypt_store(cli_progress("files"))?;
     println!(
         "Encrypted journal store at {}",
         config.journal.path.display()
@@ -94,7 +94,7 @@ pub(crate) fn decrypt_store(mut store: JournalStore, config: &Config) -> AppResu
         None
     };
     store.unlock(passphrase.as_ref())?;
-    let summary = store.decrypt_store(cli_progress())?;
+    let summary = store.decrypt_store(cli_progress("files"))?;
     println!(
         "Decrypted journal store at {}",
         config.journal.path.display()
