@@ -54,7 +54,9 @@ address. The provider is platform-specific and only ever produces
 `,` opens settings, then `t` opens the theme picker. Up/Down previews live, `b` cycles
 chrome (default → flat → bordered), `m` cycles color mode (auto → dark → light;
 hidden on themes without variants), Enter applies and saves, Esc reverts. Broken
-themes are listed but can't be applied.
+themes are listed but can't be applied. `Tab` switches between the global default and
+the current journal's own theme; a journal theme saves the previewed color mode and
+chrome with it. See [Themes](THEMES.md#per-journal-themes).
 
 Edits to the **active** theme hot-reload (debounced ~400 ms). A broken edit shows
 an error toast and keeps the current theme; the next valid save loads. Writing your

@@ -3,6 +3,7 @@ use std::{fs, path::Path};
 
 mod dates;
 mod entry;
+mod journal_metadata;
 mod journals;
 
 pub use dates::{entry_timestamp_label, parse_entry_timestamp};
@@ -20,6 +21,8 @@ pub(crate) use entry::{
     read_entry, read_entry_content, resolve_entry_asset_path, save_entry_edit, scan_entries,
     scan_import_sources,
 };
+pub use journal_metadata::JournalTheme;
+pub(crate) use journal_metadata::set_theme as set_journal_theme;
 pub use journals::{ARCHIVED_SUFFIX, Journal, is_archived_name, journal_display_name};
 pub(crate) use journals::{
     create_journal, list_journals, set_journal_archived, validate_journal_name,

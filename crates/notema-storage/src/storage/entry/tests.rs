@@ -49,6 +49,30 @@ fn entry_path_uses_year_month_day_folder_and_datetime_short_id_filename() {
 }
 
 #[test]
+fn journal_sidecar_is_not_collected_as_an_entry() {
+    let dir = tempdir().unwrap();
+    let codec = EntryCodec::plain();
+    create_test_entry(
+        &codec,
+        dir.path(),
+        "work",
+        "# Hi\nbody",
+        &Metadata::default(),
+    );
+    // The per-journal sidecar sits directly in the journal folder; the entry
+    // walker must skip it (hidden name) and never treat it as an entry.
+    fs::write(
+        dir.path().join("work").join(".journal.toml"),
+        "schema_version = 1\nid = \"abcd1234\"\n",
+    )
+    .unwrap();
+
+    let paths = collect_entry_paths(dir.path()).unwrap();
+    assert_eq!(paths.len(), 1);
+    assert!(paths[0].path.extension().is_some_and(|ext| ext == "md"));
+}
+
+#[test]
 fn create_entry_file_retries_without_overwriting_existing_path() {
     let dir = tempdir().unwrap();
     let now = local_time(2026, 7, 1, 23, 30);

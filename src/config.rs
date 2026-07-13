@@ -70,6 +70,11 @@ pub(crate) struct UiSection {
     /// or `bordered` force that chrome on every theme.
     #[serde(default)]
     pub chrome: ChromeMode,
+    /// Per-device escape hatch: when true, this device ignores the per-journal
+    /// themes set in `.journal.toml` sidecars and always uses `theme`. For
+    /// low-capability terminals (e-ink) where most themes don't render well.
+    #[serde(default)]
+    pub ignore_journal_themes: bool,
     #[serde(default)]
     pub layout: LayoutSection,
 }
@@ -80,6 +85,7 @@ impl Default for UiSection {
             theme: default_theme(),
             color_mode: ColorMode::default(),
             chrome: ChromeMode::default(),
+            ignore_journal_themes: false,
             layout: LayoutSection::default(),
         }
     }
@@ -100,6 +106,29 @@ pub(crate) enum ColorMode {
     Light,
 }
 
+impl ColorMode {
+    /// Parse the journal-sidecar spelling; `None` for anything unrecognized (a
+    /// newer device's value), so callers fall back to this device's setting.
+    /// Must mirror the serde `rename_all = "lowercase"` names.
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "auto" => Some(ColorMode::Auto),
+            "dark" => Some(ColorMode::Dark),
+            "light" => Some(ColorMode::Light),
+            _ => None,
+        }
+    }
+
+    /// The journal-sidecar spelling, inverse of [`Self::from_name`].
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            ColorMode::Auto => "auto",
+            ColorMode::Dark => "dark",
+            ColorMode::Light => "light",
+        }
+    }
+}
+
 /// The `[ui] chrome` setting: `default` follows the active theme's
 /// `chrome.default_style`; `flat`/`bordered` force that chrome on every theme.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -118,6 +147,36 @@ impl ChromeMode {
             ChromeMode::Default => None,
             ChromeMode::Flat => Some(crate::tui::theme::ChromeStyle::Flat),
             ChromeMode::Bordered => Some(crate::tui::theme::ChromeStyle::Bordered),
+        }
+    }
+
+    /// Inverse of [`Self::forced_style`].
+    pub(crate) fn from_override(style: Option<crate::tui::theme::ChromeStyle>) -> Self {
+        match style {
+            None => ChromeMode::Default,
+            Some(crate::tui::theme::ChromeStyle::Flat) => ChromeMode::Flat,
+            Some(crate::tui::theme::ChromeStyle::Bordered) => ChromeMode::Bordered,
+        }
+    }
+
+    /// Parse the journal-sidecar spelling; `None` for anything unrecognized (a
+    /// newer device's value), so callers fall back to this device's setting.
+    /// Must mirror the serde `rename_all = "lowercase"` names.
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "default" => Some(ChromeMode::Default),
+            "flat" => Some(ChromeMode::Flat),
+            "bordered" => Some(ChromeMode::Bordered),
+            _ => None,
+        }
+    }
+
+    /// The journal-sidecar spelling, inverse of [`Self::from_name`].
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            ChromeMode::Default => "default",
+            ChromeMode::Flat => "flat",
+            ChromeMode::Bordered => "bordered",
         }
     }
 }
@@ -198,9 +257,10 @@ impl Config {
 #[serde(deny_unknown_fields)]
 pub(crate) struct State {
     pub(crate) schema_version: u32,
-    /// The journal selected when the TUI last exited, restored on next launch.
+    /// The stable id of the journal selected when the TUI last exited, restored on
+    /// next launch. Stored by id (not name) so it survives a rename or archive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_journal: Option<String>,
+    pub last_journal_id: Option<String>,
     #[serde(default)]
     pub ui: UiState,
 }
@@ -209,7 +269,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             schema_version: STATE_SCHEMA_VERSION,
-            last_journal: None,
+            last_journal_id: None,
             ui: UiState::default(),
         }
     }
@@ -523,6 +583,28 @@ mod tests {
     }
 
     #[test]
+    fn mode_and_chrome_names_round_trip_and_match_serde() {
+        for mode in [ColorMode::Auto, ColorMode::Dark, ColorMode::Light] {
+            assert_eq!(ColorMode::from_name(mode.name()), Some(mode));
+            // The sidecar spelling must stay the config-file spelling.
+            assert_eq!(
+                toml::Value::try_from(mode).unwrap().as_str(),
+                Some(mode.name())
+            );
+        }
+        for chrome in [ChromeMode::Default, ChromeMode::Flat, ChromeMode::Bordered] {
+            assert_eq!(ChromeMode::from_name(chrome.name()), Some(chrome));
+            assert_eq!(
+                toml::Value::try_from(chrome).unwrap().as_str(),
+                Some(chrome.name())
+            );
+            assert_eq!(ChromeMode::from_override(chrome.forced_style()), chrome);
+        }
+        assert_eq!(ColorMode::from_name("neon"), None);
+        assert_eq!(ChromeMode::from_name("neon"), None);
+    }
+
+    #[test]
     fn offers_encryption_only_for_an_empty_new_root() {
         let dir = tempdir().unwrap();
         let store = store_in(dir.path());
@@ -618,7 +700,7 @@ mod tests {
 
         let state = State {
             schema_version: STATE_SCHEMA_VERSION,
-            last_journal: Some("home".to_string()),
+            last_journal_id: Some("home1234".to_string()),
             ui: UiState {
                 show_hints: false,
                 show_journals: true,

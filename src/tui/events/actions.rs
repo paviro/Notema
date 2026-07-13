@@ -345,9 +345,8 @@ pub(super) fn toggle_archive_selected_journal(app: &mut App) -> AppResult<()> {
     let display = journal.display_name().to_string();
 
     let new_journal = app.store.set_journal_archived(&old_name, archive)?;
-    // The rename changes the journal's identity, so config keys pointing at the
-    // old name would go stale (CLI resolution, next-launch reselect). Retarget
-    // them before reloading.
+    // The rename changes the journal's folder name, so the name-keyed
+    // `config.journal.default` would go stale. Retarget it before reloading.
     app.retarget_journal_in_config(&old_name, &new_journal.name)?;
     app.refresh()?;
     app.select_journal_by_name(&new_journal.name);

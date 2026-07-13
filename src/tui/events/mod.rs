@@ -426,6 +426,12 @@ fn apply_action(
         Action::ThemePickerCancel => app.theme_picker_cancel(),
         Action::ThemePickerCycleChrome => app.theme_picker_cycle_chrome(),
         Action::ThemePickerCycleMode => app.theme_picker_cycle_mode(),
+        Action::ThemePickerToggleScope => {
+            app.theme_picker_toggle_scope();
+            // The scope's theme may sit outside the current window; scroll it back
+            // into view so the highlight follows the preview.
+            reveal_open_dialog_selection(terminal, app)?;
+        }
 
         Action::OpenImageViewer(index) => app.begin_image_viewer(index),
         Action::StepImageViewer(delta) => app.image_viewer_step(delta),
@@ -664,7 +670,7 @@ fn open_dialog_list_height(
             .list
             .height
     } else if let Some(state) = app.theme_picker_state() {
-        render::theme_picker_layout(area, state.entries.len(), state.mode_switchable())
+        render::theme_picker_layout(area, state.entries.len(), state.hint_state())
             .list
             .height
     } else {

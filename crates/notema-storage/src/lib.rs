@@ -23,9 +23,9 @@ use notema_encryption::{
 };
 pub use storage::{
     ARCHIVED_SUFFIX, AssetFailure, AssetReport, EditOutcome, EntryAssetOptions, EntryCreateOutcome,
-    EntryDraft, EntryEdit, EntryEditOutcome, Journal, entry_id, entry_timestamp_label,
-    is_archived_name, is_entry_file, journal_display_name, parse_entry_timestamp,
-    sole_stored_image, stored_image_reference,
+    EntryDraft, EntryEdit, EntryEditOutcome, Journal, JournalTheme, entry_id,
+    entry_timestamp_label, is_archived_name, is_entry_file, journal_display_name,
+    parse_entry_timestamp, sole_stored_image, stored_image_reference,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -654,6 +654,17 @@ impl JournalStore {
     /// journal in its new state.
     pub fn set_journal_archived(&self, name: &str, archived: bool) -> AppResult<Journal> {
         storage::set_journal_archived(&self.paths.journal_root, name, archived)
+    }
+
+    /// Set a journal's own theme in its `.journal.toml` sidecar, or clear it
+    /// (`None`) so the journal follows the global theme. The journal's stable id
+    /// is preserved.
+    pub fn set_journal_theme(
+        &self,
+        journal_name: &str,
+        theme: Option<&JournalTheme>,
+    ) -> AppResult<()> {
+        storage::set_journal_theme(&self.paths.journal_root.join(journal_name), theme)
     }
 
     pub fn validate_journal_name(name: &str) -> AppResult<String> {

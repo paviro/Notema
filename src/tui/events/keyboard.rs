@@ -190,6 +190,7 @@ fn theme_picker_key_to_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Down => Some(Action::MoveDialogSelection(1)),
         KeyCode::Char('b') => Some(Action::ThemePickerCycleChrome),
         KeyCode::Char('m') => Some(Action::ThemePickerCycleMode),
+        KeyCode::Tab => Some(Action::ThemePickerToggleScope),
         _ => None,
     }
 }

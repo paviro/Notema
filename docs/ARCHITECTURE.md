@@ -63,10 +63,13 @@ highlights that a row is clickable and never commits it.
 
 Every persisted TOML document carries `schema_version = 1`, and unsupported
 versions fail rather than being guessed. The documents are entry front matter,
-config and state (root crate), themes (root crate), and the encryption roster,
-pins, identity, and pending requests (`notema-encryption`, which owns the
-`.age/` sub-layout). This is a clean-slate v1: pre-release data predating the
-version field is intentionally unsupported, with no migrations.
+the per-journal `.journal.toml` sidecar, config and state (root crate), themes
+(root crate), and the encryption roster, pins, identity, and pending requests
+(`notema-encryption`, which owns the `.age/` sub-layout). Most live in the config
+directory and are device-local; the sidecar is the exception — it sits in the
+journal folder and syncs, staying plaintext even under encryption. This is a
+clean-slate v1: pre-release data predating the version field is intentionally
+unsupported, with no migrations.
 
 Every persisted write goes through one fsync-ing atomic primitive
 (`notema_encryption::atomic_write`: write a per-process temp, fsync, rename,

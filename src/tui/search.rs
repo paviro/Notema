@@ -526,10 +526,11 @@ mod tests {
             "the query should hit some but not all entries"
         );
 
-        let mut got: Vec<String> = search_loaded_entries(&entries, query, &SearchScope::AllJournals)
-            .into_iter()
-            .map(|hit| hit.id)
-            .collect();
+        let mut got: Vec<String> =
+            search_loaded_entries(&entries, query, &SearchScope::AllJournals)
+                .into_iter()
+                .map(|hit| hit.id)
+                .collect();
         got.sort();
 
         assert_eq!(got, expected);

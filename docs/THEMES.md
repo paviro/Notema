@@ -12,6 +12,25 @@ stderr and always falls back to `journal`.
 its inversions faithfully (some emulators, Termux among them, don't). The rest are
 high-color.
 
+## Per-journal themes
+
+Each journal can use its own theme, applied when you switch to it. In the picker
+(settings menu, then `t`), `Tab` toggles the **scope**:
+
+- **This journal** — saves the theme, along with the previewed color mode and
+  chrome, to the journal's `.journal.toml`. Toggling here also previews the
+  scope's saved mode and chrome, so what you see is what confirming keeps.
+- **Global** — the default for journals without their own; confirming here also
+  drops the current journal's override (theme, mode, and chrome) so it follows
+  the default.
+
+The title names the scope and rows are tagged `global` / `this journal`.
+
+Per-journal themes live in the journal folder, so they sync across devices. An
+all-journals search shows the global theme. On a device where per-journal themes
+render poorly (e-ink), set `ignore_journal_themes = true` under `[ui]` in its
+`config.toml` to always use that device's global theme.
+
 Want to build your own? See the **[theme reference](THEME-REFERENCE.md)** for the
 file format and the full token reference. Each name below links to its bundled
 definition.

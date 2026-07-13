@@ -65,10 +65,22 @@ fn feelings_selected_line_count(frame_area: Rect, selected: &[String]) -> usize 
         .max(1)
 }
 
+/// The picker's title, naming the scope being edited so the global-vs-journal
+/// choice is unambiguous.
+fn theme_picker_title(state: &ThemePickerState) -> String {
+    use crate::tui::state::ThemePickerScope;
+    match (&state.journal, state.scope) {
+        (Some(journal), ThemePickerScope::Journal) => {
+            format!("Theme · {}", notema_storage::journal_display_name(journal))
+        }
+        _ => "Theme · global".to_string(),
+    }
+}
+
 /// The picker's hint row, with the chrome and mode hints' labels reflecting
 /// the live `[ui]` settings so cycling them reads back immediately. The mode
 /// hint only shows when the highlighted theme has dark/light variants.
-pub(crate) fn theme_picker_hints(mode_switchable: bool) -> Vec<Hint> {
+pub(crate) fn theme_picker_hints(inputs: crate::tui::state::PickerHints) -> Vec<Hint> {
     use crate::config::ColorMode;
     use crate::tui::theme::ChromeStyle;
     let chrome = match crate::tui::theme::chrome_override() {
@@ -82,12 +94,16 @@ pub(crate) fn theme_picker_hints(mode_switchable: bool) -> Vec<Hint> {
         Hint::new("apply", "enter", HintId::ThemePickerApply),
         chrome,
     ];
-    if mode_switchable {
+    if inputs.mode_switchable {
         hints.push(match crate::tui::theme::color_mode() {
             ColorMode::Auto => Hint::new("mode: auto", "m", HintId::ThemePickerMode),
             ColorMode::Dark => Hint::new("mode: dark", "m", HintId::ThemePickerMode),
             ColorMode::Light => Hint::new("mode: light", "m", HintId::ThemePickerMode),
         });
+    }
+    // Scope toggle only when there's a journal in context.
+    if inputs.has_journal {
+        hints.push(Hint::new("scope", "tab", HintId::ThemePickerScope));
     }
     hints.push(Hint::new("revert", "esc", HintId::ThemePickerRevert));
     hints
@@ -535,15 +551,15 @@ pub(crate) fn feelings_dialog_layout(
     }
 }
 
-fn theme_picker_hint_height(frame_area: Rect, mode_switchable: bool) -> u16 {
+fn theme_picker_hint_height(frame_area: Rect, inputs: crate::tui::state::PickerHints) -> u16 {
     hint_height(
-        &theme_picker_hints(mode_switchable),
+        &theme_picker_hints(inputs),
         dialog_hint_width(frame_area, LIST_DIALOG_WIDTH),
     )
 }
 
-fn theme_picker_area(frame_area: Rect, len: usize, mode_switchable: bool) -> Rect {
-    let hint_height = theme_picker_hint_height(frame_area, mode_switchable);
+fn theme_picker_area(frame_area: Rect, len: usize, inputs: crate::tui::state::PickerHints) -> Rect {
+    let hint_height = theme_picker_hint_height(frame_area, inputs);
     let visible = (len as u16).clamp(1, THEME_PICKER_MAX_VISIBLE_ROWS);
     // The frame + the list + a blank spacer + the hint block.
     let h =
@@ -563,11 +579,11 @@ pub(crate) struct ThemePickerLayout {
 pub(crate) fn theme_picker_layout(
     frame_area: Rect,
     len: usize,
-    mode_switchable: bool,
+    inputs: crate::tui::state::PickerHints,
 ) -> ThemePickerLayout {
-    let area = theme_picker_area(frame_area, len, mode_switchable);
+    let area = theme_picker_area(frame_area, len, inputs);
     let inner = dialog_inner(area);
-    let hint_height = theme_picker_hint_height(frame_area, mode_switchable);
+    let hint_height = theme_picker_hint_height(frame_area, inputs);
     let list = Rect {
         x: inner.x,
         y: inner.y,
@@ -591,7 +607,8 @@ pub(super) fn draw_theme_picker(
     hover: HoverTarget,
 ) {
     let hovered_row = hovered_dialog_row(hover);
-    let layout = theme_picker_layout(frame.area(), state.entries.len(), state.mode_switchable());
+    let hint_inputs = state.hint_state();
+    let layout = theme_picker_layout(frame.area(), state.entries.len(), hint_inputs);
 
     state.normalize_list_state();
     let len = state.entries.len();
@@ -608,20 +625,29 @@ pub(super) fn draw_theme_picker(
             .iter()
             .enumerate()
             .map(|(index, entry)| {
-                // The configured theme's row carries the active-theme dot; a
-                // file that failed to parse renders in the error style so
-                // picking it (a no-op preview, a toast on Enter) isn't a
-                // surprise. The dot marks which theme is applied, distinct from
-                // the cursor (which the selection color already conveys).
-                let marker = if entry.name == state.previous_name {
-                    '●'
+                // Annotate which row is the global default and which is this
+                // journal's own theme, so the scope you're editing is legible.
+                let mut tags: Vec<&str> = Vec::new();
+                if entry.name == state.previous_name {
+                    tags.push("global");
+                }
+                if state
+                    .journal_theme
+                    .as_ref()
+                    .map(|theme| theme.name.as_str())
+                    == Some(entry.name.as_str())
+                {
+                    tags.push("this journal");
+                }
+                let suffix = if tags.is_empty() {
+                    String::new()
                 } else {
-                    ' '
+                    format!("  ({})", tags.join(", "))
                 };
                 let item = match entry.theme {
-                    Some(_) => ListItem::new(Line::from(format!("{marker} {}", entry.name))),
+                    Some(_) => ListItem::new(Line::from(format!("  {}{suffix}", entry.name))),
                     None => ListItem::new(Line::from(Span::styled(
-                        format!("{marker} {} (broken)", entry.name),
+                        format!("  {} (broken){suffix}", entry.name),
                         theme().error(),
                     ))),
                 };
@@ -636,17 +662,12 @@ pub(super) fn draw_theme_picker(
             .collect()
     };
 
-    draw_dialog_frame(frame, layout.area, "Theme", true);
+    draw_dialog_frame(frame, layout.area, &theme_picker_title(state), true);
     let list = List::new(items).highlight_style(theme().selection());
     let mut render_state =
         list_state_for_render(state.selected_index(), scroll, layout.list.height, len > 0);
     frame.render_stateful_widget(list, layout.list, &mut render_state);
-    render_hint_line(
-        frame,
-        &theme_picker_hints(state.mode_switchable()),
-        layout.hints,
-        hover,
-    );
+    render_hint_line(frame, &theme_picker_hints(hint_inputs), layout.hints, hover);
     render_scrollbar_if_needed(frame, layout.area, len, max_visible, scroll, true);
 }
 

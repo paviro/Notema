@@ -59,6 +59,15 @@ pub(crate) enum Mode {
 
 pub(crate) use notema_domain::SearchScope;
 
+/// The theme, color mode, and chrome to display, resolved from the context
+/// journal's override and the `[ui]` config by [`App::effective_selection`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ThemeSelection {
+    pub(crate) name: String,
+    pub(crate) color_mode: crate::config::ColorMode,
+    pub(crate) chrome: crate::config::ChromeMode,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EntryTarget {
     pub(crate) id: String,
@@ -548,14 +557,15 @@ impl App {
             caches: RenderCaches::default(),
         };
         app.load_entries(entry_paths)?;
-        // Restore the journal selected in the previous session without disturbing
-        // the default startup focus (Journals).
-        if let Some(name) = app.state.last_journal.clone()
+        // Restore the journal selected in the previous session (by stable id, so a
+        // rename or archive doesn't lose it) without disturbing the default startup
+        // focus (Journals).
+        if let Some(id) = app.state.last_journal_id.clone()
             && let Some(index) = app
                 .library
                 .journals
                 .iter()
-                .position(|journal| journal.name == name)
+                .position(|journal| !journal.id.is_empty() && journal.id == id)
         {
             app.nav.journal_list.select(Some(index));
             *app.nav.journal_list.offset_mut() = app.journal_row_top(index);
@@ -564,12 +574,17 @@ impl App {
         if !app.state.ui.show_journals {
             app.nav.focus = Focus::Entries;
         }
+        // The startup journal is chosen only now, so the pre-App theme install
+        // couldn't account for it.
+        app.apply_effective_theme();
         Ok(app)
     }
 
-    /// A journal rename (archive/unarchive) changes its identity, so any config
-    /// or per-device state pointing at the old name must follow it — otherwise the
-    /// remembered default/last journal silently stops resolving.
+    /// A journal rename (archive/unarchive) changes its folder name, so the
+    /// hand-editable `config.journal.default` (which points at a name) must follow
+    /// it — otherwise the remembered default silently stops resolving. Per-device
+    /// `last_journal_id` needs no retargeting: it's keyed on the stable id, which
+    /// the rename preserves.
     pub(crate) fn retarget_journal_in_config(
         &mut self,
         old_name: &str,
@@ -579,11 +594,85 @@ impl App {
             self.config.journal.default = Some(new_name.to_string());
             crate::config::save_config(&self.config_path, &self.config)?;
         }
-        if self.state.last_journal.as_deref() == Some(old_name) {
-            self.state.last_journal = Some(new_name.to_string());
-            crate::config::save_state(&self.config_path, &self.state)?;
-        }
         Ok(())
+    }
+
+    /// The journal whose theme applies right now: the compose target while
+    /// composing, the scope journal of a journal-scoped search, otherwise the
+    /// selected journal. An all-journals search has no context journal — it
+    /// follows the global theme, so stepping through cross-journal hits doesn't
+    /// re-theme per hit.
+    fn context_journal(&self) -> Option<&Journal> {
+        if self.compose
+            && let Some(editor) = &self.editor
+            && let crate::tui::editor_state::EditorTarget::New { journal } = &editor.target
+        {
+            return self.library.journals.iter().find(|j| &j.name == journal);
+        }
+        if self.nav.mode == Mode::Search {
+            return match &self.search.scope {
+                SearchScope::Journal(name) => {
+                    self.library.journals.iter().find(|j| &j.name == name)
+                }
+                SearchScope::AllJournals => None,
+            };
+        }
+        self.selected_journal()
+    }
+
+    /// The theme selection in effect: the context journal's own theme — with
+    /// per-field fallback to the `[ui]` config for anything it doesn't set or
+    /// this device doesn't recognize — unless the device ignores per-journal
+    /// themes.
+    pub(crate) fn effective_selection(&self) -> ThemeSelection {
+        let global = ThemeSelection {
+            name: self.config.ui.theme.clone(),
+            color_mode: self.config.ui.color_mode,
+            chrome: self.config.ui.chrome,
+        };
+        if self.config.ui.ignore_journal_themes {
+            return global;
+        }
+        let Some(theme) = self.context_journal().and_then(|j| j.theme.as_ref()) else {
+            return global;
+        };
+        ThemeSelection {
+            name: theme.name.clone(),
+            color_mode: theme
+                .color_mode
+                .as_deref()
+                .and_then(crate::config::ColorMode::from_name)
+                .unwrap_or(global.color_mode),
+            chrome: theme
+                .chrome
+                .as_deref()
+                .and_then(crate::config::ChromeMode::from_name)
+                .unwrap_or(global.chrome),
+        }
+    }
+
+    pub(crate) fn effective_theme_name(&self) -> String {
+        self.effective_selection().name
+    }
+
+    /// Resolve and install the effective theme, color mode, and chrome. Called at
+    /// startup and whenever the theme context changes (journal switch, search
+    /// enter/exit, compose), so the UI re-themes as you move around.
+    pub(crate) fn apply_effective_theme(&self) {
+        // Tests pin a known theme via `set_test_theme`; installing here would
+        // clobber it, so the global install runs only outside test builds.
+        // `effective_selection` stays testable on its own.
+        #[cfg(not(test))]
+        {
+            let selection = self.effective_selection();
+            crate::tui::theme::set_color_mode(selection.color_mode);
+            crate::tui::theme::set_chrome_override(selection.chrome.forced_style());
+            crate::tui::theme::install(crate::tui::theme::load(
+                &self.config_path,
+                &selection.name,
+                crate::tui::theme::mode(),
+            ));
+        }
     }
 
     pub(crate) fn refresh(&mut self) -> AppResult<()> {

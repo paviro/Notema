@@ -79,6 +79,8 @@ impl App {
         self.nav.reader_fullscreen = true;
         self.nav.focus = Focus::Reader;
         self.compose = true;
+        // Theme by the compose target, not the journal restored from state.
+        self.apply_effective_theme();
     }
 
     /// Discard the open editor without saving. A cancelled new-entry compose has

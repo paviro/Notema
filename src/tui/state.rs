@@ -428,6 +428,27 @@ pub(crate) struct ThemePickerEntry {
     pub(crate) mode_agnostic: bool,
 }
 
+/// Whether the picker is setting the current journal's theme or the global
+/// default. In `Global` scope, choosing a row changes `ui.theme` and saving
+/// clears any per-journal override; in `Journal` scope it writes the journal's
+/// own theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ThemePickerScope {
+    Global,
+    Journal,
+}
+
+/// A journal's own theme as the picker uses it: the sidecar's strings parsed
+/// into this device's enums once, at open. `None` fields are settings the
+/// sidecar doesn't carry (or spellings this device doesn't know) — those follow
+/// the `[ui]` config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JournalThemeChoice {
+    pub(crate) name: String,
+    pub(crate) color_mode: Option<crate::config::ColorMode>,
+    pub(crate) chrome: Option<crate::config::ChromeMode>,
+}
+
 /// State for the theme-picker overlay. Selection moves preview by installing
 /// the highlighted theme; Esc restores [`Self::previous`].
 pub(crate) struct ThemePickerState {
@@ -435,7 +456,7 @@ pub(crate) struct ThemePickerState {
     pub(crate) list: SelectableList,
     /// The theme installed when the picker opened, restored on cancel.
     pub(crate) previous: crate::tui::theme::Theme,
-    /// The configured theme name at open, marking the active row.
+    /// The global theme name at open, marking the "global default" row.
     pub(crate) previous_name: String,
     /// The chrome override at open, restored on cancel (the picker cycles it
     /// live for preview).
@@ -443,6 +464,14 @@ pub(crate) struct ThemePickerState {
     /// The color mode at open, restored on cancel (the picker cycles it live
     /// for preview).
     pub(crate) previous_color_mode: crate::config::ColorMode,
+    /// Which scope the current selection applies to.
+    pub(crate) scope: ThemePickerScope,
+    /// The raw name of the journal in context, or `None` when no journal is
+    /// selected (then only `Global` scope is available).
+    pub(crate) journal: Option<String>,
+    /// That journal's own theme at open (used to seed the Journal-scope row and
+    /// to mark the "this journal" row); `None` when it follows the global theme.
+    pub(crate) journal_theme: Option<JournalThemeChoice>,
 }
 
 impl ThemePickerState {
@@ -458,6 +487,23 @@ impl ThemePickerState {
         self.selected_entry()
             .is_some_and(|entry| !entry.mode_agnostic)
     }
+
+    /// The inputs the hint row and its geometry depend on, bundled so the draw
+    /// and the mouse hit-test always compute the same hints.
+    pub(crate) fn hint_state(&self) -> PickerHints {
+        PickerHints {
+            mode_switchable: self.mode_switchable(),
+            has_journal: self.journal.is_some(),
+        }
+    }
+}
+
+/// What the theme picker's hint row shows (labels and which optional hints
+/// appear), shared by the render and the mouse hit-test.
+#[derive(Clone, Copy)]
+pub(crate) struct PickerHints {
+    pub(crate) mode_switchable: bool,
+    pub(crate) has_journal: bool,
 }
 
 impl ListNav for ThemePickerState {

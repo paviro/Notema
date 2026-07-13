@@ -237,6 +237,34 @@ impl App {
             .collect();
         entries.sort_by(|a, b| a.name.cmp(&b.name));
 
+        use crate::tui::state::{JournalThemeChoice, ThemePickerScope};
+        let context = self.context_journal();
+        let journal = context.map(|j| j.name.clone());
+        let journal_theme = context
+            .and_then(|j| j.theme.as_ref())
+            .map(|t| JournalThemeChoice {
+                name: t.name.clone(),
+                color_mode: t
+                    .color_mode
+                    .as_deref()
+                    .and_then(crate::config::ColorMode::from_name),
+                chrome: t
+                    .chrome
+                    .as_deref()
+                    .and_then(crate::config::ChromeMode::from_name),
+            });
+        // Open on the journal's own theme when it has one, otherwise on the
+        // global default.
+        let scope = if journal.is_some() && journal_theme.is_some() {
+            ThemePickerScope::Journal
+        } else {
+            ThemePickerScope::Global
+        };
+        let seed_name = match &journal_theme {
+            Some(theme) if scope == ThemePickerScope::Journal => theme.name.clone(),
+            _ => self.config.ui.theme.clone(),
+        };
+
         let mut state = ThemePickerState {
             entries,
             list: SelectableList::default(),
@@ -244,14 +272,80 @@ impl App {
             previous_name: self.config.ui.theme.clone(),
             previous_chrome: crate::tui::theme::chrome_override(),
             previous_color_mode: crate::tui::theme::color_mode(),
+            scope,
+            journal,
+            journal_theme,
         };
         let active = state
             .entries
             .iter()
-            .position(|entry| entry.name == state.previous_name)
+            .position(|entry| entry.name == seed_name)
             .unwrap_or(0);
         state.select_index(active);
         self.overlay = Overlay::ThemePicker(state);
+        // Install the seeded row so the preview matches the highlight from the
+        // first frame, not only after the selection moves.
+        self.theme_picker_preview();
+    }
+
+    /// Move the picker selection to the row named `name` (if present) and preview.
+    fn theme_picker_select_named(&mut self, name: &str) {
+        if let Some(index) = self
+            .theme_picker_state()
+            .and_then(|state| state.entries.iter().position(|entry| entry.name == name))
+        {
+            self.theme_picker_select(index);
+        }
+    }
+
+    /// Toggle the scope between this journal and the global default, snapping the
+    /// selection — theme, color mode, and chrome — to that scope's saved values,
+    /// so the preview shows exactly what confirming would keep. A no-op with no
+    /// journal in context.
+    pub(crate) fn theme_picker_toggle_scope(&mut self) {
+        use crate::tui::state::ThemePickerScope;
+        let Some(state) = self.theme_picker_state() else {
+            return;
+        };
+        if state.journal.is_none() {
+            return;
+        }
+        let (next, name, color_mode, chrome) = match state.scope {
+            ThemePickerScope::Journal => (
+                ThemePickerScope::Global,
+                self.config.ui.theme.clone(),
+                self.config.ui.color_mode,
+                self.config.ui.chrome,
+            ),
+            // Seed Journal scope on the journal's own theme, falling back to the
+            // global values for anything it doesn't set — including the whole
+            // theme when the journal has none yet (so you can pick one).
+            ThemePickerScope::Global => {
+                let theme = state.journal_theme.as_ref();
+                (
+                    ThemePickerScope::Journal,
+                    theme
+                        .map(|t| t.name.clone())
+                        .unwrap_or_else(|| self.config.ui.theme.clone()),
+                    theme
+                        .and_then(|t| t.color_mode)
+                        .unwrap_or(self.config.ui.color_mode),
+                    theme
+                        .and_then(|t| t.chrome)
+                        .unwrap_or(self.config.ui.chrome),
+                )
+            }
+        };
+        if let Some(state) = self.theme_picker_state_mut() {
+            state.scope = next;
+        }
+        let mode_before = crate::tui::theme::mode();
+        crate::tui::theme::set_color_mode(color_mode);
+        crate::tui::theme::set_chrome_override(chrome.forced_style());
+        if crate::tui::theme::mode() != mode_before {
+            self.theme_picker_reresolve_rows();
+        }
+        self.theme_picker_select_named(&name);
     }
 
     pub(crate) fn theme_picker_state(&self) -> Option<&ThemePickerState> {
@@ -319,6 +413,12 @@ impl App {
             ColorMode::Dark => ColorMode::Light,
             ColorMode::Light => ColorMode::Auto,
         });
+        self.theme_picker_reresolve_rows();
+    }
+
+    /// Re-resolve every row at the current mode and re-install the highlighted
+    /// one — a mode change invalidates the flattened variants cached per row.
+    fn theme_picker_reresolve_rows(&mut self) {
         let dir = crate::tui::theme::themes_dir(&self.config_path);
         let mode = crate::tui::theme::mode();
         if let Some(state) = self.theme_picker_state_mut() {
@@ -330,8 +430,10 @@ impl App {
         self.theme_picker_preview();
     }
 
-    /// Confirm the highlighted theme: persist it to the config and close. A
-    /// broken row or a failed save toasts and keeps the picker open.
+    /// Confirm the highlighted theme: persist it — with the previewed color mode
+    /// and chrome — to the active scope (the journal's sidecar, or the config
+    /// plus clearing the journal's override) and close. A broken row or a failed
+    /// save toasts and keeps the picker open.
     pub(crate) fn theme_picker_confirm(&mut self) {
         let Some(entry) = self
             .theme_picker_state()
@@ -339,31 +441,95 @@ impl App {
         else {
             return;
         };
+        use crate::tui::state::ThemePickerScope;
         let name = entry.name.clone();
-        let Some(theme) = entry.theme else {
+        if entry.theme.is_none() {
             self.toast(
                 ToastVariant::Error,
                 format!("Theme '{name}' is broken; fix its file or pick another"),
             );
             return;
-        };
-        crate::tui::theme::install(theme);
-        self.config.ui.theme = name.clone();
-        self.config.ui.color_mode = crate::tui::theme::color_mode();
-        self.config.ui.chrome = match crate::tui::theme::chrome_override() {
-            None => crate::config::ChromeMode::Default,
-            Some(crate::tui::theme::ChromeStyle::Flat) => crate::config::ChromeMode::Flat,
-            Some(crate::tui::theme::ChromeStyle::Bordered) => crate::config::ChromeMode::Bordered,
-        };
-        if let Err(err) = crate::config::save_config(&self.config_path, &self.config) {
-            self.toast(
-                ToastVariant::Error,
-                format!("Couldn't save config: {}", crate::tui::concise_error(&err)),
-            );
-            return;
         }
-        self.toast(ToastVariant::Success, format!("Theme set to {name}"));
+
+        let (scope, journal) = self
+            .theme_picker_state()
+            .map(|state| (state.scope, state.journal.clone()))
+            .unwrap_or((ThemePickerScope::Global, None));
+
+        // The scope only ever becomes Journal with a journal in context, so the
+        // catch-all arm is the Global scope.
+        let toast = match (scope, journal) {
+            (ThemePickerScope::Journal, Some(journal_name)) => {
+                // The journal's theme carries the previewed color mode and chrome
+                // with it, so it looks the same on every device.
+                let theme = notema_storage::JournalTheme {
+                    name: name.clone(),
+                    color_mode: Some(crate::tui::theme::color_mode().name().to_string()),
+                    chrome: Some(
+                        crate::config::ChromeMode::from_override(
+                            crate::tui::theme::chrome_override(),
+                        )
+                        .name()
+                        .to_string(),
+                    ),
+                };
+                if let Err(err) = self.store.set_journal_theme(&journal_name, Some(&theme)) {
+                    self.toast(
+                        ToastVariant::Error,
+                        format!("Couldn't set theme: {}", crate::tui::concise_error(&err)),
+                    );
+                    return;
+                }
+                self.set_local_journal_theme(&journal_name, Some(theme));
+                format!(
+                    "Theme for {} set to {name}",
+                    notema_storage::journal_display_name(&journal_name)
+                )
+            }
+            (_, journal) => {
+                self.config.ui.theme = name.clone();
+                self.config.ui.color_mode = crate::tui::theme::color_mode();
+                self.config.ui.chrome =
+                    crate::config::ChromeMode::from_override(crate::tui::theme::chrome_override());
+                // Switching a journal to Global removes its own override so it
+                // follows the (possibly just-changed) global theme.
+                if let Some(journal_name) = journal {
+                    if let Err(err) = self.store.set_journal_theme(&journal_name, None) {
+                        self.toast(
+                            ToastVariant::Error,
+                            format!("Couldn't clear theme: {}", crate::tui::concise_error(&err)),
+                        );
+                        return;
+                    }
+                    self.set_local_journal_theme(&journal_name, None);
+                }
+                if let Err(err) = crate::config::save_config(&self.config_path, &self.config) {
+                    self.toast(
+                        ToastVariant::Error,
+                        format!("Couldn't save config: {}", crate::tui::concise_error(&err)),
+                    );
+                    return;
+                }
+                format!("Global theme set to {name}")
+            }
+        };
+
+        self.apply_effective_theme();
+        self.toast(ToastVariant::Success, toast);
         self.close_overlay();
+    }
+
+    /// Update the in-memory `Journal.theme` for `name` so the next render and
+    /// journal switch see the change without a rescan.
+    fn set_local_journal_theme(&mut self, name: &str, theme: Option<notema_storage::JournalTheme>) {
+        if let Some(journal) = self
+            .library
+            .journals
+            .iter_mut()
+            .find(|journal| journal.name == name)
+        {
+            journal.theme = theme;
+        }
     }
 
     /// Cancel the picker: restore the theme, chrome override, and color mode

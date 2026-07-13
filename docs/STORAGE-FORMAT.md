@@ -9,6 +9,7 @@ without this app.
 ```
 <journal_root>/
 ├── personal/                                  # one directory per journal
+│   ├── .journal.toml                          # per-journal id + optional theme
 │   └── 2026/07/05/                            # YYYY/MM/DD of creation
 │       ├── 2026-07-05T14-30-00-<id>.md        # entry (.md.age when encrypted)
 │       └── 2026-07-05T14-30-00-<id>.assets/   # files referenced by the entry
@@ -32,6 +33,28 @@ without this app.
 
 Per-device settings and this device's private key live in the config directory
 (`~/.config/notema/`), never in the journal root and never synced.
+
+## Journal sidecar
+
+Each journal folder holds a `.journal.toml`, created on first sight:
+
+```toml
+schema_version = 1
+id = "a1b2c3d4"        # stable random handle, survives renames/archiving
+
+[theme]                # optional; absent means the journal follows the global theme
+name = "gameboy"
+color_mode = "dark"    # auto | dark | light
+chrome = "flat"        # default | flat | bordered
+```
+
+This file lives in the journal folder, so it syncs with the journal (config and
+state don't). It's plaintext even on an encrypted store. `state.toml`'s
+`last_journal_id` references the `id`, so the remembered journal survives folder
+renames. The `[theme]` table is written and cleared as one unit; a device that
+doesn't recognize a value uses its own config for that field. A corrupt or
+unknown-version sidecar is left alone, and the journal falls back to the global
+theme.
 
 ## Entry file
 
@@ -167,9 +190,10 @@ start_fullscreen = false
 download_remote_images = true
 
 [ui]
-theme = "journal"               # theme file in <config>/themes/, without .toml
+theme = "journal"               # global theme; theme file in <config>/themes/, without .toml
 color_mode = "auto"             # auto | dark | light
 chrome = "default"              # default | flat | bordered
+ignore_journal_themes = false   # true: this device ignores per-journal themes, uses `theme`
 
 [ui.layout.reader]
 body_center_vertically = true
@@ -181,7 +205,7 @@ show_link_urls = false
 
 ```toml
 schema_version = 1
-last_journal = "personal"
+last_journal_id = "a1b2c3d4"    # the journal sidecar id, so it survives renames
 
 [ui]
 show_hints = true

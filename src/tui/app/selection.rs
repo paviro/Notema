@@ -214,6 +214,7 @@ impl App {
 
         let previous_entry_index = self.nav.selected_entry_index;
         if self.nav.focus == Focus::Journals && self.nav.mode == Mode::Browse {
+            let previous_journal = self.nav.journal_list.selected();
             move_list_selection(&mut self.nav.journal_list, len, delta);
             // Browsing journals shows the journal's insights, not an entry: leave the
             // entry selection empty until the user moves into the entries column.
@@ -221,6 +222,9 @@ impl App {
             *self.nav.entry_list.offset_mut() = 0;
             // A different journal means different insights, so its lists start fresh.
             self.nav.scroll.reset_insights();
+            if self.nav.journal_list.selected() != previous_journal {
+                self.apply_effective_theme();
+            }
         } else {
             match self.nav.selected_entry_index {
                 // Deselected (Browse shows journal insights): a downward move selects
@@ -257,6 +261,7 @@ impl App {
             // selection so the insights column shows and no reader is rendered.
             self.nav.selected_entry_index = None;
             self.reset_entry_scroll();
+            self.apply_effective_theme();
         }
     }
 
@@ -345,6 +350,7 @@ impl App {
         if self.selected_journal_index() != journal_index {
             self.nav.journal_list.select(Some(journal_index));
             *self.nav.entry_list.offset_mut() = 0;
+            self.apply_effective_theme();
         }
         Some(journal_name)
     }
@@ -457,11 +463,15 @@ impl App {
             .iter()
             .position(|journal| journal.name == name)
         {
+            let changed = self.selected_journal_index() != index;
             self.nav.journal_list.select(Some(index));
             *self.nav.journal_list.offset_mut() = self.journal_row_top(index);
             self.nav.selected_entry_index = Some(0);
             self.reset_entry_scroll();
             self.nav.focus = Focus::Entries;
+            if changed {
+                self.apply_effective_theme();
+            }
         }
     }
 }

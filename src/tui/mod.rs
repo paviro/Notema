@@ -642,6 +642,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
         // Live theme reload, debounced the same way: only changes to the
         // active theme's file count (edits to other themes wait until they're
         // selected). A broken edit keeps the current theme and says so.
+        let active_theme = app.effective_theme_name();
         let active_theme_changed = theme_watcher
             .as_ref()
             .map_or_else(Vec::new, watcher::FileWatcher::poll_changes)
@@ -650,24 +651,20 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
                 path.extension().is_some_and(|ext| ext == "toml")
                     && path
                         .file_stem()
-                        .is_some_and(|stem| stem == app.config.ui.theme.as_str())
+                        .is_some_and(|stem| stem == active_theme.as_str())
             });
         if active_theme_changed {
             pending_theme_reload_at = Some(Instant::now() + REFRESH_DEBOUNCE);
         }
         let theme_reloaded = if pending_theme_reload_at.is_some_and(|at| Instant::now() >= at) {
             pending_theme_reload_at = None;
-            let path =
-                theme::themes_dir(&app.config_path).join(format!("{}.toml", app.config.ui.theme));
+            let name = app.effective_theme_name();
+            let path = theme::themes_dir(&app.config_path).join(format!("{name}.toml"));
             match theme::load_file(&path, theme::mode()) {
                 Ok(reloaded) => theme::install(reloaded),
                 Err(err) => app.toast(
                     state::ToastVariant::Error,
-                    format!(
-                        "Theme not reloaded: {}.toml: {}",
-                        app.config.ui.theme,
-                        concise_error(&err)
-                    ),
+                    format!("Theme not reloaded: {name}.toml: {}", concise_error(&err)),
                 ),
             }
             true
@@ -727,11 +724,14 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, mut app: App)
         }
     }
 
-    // Remember the selected journal for the next session. All break paths fall
-    // through here, so this covers every exit (including Ctrl-C).
-    let selected = app.selected_journal().map(|journal| journal.name.clone());
-    if app.state.last_journal != selected {
-        app.state.last_journal = selected;
+    // Remember the selected journal (by stable id) for the next session. All break
+    // paths fall through here, so this covers every exit (including Ctrl-C).
+    let selected = app
+        .selected_journal()
+        .map(|journal| journal.id.clone())
+        .filter(|id| !id.is_empty());
+    if app.state.last_journal_id != selected {
+        app.state.last_journal_id = selected;
         crate::config::save_state(&app.config_path, &app.state)?;
     }
 

@@ -126,6 +126,8 @@ pub(crate) enum Action {
     ThemePickerCycleChrome,
     /// Cycle the color mode: auto → dark → light → auto.
     ThemePickerCycleMode,
+    /// Toggle the picker scope between this journal and the global default.
+    ThemePickerToggleScope,
     // Image viewer overlay
     OpenImageViewer(usize),
     StepImageViewer(isize),

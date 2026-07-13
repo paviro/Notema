@@ -818,19 +818,15 @@ fn overlay_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarge
     }
 
     if let Some(state) = app.theme_picker_state() {
-        let layout =
-            render::theme_picker_layout(area, state.entries.len(), state.mode_switchable());
+        let hint_inputs = state.hint_state();
+        let layout = render::theme_picker_layout(area, state.entries.len(), hint_inputs);
         if render::point_in_rect(layout.list, col, row)
             && let Some(index) =
                 list_row_at(layout.list, col, row, state.offset(), state.entries.len())
         {
             return HoverTarget::DialogRow(index);
         }
-        return hint(
-            layout.hints,
-            &render::theme_picker_hints(state.mode_switchable()),
-        )
-        .unwrap_or_default();
+        return hint(layout.hints, &render::theme_picker_hints(hint_inputs)).unwrap_or_default();
     }
 
     if let Some(state) = app.edit_metadata_state() {
@@ -1101,12 +1097,12 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
     if let Some(state) = app.theme_picker_state() {
         let len = state.entries.len();
         let offset = state.offset();
-        let mode_switchable = state.mode_switchable();
-        let layout = render::theme_picker_layout(area, len, mode_switchable);
+        let hint_inputs = state.hint_state();
+        let layout = render::theme_picker_layout(area, len, hint_inputs);
         if let Some(action) = dialog_hint_action(
             app,
             layout.hints,
-            &render::theme_picker_hints(mode_switchable),
+            &render::theme_picker_hints(hint_inputs),
             col,
             row,
         ) {
@@ -1312,11 +1308,11 @@ fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16
         return;
     }
 
-    if let Some((len, mode_switchable)) = app
+    if let Some((len, hint_inputs)) = app
         .theme_picker_state()
-        .map(|s| (s.entries.len(), s.mode_switchable()))
+        .map(|s| (s.entries.len(), s.hint_state()))
     {
-        let layout = render::theme_picker_layout(area, len, mode_switchable);
+        let layout = render::theme_picker_layout(area, len, hint_inputs);
         if render::point_in_rect(layout.list, mouse.column, mouse.row)
             && let Some(state) = app.theme_picker_state_mut()
         {
@@ -1413,6 +1409,7 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::ThemePickerRevert => Some(Action::ThemePickerCancel),
         render::HintId::ThemePickerChrome => Some(Action::ThemePickerCycleChrome),
         render::HintId::ThemePickerMode => Some(Action::ThemePickerCycleMode),
+        render::HintId::ThemePickerScope => Some(Action::ThemePickerToggleScope),
         render::HintId::HintsToggle => Some(Action::ToggleHints),
         render::HintId::ToggleJournals => Some(Action::ToggleJournals),
         // Clicking the tabs hint steps forward through the tabs (Right); scope

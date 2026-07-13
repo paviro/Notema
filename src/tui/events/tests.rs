@@ -1480,7 +1480,7 @@ fn theme_picker_hover_targets_rows_without_selecting() {
     } else {
         offset
     };
-    let layout = render::theme_picker_layout(area, len, state.mode_switchable());
+    let layout = render::theme_picker_layout(area, len, state.hint_state());
 
     let row = layout.list.y + (target - offset) as u16;
     assert!(mouse::apply_hover(&mut app, layout.list.x + 1, row, area));
@@ -1736,7 +1736,7 @@ fn theme_picker_hides_the_mode_switch_on_mode_agnostic_themes() {
     let state = app.theme_picker_state().unwrap();
     assert!(!state.mode_switchable());
     assert!(
-        render::theme_picker_hints(state.mode_switchable())
+        render::theme_picker_hints(state.hint_state())
             .iter()
             .all(|hint| hint.id != render::HintId::ThemePickerMode),
         "mode hint should be hidden on classic"

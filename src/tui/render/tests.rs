@@ -2219,16 +2219,23 @@ fn theme_picker_lists_bundled_themes_with_the_active_row_marked() {
     let rows = render_to_rows(90, 30, |frame| draw(frame, &mut app));
     let text = rows.join("\n");
 
-    // Dialog frame with its title and hint row.
-    assert!(text.contains(" Theme "), "dialog title missing:\n{text}");
+    // Dialog frame with its scope-naming title and hint row. With no per-journal
+    // theme on "work", the picker opens in Global scope.
+    assert!(
+        text.contains("Theme · global"),
+        "dialog title missing:\n{text}"
+    );
     assert!(text.contains("enter  apply"));
     assert!(text.contains("esc  revert"));
-    // The bundled themes at the top of the list render; the configured one
-    // carries the ● marker.
+    // The bundled themes at the top of the list render; the configured one is
+    // annotated as the global default.
     for name in ["blossom", "classic", "eclipse", "fjord", "grove"] {
         assert!(text.contains(name), "theme '{name}' missing:\n{text}");
     }
-    assert!(text.contains("● blossom"), "active marker missing:\n{text}");
+    assert!(
+        text.contains("blossom  (global)"),
+        "global-default annotation missing:\n{text}"
+    );
 }
 
 #[test]
@@ -2239,7 +2246,7 @@ fn theme_picker_renders_broken_rows_in_the_error_style() {
     fs::write(themes.join("busted.toml"), "surfaces = 12\n").unwrap();
     app.open_theme_picker();
     let state = app.theme_picker_state().unwrap();
-    let (len, mode_switchable) = (state.entries.len(), state.mode_switchable());
+    let (len, hint_inputs) = (state.entries.len(), state.hint_state());
 
     let backend = render_app(app, 90, 30);
     let buffer = backend.buffer();
@@ -2258,7 +2265,7 @@ fn theme_picker_renders_broken_rows_in_the_error_style() {
     let error_fg = crate::tui::theme::theme().error().fg.unwrap();
     assert_eq!(buffer[(x, y as u16)].fg, error_fg);
     // The layout the mouse handler uses matches where the list was drawn.
-    let layout = theme_picker_layout(Rect::new(0, 0, 90, 30), len, mode_switchable);
+    let layout = theme_picker_layout(Rect::new(0, 0, 90, 30), len, hint_inputs);
     assert!(point_in_rect(layout.list, x, y as u16));
 }
 

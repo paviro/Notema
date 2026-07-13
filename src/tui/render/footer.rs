@@ -53,6 +53,7 @@ pub(crate) enum HintId {
     ThemePickerRevert,
     ThemePickerChrome,
     ThemePickerMode,
+    ThemePickerScope,
     HintsToggle,
     ToggleJournals,
     InsightsTab,

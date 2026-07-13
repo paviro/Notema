@@ -19,6 +19,8 @@ impl App {
         self.search.query.set_text(&query);
         self.search.hits = hits;
         self.commit_search_selection();
+        // An all-journals search follows the global theme (see context_journal).
+        self.apply_effective_theme();
     }
 
     pub(crate) fn exit_search(&mut self) {
@@ -27,6 +29,7 @@ impl App {
         self.search.query.clear();
         self.search.hits.clear();
         self.commit_search_selection();
+        self.apply_effective_theme();
     }
 
     pub(crate) fn update_search_results(&mut self) {

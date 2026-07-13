@@ -1,3 +1,4 @@
+use super::journal_metadata::JournalTheme;
 use crate::{AppResult, StorageError};
 use anyhow::bail;
 use std::{
@@ -16,6 +17,12 @@ pub struct Journal {
     pub name: String,
     pub path: PathBuf,
     pub archived: bool,
+    /// Stable id from the journal's `.journal.toml` sidecar; a handle for
+    /// machine-written references that must survive a rename. Empty only when the
+    /// sidecar exists but couldn't be read.
+    pub id: String,
+    /// The journal's own theme, or `None` to follow the global theme.
+    pub theme: Option<JournalTheme>,
 }
 
 impl Journal {
@@ -53,10 +60,14 @@ pub(crate) fn list_journals(root: &Path) -> AppResult<Vec<Journal>> {
         }
 
         let archived = is_archived_name(&name);
+        let path = entry.path();
+        let meta = super::journal_metadata::read_or_init_metadata(&path);
         journals.push(Journal {
             name,
-            path: entry.path(),
+            path,
             archived,
+            id: meta.id,
+            theme: meta.theme,
         });
     }
 
@@ -86,10 +97,13 @@ pub(crate) fn set_journal_archived(root: &Path, name: &str, archived: bool) -> A
     let target = root.join(&target_name);
     if target_name == name {
         // Already in the requested state; nothing to do.
+        let meta = super::journal_metadata::read_or_init_metadata(&target);
         return Ok(Journal {
             name: target_name,
             path: target,
             archived,
+            id: meta.id,
+            theme: meta.theme,
         });
     }
     if target.exists() {
@@ -100,11 +114,16 @@ pub(crate) fn set_journal_archived(root: &Path, name: &str, archived: bool) -> A
         .into());
     }
 
+    // The sidecar rides along inside the folder, so the id/theme survive the
+    // archive rename; re-read from the new location to populate the result.
     fs::rename(&source, &target)?;
+    let meta = super::journal_metadata::read_or_init_metadata(&target);
     Ok(Journal {
         name: target_name,
         path: target,
         archived,
+        id: meta.id,
+        theme: meta.theme,
     })
 }
 
@@ -118,10 +137,14 @@ pub(crate) fn create_journal(root: &Path, name: &str) -> AppResult<Journal> {
     }
     let path = root.join(&name);
     fs::create_dir_all(&path)?;
+    // Reading the sidecar here backfills it, so a new journal gets its id at once.
+    let meta = super::journal_metadata::read_or_init_metadata(&path);
     Ok(Journal {
         name,
         path,
         archived: false,
+        id: meta.id,
+        theme: meta.theme,
     })
 }
 
@@ -230,6 +253,45 @@ mod tests {
         assert!(!restored.archived);
         assert!(dir.path().join("personal").is_dir());
         assert!(!dir.path().join("personal.archived").exists());
+    }
+
+    #[test]
+    fn create_journal_assigns_a_stable_id() {
+        let dir = tempdir().unwrap();
+        let created = create_journal(dir.path(), "personal").unwrap();
+        assert!(!created.id.is_empty());
+        assert_eq!(created.theme, None);
+        // Listing returns the same persisted id.
+        let listed = &list_journals(dir.path()).unwrap()[0];
+        assert_eq!(listed.id, created.id);
+    }
+
+    #[test]
+    fn list_journals_backfills_ids_for_pre_existing_folders() {
+        let dir = tempdir().unwrap();
+        // A folder made by hand (no sidecar), as an older journal would be.
+        fs::create_dir_all(dir.path().join("work")).unwrap();
+        let first = list_journals(dir.path()).unwrap().pop().unwrap();
+        assert!(!first.id.is_empty());
+        // The minted id is persisted and stable across listings.
+        let second = list_journals(dir.path()).unwrap().pop().unwrap();
+        assert_eq!(second.id, first.id);
+    }
+
+    #[test]
+    fn archiving_preserves_the_id_and_theme() {
+        let dir = tempdir().unwrap();
+        let created = create_journal(dir.path(), "personal").unwrap();
+        let theme = JournalTheme {
+            name: "gameboy".to_string(),
+            color_mode: Some("dark".to_string()),
+            chrome: Some("flat".to_string()),
+        };
+        super::super::journal_metadata::set_theme(&created.path, Some(&theme)).unwrap();
+
+        let archived = set_journal_archived(dir.path(), "personal", true).unwrap();
+        assert_eq!(archived.id, created.id);
+        assert_eq!(archived.theme, Some(theme));
     }
 
     #[test]
