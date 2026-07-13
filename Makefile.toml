@@ -644,7 +644,11 @@ if [ -z "$APPLE_DEVELOPER_ID" ]; then
     echo "APPLE_DEVELOPER_ID not set, cannot sign Apple Silicon macOS FUSE binary." >&2
     exit 1
 fi
-codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime "$BINARY_PATH"
+# Disable library validation so hardened runtime allows loading fuse-t/macFUSE's
+# libfuse3, which is signed by a different vendor's Team ID. Notarization still
+# passes; the entitlement is on Apple's allowed list.
+codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime \
+    --entitlements crates/notema-fuse/fuse.entitlements "$BINARY_PATH"
 '''
 
 # Packaging (FUSE): same `notema` binary, `<platform>-fuse.zip` name.

@@ -111,6 +111,10 @@ provider first — [fuse-t](https://www.fuse-t.org) is kext-free (nothing to
 approve) and is what this is tested with; [macFUSE](https://macfuse.io) probably also works.
 The mounted volume shows up in Finder as **Journals**.
 
+The FUSE binary is signed with library validation disabled
+(`crates/notema-fuse/fuse.entitlements`) so hardened runtime can load libfuse3,
+which the FUSE provider ships signed under its own vendor's Team ID.
+
 Everywhere else, build it natively. Install a FUSE provider first — `libfuse3-dev`
 on Linux, fuse-t or macFUSE on macOS — then:
 
