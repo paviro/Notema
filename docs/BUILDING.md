@@ -7,7 +7,7 @@ Grab a binary for your platform from the [releases page](https://github.com/pavi
 **Standard builds cover:**
 
 - Android/Termux (ARM64)
-- Linux (x86_64 and ARM64, glibc and musl)
+- Linux (x86_64, ARM64, 32-bit x86/i686, and ARMv7, glibc and musl)
 - Windows (x86_64)
 - macOS (universal — Intel + Apple Silicon)
 
@@ -41,8 +41,45 @@ Cross-compilation targets live in `Makefile.toml`, driven by
 ```bash
 cargo make build-termux            # Android/Termux ARM64
 cargo make build-x86-gnu           # x86_64 Linux (glibc)
+cargo make build-i686-musl         # 32-bit x86 Linux (static musl)
+cargo make build-armv7-musl        # 32-bit ARMv7 Linux (static musl)
 cargo make build-macos-universal   # Intel + Apple Silicon
 cargo make build-windows-gnu       # Windows x86_64
+```
+
+Each target needs its Rust std added with `rustup` plus a matching cross-linker.
+The Linux targets link with per-target GCC toolchains from the
+[`messense/macos-cross-toolchains`](https://github.com/messense/homebrew-macos-cross-toolchains)
+Homebrew tap; Windows uses MinGW-w64; macOS builds natively (host clang + `lipo`,
+no cross-toolchain); Android/Termux uses the Android NDK (see the `build-termux`
+task for how it's located).
+
+Install the linkers — every Linux toolchain the tap provides for our targets,
+plus MinGW for Windows:
+
+```bash
+brew install \
+  messense/macos-cross-toolchains/x86_64-unknown-linux-gnu \
+  messense/macos-cross-toolchains/x86_64-unknown-linux-musl \
+  messense/macos-cross-toolchains/aarch64-unknown-linux-gnu \
+  messense/macos-cross-toolchains/aarch64-unknown-linux-musl \
+  messense/macos-cross-toolchains/i686-unknown-linux-gnu \
+  messense/macos-cross-toolchains/i686-unknown-linux-musl \
+  messense/macos-cross-toolchains/armv7-unknown-linux-gnueabihf \
+  messense/macos-cross-toolchains/armv7-unknown-linux-musleabihf \
+  mingw-w64
+```
+
+Add every Rust target (Android/Termux, all Linux, Windows):
+
+```bash
+rustup target add \
+  aarch64-linux-android \
+  x86_64-unknown-linux-gnu x86_64-unknown-linux-musl \
+  aarch64-unknown-linux-gnu aarch64-unknown-linux-musl \
+  i686-unknown-linux-gnu i686-unknown-linux-musl \
+  armv7-unknown-linux-gnueabihf armv7-unknown-linux-musleabihf \
+  x86_64-pc-windows-gnu
 ```
 
 ## FUSE builds
