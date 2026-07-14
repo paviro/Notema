@@ -623,7 +623,7 @@ fn run_loop(
         let reader_flash_changed = app.expire_reader_heading_flash();
         app.dispatch_environment_backfill();
         // Close the "Fetching…" modal and finish the deferred save once ready.
-        let context_saved = events::poll_fetching_environment(&mut app)?;
+        let context_saved = events::poll_fetching_environment(&mut app);
         let mut poll_timeout = app
             .toast_deadline()
             .map(|t| t.min(Duration::from_millis(200)))
@@ -865,7 +865,9 @@ fn run_loop(
         .filter(|id| !id.is_empty());
     if app.state.last_journal_id != selected {
         app.state.last_journal_id = selected;
-        crate::config::save_state(&app.config_path, &app.state)?;
+        // Best-effort: a failed preference write shouldn't turn a clean quit into
+        // a printed error, and a toast can't render once we're tearing down.
+        let _ = crate::config::save_state(&app.config_path, &app.state);
     }
 
     Ok(())

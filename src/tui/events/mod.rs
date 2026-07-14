@@ -49,9 +49,9 @@ const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// fetch lands (or the timeout fires) close it and re-run the deferred save.
 /// Returns whether it acted, so the event loop knows to repaint. No-op when the
 /// modal isn't open.
-pub(crate) fn poll_fetching_environment(app: &mut App) -> AppResult<bool> {
+pub(crate) fn poll_fetching_environment(app: &mut App) -> bool {
     let Overlay::FetchingEnvironment(started) = app.overlay else {
-        return Ok(false);
+        return false;
     };
     let landed = app
         .editor
@@ -59,7 +59,7 @@ pub(crate) fn poll_fetching_environment(app: &mut App) -> AppResult<bool> {
         .is_none_or(|editor| editor.pending_environment.is_none());
     let timed_out = started.elapsed() >= FETCH_TIMEOUT;
     if !(landed || timed_out) {
-        return Ok(false);
+        return false;
     }
     // Timed out with nothing yet: give up waiting so the save proceeds bare.
     if timed_out && let Some(editor) = app.editor.as_mut() {
@@ -69,7 +69,7 @@ pub(crate) fn poll_fetching_environment(app: &mut App) -> AppResult<bool> {
     if let Err(error) = save_editor_with_reader_restore(app) {
         report_action_error(app, &error);
     }
-    Ok(true)
+    true
 }
 
 /// Save the open editor and, for an edit of an existing entry, restore the
