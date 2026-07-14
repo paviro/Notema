@@ -45,8 +45,9 @@ pub(crate) fn draw_journal_insights(frame: &mut Frame<'_>, area: Rect, app: &mut
         HoverTarget::InsightsTab(tab) => Some(tab),
         _ => None,
     };
-    // The tabs live in the panel's top border. Scope only differentiates the
-    // analytic tabs, so Overview leaves the bottom border unlabeled.
+    // The tabs live in the panel's top border; a dimmed footnote in the bottom-left
+    // (built below) names each analytic tab's scope and, where it applies, its rolling
+    // window. Overview omits it — its top card already carries the scope.
     let inner_width = area.width.saturating_sub(2);
     let flat = crate::tui::render::flat_chrome();
     let mut block = if flat {
@@ -68,16 +69,27 @@ pub(crate) fn draw_journal_insights(frame: &mut Frame<'_>, area: Rect, app: &mut
         }
         block
     };
+    // A dimmed footnote in the bottom-left names the data the analytic tabs show: their
+    // scope, plus the rolling window on tabs that respond to one. The separator carries
+    // the tab-strip's separator colour, matching the top border. Overview skips it — its
+    // top card already names the scope.
     if tab != InsightsTab::Overview {
-        block = block.title_bottom(
-            Line::from(format!(" {} ", app.nav.insights_scope.label())).right_aligned(),
-        );
-    }
-    // The rolling window sits opposite the scope on tabs that respond to it.
-    if tab.uses_timeframe() {
-        block = block.title_bottom(
-            Line::from(format!(" {} ", app.nav.insights_timeframe.label())).left_aligned(),
-        );
+        let mut footnote = vec![Span::styled(
+            format!(" {}", app.nav.insights_scope.label()),
+            theme().muted(),
+        )];
+        if tab.uses_timeframe() {
+            footnote.push(Span::styled(
+                format!(" {} ", theme().glyphs().tab_separator),
+                theme().tab_separator(),
+            ));
+            footnote.push(Span::styled(
+                app.nav.insights_timeframe.label(),
+                theme().muted(),
+            ));
+        }
+        footnote.push(Span::styled(" ", theme().muted()));
+        block = block.title_bottom(Line::from(footnote).left_aligned());
     }
     let content = block.inner(area);
     frame.render_widget(block, area);

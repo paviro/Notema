@@ -138,8 +138,9 @@ impl InsightsTimeframe {
     }
 }
 
-/// Whether the analytic tabs aggregate only the selected journal or every
-/// journal. `Overview` ignores this (it's always the selected journal's card).
+/// Whether the tabs aggregate only the selected journal or every journal.
+/// Overview honors it too: its card switches between the journal name and
+/// "All journals".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum InsightsScope {
     #[default]
