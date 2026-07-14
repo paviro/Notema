@@ -3,7 +3,7 @@
 .env
 .DS_Store
 
-# Dev config dir used by cargo runs (see .cargo/config.toml); only the
-# committed config.toml is tracked — journals, state, and keys stay local.
-/.dev/*
-!/.dev/config.toml
+# Local dev sandbox: .cargo/config.toml points cargo runs at a throwaway
+# journal in .dev/ on this machine only. Nothing here is committed.
+/.cargo/config.toml
+/.dev/
