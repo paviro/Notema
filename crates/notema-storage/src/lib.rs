@@ -954,7 +954,7 @@ impl JournalStore {
     }
 
     pub fn delete_empty_entry(&self, path: &Path) -> AppResult<()> {
-        storage::delete_empty_entry(path)
+        storage::delete_empty_entry(&self.paths.journal_root, path)
     }
 
     /// Replace one metadata field of an entry's front matter (and refresh

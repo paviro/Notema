@@ -6,6 +6,7 @@ use anyhow::{Context, bail};
 use notema_domain::{Metadata, MetadataField};
 use notema_encryption::{self as crypto, KeyPaths};
 use std::{
+    ffi::OsStr,
     fs,
     path::{Path, PathBuf},
 };
@@ -238,10 +239,91 @@ fn render_edited_content(
     Ok(crate::markdown::render_entry(&parsed, body))
 }
 
-pub(crate) fn delete_empty_entry(path: &Path) -> AppResult<()> {
+pub(crate) fn delete_empty_entry(root: &Path, path: &Path) -> AppResult<()> {
     fs::remove_file(path)?;
     remove_entry_assets(path);
+    prune_empty_date_dirs(root, path);
     Ok(())
+}
+
+/// After an entry file is removed from `root/<journal>/YYYY/MM/DD/`, delete any
+/// now-empty day, month, and year folders. Stops at the journal folder, which is
+/// kept even when empty. Best-effort: an ancestor that still holds real content
+/// ends the walk, and nothing above an occupied folder can be empty.
+fn prune_empty_date_dirs(root: &Path, entry_path: &Path) {
+    let Some(journal) = entry_path
+        .strip_prefix(root)
+        .ok()
+        .and_then(|rel| rel.components().next())
+        .map(|first| root.join(first.as_os_str()))
+    else {
+        return;
+    };
+    let mut dir = entry_path.parent();
+    while let Some(current) = dir {
+        if current == journal || !current.starts_with(&journal) {
+            break;
+        }
+        if !remove_dir_if_content_free(current) {
+            break;
+        }
+        dir = current.parent();
+    }
+}
+
+/// Remove `dir` if it holds nothing but OS junk (a stray `.DS_Store`, AppleDouble
+/// `._*`, `Thumbs.db`, …). Clears that junk first so a folder the user considers
+/// empty is actually deleted. Refuses when a subfolder or any unrecognized file
+/// remains, so real content is never destroyed. Returns whether `dir` was removed.
+fn remove_dir_if_content_free(dir: &Path) -> bool {
+    if fs::remove_dir(dir).is_ok() {
+        return true;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    let mut junk = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return false;
+        };
+        // A subfolder means a sibling date dir with real content, or an asset
+        // folder — never prune it. Any non-junk file is likewise content.
+        let is_junk_file = entry.file_type().is_ok_and(|kind| kind.is_file())
+            && is_os_junk_name(&entry.file_name());
+        if !is_junk_file {
+            return false;
+        }
+        junk.push(entry.path());
+    }
+    for path in junk {
+        if fs::remove_file(&path).is_err() {
+            return false;
+        }
+    }
+    fs::remove_dir(dir).is_ok()
+}
+
+/// OS-generated filenames that carry no journal data. Mirrors the rejected system
+/// state that the FUSE mount clears (see `notema-fuse` path policy), plus the
+/// Finder/Explorer droppings (`.DS_Store`, `Thumbs.db`, `desktop.ini`) that turn
+/// an otherwise-empty date folder into one `remove_dir` refuses.
+fn is_os_junk_name(name: &OsStr) -> bool {
+    name.to_str().is_some_and(|name| {
+        name.starts_with("._")
+            || matches!(
+                name,
+                ".DS_Store"
+                    | ".Spotlight-V100"
+                    | ".fseventsd"
+                    | ".Trashes"
+                    | ".TemporaryItems"
+                    | ".DocumentRevisions-V100"
+                    | ".apdisk"
+                    | "Thumbs.db"
+                    | "desktop.ini"
+            )
+    })
 }
 
 /// Remove an entry's sibling `<stem>.assets` folder, if present. Best-effort:
@@ -289,6 +371,7 @@ pub(crate) fn move_entry_to_trash(root: &Path, entry_path: &Path) -> AppResult<P
     preflight_entry_assets_trash(entry_path, &trash_path)?;
     fs::rename(entry_path, &trash_path)?;
     move_entry_assets_to_trash(entry_path, &trash_path)?;
+    prune_empty_date_dirs(root, entry_path);
     Ok(trash_path)
 }
 

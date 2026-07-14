@@ -565,6 +565,119 @@ fn delete_moves_entry_to_journal_trash() {
 }
 
 #[test]
+fn delete_prunes_empty_day_month_year_dirs() {
+    let dir = tempdir().unwrap();
+    let day = dir.path().join("work").join("2026").join("07").join("01");
+    fs::create_dir_all(&day).unwrap();
+    let path = day.join("id.md");
+    fs::write(&path, "body").unwrap();
+
+    move_entry_to_trash(dir.path(), &path).unwrap();
+
+    assert!(!day.exists());
+    assert!(!dir.path().join("work").join("2026").join("07").exists());
+    assert!(!dir.path().join("work").join("2026").exists());
+    // The journal folder is kept even when empty.
+    assert!(dir.path().join("work").exists());
+}
+
+#[test]
+fn delete_keeps_dirs_with_surviving_siblings() {
+    let dir = tempdir().unwrap();
+    let month = dir.path().join("work").join("2026").join("07");
+    let day_one = month.join("01");
+    let day_two = month.join("02");
+    fs::create_dir_all(&day_one).unwrap();
+    fs::create_dir_all(&day_two).unwrap();
+    let path = day_one.join("id.md");
+    fs::write(&path, "body").unwrap();
+    fs::write(day_two.join("other.md"), "body").unwrap();
+
+    move_entry_to_trash(dir.path(), &path).unwrap();
+
+    // The emptied day is gone, but its non-empty month/year and sibling day stay.
+    assert!(!day_one.exists());
+    assert!(day_two.exists());
+    assert!(month.exists());
+    assert!(dir.path().join("work").join("2026").exists());
+}
+
+#[test]
+fn delete_prunes_month_but_keeps_year_with_other_months() {
+    let dir = tempdir().unwrap();
+    let year = dir.path().join("work").join("2026");
+    let july_day = year.join("07").join("01");
+    let august_day = year.join("08").join("01");
+    fs::create_dir_all(&july_day).unwrap();
+    fs::create_dir_all(&august_day).unwrap();
+    let path = july_day.join("id.md");
+    fs::write(&path, "body").unwrap();
+    fs::write(august_day.join("other.md"), "body").unwrap();
+
+    move_entry_to_trash(dir.path(), &path).unwrap();
+
+    assert!(!year.join("07").exists());
+    assert!(year.join("08").exists());
+    assert!(year.exists());
+}
+
+#[test]
+fn delete_prunes_dirs_holding_only_os_junk() {
+    let dir = tempdir().unwrap();
+    let year = dir.path().join("work").join("2026");
+    let month = year.join("07");
+    let day = month.join("01");
+    fs::create_dir_all(&day).unwrap();
+    let path = day.join("id.md");
+    fs::write(&path, "body").unwrap();
+    // Finder/Explorer droppings scattered up the date tree must not block pruning.
+    fs::write(day.join(".DS_Store"), b"finder").unwrap();
+    fs::write(day.join("._id.md"), b"appledouble").unwrap();
+    fs::write(month.join("Thumbs.db"), b"win").unwrap();
+    fs::write(year.join(".DS_Store"), b"finder").unwrap();
+
+    move_entry_to_trash(dir.path(), &path).unwrap();
+
+    assert!(!day.exists());
+    assert!(!month.exists());
+    assert!(!year.exists());
+    assert!(dir.path().join("work").exists());
+}
+
+#[test]
+fn delete_keeps_dir_with_unrecognized_file() {
+    let dir = tempdir().unwrap();
+    let day = dir.path().join("work").join("2026").join("07").join("01");
+    fs::create_dir_all(&day).unwrap();
+    let path = day.join("id.md");
+    fs::write(&path, "body").unwrap();
+    // An unknown file is treated as real content — the folder must survive.
+    fs::write(day.join("notes.txt"), b"keep me").unwrap();
+
+    move_entry_to_trash(dir.path(), &path).unwrap();
+
+    assert!(day.exists());
+    assert!(day.join("notes.txt").exists());
+}
+
+#[test]
+fn delete_empty_entry_prunes_empty_date_dirs() {
+    let dir = tempdir().unwrap();
+    let day = dir.path().join("work").join("2026").join("07").join("01");
+    fs::create_dir_all(&day).unwrap();
+    let path = day.join("id.md");
+    fs::write(&path, "").unwrap();
+
+    delete_empty_entry(dir.path(), &path).unwrap();
+
+    assert!(!path.exists());
+    assert!(!day.exists());
+    assert!(!dir.path().join("work").join("2026").join("07").exists());
+    assert!(!dir.path().join("work").join("2026").exists());
+    assert!(dir.path().join("work").exists());
+}
+
+#[test]
 fn delete_relocates_entry_asset_folder_to_trash() {
     let dir = tempdir().unwrap();
     let day = dir.path().join("work").join("2026").join("07").join("01");
