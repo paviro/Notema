@@ -190,4 +190,4 @@ workspace = true
 # base styling layer. Upstream keeps these pub(crate); drop this patch if/when they
 # land in a release.
 [patch.crates-io]
-ratatui-textarea = { git = "https://github.com/paviro/ratatui-textarea", rev = "e2872ed3476cf571a736803ff418e5b555a538ec" }
+ratatui-textarea = { git = "https://github.com/paviro/ratatui-textarea", rev = "fc041da" }
