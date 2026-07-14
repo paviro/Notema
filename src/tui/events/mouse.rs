@@ -14,7 +14,7 @@ use crate::tui::{
 };
 
 use super::DispatchOutcome;
-use super::action::{Action, InsightsAction, ReaderAction};
+use super::action::{Action, InsightsAction};
 use super::actions::view_selected;
 
 fn editor_mouse_action(app: &App, mouse: MouseEvent) -> Option<Action> {
@@ -79,17 +79,11 @@ fn editor_prompt_mouse_action(app: &App, mouse: MouseEvent, area: Rect) -> Optio
             }
             _ => None,
         },
-        EditorPrompt::Help { scroll } => match mouse.kind {
+        // The shortcut sheet is a reference: any click dismisses it.
+        EditorPrompt::Help { .. } => match mouse.kind {
             MouseEventKind::ScrollDown => Some(Action::EditorScrollHelp(1)),
             MouseEventKind::ScrollUp => Some(Action::EditorScrollHelp(-1)),
-            MouseEventKind::Down(MouseButton::Left) => {
-                if render::editor_shortcut_close_at_point(area, *scroll, mouse.column, mouse.row) {
-                    return Some(Action::EditorClosePrompt);
-                }
-                let id =
-                    render::editor_shortcut_hint_at_point(area, *scroll, mouse.column, mouse.row)?;
-                hint_id_to_action(app, id)
-            }
+            MouseEventKind::Down(MouseButton::Left) => Some(Action::EditorClosePrompt),
             _ => None,
         },
     }
@@ -901,13 +895,9 @@ fn editor_prompt_hover_target(app: &App, col: u16, row: u16, area: Rect) -> Hove
 
 // ── Footer click ──────────────────────────────────────────────────────────────
 
-/// The footer hint under `(col, row)`, in whichever footer form is showing.
+/// The footer hint under `(col, row)`.
 fn footer_hint_at(app: &App, footer: Rect, col: u16, row: u16) -> Option<render::HintId> {
-    if app.reader_is_fullscreen(footer.width) {
-        render::expanded_footer_hint_id_at_point(app, footer.x, footer.y, footer.width, col, row)
-    } else {
-        render::footer_hint_id_at_point(app, footer.x, footer.y, footer.width, col, row)
-    }
+    render::footer_hint_id_at_point(app, footer.x, footer.y, footer.width, col, row)
 }
 
 fn footer_click_to_action(app: &App, mouse: MouseEvent, footer: Rect) -> Option<Action> {
@@ -916,7 +906,7 @@ fn footer_click_to_action(app: &App, mouse: MouseEvent, footer: Rect) -> Option<
 
 fn footer_area(app: &App, area: Rect) -> Rect {
     if app.reader_is_fullscreen(area.width) {
-        let height = render::expanded_footer_height(app, area.width).min(area.height);
+        let height = render::footer_height(app, area.width).min(area.height);
         return Rect {
             x: area.x,
             y: area.y + area.height.saturating_sub(height),
@@ -1092,6 +1082,11 @@ fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Ac
         return match render::settings_menu_choice_at_point(area, col, row)? {
             render::SettingsChoice::Theme => Some(Action::OpenThemePicker),
         };
+    }
+
+    // The help cheatsheet is a reference: any click dismisses it.
+    if matches!(app.overlay, Overlay::Help { .. }) {
+        return Some(Action::CancelOverlay);
     }
 
     if let Some(state) = app.theme_picker_state() {
@@ -1274,6 +1269,11 @@ fn handle_overlay_drag(app: &mut App, mouse: MouseEvent, area: Rect) {
 }
 
 fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16) {
+    if let Overlay::Help { scroll } = &mut app.overlay {
+        *scroll = scroll.saturating_add_signed(delta);
+        return;
+    }
+
     if app.edit_metadata_state().is_some() {
         let filtered_len = app.edit_metadata_state().map_or(0, |s| s.filtered.len());
         let layout = render::metadata_dialog_layout(area, filtered_len);
@@ -1356,23 +1356,9 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::EditSelected if app.can_act_on_selected_entry() => {
             Some(Action::EditSelected)
         }
-        render::HintId::ViewSelected if app.has_selected_entry_target() => {
-            Some(Action::ViewSelected)
-        }
         render::HintId::BeginDelete if app.has_selected_entry_target() => Some(Action::BeginDelete),
         render::HintId::ExitSearch => Some(Action::ExitSearch),
         render::HintId::CancelOverlay => Some(Action::CancelOverlay),
-        // In multi-column full screen the flag is set, so collapse back to the pane;
-        // otherwise (single-column) exit the viewer to the entries list.
-        render::HintId::CloseReader => Some(if app.nav.reader_fullscreen {
-            Action::Reader(ReaderAction::SetFullscreen(false))
-        } else {
-            Action::FocusLeft
-        }),
-        // The focused-viewer "enter" chip expands to full screen, matching the key.
-        render::HintId::ExpandReader if app.nav.focus == Focus::Reader => {
-            Some(Action::Reader(ReaderAction::SetFullscreen(true)))
-        }
         render::HintId::MetadataToggle
             if app
                 .edit_metadata_state()
@@ -1401,17 +1387,33 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::OpenImageViewer if app.selected_entry_image_count() > 0 => {
             Some(Action::OpenImageViewer(0))
         }
-        render::HintId::OpenMetadataMenu if app.can_act_on_selected_entry() => {
-            Some(Action::OpenMetadataMenu)
+        // The per-type metadata chips (and star) open their editor for the
+        // selected entry, the same as the bare keys.
+        render::HintId::EditTags if app.can_act_on_selected_entry() => {
+            Some(Action::BeginEditMetadata(MetadataKind::Tags))
         }
-        render::HintId::OpenSettings => Some(Action::OpenSettingsMenu),
+        render::HintId::EditPeople if app.can_act_on_selected_entry() => {
+            Some(Action::BeginEditMetadata(MetadataKind::People))
+        }
+        render::HintId::EditActivities if app.can_act_on_selected_entry() => {
+            Some(Action::BeginEditMetadata(MetadataKind::Activities))
+        }
+        render::HintId::EditFeelings if app.can_act_on_selected_entry() => {
+            Some(Action::BeginEditFeelings)
+        }
+        render::HintId::EditMood if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
+        render::HintId::EditLocation if app.can_act_on_selected_entry() => {
+            Some(Action::BeginEditLocation)
+        }
+        render::HintId::ToggleStarred if app.can_act_on_selected_entry() => {
+            Some(Action::ToggleStarred)
+        }
         render::HintId::ThemePickerApply => Some(Action::ThemePickerConfirm),
         render::HintId::ThemePickerRevert => Some(Action::ThemePickerCancel),
         render::HintId::ThemePickerChrome => Some(Action::ThemePickerCycleChrome),
         render::HintId::ThemePickerMode => Some(Action::ThemePickerCycleMode),
         render::HintId::ThemePickerScope => Some(Action::ThemePickerToggleScope),
-        render::HintId::HintsToggle => Some(Action::ToggleHints),
-        render::HintId::ToggleJournals => Some(Action::ToggleJournals),
+        render::HintId::Help => Some(Action::OpenHelp),
         // Clicking the scope hint toggles it, only while the insights panel is focused.
         render::HintId::InsightsScope if app.insights_panel_focused() => {
             Some(Action::Insights(InsightsAction::ToggleScope))

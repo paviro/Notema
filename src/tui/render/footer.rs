@@ -20,13 +20,10 @@ pub(crate) enum HintId {
     BeginSearch,
     Quit,
     EditSelected,
-    ViewSelected,
     BeginDelete,
     ToggleStarred,
     ExitSearch,
     CancelOverlay,
-    CloseReader,
-    ExpandReader,
     MetadataToggle,
     MetadataSwitchFocus,
     MetadataAddFromInput,
@@ -47,15 +44,20 @@ pub(crate) enum HintId {
     LocationSave,
     LocationClear,
     OpenImageViewer,
-    OpenMetadataMenu,
-    OpenSettings,
+    // The per-type metadata editors, each a direct footer chip (and mouse button)
+    // for the selected entry.
+    EditTags,
+    EditPeople,
+    EditActivities,
+    EditFeelings,
+    EditMood,
+    EditLocation,
     ThemePickerApply,
     ThemePickerRevert,
     ThemePickerChrome,
     ThemePickerMode,
     ThemePickerScope,
-    HintsToggle,
-    ToggleJournals,
+    Help,
     InsightsScope,
     InsightsTimeframe,
     ExpandInsights,
@@ -389,72 +391,6 @@ pub(crate) fn footer_hint_id_at_point(
 }
 
 /// The expanded footer's justified rows joined by newlines, for tests.
-#[cfg(test)]
-pub(crate) fn expanded_footer_text(app: &App, width: u16) -> String {
-    if app.editor.is_some() {
-        return editor_footer_line()
-            .rendered_lines(width)
-            .iter()
-            .map(|row| row.text.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
-    }
-    rendered_hint_lines(&expanded_footer_hints(app), width.saturating_sub(1))
-        .iter()
-        .map(|row| row.text.clone())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub(crate) fn expanded_footer_lines(app: &App, width: u16) -> Text<'static> {
-    let hovered = app.hovered_footer_hint();
-    if !app.state.ui.show_hints {
-        return Text::default();
-    }
-    if app.editor.is_some() {
-        return Text::from(editor_footer_line().lines(width, hovered));
-    }
-    Text::from(hint_lines(
-        &expanded_footer_hints(app),
-        width.saturating_sub(1),
-        hovered,
-    ))
-}
-
-pub(crate) fn expanded_footer_height(app: &App, width: u16) -> u16 {
-    if !app.state.ui.show_hints {
-        return 0;
-    }
-    if app.editor.is_some() {
-        return editor_footer_line().height(width);
-    }
-    hint_height(&expanded_footer_hints(app), width.saturating_sub(1))
-}
-
-pub(crate) fn expanded_footer_hint_id_at_point(
-    app: &App,
-    origin_x: u16,
-    origin_y: u16,
-    width: u16,
-    col: u16,
-    row: u16,
-) -> Option<HintId> {
-    if !app.state.ui.show_hints {
-        return None;
-    }
-    if app.editor.is_some() {
-        return editor_footer_line().hint_id_at_point(origin_x, origin_y, width, col, row);
-    }
-    hint_id_at_wrapped(
-        &expanded_footer_hints(app),
-        origin_x.saturating_add(1),
-        origin_y,
-        width.saturating_sub(1),
-        col,
-        row,
-    )
-}
-
 #[derive(Debug, Clone)]
 struct HintLine {
     hints: Vec<Hint>,
@@ -496,7 +432,7 @@ fn search_footer_line(app: &App) -> HintLine {
     // `draw_entry_list`), so the footer only carries the action hints.
     let hints = match app.nav.focus {
         Focus::Reader if app.has_selected_entry_target() => {
-            let mut hints = selected_entry_action_hints(Some(EXPAND_ENTER_HINT));
+            let mut hints = selected_entry_action_hints();
             hints.extend(image_hint(app));
             hints.push(Hint::new("exit search", "esc", HintId::ExitSearch));
             hints.push(Hint::new("quit", "q", HintId::Quit));
@@ -506,14 +442,7 @@ fn search_footer_line(app: &App) -> HintLine {
             Hint::new("exit search", "esc", HintId::ExitSearch),
             Hint::new("quit", "q", HintId::Quit),
         ],
-        _ => {
-            let mut hints = Vec::new();
-            if app.has_selected_entry_target() {
-                hints.push(Hint::new("view", "enter", HintId::ViewSelected));
-            }
-            hints.push(Hint::new("exit search", "esc", HintId::ExitSearch));
-            hints
-        }
+        _ => vec![Hint::new("exit search", "esc", HintId::ExitSearch)],
     };
 
     HintLine { hints }
@@ -524,57 +453,30 @@ fn browse_footer_line(app: &App) -> HintLine {
         Focus::Journals => {
             let mut hints = vec![Hint::new("new journal", "n", HintId::NewJournal)];
             hints.extend(archive_hint(app));
-            hints.push(Hint::new("search", "/", HintId::BeginSearch));
-            hints.push(journals_hint(app));
-            hints.push(SETTINGS_HINT);
-            hints.push(Hint::new("hints", "h", HintId::HintsToggle));
-            hints.push(Hint::new("quit", "q", HintId::Quit));
+            hints.extend(browse_footer_tail());
             hints
         }
         Focus::Insights => {
             let mut hints = vec![Hint::new("scope", "g", HintId::InsightsScope)];
             if app.nav.insights_tab.uses_timeframe() {
-                hints.push(Hint::new("window", "w", HintId::InsightsTimeframe));
+                hints.push(Hint::new("timeframe", "w", HintId::InsightsTimeframe));
             }
             if app.nav.insights_fullscreen {
                 hints.push(Hint::new("close", "enter/esc", HintId::CloseInsights));
             } else {
                 hints.push(Hint::new("expand", "enter", HintId::ExpandInsights));
             }
-            hints.push(Hint::new("search", "/", HintId::BeginSearch));
-            hints.push(journals_hint(app));
-            hints.push(SETTINGS_HINT);
-            hints.push(Hint::new("hints", "h", HintId::HintsToggle));
-            hints.push(Hint::new("quit", "q", HintId::Quit));
+            hints.extend(help_quit_tail());
             hints
         }
+        Focus::Entries if app.has_selected_entry_target() => focused_entry_footer(app),
         Focus::Entries => {
             let mut hints = vec![Hint::new("new entry", "n", HintId::NewEntry)];
-            if app.has_selected_entry_target() {
-                hints.extend(selected_entry_action_hints(Some(VIEW_ENTER_HINT)));
-            }
-            // The image viewer opens only from a focused entry view, so no
-            // `images` hint here.
-            hints.push(Hint::new("search", "/", HintId::BeginSearch));
-            hints.push(journals_hint(app));
-            hints.push(SETTINGS_HINT);
-            hints.push(Hint::new("hints", "h", HintId::HintsToggle));
-            hints.push(Hint::new("quit", "q", HintId::Quit));
+            hints.extend(browse_footer_tail());
             hints
         }
-        Focus::Reader => {
-            let mut hints = vec![Hint::new("new entry", "n", HintId::NewEntry)];
-            if app.has_selected_entry_target() {
-                hints.extend(selected_entry_action_hints(Some(EXPAND_ENTER_HINT)));
-            }
-            hints.extend(image_hint(app));
-            hints.push(Hint::new("search", "/", HintId::BeginSearch));
-            hints.push(journals_hint(app));
-            hints.push(SETTINGS_HINT);
-            hints.push(Hint::new("hints", "h", HintId::HintsToggle));
-            hints.push(Hint::new("quit", "q", HintId::Quit));
-            hints
-        }
+        Focus::Reader if app.has_selected_entry_target() => focused_entry_footer(app),
+        Focus::Reader => vec![Hint::new("new entry", "n", HintId::NewEntry)],
     };
 
     HintLine { hints }
@@ -587,6 +489,29 @@ fn image_hint(app: &App) -> Option<Hint> {
         "i",
         HintId::OpenImageViewer,
     ))
+}
+
+/// The cheatsheet pointer (`?`). The full binding set — the journals/settings/hints
+/// toggles and the bare metadata keys — lives behind it.
+const HELP_HINT: Hint = Hint::new("help", "?", HintId::Help);
+
+/// The quit chip, shared by the footer tails.
+const QUIT_HINT: Hint = Hint::new("quit", "q", HintId::Quit);
+
+/// Trailing hints for the columns where search has a clear scope — journals (all)
+/// and entries (this journal): search, the `?` cheatsheet, and quit.
+fn browse_footer_tail() -> [Hint; 3] {
+    [
+        Hint::new("search", "/", HintId::BeginSearch),
+        HELP_HINT,
+        QUIT_HINT,
+    ]
+}
+
+/// Trailing hints without search, for the insights column: the `?` cheatsheet
+/// and quit.
+fn help_quit_tail() -> [Hint; 2] {
+    [HELP_HINT, QUIT_HINT]
 }
 
 /// The `archive`/`unarchive (a)` hint, shown only when a journal is selected. The
@@ -602,66 +527,28 @@ fn archive_hint(app: &App) -> Option<Hint> {
     })
 }
 
-/// The `settings (,)` hint, shown in every Browse-mode footer.
-const SETTINGS_HINT: Hint = Hint::new("settings", ",", HintId::OpenSettings);
-
-fn journals_hint(app: &App) -> Hint {
-    let label = if app.state.ui.show_journals {
-        "hide journals"
-    } else {
-        "journals"
-    };
-    Hint::new(label, "j", HintId::ToggleJournals)
+/// The action hints for a selected entry: edit, the per-type metadata editors,
+/// star, and delete. Each chip is also the only pointer path to its action.
+fn selected_entry_action_hints() -> Vec<Hint> {
+    vec![
+        Hint::new("edit", "e", HintId::EditSelected),
+        Hint::new("tags", "t", HintId::EditTags),
+        Hint::new("people", "p", HintId::EditPeople),
+        Hint::new("activities", "a", HintId::EditActivities),
+        Hint::new("feelings", "f", HintId::EditFeelings),
+        Hint::new("mood", "m", HintId::EditMood),
+        Hint::new("location", "l", HintId::EditLocation),
+        Hint::new("star", "s", HintId::ToggleStarred),
+        Hint::new("del", "d", HintId::BeginDelete),
+    ]
 }
 
-/// The edit/enter/del/metadata action hints for a selected entry. `enter` is the
-/// hint for the Enter key, which differs by focus: in the list it views the entry,
-/// in the focused viewer it expands to full screen. `None` omits it.
-fn selected_entry_action_hints(enter: Option<Hint>) -> Vec<Hint> {
-    let mut hints = vec![Hint::new("edit", "e", HintId::EditSelected)];
-    hints.extend(enter);
-    hints.push(Hint::new("del", "d", HintId::BeginDelete));
-    hints.push(Hint::new("metadata", "ctrl+g", HintId::OpenMetadataMenu));
-    hints
-}
-
-/// Enter views the entry from the list.
-const VIEW_ENTER_HINT: Hint = Hint::new("view", "enter", HintId::ViewSelected);
-
-/// Enter expands the entry from the focused (multi-column) viewer.
-const EXPAND_ENTER_HINT: Hint = Hint::new("expand", "enter", HintId::ExpandReader);
-
-/// The `close` hint for the full-screen viewer. Enter and Esc always close it; in
-/// multi-column full screen Left is inert, while single-column also exits on Left.
-fn close_reader_hint(app: &App) -> Hint {
-    let keys = if app.nav.reader_fullscreen {
-        "enter/esc"
-    } else {
-        "enter/esc/←"
-    };
-    Hint::new("close", keys, HintId::CloseReader)
-}
-
-fn expanded_footer_hints(app: &App) -> Vec<Hint> {
-    let mut hints = Vec::new();
-    if app.nav.mode == Mode::Browse {
-        hints.push(Hint::new("new entry", "n", HintId::NewEntry));
-    }
-    if app.has_selected_entry_target() {
-        hints.push(Hint::new("edit", "e", HintId::EditSelected));
-        hints.push(close_reader_hint(app));
-        hints.push(Hint::new("del", "d", HintId::BeginDelete));
-        hints.push(Hint::new("metadata", "ctrl+g", HintId::OpenMetadataMenu));
-        hints.push(Hint::new("star", "s", HintId::ToggleStarred));
-        hints.extend(image_hint(app));
-    } else {
-        hints.push(close_reader_hint(app));
-    }
-    if app.nav.mode == Mode::Browse {
-        hints.push(Hint::new("search", "/", HintId::BeginSearch));
-    }
-    hints.push(Hint::new("hints", "h", HintId::HintsToggle));
-    hints.push(Hint::new("quit", "q", HintId::Quit));
+/// The footer for a selected entry — new-entry, the entry actions, and the image
+/// chip when the entry has images. Shared by the entries list and the reader.
+fn focused_entry_footer(app: &App) -> Vec<Hint> {
+    let mut hints = vec![Hint::new("new entry", "n", HintId::NewEntry)];
+    hints.extend(selected_entry_action_hints());
+    hints.extend(image_hint(app));
     hints
 }
 

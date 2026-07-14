@@ -62,14 +62,10 @@ use dialogs::{
 use editor::draw_entry_editor;
 use entries::draw_entry_list;
 pub(crate) use footer::{
-    Hint, HintId, expanded_footer_height, expanded_footer_hint_id_at_point, expanded_footer_lines,
-    footer_hint_id_at_point, footer_lines, hint_id_at_wrapped,
+    Hint, HintId, footer_height, footer_hint_id_at_point, footer_lines, hint_id_at_wrapped,
 };
 #[cfg(test)]
-pub(crate) use footer::{
-    expanded_footer_text, footer_height, footer_hint_id_at, footer_text, hint_grid_text,
-    hint_height,
-};
+pub(crate) use footer::{footer_hint_id_at, footer_text, hint_grid_text, hint_height};
 pub(crate) use frames::{
     confirm_button_at, draw_editor_discard_confirm, draw_modal_frame,
     editor_discard_choice_at_point,
@@ -84,9 +80,8 @@ pub(crate) use journals::{journal_list_rect, journal_row_height};
 pub(crate) use layout::{TuiLayout, tui_layout};
 pub(crate) use menus::{
     MetadataChoice, MetadataMenuMode, SettingsChoice, draw_editor_shortcuts, draw_metadata_menu,
-    editor_shortcut_close_at_point, editor_shortcut_hint_at_point, metadata_menu_choice_at_point,
-    metadata_menu_close_at_point, metadata_menu_row_at_point, settings_menu_choice_at_point,
-    settings_menu_close_at_point, settings_menu_row_at_point,
+    metadata_menu_choice_at_point, metadata_menu_close_at_point, metadata_menu_row_at_point,
+    settings_menu_choice_at_point, settings_menu_close_at_point, settings_menu_row_at_point,
 };
 pub(crate) use pending::{
     AccessNotice, draw_disable_notice, draw_pending_notice, draw_pending_request,
@@ -135,7 +130,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
     app.insights_scroll = InsightsScrollGeometry::default();
 
     if app.reader_is_fullscreen(area.width) {
-        let footer_height = expanded_footer_height(app, area.width).min(area.height);
+        let footer_height = footer_height(app, area.width).min(area.height);
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(footer_height)])
@@ -156,14 +151,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut App) {
         frame
             .buffer_mut()
             .set_style(footer_area, chrome::footer_style());
-        let footer_text_area = ratatui::layout::Rect {
-            x: footer_area.x.saturating_add(1),
-            width: footer_area.width.saturating_sub(1),
-            ..footer_area
-        };
         frame.render_widget(
-            Paragraph::new(expanded_footer_lines(app, footer_area.width)),
-            footer_text_area,
+            Paragraph::new(footer_lines(app, footer_area.width)),
+            footer_area,
         );
         draw_overlays(frame, app);
         draw_toasts(frame, app);
@@ -233,6 +223,10 @@ fn draw_overlays(frame: &mut Frame<'_>, app: &mut App) {
 
     if matches!(app.overlay, crate::tui::state::Overlay::SettingsMenu) {
         menus::draw_settings_menu(frame, hovered_dialog_row);
+    }
+
+    if let crate::tui::state::Overlay::Help { scroll } = &mut app.overlay {
+        menus::draw_help(frame, scroll);
     }
 
     if let Some(state) = app.theme_picker_state_mut() {

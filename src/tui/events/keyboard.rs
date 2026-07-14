@@ -1,3 +1,21 @@
+//! Keyboard dispatch: translate a keystroke into an [`Action`] for the current
+//! context (mode, focus, overlay, open editor).
+//!
+//! Key-selection rule, so new bindings stay consistent: a command needs a
+//! modifier **only when a text field is competing for the same keystroke** in
+//! that context. The two families that follow from it:
+//!
+//! - Command surfaces (browse list, reader, insights, list-focused dialogs) take
+//!   no free text, so bare single letters are the actions (`e` edit, `d` delete,
+//!   `t`/`p`/`a`/`f`/`m`/`l` metadata, `q` quit, `/` search, `?` help…).
+//! - Text fields (the internal editor, the search box, dialog inputs) let bare
+//!   keys type, so their commands take a modifier (`Ctrl+S`, `Ctrl+G`) or a
+//!   non-text key (`Esc`, `Enter`, `Tab`).
+//!
+//! When a binding must span both families (the metadata menu is `Ctrl+G` in the
+//! editor and browse alike) it keeps the modifier form everywhere for one muscle
+//! memory, even where a bare key would be free.
+
 use crate::AppResult;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -101,10 +119,27 @@ fn handle_editor_key(
         KeyCode::Char('s') if ctrl => {
             return super::dispatch_action(terminal, app, Action::EditorSave);
         }
-        // Ctrl+A selects all, shadowing the textarea's emacs-style line-start
-        // (Home still covers that).
+        // The editor is a text field, so commands take a modifier (bare letters
+        // type). Ctrl+A select-all, Ctrl+Z/Y undo/redo, Ctrl+X/C/V cut/copy/paste;
+        // Ctrl+K and Ctrl+W (cut-to-line-end, delete-word) fall through to the
+        // textarea. Home covers line-start; Esc discards.
         KeyCode::Char('a') if ctrl => {
             return super::dispatch_action(terminal, app, Action::EditorSelectAll);
+        }
+        KeyCode::Char('z') if ctrl => {
+            return super::dispatch_action(terminal, app, Action::EditorUndo);
+        }
+        KeyCode::Char('y') if ctrl => {
+            return super::dispatch_action(terminal, app, Action::EditorRedo);
+        }
+        KeyCode::Char('x') if ctrl => {
+            return super::dispatch_action(terminal, app, Action::EditorCut);
+        }
+        KeyCode::Char('c') if ctrl => {
+            return super::dispatch_action(terminal, app, Action::EditorCopy);
+        }
+        KeyCode::Char('v') if ctrl => {
+            return super::dispatch_action(terminal, app, Action::EditorPaste);
         }
         // Fullscreen is on Ctrl+O, not Ctrl+F: the textarea binds Ctrl+F to
         // forward-char (emacs), which we leave to it.
@@ -142,6 +177,7 @@ pub(super) fn key_to_action(app: &App, key: KeyEvent, reader_available: bool) ->
         Overlay::None => browse_key_to_action(app, key, reader_available),
         Overlay::MetadataMenu => metadata_menu_key_to_action(key),
         Overlay::SettingsMenu => settings_menu_key_to_action(key),
+        Overlay::Help { .. } => help_key_to_action(key),
         Overlay::ThemePicker(_) => theme_picker_key_to_action(key),
         Overlay::ConfirmDelete(_, selected) => confirm_delete_key_to_action(key, *selected),
         Overlay::NewJournal(_) => new_journal_key_to_action(key),
@@ -176,6 +212,20 @@ fn metadata_menu_key_to_action(key: KeyEvent) -> Option<Action> {
 fn settings_menu_key_to_action(key: KeyEvent) -> Option<Action> {
     Some(match key.code {
         KeyCode::Char('t') | KeyCode::Enter => Action::OpenThemePicker,
+        _ => Action::CancelOverlay,
+    })
+}
+
+/// Keys while the global help cheatsheet is open: the arrow/page/home/end keys
+/// scroll it, and anything else closes it — it is a reference, not interactive.
+fn help_key_to_action(key: KeyEvent) -> Option<Action> {
+    Some(match key.code {
+        KeyCode::Up => Action::HelpScroll(-1),
+        KeyCode::Down => Action::HelpScroll(1),
+        KeyCode::PageUp => Action::HelpScroll(-10),
+        KeyCode::PageDown => Action::HelpScroll(10),
+        KeyCode::Home => Action::HelpScroll(i16::MIN),
+        KeyCode::End => Action::HelpScroll(i16::MAX),
         _ => Action::CancelOverlay,
     })
 }
@@ -253,7 +303,11 @@ fn browse_key_to_action(app: &App, key: KeyEvent, reader_available: bool) -> Opt
     match key.code {
         KeyCode::Char('q') => Some(Action::Quit),
         KeyCode::Char('r') => Some(Action::RefreshLibrary),
-        KeyCode::Char('/') => Some(Action::BeginSearch),
+        // Search where its scope is clear: the journals column (all) and the
+        // entries column (this journal).
+        KeyCode::Char('/') if matches!(app.nav.focus, Focus::Journals | Focus::Entries) => {
+            Some(Action::BeginSearch)
+        }
         // Left backs out one level, but does nothing in multi-column full screen —
         // there, Esc collapses back to the focused reader pane instead.
         KeyCode::Left
@@ -348,14 +402,17 @@ fn browse_key_to_action(app: &App, key: KeyEvent, reader_available: bool) -> Opt
         KeyCode::Char('m') if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
         KeyCode::Char('l') if app.can_act_on_selected_entry() => Some(Action::BeginEditLocation),
         KeyCode::Char('s') if app.can_act_on_selected_entry() => Some(Action::ToggleStarred),
+        // Images open from the reader or the entries list.
         KeyCode::Char('i' | '0'..='9')
-            if app.nav.focus == Focus::Reader && app.has_selected_entry_target() =>
+            if matches!(app.nav.focus, Focus::Reader | Focus::Entries)
+                && app.has_selected_entry_target() =>
         {
             image_shortcut(app, key)
         }
         KeyCode::Char('h') => Some(Action::ToggleHints),
         KeyCode::Char('j') => Some(Action::ToggleJournals),
         KeyCode::Char(',') => Some(Action::OpenSettingsMenu),
+        KeyCode::Char('?') => Some(Action::OpenHelp),
         _ => None,
     }
 }
@@ -412,6 +469,8 @@ fn search_key_to_action(app: &App, key: KeyEvent, reader_available: bool) -> Opt
         }
         KeyCode::Esc => Some(Action::ExitSearch),
         KeyCode::Char('q') if app.nav.focus != Focus::Entries => Some(Action::Quit),
+        // `?` opens the cheatsheet from the panes, but types into the search field.
+        KeyCode::Char('?') if app.nav.focus != Focus::Entries => Some(Action::OpenHelp),
         // Left backs the viewer out to the results list, but is inert in multi-column
         // full screen (Esc collapses that).
         KeyCode::Left

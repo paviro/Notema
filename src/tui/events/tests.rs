@@ -78,6 +78,37 @@ fn browse_r_maps_to_manual_library_refresh() {
 }
 
 #[test]
+fn search_key_only_fires_where_its_scope_is_clear() {
+    let mut app = app_with_entries(1);
+
+    app.nav.focus = Focus::Journals;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('/')), true),
+        Some(Action::BeginSearch)
+    );
+
+    app.nav.focus = Focus::Entries;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('/')), true),
+        Some(Action::BeginSearch)
+    );
+
+    // The reader and insights columns have no obvious search target, so `/` is
+    // inert there.
+    app.nav.focus = Focus::Reader;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('/')), true),
+        None
+    );
+
+    app.nav.focus = Focus::Insights;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('/')), true),
+        None
+    );
+}
+
+#[test]
 fn enter_on_journals_moves_to_entries_like_right_arrow() {
     let dir = tempdir().unwrap();
     fs::create_dir_all(dir.path().join("work")).unwrap();
@@ -516,8 +547,20 @@ fn typed_hint_ids_route_to_actions_without_string_parsing() {
     app.nav.focus = Focus::Entries;
 
     assert_eq!(
-        mouse::hint_id_to_action(&app, render::HintId::OpenMetadataMenu),
-        Some(Action::OpenMetadataMenu)
+        mouse::hint_id_to_action(&app, render::HintId::EditTags),
+        Some(Action::BeginEditMetadata(
+            crate::tui::state::MetadataKind::Tags
+        ))
+    );
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::EditPeople),
+        Some(Action::BeginEditMetadata(
+            crate::tui::state::MetadataKind::People
+        ))
+    );
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::ToggleStarred),
+        Some(Action::ToggleStarred)
     );
     assert_eq!(
         mouse::hint_id_to_action(&app, render::HintId::EditSelected),
@@ -1356,6 +1399,76 @@ fn comma_opens_settings_in_browse_but_not_over_dialogs() {
     );
 }
 
+// ── Help cheatsheet ──────────────────────────────────────────────────────────
+
+#[test]
+fn question_mark_opens_help_from_browse_and_search_panes() {
+    let mut app = app_with_entries(1);
+    app.nav.focus = Focus::Entries;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('?')), true),
+        Some(Action::OpenHelp)
+    );
+
+    // In search, `?` opens the cheatsheet from a result view but types into the
+    // search field.
+    app.begin_search();
+    app.nav.focus = Focus::Reader;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('?')), true),
+        Some(Action::OpenHelp)
+    );
+    app.nav.focus = Focus::Entries;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('?')), true),
+        Some(Action::InputKey(key(KeyCode::Char('?'))))
+    );
+}
+
+#[test]
+fn help_overlay_scrolls_on_arrows_and_closes_on_any_other_key() {
+    let mut app = app_with_entries(1);
+    app.open_help();
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Down), true),
+        Some(Action::HelpScroll(1))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::PageUp), true),
+        Some(Action::HelpScroll(-10))
+    );
+    // A quit key does not quit while the reference is up — it dismisses it.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('q')), true),
+        Some(Action::CancelOverlay)
+    );
+}
+
+#[test]
+fn help_hint_click_opens_the_cheatsheet() {
+    let app = app_with_entries(1);
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::Help),
+        Some(Action::OpenHelp)
+    );
+}
+
+#[test]
+fn wheel_over_help_scrolls_it_without_closing() {
+    let mut app = app_with_entries(1);
+    app.open_help();
+
+    mouse_in_area(&mut app, mouse(MouseEventKind::ScrollDown, 5, 5), 80, 20);
+
+    // The wheel bumps the reference's scroll and the overlay stays open — the
+    // early-return keeps the event off the panes behind it.
+    match app.overlay {
+        crate::tui::state::Overlay::Help { scroll } => assert_eq!(scroll, 1),
+        _ => panic!("help overlay closed on wheel"),
+    }
+}
+
 #[test]
 fn settings_menu_routes_enter_and_t_to_the_theme_picker() {
     let mut app = app_with_journals(&["work"]);
@@ -1406,10 +1519,6 @@ fn theme_picker_keys_route_to_dedicated_actions() {
     assert_eq!(
         mouse::hint_id_to_action(&app, render::HintId::ThemePickerRevert),
         Some(Action::ThemePickerCancel)
-    );
-    assert_eq!(
-        mouse::hint_id_to_action(&app, render::HintId::OpenSettings),
-        Some(Action::OpenSettingsMenu)
     );
 }
 

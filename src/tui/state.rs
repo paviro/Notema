@@ -617,6 +617,11 @@ pub(crate) enum Overlay {
     /// The settings menu: a small chooser whose rows open the settings dialogs
     /// (currently just the theme picker).
     SettingsMenu,
+    /// The global keyboard-shortcut cheatsheet, scrolled to `scroll`. Opened with
+    /// `?` from browse or a search result; a reference only, so any key closes it.
+    Help {
+        scroll: u16,
+    },
     /// The theme picker list, live-previewing the highlighted theme. Boxed: it
     /// carries a full `Theme` snapshot, far larger than the small variants.
     ThemePicker(Box<ThemePickerState>),

@@ -389,7 +389,7 @@ fn reader_wraps_long_location_hanging_under_its_glyph() {
     app.select_journal_by_name("work");
     app.nav.focus = Focus::Reader;
 
-    let reader = Rect::new(0, 0, 24, 60 - expanded_footer_height(&app, 24));
+    let reader = Rect::new(0, 0, 24, 60 - footer_height(&app, 24));
     let environment = crate::tui::env_strip::environment_items(
         Some("Grand Central Station Cafe"),
         None,
@@ -488,7 +488,7 @@ fn reader_wraps_metadata_rows_without_leading_space_or_separator() {
         "focused".to_string(),
         "tired".to_string(),
     ];
-    let reader = Rect::new(0, 0, 24, 60 - expanded_footer_height(&app, 24));
+    let reader = Rect::new(0, 0, 24, 60 - footer_height(&app, 24));
     let values = metadata_values(&tags, &feelings, None);
     let metadata = crate::tui::surface::entry_metadata_layout(reader, values);
     let chips = metadata.chips.unwrap();
@@ -1731,51 +1731,58 @@ fn entries_footer_includes_entry_actions_when_an_entry_is_selected() {
 
     let text = footer_text(&app, 200);
 
-    assert!(text.contains("enter  view"));
+    // The direct entry-action chips are present; view is gone (clicking the row
+    // already opens it).
     assert!(text.contains("e  edit"));
+    assert!(text.contains("t  tags"));
+    assert!(text.contains("p  people"));
+    assert!(text.contains("s  star"));
     assert!(text.contains("d  del"));
+    assert!(!text.contains("enter  view"));
+    // With an entry selected the footer matches the reader: no global tail.
+    assert!(!text.contains("/  search"));
+    assert!(!text.contains("?  help"));
+    assert!(!text.contains("q  quit"));
+
+    // The empty entries list keeps the tail — it has no entry actions to show.
+    app.nav.selected_entry_index = None;
+    let empty = footer_text(&app, 200);
+    assert!(empty.contains("/  search"));
+    assert!(empty.contains("?  help"));
+    assert!(empty.contains("q  quit"));
 }
 
 #[test]
-fn expanded_entry_footer_includes_inline_entry_actions() {
+fn entries_and_reader_share_one_footer_for_a_selected_entry() {
+    let mut app = app_with_entry();
+
+    app.nav.focus = Focus::Entries;
+    let entries = footer_text(&app, 200);
+    app.nav.focus = Focus::Reader;
+    let reader = footer_text(&app, 200);
+
+    // Both render `focused_entry_footer`, so the text is byte-for-byte identical
+    // (image chip included) — the two footers cannot drift.
+    assert_eq!(entries, reader);
+}
+
+#[test]
+fn reader_footer_drops_the_close_chip_and_global_tail() {
     let mut app = app_with_entry();
     app.nav.focus = Focus::Reader;
 
-    let inline_text = footer_text(&app, 200);
-    let expanded_text = expanded_footer_text(&app, 200);
+    // The full-screen reader renders this exact footer (via `footer_lines`), so it
+    // matches the inline reader by construction — no separate expanded footer.
+    let text = footer_text(&app, 200);
 
-    for label in [
-        "n  new entry",
-        "e  edit",
-        "d  del",
-        "ctrl+g  metadata",
-        "/  search",
-        "q  quit",
-    ] {
-        assert!(inline_text.contains(label));
-        assert!(expanded_text.contains(label));
+    for label in ["e  edit", "t  tags", "s  star", "d  del"] {
+        assert!(text.contains(label), "missing {label}");
     }
-    // The per-field metadata shortcuts are folded into the metadata popup, so no
-    // longer appear as their own footer chips in either form.
-    for label in [
-        "t  tags",
-        "p  ppl",
-        "a  act",
-        "f  feel",
-        "m  mood",
-        "l  location",
-    ] {
-        assert!(!inline_text.contains(label));
-        assert!(!expanded_text.contains(label));
+    // No close chip, no global tail. Enter/Esc/← still collapse full screen by key;
+    // they just aren't advertised on the busy bar.
+    for absent in ["close", "/  search", "?  help", "q  quit"] {
+        assert!(!text.contains(absent), "still has {absent}");
     }
-    // Single-column full screen (the flag is unset): Left also exits, so it is
-    // listed alongside Enter/Esc.
-    assert!(expanded_text.contains("enter/esc/←  close"));
-
-    // Multi-column full screen: Left is inert (Esc collapses), so it drops from the
-    // close hint.
-    app.nav.reader_fullscreen = true;
-    assert!(expanded_footer_text(&app, 200).contains("enter/esc  close"));
 }
 
 #[test]
@@ -1825,8 +1832,10 @@ fn search_results_footer_shows_escape_and_entry_actions() {
     let text = footer_text(&app, 200);
 
     // The query now lives on the entry panel's top-right border, not the footer.
+    // While typing (Entries focus) the footer carries only the exit hint; the
+    // entry actions appear once a result is opened in the reader.
     assert!(!text.contains("Search all: body"));
-    assert!(text.contains("enter  view"));
+    assert!(!text.contains("enter  view"));
     assert!(text.contains("esc  exit search"));
     assert!(!text.contains("type query"));
     assert!(!text.contains("backspace"));
@@ -1857,13 +1866,13 @@ fn wrapped_footer_hint_routing_uses_visible_row() {
     let (row_index, line) = text
         .split('\n')
         .enumerate()
-        .find(|(_, line)| line.contains("ctrl+g  metadata"))
+        .find(|(_, line)| line.contains("t  tags"))
         .expect("metadata hint present");
-    let col = line.find("ctrl+g  metadata").unwrap() as u16;
+    let col = line.find("t  tags").unwrap() as u16;
 
     assert_eq!(
         footer_hint_id_at_point(&app, 0, origin_y, width, col, origin_y + row_index as u16),
-        Some(HintId::OpenMetadataMenu)
+        Some(HintId::EditTags)
     );
 }
 
@@ -1874,8 +1883,8 @@ fn footer_hint_routing_uses_typed_ids() {
     let text = footer_text(&app, 200);
 
     assert_eq!(
-        footer_hint_id_at(&app, 0, 200, text.find("ctrl+g  metadata").unwrap() as u16),
-        Some(HintId::OpenMetadataMenu)
+        footer_hint_id_at(&app, 0, 200, text.find("t  tags").unwrap() as u16),
+        Some(HintId::EditTags)
     );
     assert_eq!(
         footer_hint_id_at(&app, 0, 200, text.find("e  edit").unwrap() as u16),
@@ -1884,29 +1893,25 @@ fn footer_hint_routing_uses_typed_ids() {
 }
 
 #[test]
-fn expanded_footer_hint_routing_uses_typed_ids() {
+fn fullscreen_reader_footer_routes_via_the_shared_hit_test() {
     let mut app = app_with_entry();
     app.nav.focus = Focus::Reader;
     let width = 120;
     let origin_y = 19;
-    let text = expanded_footer_text(&app, width);
+    // The full-screen footer renders through `footer_lines`/`footer_hint_id_at_point`
+    // now — flush, no inset — so its clicks route through the same hit-test as the
+    // inline footer.
+    let text = footer_text(&app, width);
     let (row_index, line) = text
         .split('\n')
         .enumerate()
-        .find(|(_, line)| line.contains("ctrl+g  metadata"))
+        .find(|(_, line)| line.contains("t  tags"))
         .expect("metadata hint present");
-    let col = line.find("ctrl+g  metadata").unwrap() as u16;
+    let col = line.find("t  tags").unwrap() as u16;
 
     assert_eq!(
-        expanded_footer_hint_id_at_point(
-            &app,
-            0,
-            origin_y,
-            width,
-            1 + col,
-            origin_y + row_index as u16
-        ),
-        Some(HintId::OpenMetadataMenu)
+        footer_hint_id_at_point(&app, 0, origin_y, width, col, origin_y + row_index as u16),
+        Some(HintId::EditTags)
     );
 }
 
@@ -2281,39 +2286,25 @@ fn internal_editor_shows_entry_location() {
     assert!(text.contains("Testville Cafe"), "editor pane was:\n{text}");
 }
 
-/// The shortcut overlay shows the full bordered grid when tall enough and
-/// collapses to chrome-less rows (no box-drawing) when it is not.
+/// The shortcut overlay lists every group's bindings as a centered table with
+/// vertical rules between the columns.
 #[test]
-fn editor_shortcuts_collapses_when_short() {
-    let has_grid = |h: u16| {
-        render_to_text(64, h, |frame| {
-            super::menus::draw_editor_shortcuts(frame, &mut 0)
-        })
-        .contains('┼')
-    };
-    assert!(has_grid(44), "tall terminal shows the bordered grid");
-    assert!(!has_grid(20), "short terminal collapses to plain rows");
-}
-
-#[test]
-fn editor_shortcuts_hit_test_action_rows() {
-    let area = Rect::new(0, 0, 64, 44);
-    let mut found = Vec::new();
-    let mut close_found = false;
-    for y in 0..area.height {
-        for x in 0..area.width {
-            if let Some(id) = super::menus::editor_shortcut_hint_at_point(area, 0, x, y) {
-                found.push(id);
-            }
-            close_found |= super::menus::editor_shortcut_close_at_point(area, 0, x, y);
-        }
-    }
-
-    assert!(found.contains(&HintId::EditorSave));
-    assert!(found.contains(&HintId::EditorFullscreen));
-    assert!(found.contains(&HintId::EditorMetadata));
-    assert!(found.contains(&HintId::EditorDiscard));
-    assert!(close_found);
+fn editor_shortcuts_list_grouped_bindings() {
+    let text = render_to_text(90, 44, |frame| {
+        super::menus::draw_editor_shortcuts(frame, &mut 0)
+    });
+    assert!(text.contains("Editor Shortcuts"));
+    // A group header, plus bindings from each section.
+    assert!(text.contains("File"));
+    assert!(text.contains("Save"));
+    assert!(text.contains("Select all"));
+    assert!(text.contains("Cut to line end"));
+    assert!(text.contains("Paragraph"));
+    // The emacs bindings the textarea honors are listed too.
+    assert!(text.contains("Emacs"));
+    assert!(text.contains("Delete to line start"));
+    // The columns are split by a vertical rule.
+    assert!(text.contains('│'));
 }
 
 #[test]
@@ -2339,6 +2330,81 @@ fn editor_metadata_menu_hit_tests_rows() {
     assert!(found_tags);
     assert!(found_feelings);
     assert!(found_mood);
+}
+
+#[test]
+fn help_cheatsheet_lists_grouped_bindings() {
+    let text = render_to_text(72, 44, |frame| menus::draw_help(frame, &mut 0));
+    assert!(text.contains("Keyboard Shortcuts"));
+    // A bare metadata key the footer no longer advertises, plus a grouped label.
+    assert!(text.contains("Tags"));
+    assert!(text.contains("Metadata"));
+    // The global bindings the trimmed footer dropped still live here.
+    assert!(text.contains("Settings"));
+    assert!(text.contains("Quit"));
+    assert!(text.contains("This help"));
+}
+
+/// On a terminal too short to show every row, the cheatsheet scrolls rather than
+/// clipping: the footer stays pinned and a binding below the fold is reachable.
+#[test]
+fn help_cheatsheet_scrolls_when_the_terminal_is_short() {
+    // "This help" (the `?` binding) sits low in its column, so it is below the
+    // fold at scroll 0 on a short terminal but reachable once scrolled.
+    let top = render_to_text(72, 14, |frame| menus::draw_help(frame, &mut 0));
+    let bottom = render_to_text(72, 14, |frame| menus::draw_help(frame, &mut 9999));
+
+    // The footer is pinned in both — the box never clips it away.
+    assert!(top.contains("press any key to close"));
+    assert!(bottom.contains("press any key to close"));
+
+    // Scrolling actually moves the viewport and brings the hidden row into view.
+    assert!(
+        !top.contains("This help"),
+        "row should be below the fold:\n{top}"
+    );
+    assert!(
+        bottom.contains("This help"),
+        "scrolled view should reveal it:\n{bottom}"
+    );
+}
+
+#[test]
+fn balanced_splits_minimizes_the_tallest_column() {
+    use super::menus::{balanced_splits, column_span};
+
+    // Brute-force the minimum tallest-column span over every contiguous 3-way cut
+    // and confirm the splitter matches it, with well-formed boundaries.
+    let sizes = [6usize, 5, 7, 9, 4, 9];
+    let bounds = balanced_splits(&sizes, 3);
+    assert_eq!(bounds.len(), 3, "one boundary per column");
+    assert_eq!(
+        *bounds.last().unwrap(),
+        sizes.len(),
+        "last boundary spans all"
+    );
+    assert!(
+        bounds.windows(2).all(|w| w[0] < w[1]) && bounds[0] > 0,
+        "boundaries strictly increasing, so no column is empty: {bounds:?}"
+    );
+
+    let mut brute = usize::MAX;
+    for a in 1..sizes.len() - 1 {
+        for b in a + 1..sizes.len() {
+            brute = brute.min(column_span(&sizes, &[a, b, sizes.len()]));
+        }
+    }
+    assert_eq!(
+        column_span(&sizes, &bounds),
+        brute,
+        "picks the minimax split"
+    );
+
+    // Edge cases: one column is the whole list; more columns than sections gives
+    // one section each; empty input is a single empty column.
+    assert_eq!(balanced_splits(&sizes, 1), vec![sizes.len()]);
+    assert_eq!(balanced_splits(&[3, 4], 5), vec![1, 2]);
+    assert_eq!(balanced_splits(&[], 3), vec![0]);
 }
 
 // ── Settings menu / theme picker ─────────────────────────────────────────────

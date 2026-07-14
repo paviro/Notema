@@ -194,6 +194,11 @@ impl App {
         self.overlay = Overlay::SettingsMenu;
     }
 
+    /// Open the global keyboard-shortcut cheatsheet.
+    pub(crate) fn open_help(&mut self) {
+        self.overlay = Overlay::Help { scroll: 0 };
+    }
+
     /// Open the theme picker: list the theme files on disk (parse results
     /// cached per row), seed the selection on the configured theme, and
     /// remember the installed theme so Esc can restore it.

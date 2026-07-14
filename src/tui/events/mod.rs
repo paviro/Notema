@@ -239,6 +239,31 @@ fn apply_action(
                 editor.textarea.select_all();
             }
         }
+        Action::EditorUndo => {
+            if let Some(editor) = app.editor.as_mut() {
+                editor.textarea.undo();
+            }
+        }
+        Action::EditorRedo => {
+            if let Some(editor) = app.editor.as_mut() {
+                editor.textarea.redo();
+            }
+        }
+        Action::EditorCut => {
+            if let Some(editor) = app.editor.as_mut() {
+                editor.textarea.cut();
+            }
+        }
+        Action::EditorCopy => {
+            if let Some(editor) = app.editor.as_mut() {
+                editor.textarea.copy();
+            }
+        }
+        Action::EditorPaste => {
+            if let Some(editor) = app.editor.as_mut() {
+                editor.textarea.paste();
+            }
+        }
         Action::EditorScroll(delta) => {
             if let Some(editor) = app.editor.as_mut() {
                 editor.scroll_lines(delta);
@@ -260,6 +285,8 @@ fn apply_action(
                 app.close_overlay();
             }
         }
+        Action::OpenHelp => app.open_help(),
+        Action::HelpScroll(delta) => scroll_help(app, delta),
         Action::OpenMetadataMenu => {
             if app.editor.is_none() {
                 app.reload_selected_entry_from_disk()?;
@@ -604,6 +631,14 @@ fn request_editor_discard(app: &mut App) {
         );
     } else {
         app.cancel_editor();
+    }
+}
+
+/// Scroll the global help cheatsheet, clamping at the top; the draw clamps the
+/// bottom against the rendered height it alone knows.
+fn scroll_help(app: &mut App, delta: i16) {
+    if let Overlay::Help { scroll } = &mut app.overlay {
+        *scroll = scroll.saturating_add_signed(delta);
     }
 }
 

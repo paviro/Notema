@@ -66,6 +66,11 @@ pub(crate) enum Action {
     EditorScrollHelp(i16),
     EditorInput(KeyEvent),
     EditorSelectAll,
+    EditorUndo,
+    EditorRedo,
+    EditorCut,
+    EditorCopy,
+    EditorPaste,
     EditorScroll(i16),
     EditorStartSelection {
         col: u16,
@@ -85,6 +90,9 @@ pub(crate) enum Action {
     ConfirmSelect(bool),
     // Cancel / close — covers Esc across all overlays
     CancelOverlay,
+    // Global help cheatsheet overlay
+    OpenHelp,
+    HelpScroll(i16),
     OpenMetadataMenu,
     BeginEditMetadata(MetadataKind),
     BeginEditFeelings,
