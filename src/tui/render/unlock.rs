@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::tui::entry_rows::wrap_text;
 use crate::tui::text_input::PassphraseInput;
-use crate::tui::theme::theme;
+use crate::tui::theme::Theme;
 
 /// Width of the "Enter Password" container box, clamped to the available width.
 const CONTAINER_WIDTH: u16 = 68;
@@ -34,11 +34,13 @@ const MAX_STATUS_LINES: usize = 4;
 /// Returns the passphrase field's inner rect, so the unlock loop can map a
 /// mouse click onto the caret. `None` when the screen is too small to draw it.
 pub(crate) fn draw_unlock(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     input: &PassphraseInput,
     error: Option<&str>,
 ) -> Option<Rect> {
-    let inner = super::draw_modal_frame(frame, "Unlock Notema", "", "enter unlock · esc quit");
+    let inner =
+        super::draw_modal_frame(theme, frame, "Unlock Notema", "", "enter unlock · esc quit");
     if inner.height == 0 || inner.width == 0 {
         return None;
     }
@@ -53,7 +55,7 @@ pub(crate) fn draw_unlock(
         .max(wrap_text(status, status_width, MAX_STATUS_LINES).len())
         .max(1) as u16;
     // The container: titled top-left, generous padding around its contents.
-    let container = super::container_block("Enter Password");
+    let container = super::container_block(theme, "Enter Password");
     let overhead = super::container_block_vertical_inset(&container, inner);
     let container_height = (overhead + CONTAINER_CONTENT_HEIGHT + status_lines).min(inner.height);
 
@@ -81,15 +83,15 @@ pub(crate) fn draw_unlock(
     // The input line's own sub-field: a faint (dimmed) border framing just the
     // masked passphrase, with a padded input row inside — or, in flat chrome,
     // an element-colored surface with the same inner geometry.
-    let subfield = if super::flat_chrome() {
+    let subfield = if super::flat_chrome(theme) {
         Block::new()
-            .style(Style::default().bg(theme().raised_bg()))
+            .style(Style::default().bg(theme.raised_bg()))
             .padding(Padding::new(2, 2, 1, 1))
     } else {
         Block::default()
             .borders(Borders::ALL)
-            .border_set(theme().glyphs().borders.border_set())
-            .border_style(theme().muted())
+            .border_set(theme.glyphs().borders.border_set())
+            .border_style(theme.muted())
             .padding(Padding::horizontal(1))
     };
     let subfield_inner = subfield.inner(subfield_box);
@@ -106,7 +108,7 @@ pub(crate) fn draw_unlock(
     // wraps so a narrow terminal shows the whole message across the rows the
     // container reserved for it.
     frame.render_widget(
-        Paragraph::new(Span::styled(status.to_string(), theme().muted()))
+        Paragraph::new(Span::styled(status.to_string(), theme.muted()))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true }),
         error_row,

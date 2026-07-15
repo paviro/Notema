@@ -9,8 +9,8 @@ use std::{collections::BTreeMap, str::FromStr};
 
 use super::{
     AlertGlyphs, BorderGlyphs, ChartRamps, ChromeStyle, CustomBorderSet, EnvGlyphs, Fill, Glyphs,
-    MarkdownGlyphs, MetadataTheme, Mode, MoonGlyphs, PillStyle, Syntax, Theme, WeatherGlyphs,
-    intern_chart_ramps, intern_markdown_glyphs, intern_metadata_theme,
+    MarkdownGlyphs, MetadataTheme, Mode, MoonGlyphs, OwnedBorderSet, OwnedLineSet, PillStyle,
+    Syntax, Theme, WeatherGlyphs,
 };
 
 pub(super) fn parse(text: &str, mode: Mode) -> Result<Theme> {
@@ -291,21 +291,6 @@ struct BorderGlyphsSection {
     separator: Option<String>,
 }
 
-/// ratatui border sets hold `&'static str`, so parsed glyphs are interned
-/// once per distinct character — the picker and live reload re-parse themes
-/// constantly, and leaking per parse would grow without bound.
-fn intern_glyph(glyph: char) -> &'static str {
-    use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<BTreeMap<char, &'static str>>> = OnceLock::new();
-    let mut cache = CACHE
-        .get_or_init(Mutex::default)
-        .lock()
-        .expect("glyph intern lock");
-    cache
-        .entry(glyph)
-        .or_insert_with(|| glyph.to_string().leak())
-}
-
 impl BorderGlyphsSection {
     /// Whether any box-drawing glyph is overridden. `focus_stripe`/`divider` are
     /// furniture, not box glyphs — a section with only those keeps the base
@@ -321,53 +306,47 @@ impl BorderGlyphsSection {
     }
 
     /// Overlay this section's glyphs on `base`, producing a custom set.
-    fn resolve(&self, base: BorderGlyphs, token: &str) -> Result<BorderGlyphs> {
-        let mut border = base.border_set();
-        let mut line = base.line_set();
-        let glyph = |spec: &Option<String>, key: &str| -> Result<Option<&'static str>> {
+    fn resolve(&self, base: &BorderGlyphs, token: &str) -> Result<BorderGlyphs> {
+        let mut border = OwnedBorderSet::from_set(base.border_set());
+        let mut line = OwnedLineSet::from_set(base.line_set());
+        let glyph = |spec: &Option<String>, key: &str| -> Result<Option<String>> {
             spec.as_deref()
-                .map(|spec| parse_glyph(spec, &format!("{token}.{key}")).map(intern_glyph))
+                .map(|spec| {
+                    parse_glyph(spec, &format!("{token}.{key}")).map(|glyph| glyph.to_string())
+                })
                 .transpose()
         };
         if let Some(g) = glyph(&self.top_left, "top_left")? {
-            border.top_left = g;
+            border.top_left.clone_from(&g);
             line.top_left = g;
         }
         if let Some(g) = glyph(&self.top_right, "top_right")? {
-            border.top_right = g;
+            border.top_right.clone_from(&g);
             line.top_right = g;
         }
         if let Some(g) = glyph(&self.bottom_left, "bottom_left")? {
-            border.bottom_left = g;
+            border.bottom_left.clone_from(&g);
             line.bottom_left = g;
         }
         if let Some(g) = glyph(&self.bottom_right, "bottom_right")? {
-            border.bottom_right = g;
+            border.bottom_right.clone_from(&g);
             line.bottom_right = g;
         }
         if let Some(g) = glyph(&self.horizontal, "horizontal")? {
-            border.horizontal_top = g;
-            border.horizontal_bottom = g;
+            border.horizontal_top.clone_from(&g);
+            border.horizontal_bottom.clone_from(&g);
             line.horizontal = g;
         }
         if let Some(g) = glyph(&self.vertical, "vertical")? {
-            border.vertical_left = g;
-            border.vertical_right = g;
+            border.vertical_left.clone_from(&g);
+            border.vertical_right.clone_from(&g);
             line.vertical = g;
         }
-        Ok(BorderGlyphs::Custom(intern_border_set(CustomBorderSet {
+        Ok(BorderGlyphs::Custom(std::sync::Arc::new(CustomBorderSet {
             border,
             line,
         })))
     }
-}
-
-/// Intern a resolved border set — leaked once per distinct set so
-/// [`BorderGlyphs`] can carry a `Copy` reference.
-fn intern_border_set(set: CustomBorderSet) -> &'static CustomBorderSet {
-    use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<Vec<&'static CustomBorderSet>>> = OnceLock::new();
-    super::intern(set, &CACHE)
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -786,10 +765,9 @@ impl ThemeFile {
         )?;
         let border_active = style(&borders.focused, Style::default(), "borders.focused")?;
         let border_inactive = style(&borders.unfocused, Style::default(), "borders.unfocused")?;
-        // Structural furniture: the divider rule and the tab separator have
-        // always ridden the muted ink (dim included, as `Theme::muted` applies);
-        // cards have used the normal border. Each is now a token that keeps that
-        // default.
+        // Structural furniture defaults: the divider rule and tab separator ride
+        // the muted ink (dim included, as `Theme::muted` applies); cards use the
+        // normal border.
         let muted_ink = muted.add_modifier(Modifier::DIM);
         let divider = style(&borders.divider, muted_ink, "borders.divider")?;
         let card_border = style(
@@ -836,8 +814,8 @@ impl ThemeFile {
         };
         // Buttons are selection-colored unless a theme splits them.
         let button = readable_fill(&interaction.button, selection, "interaction.button")?;
-        // The hover treatment is patched over the button chip, so its default is
-        // a bare underline (matching the long-standing hardcoded behavior).
+        // The hover treatment is patched over the button chip; its default is a
+        // bare underline.
         let button_hover = match &interaction.button_hover {
             Some(spec) => spec.resolve(mode, palette, "interaction.button_hover")?,
             None => Style::default().add_modifier(Modifier::UNDERLINED),
@@ -847,7 +825,7 @@ impl ThemeFile {
             None => Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD),
         };
         // Both default to "no styling": the terminal's own cursor shape and no
-        // cursor-line highlight, which is what the app always did.
+        // cursor-line highlight.
         let cursor = match &interaction.cursor {
             Some(spec) => spec.resolve(mode, palette, "interaction.cursor")?,
             None => Style::default(),
@@ -928,8 +906,8 @@ impl ThemeFile {
             Style::default(),
             "markdown.blockquote",
         )?;
-        // `==highlight==` defaults to the primary accent, reversed and bold — the
-        // long-standing hardcoded look — until a theme restyles it.
+        // `==highlight==` defaults to the primary accent, reversed and bold,
+        // until a theme restyles it.
         let md_highlight = style(
             &markdown.highlight,
             primary.add_modifier(Modifier::REVERSED | Modifier::BOLD),
@@ -1013,19 +991,19 @@ impl ThemeFile {
             spec.as_deref()
                 .map_or(Ok(default), |spec| parse_glyph(spec, token))
         };
-        let base_borders = borders.style.unwrap_or_default();
+        let base_borders = borders.style.clone().unwrap_or_default();
         let border_glyphs = match &borders.glyphs {
             Some(section) if section.has_box_overrides() => {
-                section.resolve(base_borders, "borders.glyphs")?
+                section.resolve(&base_borders, "borders.glyphs")?
             }
-            _ => base_borders,
+            _ => base_borders.clone(),
         };
         let focused_borders = match &borders.focused_glyphs {
-            Some(section) if section.has_box_overrides() => Some(section.resolve(
-                borders.focused_style.unwrap_or(border_glyphs),
-                "borders.focused_glyphs",
-            )?),
-            _ => borders.focused_style,
+            Some(section) if section.has_box_overrides() => {
+                let base = borders.focused_style.as_ref().unwrap_or(&border_glyphs);
+                Some(section.resolve(base, "borders.focused_glyphs")?)
+            }
+            _ => borders.focused_style.clone(),
         };
         let scrollbar_glyphs = &self.scrollbar.glyphs;
         let metadata_glyphs = &self.metadata.glyphs;
@@ -1131,7 +1109,7 @@ impl ThemeFile {
                 '│',
                 "charts.glyphs.diverge_center",
             )?,
-            ramps: intern_chart_ramps(ChartRamps {
+            ramps: std::sync::Arc::new(ChartRamps {
                 up: match &chart_glyphs.ramp_up {
                     Some(spec) => parse_ramp(spec, "charts.glyphs.ramp_up")?,
                     None => [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'],
@@ -1160,7 +1138,7 @@ impl ThemeFile {
                 '★',
                 "indicators.glyphs.starred",
             )?,
-            markdown: intern_markdown_glyphs(MarkdownGlyphs {
+            markdown: std::sync::Arc::new(MarkdownGlyphs {
                 quote_rail: string_glyph(
                     &self.markdown.glyphs.quote_rail,
                     "│ ",
@@ -1223,7 +1201,7 @@ impl ThemeFile {
             borders: border_glyphs,
             focused_borders,
         };
-        let metadata = intern_metadata_theme(MetadataTheme {
+        let metadata = std::sync::Arc::new(MetadataTheme {
             pill_style: pills.style,
             pill_feelings,
             pill_people,

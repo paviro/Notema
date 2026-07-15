@@ -1,4 +1,6 @@
-use crate::{AppResult, config::Config, prompts};
+use crate::{AppResult, config::Config};
+
+use super::prompts;
 use anyhow::bail;
 use indicatif::{ProgressBar, ProgressStyle};
 use notema_storage::JournalStore;
@@ -43,9 +45,8 @@ pub(crate) fn encrypt_store(
         }
         store.public_recipient()?
     } else if store.has_encrypted_entries()? {
-        // Encrypted entries but no roster to encrypt more against — reuse the
-        // storage layer's own message rather than restating it here. anyhow
-        // prints the typed error's Display, so route it through directly.
+        // Encrypted entries but no roster to encrypt more against — surface the
+        // storage layer's own typed error rather than restating its message here.
         return Err(notema_encryption::EncryptionError::RecipientsMissing {
             path: store.device_roster_path().to_path_buf(),
         }

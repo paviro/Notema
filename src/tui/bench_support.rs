@@ -9,13 +9,13 @@ use notema_domain::SearchScope;
 use notema_storage::JournalStore;
 use ratatui::{Terminal, backend::TestBackend};
 
-use super::app::App;
+use super::app::AppModel;
 use super::search::search_loaded_entries;
 use crate::config::Config;
 
-/// An opaque, fully-loaded app handle for benchmarks. Wraps the private `App` so
+/// An opaque, fully-loaded app handle for benchmarks. Wraps the private `AppModel` so
 /// the bench API stays public without exposing the TUI's internal types.
-pub struct BenchApp(App);
+pub struct BenchApp(AppModel);
 
 /// Build a [`BenchApp`] over a fresh on-disk store holding `count` plaintext
 /// entries across four journals, with the first entry selected and the reader
@@ -51,7 +51,7 @@ pub fn app_with_entries(root: &Path, count: usize) -> BenchApp {
     }
 
     let config = Config::new(root.to_path_buf());
-    let mut app = App::new(config_path, config, store).unwrap();
+    let mut app = AppModel::new(config_path, config, store).unwrap();
     app.select_journal(0);
     app.select_entry_index(0);
     app.focus_reader_from_click();
@@ -63,8 +63,11 @@ pub fn app_with_entries(root: &Path, count: usize) -> BenchApp {
 pub fn draw_frame(app: &mut BenchApp, width: u16, height: u16) {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).unwrap();
+    let mut view = super::ui::ViewState::default();
+    let active_theme = app.0.appearance.theme.clone();
+    let mut context = super::ui::RenderContext::new(&active_theme, &mut view);
     terminal
-        .draw(|frame| super::render::draw(frame, &mut app.0))
+        .draw(|frame| super::render::draw(frame, &mut app.0, &mut context))
         .unwrap();
 }
 

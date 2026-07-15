@@ -23,7 +23,12 @@ pub(crate) fn confirm(prompt: &str, skip: bool) -> AppResult<bool> {
     io::stdout().flush()?;
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
-    Ok(matches!(input.trim(), "y" | "Y" | "yes" | "YES" | "Yes"))
+    Ok(is_yes(&input))
+}
+
+/// Interpret an interactive `[y/N]` answer, defaulting to no.
+pub(crate) fn is_yes(input: &str) -> bool {
+    matches!(input.trim(), "y" | "Y" | "yes" | "YES" | "Yes")
 }
 
 /// Resolve the device name and optional passphrase for a *new* identity,
@@ -49,7 +54,7 @@ pub(crate) fn resolve_new_identity_options(
 /// Prompt for this device's name (used to label its key), defaulting to the
 /// hostname.
 pub(crate) fn prompt_device_name(stdout: &mut impl Write) -> AppResult<String> {
-    let default_name = crate::device::default_device_name();
+    let default_name = crate::platform::device::default_device_name();
     write!(stdout, "Device name [{default_name}]: ")?;
     stdout.flush()?;
     let mut input = String::new();

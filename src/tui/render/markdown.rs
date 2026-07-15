@@ -8,10 +8,14 @@ use ratatui::{
     text::{Line, Span},
 };
 use std::path::{Path, PathBuf};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use crate::tui::app::{ReaderHeading, ReaderLinkHit};
-use crate::tui::theme::theme;
+use crate::tui::theme::Theme;
+
+mod table;
+mod wrapping;
+use wrapping::{rich_from_line, wrap_line, wrap_rich};
 
 /// The rendered form of one markdown chunk: the wrapped display lines plus the
 /// clickable link regions and heading anchors discovered structurally during
@@ -34,13 +38,15 @@ pub(super) struct RenderedChunk {
 /// they can be opened in the OS default app. It is left unset for encrypted
 /// entries, whose on-disk assets are `.age` and cannot be handed to the OS.
 pub(super) fn render_text_chunk(
+    theme: &Theme,
     text: &str,
     width: usize,
     show_urls: bool,
     entry_path: Option<&Path>,
     attachments_openable: bool,
 ) -> RenderedChunk {
-    MarkdownTerminalRenderer::new(width, show_urls, entry_path, attachments_openable).render(text)
+    MarkdownTerminalRenderer::new(theme, width, show_urls, entry_path, attachments_openable)
+        .render(text)
 }
 
 /// A styled run tagged with the link it belongs to, if any. The renderer
@@ -53,7 +59,8 @@ struct RichSpan {
     link: Option<usize>,
 }
 
-struct MarkdownTerminalRenderer {
+struct MarkdownTerminalRenderer<'a> {
+    theme: &'a Theme,
     width: usize,
     show_urls: bool,
     lines: Vec<Line<'static>>,
@@ -103,14 +110,14 @@ enum Container {
 
 /// The icon, label, and role style for a GitHub-style alert kind. Icons stay
 /// ASCII (guaranteed width 1) so the rail's column math never drifts.
-fn alert_meta(kind: BlockQuoteKind) -> (char, &'static str, Style) {
-    let alert = theme().glyphs().markdown.alert;
+fn alert_meta(theme: &Theme, kind: BlockQuoteKind) -> (char, &'static str, Style) {
+    let alert = theme.glyphs().markdown.alert;
     match kind {
-        BlockQuoteKind::Note => (alert.note, "NOTE", theme().info()),
-        BlockQuoteKind::Tip => (alert.tip, "TIP", theme().success()),
-        BlockQuoteKind::Important => (alert.important, "IMPORTANT", theme().primary()),
-        BlockQuoteKind::Warning => (alert.warning, "WARNING", theme().warning()),
-        BlockQuoteKind::Caution => (alert.caution, "CAUTION", theme().error()),
+        BlockQuoteKind::Note => (alert.note, "NOTE", theme.info()),
+        BlockQuoteKind::Tip => (alert.tip, "TIP", theme.success()),
+        BlockQuoteKind::Important => (alert.important, "IMPORTANT", theme.primary()),
+        BlockQuoteKind::Warning => (alert.warning, "WARNING", theme.warning()),
+        BlockQuoteKind::Caution => (alert.caution, "CAUTION", theme.error()),
     }
 }
 
@@ -134,14 +141,16 @@ struct MarkdownTable {
     in_head: bool,
 }
 
-impl MarkdownTerminalRenderer {
+impl<'a> MarkdownTerminalRenderer<'a> {
     fn new(
+        theme: &'a Theme,
         width: usize,
         show_urls: bool,
         entry_path: Option<&Path>,
         attachments_openable: bool,
     ) -> Self {
         Self {
+            theme,
             width: width.max(1),
             show_urls,
             lines: Vec::new(),
@@ -220,29 +229,29 @@ impl MarkdownTerminalRenderer {
             MarkdownEvent::Code(code) => {
                 self.capture_link_text(&code);
                 self.capture_heading_text(&code);
-                self.push_span(&code, theme().md_inline_code());
+                self.push_span(&code, self.theme.md_inline_code());
             }
             MarkdownEvent::Html(html) | MarkdownEvent::InlineHtml(html) => {
-                self.push_multiline(&html, theme().muted());
+                self.push_multiline(&html, self.theme.muted());
             }
             MarkdownEvent::SoftBreak | MarkdownEvent::HardBreak => self.finish_current(true),
             MarkdownEvent::Rule => self.render_rule(),
             MarkdownEvent::TaskListMarker(checked) => {
-                let glyphs = theme().glyphs().markdown;
+                let glyphs = self.theme.glyphs().markdown.clone();
                 let box_glyph = if checked {
                     &glyphs.task_done
                 } else {
                     &glyphs.task_todo
                 };
-                self.push_span(&format!("{box_glyph} "), theme().muted())
+                self.push_span(&format!("{box_glyph} "), self.theme.muted())
             }
             MarkdownEvent::FootnoteReference(label) => {
-                self.push_span(&format!("[{label}]"), theme().md_link());
+                self.push_span(&format!("[{label}]"), self.theme.md_link());
             }
-            MarkdownEvent::InlineMath(math) => self.push_span(&math, theme().md_inline_code()),
+            MarkdownEvent::InlineMath(math) => self.push_span(&math, self.theme.md_inline_code()),
             MarkdownEvent::DisplayMath(math) => {
                 self.begin_block();
-                self.push_multiline(&math, theme().md_code());
+                self.push_multiline(&math, self.theme.md_code());
                 self.finish_current(false);
                 self.separate_next_block = true;
             }
@@ -256,9 +265,9 @@ impl MarkdownTerminalRenderer {
                 self.begin_block();
                 self.heading_text = Some(String::new());
                 let style = match level {
-                    HeadingLevel::H1 => theme().md_heading(),
-                    HeadingLevel::H2 => theme().md_heading2(),
-                    _ => theme().md_subheading(),
+                    HeadingLevel::H1 => self.theme.md_heading(),
+                    HeadingLevel::H2 => self.theme.md_heading2(),
+                    _ => self.theme.md_subheading(),
                 };
                 self.push_style(style);
                 self.push_span(&format!("{} ", "#".repeat(level as usize)), style);
@@ -267,7 +276,7 @@ impl MarkdownTerminalRenderer {
                 self.begin_block();
                 self.containers.push(Container::Quote(kind));
                 if let Some(kind) = kind {
-                    let (icon, label, style) = alert_meta(kind);
+                    let (icon, label, style) = alert_meta(self.theme, kind);
                     self.push_span(
                         &format!("{icon} {label}"),
                         style.add_modifier(Modifier::BOLD),
@@ -384,9 +393,9 @@ impl MarkdownTerminalRenderer {
                     // region) stays `md_link`; the untagged target trails it in the
                     // faint secondary style. When URLs are hidden the trailer is
                     // skipped entirely, so wrapping never accounts for it.
-                    self.push_span(" (", theme().muted());
-                    self.push_span(&target, theme().muted());
-                    self.push_span(")", theme().muted());
+                    self.push_span(" (", self.theme.muted());
+                    self.push_span(&target, self.theme.muted());
+                    self.push_span(")", self.theme.muted());
                 }
             }
             MarkdownTagEnd::CodeBlock | MarkdownTagEnd::Table => {}
@@ -411,7 +420,7 @@ impl MarkdownTerminalRenderer {
             is_image,
         });
         self.links.push((target, String::new(), id));
-        self.push_style(theme().md_link());
+        self.push_style(self.theme.md_link());
     }
 
     fn start_paragraph(&mut self) {
@@ -424,6 +433,7 @@ impl MarkdownTerminalRenderer {
 
     fn start_list_item(&mut self) {
         self.finish_current(false);
+        let bullet = self.theme.glyphs().markdown.bullet;
         let Some(list) = self.current_list_mut() else {
             return;
         };
@@ -432,7 +442,7 @@ impl MarkdownTerminalRenderer {
                 list.next = Some(number.saturating_add(1));
                 format!("{number}. ")
             }
-            None => format!("{} ", theme().glyphs().markdown.bullet),
+            None => format!("{bullet} "),
         };
         list.first_line = true;
         list.in_item = true;
@@ -538,7 +548,7 @@ impl MarkdownTerminalRenderer {
 
     fn highlight_style(&self) -> Style {
         if self.highlight_open {
-            self.current_style().patch(theme().md_highlight())
+            self.current_style().patch(self.theme.md_highlight())
         } else {
             self.current_style()
         }
@@ -578,16 +588,18 @@ impl MarkdownTerminalRenderer {
         for container in &mut self.containers {
             match container {
                 Container::Quote(kind) => {
-                    let style =
-                        kind.map_or_else(|| theme().md_blockquote(), |kind| alert_meta(kind).2);
+                    let style = kind.map_or_else(
+                        || self.theme.md_blockquote(),
+                        |kind| alert_meta(self.theme, kind).2,
+                    );
                     spans.push(Span::styled(
-                        theme().glyphs().markdown.quote_rail.clone(),
+                        self.theme.glyphs().markdown.quote_rail.clone(),
                         style,
                     ));
                 }
                 Container::List(list) if list.in_item => {
                     if markers && list.first_line {
-                        spans.push(Span::styled(list.marker.clone(), theme().muted()));
+                        spans.push(Span::styled(list.marker.clone(), self.theme.muted()));
                         list.first_line = false;
                     } else {
                         spans.push(Span::raw(" ".repeat(list.marker.width())));
@@ -599,17 +611,12 @@ impl MarkdownTerminalRenderer {
         Line::from(spans)
     }
 
-    fn emit_wrapped_line(
-        &mut self,
-        spans: Vec<RichSpan>,
-        rail: Option<&'static str>,
-        hard_wrap: bool,
-    ) {
+    fn emit_wrapped_line(&mut self, spans: Vec<RichSpan>, rail: Option<&str>, hard_wrap: bool) {
         let mut first_prefix = self.container_prefix(true);
         if let Some(rail) = rail {
             first_prefix
                 .spans
-                .push(Span::styled(rail, theme().md_blockquote()));
+                .push(Span::styled(rail.to_string(), self.theme.md_blockquote()));
         }
         let available = self.width.saturating_sub(first_prefix.width()).max(1);
         let wrapped = wrap_rich(spans, available, hard_wrap);
@@ -621,7 +628,7 @@ impl MarkdownTerminalRenderer {
                 if let Some(rail) = rail {
                     prefix
                         .spans
-                        .push(Span::styled(rail, theme().md_blockquote()));
+                        .push(Span::styled(rail.to_string(), self.theme.md_blockquote()));
                 }
                 prefix
             };
@@ -658,11 +665,17 @@ impl MarkdownTerminalRenderer {
         self.begin_block();
         let prefix_width = self.container_prefix(false).width();
         let width = self.width.saturating_sub(prefix_width).max(1);
-        let glyph = theme().glyphs().borders.line_set().horizontal;
+        let glyph = self
+            .theme
+            .glyphs()
+            .borders
+            .line_set()
+            .horizontal
+            .to_string();
         self.emit_wrapped_line(
             vec![RichSpan {
                 content: glyph.repeat(width),
-                style: theme().muted(),
+                style: self.theme.muted(),
                 link: None,
             }],
             None,
@@ -682,8 +695,8 @@ impl MarkdownTerminalRenderer {
             .split([' ', '\t', ','])
             .next()
             .unwrap_or_default();
-        let t = theme();
-        let markdown = t.glyphs().markdown;
+        let t = self.theme;
+        let markdown = &t.glyphs().markdown;
         let header = if language.is_empty() {
             markdown.code_top.clone()
         } else {
@@ -699,7 +712,7 @@ impl MarkdownTerminalRenderer {
             true,
         );
         let source = code.source.trim_end_matches('\n').replace('\t', "    ");
-        let highlighted = crate::tui::syntax_highlight::highlight(language, &source);
+        let highlighted = crate::tui::syntax_highlight::highlight(t, language, &source);
         let code_lines = highlighted.unwrap_or_else(|| {
             source
                 .split('\n')
@@ -721,383 +734,6 @@ impl MarkdownTerminalRenderer {
         );
         self.separate_next_block = true;
     }
-
-    fn table_event(&mut self, event: &MarkdownEvent<'_>) -> bool {
-        match event {
-            MarkdownEvent::Start(MarkdownTag::TableHead) => {
-                self.table.as_mut().expect("table exists").in_head = true;
-            }
-            MarkdownEvent::End(MarkdownTagEnd::TableHead) => {
-                let table = self.table.as_mut().expect("table exists");
-                table.in_head = false;
-                if !table.row.is_empty() {
-                    table.rows.push(std::mem::take(&mut table.row));
-                }
-            }
-            MarkdownEvent::Start(MarkdownTag::TableRow) => {}
-            MarkdownEvent::End(MarkdownTagEnd::TableRow) => {
-                let table = self.table.as_mut().expect("table exists");
-                table.rows.push(std::mem::take(&mut table.row));
-            }
-            MarkdownEvent::Start(MarkdownTag::TableCell) => {}
-            MarkdownEvent::End(MarkdownTagEnd::TableCell) => {
-                let table = self.table.as_mut().expect("table exists");
-                let mut cell = std::mem::take(&mut table.cell);
-                if table.in_head {
-                    cell = cell.patch_style(Style::new().bold());
-                }
-                table.row.push(cell);
-            }
-            MarkdownEvent::End(MarkdownTagEnd::Table) => self.finish_table(),
-            MarkdownEvent::Start(MarkdownTag::Emphasis) => self.push_style(Style::new().italic()),
-            MarkdownEvent::End(MarkdownTagEnd::Emphasis) => self.pop_style(),
-            MarkdownEvent::Start(MarkdownTag::Strong) => self.push_style(Style::new().bold()),
-            MarkdownEvent::End(MarkdownTagEnd::Strong) => self.pop_style(),
-            MarkdownEvent::Start(MarkdownTag::Strikethrough) => {
-                self.push_style(Style::new().add_modifier(Modifier::CROSSED_OUT));
-            }
-            MarkdownEvent::End(MarkdownTagEnd::Strikethrough) => self.pop_style(),
-            MarkdownEvent::Code(code) => self.push_span(code, theme().md_inline_code()),
-            MarkdownEvent::Text(text) => self.push_highlighted_text(text),
-            MarkdownEvent::SoftBreak | MarkdownEvent::HardBreak => {
-                self.push_span(" ", self.current_style());
-            }
-            _ => {}
-        }
-        true
-    }
-
-    fn finish_table(&mut self) {
-        let Some(table_data) = self.table.take() else {
-            return;
-        };
-        if table_data.rows.is_empty() {
-            return;
-        }
-        let columns = table_data
-            .rows
-            .iter()
-            .map(Vec::len)
-            .max()
-            .unwrap_or_default();
-        if columns == 0 {
-            return;
-        }
-        let prefix_width = self.container_prefix(false).width();
-        let available = self.width.saturating_sub(prefix_width);
-        let overhead = columns.saturating_mul(3).saturating_add(1);
-        if available <= overhead.saturating_add(columns) {
-            self.render_stacked_table(table_data.rows);
-            self.separate_next_block = true;
-            return;
-        }
-        let content_width = available - overhead;
-        let mut widths = vec![1usize; columns];
-        for row in &table_data.rows {
-            for (column, cell) in row.iter().enumerate() {
-                widths[column] = widths[column].max(cell.width());
-            }
-        }
-        while widths.iter().sum::<usize>() > content_width {
-            let Some((column, _)) = widths.iter().enumerate().max_by_key(|(_, width)| **width)
-            else {
-                break;
-            };
-            if widths[column] <= 1 {
-                break;
-            }
-            widths[column] -= 1;
-        }
-
-        let border = super::table::border_style();
-        self.emit_table_line(super::table::rule(
-            &widths,
-            super::table::RulePos::Top,
-            border,
-            border,
-        ));
-        for (row_index, row) in table_data.rows.iter().enumerate() {
-            let wrapped: Vec<Vec<Line<'static>>> = (0..columns)
-                .map(|column| {
-                    row.get(column).cloned().map_or_else(
-                        || vec![Line::default()],
-                        |cell| wrap_line(cell, widths[column]),
-                    )
-                })
-                .collect();
-            let height = wrapped.iter().map(Vec::len).max().unwrap_or(1);
-            for line_index in 0..height {
-                let mut spans = vec![super::table::border()];
-                for column in 0..columns {
-                    let mut cell = wrapped[column]
-                        .get(line_index)
-                        .cloned()
-                        .unwrap_or_default()
-                        .spans;
-                    let used = cell.iter().map(Span::width).sum::<usize>();
-                    let padding = widths[column].saturating_sub(used);
-                    let (left, right) = match table_data
-                        .alignments
-                        .get(column)
-                        .copied()
-                        .unwrap_or(MarkdownAlignment::None)
-                    {
-                        MarkdownAlignment::Right => (padding, 0),
-                        MarkdownAlignment::Center => (padding / 2, padding - padding / 2),
-                        MarkdownAlignment::None | MarkdownAlignment::Left => (0, padding),
-                    };
-                    if left > 0 {
-                        cell.insert(0, Span::raw(" ".repeat(left)));
-                    }
-                    if right > 0 {
-                        cell.push(Span::raw(" ".repeat(right)));
-                    }
-                    super::table::push_cell_spans(&mut spans, cell);
-                }
-                self.emit_table_line(Line::from(spans));
-            }
-            if row_index == 0 && table_data.rows.len() > 1 {
-                self.emit_table_line(super::table::rule(
-                    &widths,
-                    super::table::RulePos::Mid,
-                    border,
-                    border,
-                ));
-            } else if row_index + 1 < table_data.rows.len() {
-                self.emit_table_line(super::table::rule(
-                    &widths,
-                    super::table::RulePos::Row,
-                    border,
-                    super::table::faint_rule_style(),
-                ));
-            }
-        }
-        self.emit_table_line(super::table::rule(
-            &widths,
-            super::table::RulePos::Bottom,
-            border,
-            border,
-        ));
-        self.separate_next_block = true;
-    }
-
-    fn render_stacked_table(&mut self, rows: Vec<Vec<Line<'static>>>) {
-        let headers = rows.first().cloned().unwrap_or_default();
-        for (row_index, row) in rows.iter().skip(1).enumerate() {
-            if row_index > 0 {
-                self.emit_blank_line();
-            }
-            for (column, value) in row.iter().enumerate() {
-                let mut line = headers.get(column).cloned().unwrap_or_default();
-                if !line.spans.is_empty() {
-                    line.spans.push(Span::styled(": ", theme().muted()));
-                }
-                line.spans.extend(value.spans.clone());
-                self.emit_wrapped_line(rich_from_line(line), None, false);
-            }
-        }
-    }
-
-    fn emit_table_line(&mut self, mut line: Line<'static>) {
-        let mut prefix = self.container_prefix(true);
-        prefix.spans.append(&mut line.spans);
-        self.lines.push(prefix);
-    }
-}
-
-/// A wrapped display line: its collapsed spans plus the clickable link runs
-/// `(start_col, end_col, link_id)` in columns relative to the content start
-/// (before any container prefix is prepended).
-struct WrappedLine {
-    spans: Vec<Span<'static>>,
-    links: Vec<(usize, usize, usize)>,
-}
-
-#[derive(Clone, Copy)]
-struct StyledCharacter {
-    character: char,
-    width: usize,
-    style: Style,
-    link: Option<usize>,
-}
-
-/// Wrap link-tagged runs to `width`, returning display lines that carry both the
-/// collapsed spans and the link regions the wrap produced. `hard_wrap` breaks
-/// anywhere (rules, code); otherwise it breaks at whitespace, splitting a lone
-/// token only when it alone exceeds the width.
-fn wrap_rich(spans: Vec<RichSpan>, width: usize, hard_wrap: bool) -> Vec<WrappedLine> {
-    let mut characters = Vec::new();
-    for span in spans {
-        for character in span.content.chars() {
-            characters.push(StyledCharacter {
-                character,
-                width: character.width().unwrap_or(0),
-                style: span.style,
-                link: span.link,
-            });
-        }
-    }
-    let char_lines = if hard_wrap {
-        hard_wrap_chars(characters, width)
-    } else {
-        soft_wrap_chars(characters, width)
-    };
-    char_lines.iter().map(|line| finalize_line(line)).collect()
-}
-
-/// Word-wrap the table path, which has no link semantics; the surviving caller of
-/// the plain-`Line` shape. Preserves the line-level style/alignment tables set.
-fn wrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
-    let style = line.style;
-    let alignment = line.alignment;
-    let mut characters = Vec::new();
-    for span in line.spans {
-        for character in span.content.chars() {
-            characters.push(StyledCharacter {
-                character,
-                width: character.width().unwrap_or(0),
-                style: span.style,
-                link: None,
-            });
-        }
-    }
-    soft_wrap_chars(characters, width)
-        .iter()
-        .map(|chars| {
-            let mut line = Line::from(finalize_line(chars).spans);
-            line.style = style;
-            line.alignment = alignment;
-            line
-        })
-        .collect()
-}
-
-fn soft_wrap_chars(characters: Vec<StyledCharacter>, width: usize) -> Vec<Vec<StyledCharacter>> {
-    let mut wrapped: Vec<Vec<StyledCharacter>> = vec![Vec::new()];
-    let mut used = 0usize;
-    let mut pending_whitespace: Option<&[StyledCharacter]> = None;
-    let mut cursor = 0;
-
-    while cursor < characters.len() {
-        let whitespace = characters[cursor].character.is_whitespace();
-        let end = characters[cursor..]
-            .iter()
-            .position(|character| character.character.is_whitespace() != whitespace)
-            .map_or(characters.len(), |offset| cursor + offset);
-        let token = &characters[cursor..end];
-
-        if whitespace {
-            pending_whitespace = Some(token);
-            cursor = end;
-            continue;
-        }
-
-        let whitespace_width = pending_whitespace.map_or(0, token_width);
-        let word_width = token_width(token);
-        if used > 0
-            && used
-                .saturating_add(whitespace_width)
-                .saturating_add(word_width)
-                > width
-        {
-            wrapped.push(Vec::new());
-            used = 0;
-        } else if let Some(whitespace) = pending_whitespace {
-            wrapped
-                .last_mut()
-                .expect("wrapped output always has a line")
-                .extend_from_slice(whitespace);
-            used = used.saturating_add(whitespace_width);
-        }
-        pending_whitespace = None;
-
-        for character in token {
-            if used > 0 && used.saturating_add(character.width) > width {
-                wrapped.push(Vec::new());
-                used = 0;
-            }
-            wrapped
-                .last_mut()
-                .expect("wrapped output always has a line")
-                .push(*character);
-            used = used.saturating_add(character.width);
-        }
-        cursor = end;
-    }
-
-    wrapped
-}
-
-fn hard_wrap_chars(characters: Vec<StyledCharacter>, width: usize) -> Vec<Vec<StyledCharacter>> {
-    let mut wrapped: Vec<Vec<StyledCharacter>> = vec![Vec::new()];
-    let mut used = 0usize;
-    for character in characters {
-        if used > 0 && used.saturating_add(character.width) > width {
-            wrapped.push(Vec::new());
-            used = 0;
-        }
-        wrapped
-            .last_mut()
-            .expect("wrapped output always has a line")
-            .push(character);
-        used = used.saturating_add(character.width);
-    }
-    wrapped
-}
-
-/// Collapse a wrapped display line's characters into style-merged spans (matching
-/// the previous span output) while recording each contiguous same-id link run's
-/// column span.
-fn finalize_line(characters: &[StyledCharacter]) -> WrappedLine {
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut links = Vec::new();
-    let mut column = 0usize;
-    let mut run: Option<(usize, usize)> = None;
-    for character in characters {
-        if let Some(span) = spans.last_mut()
-            && span.style == character.style
-        {
-            span.content.to_mut().push(character.character);
-        } else {
-            spans.push(Span::styled(
-                character.character.to_string(),
-                character.style,
-            ));
-        }
-        match (run, character.link) {
-            (Some((id, _)), Some(current)) if id == current => {}
-            (Some((id, start)), _) => {
-                links.push((start, column, id));
-                run = character.link.map(|current| (current, column));
-            }
-            (None, Some(current)) => run = Some((current, column)),
-            (None, None) => {}
-        }
-        column = column.saturating_add(character.width);
-    }
-    if let Some((id, start)) = run {
-        links.push((start, column, id));
-    }
-    WrappedLine { spans, links }
-}
-
-fn token_width(token: &[StyledCharacter]) -> usize {
-    token.iter().fold(0usize, |width, character| {
-        width.saturating_add(character.width)
-    })
-}
-
-/// Convert a plain `Line` (code, rules, stacked-table rows — none carry link
-/// semantics) into the renderer's tagged runs for emission.
-fn rich_from_line(line: Line<'static>) -> Vec<RichSpan> {
-    line.spans
-        .into_iter()
-        .map(|span| RichSpan {
-            content: span.content.into_owned(),
-            style: span.style,
-            link: None,
-        })
-        .collect()
 }
 
 /// Whether a link target is worth making clickable — external URLs and in-page
@@ -1159,7 +795,7 @@ mod wrap_tests {
     /// Render just the display lines (URLs shown) for the many tests that only
     /// assert on rendered text.
     fn render_lines(source: &str, width: usize) -> Vec<Line<'static>> {
-        render_text_chunk(source, width, true, None, false).lines
+        render_text_chunk(&Theme::terminal_default(), source, width, true, None, false).lines
     }
 
     #[test]
@@ -1211,9 +847,18 @@ mod wrap_tests {
         let visible: Vec<String> = lines.iter().map(text).collect();
 
         assert_eq!(visible, ["╭─ rust", "│ fn main() {}", "╰─"]);
-        assert_eq!(lines[0].spans[0].style, theme().md_blockquote());
-        assert_eq!(lines[1].spans[0].style, theme().md_blockquote());
-        assert_eq!(lines[2].spans[0].style, theme().md_blockquote());
+        assert_eq!(
+            lines[0].spans[0].style,
+            Theme::terminal_default().md_blockquote()
+        );
+        assert_eq!(
+            lines[1].spans[0].style,
+            Theme::terminal_default().md_blockquote()
+        );
+        assert_eq!(
+            lines[2].spans[0].style,
+            Theme::terminal_default().md_blockquote()
+        );
     }
 
     #[test]
@@ -1235,14 +880,25 @@ mod wrap_tests {
         let lines = render_lines(source, 50);
         let visible: Vec<String> = lines.iter().map(text).collect();
 
-        assert!(visible[0].starts_with(theme().glyphs().borders.line_set().top_left));
-        assert!(visible[1].contains("Hi"));
-        assert!(visible[2].contains(theme().glyphs().borders.line_set().cross));
         assert!(
-            visible
-                .last()
-                .unwrap()
-                .starts_with(theme().glyphs().borders.line_set().bottom_left)
+            visible[0].starts_with(
+                Theme::terminal_default()
+                    .glyphs()
+                    .borders
+                    .line_set()
+                    .top_left
+            )
+        );
+        assert!(visible[1].contains("Hi"));
+        assert!(visible[2].contains(Theme::terminal_default().glyphs().borders.line_set().cross));
+        assert!(
+            visible.last().unwrap().starts_with(
+                Theme::terminal_default()
+                    .glyphs()
+                    .borders
+                    .line_set()
+                    .bottom_left
+            )
         );
         assert!(!visible.iter().any(|line| line.contains("-----")));
     }
@@ -1303,12 +959,14 @@ mod wrap_tests {
         // The parser consumed the marker — it never leaks into the body.
         assert!(!visible.iter().any(|line| line.contains("[!WARNING]")));
         // Rail and header both carry the warning role; the header is bold.
-        assert_eq!(lines[0].spans[0].style, theme().warning());
+        assert_eq!(lines[0].spans[0].style, Theme::terminal_default().warning());
         assert_eq!(
             lines[0].spans[1].style,
-            theme().warning().add_modifier(Modifier::BOLD)
+            Theme::terminal_default()
+                .warning()
+                .add_modifier(Modifier::BOLD)
         );
-        assert_eq!(lines[1].spans[0].style, theme().warning());
+        assert_eq!(lines[1].spans[0].style, Theme::terminal_default().warning());
     }
 
     #[test]
@@ -1335,7 +993,10 @@ mod wrap_tests {
         let visible: Vec<String> = lines.iter().map(text).collect();
 
         assert_eq!(visible, ["│ just a quote"]);
-        assert_eq!(lines[0].spans[0].style, theme().md_blockquote());
+        assert_eq!(
+            lines[0].spans[0].style,
+            Theme::terminal_default().md_blockquote()
+        );
     }
 
     #[test]
@@ -1395,7 +1056,11 @@ mod wrap_tests {
             let lines = render_lines(marker, 12);
             assert_eq!(lines.len(), 1, "{marker}");
             assert_eq!(lines[0].width(), 12, "{marker}");
-            assert_eq!(lines[0].spans[0].style, theme().muted(), "{marker}");
+            assert_eq!(
+                lines[0].spans[0].style,
+                Theme::terminal_default().muted(),
+                "{marker}"
+            );
         }
 
         let lines = render_lines("These are ==very important words==.", 40);
@@ -1410,6 +1075,7 @@ mod wrap_tests {
     #[test]
     fn link_names_stay_blue_with_a_faint_target_trailer() {
         let chunk = render_text_chunk(
+            &Theme::terminal_default(),
             "See [the docs](https://example.com) now.",
             60,
             true,
@@ -1422,12 +1088,12 @@ mod wrap_tests {
             .iter()
             .find(|span| span.content == "the docs")
             .unwrap();
-        assert_eq!(name.style, theme().md_link());
+        assert_eq!(name.style, Theme::terminal_default().md_link());
         let trailer = spans
             .iter()
             .find(|span| span.content == " (https://example.com)")
             .unwrap();
-        assert_eq!(trailer.style, theme().muted());
+        assert_eq!(trailer.style, Theme::terminal_default().muted());
 
         // The name — not the trailer — is the recorded clickable region.
         assert_eq!(chunk.links.len(), 1);
@@ -1437,7 +1103,14 @@ mod wrap_tests {
 
     #[test]
     fn autolinks_drop_the_redundant_target_trailer() {
-        let chunk = render_text_chunk("<https://example.com>", 60, true, None, false);
+        let chunk = render_text_chunk(
+            &Theme::terminal_default(),
+            "<https://example.com>",
+            60,
+            true,
+            None,
+            false,
+        );
         let rendered: String = chunk.lines[0]
             .spans
             .iter()

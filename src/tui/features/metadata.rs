@@ -1,10 +1,50 @@
-use super::*;
+use std::collections::BTreeMap;
+
+use notema_domain::Entry;
+
 use crate::tui::state::{ListNav, SelectableList};
+use crate::tui::{
+    app::AppModel,
+    state::{EditMoodState, MetadataKind, Overlay},
+    text_input::TextInput,
+};
+
+pub(crate) fn metadata_values(entry: &Entry, kind: MetadataKind) -> &[String] {
+    match kind {
+        MetadataKind::Tags => &entry.tags,
+        MetadataKind::People => &entry.people,
+        MetadataKind::Activities => &entry.activities,
+    }
+}
+
+/// Counts per lowercased value and per original-casing form.
+#[derive(Default)]
+struct CasingCount {
+    total: usize,
+    forms: BTreeMap<String, usize>,
+}
+
+fn sort_casing(map: BTreeMap<String, CasingCount>) -> Vec<(String, usize)> {
+    let mut pairs: Vec<_> = map
+        .into_values()
+        .map(|count| {
+            let display = count
+                .forms
+                .into_iter()
+                .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
+                .map(|(form, _)| form)
+                .unwrap_or_default();
+            (display, count.total)
+        })
+        .collect();
+    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    pairs
+}
 
 /// A list of `(display value, usage count)` pairs, sorted by count descending.
 pub(crate) type MetadataCounts = Vec<(String, usize)>;
 
-impl App {
+impl AppModel {
     /// Split metadata values into `(active, archived_only)`. Archived journals
     /// don't contribute to the offered list or usage counts, so `active` counts
     /// only non-archived entries. `archived_only` holds values that appear *solely*
@@ -83,6 +123,43 @@ impl App {
         let scope = self.current_journal_scope();
         let hits = self.search_results_by_metadata(kind, value);
         self.enter_search(scope, format!("{}:{value}", kind.search_prefix()), hits);
+    }
+
+    pub(crate) fn edit_metadata_state(&self) -> Option<&EditMetadataState> {
+        match &self.overlay {
+            Overlay::EditMetadata(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn edit_metadata_state_mut(&mut self) -> Option<&mut EditMetadataState> {
+        match &mut self.overlay {
+            Overlay::EditMetadata(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn begin_edit_mood(&mut self) {
+        if self.editor.is_none() && !self.allow_selected_entry_edit() {
+            return;
+        }
+        let saved = self.editing_mood();
+        let draft = saved.unwrap_or(0);
+        self.overlay = Overlay::EditMood(EditMoodState { saved, draft });
+    }
+
+    pub(crate) fn edit_mood_state(&self) -> Option<&EditMoodState> {
+        match &self.overlay {
+            Overlay::EditMood(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn edit_mood_state_mut(&mut self) -> Option<&mut EditMoodState> {
+        match &mut self.overlay {
+            Overlay::EditMood(state) => Some(state),
+            _ => None,
+        }
     }
 }
 

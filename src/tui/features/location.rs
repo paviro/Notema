@@ -1,6 +1,6 @@
-use super::*;
 use crate::tui::geocode::{GeocodeQuery, GeocodeRequest};
 use crate::tui::state::{ListNav, SelectableList};
+use crate::tui::{app::AppModel, state::Overlay, text_input::TextInput};
 use chrono::{DateTime, FixedOffset};
 use notema_context::{DeviceFix, GeocodeHit};
 use notema_domain::Location;
@@ -21,7 +21,7 @@ struct PresetAgg {
     location: Location,
 }
 
-impl App {
+impl AppModel {
     pub(crate) fn edit_location_state(&self) -> Option<&EditLocationState> {
         match &self.overlay {
             Overlay::EditLocation(state) => Some(state.as_ref()),
@@ -116,15 +116,13 @@ impl App {
     /// Dispatch the dialog's current query to the geocode worker: coordinates are
     /// resolved immediately and enriched with names in the background; anything
     /// else is treated as an address. No-op on an empty query.
-    pub(crate) fn resolve_location_query(&mut self) {
+    pub(crate) fn prepare_location_query(&mut self) -> Option<GeocodeRequest> {
         let id = self.next_geocode_id;
         let dispatch = {
-            let Some(state) = self.edit_location_state_mut() else {
-                return;
-            };
+            let state = self.edit_location_state_mut()?;
             let query = state.query.as_str().trim().to_string();
             if query.is_empty() {
-                return;
+                return None;
             }
             state.pending_request_id = Some(id);
             state.status = LocationResolveStatus::Resolving;
@@ -142,18 +140,16 @@ impl App {
             GeocodeRequest { id, query }
         };
         self.next_geocode_id += 1;
-        self.geocode.request(dispatch, crate::tui::geocode::resolve);
+        Some(dispatch)
     }
 
     /// Ask the device for its current location, then name it like any coordinates.
     /// The grab and the reverse lookup both run on the worker thread, so the dialog
     /// just shows "Resolving…" until the fix (or a failure) comes back.
-    pub(crate) fn grab_device_location(&mut self) {
+    pub(crate) fn prepare_device_location(&mut self) -> Option<GeocodeRequest> {
         let id = self.next_geocode_id;
         let dispatch = {
-            let Some(state) = self.edit_location_state_mut() else {
-                return;
-            };
+            let state = self.edit_location_state_mut()?;
             state.pending_request_id = Some(id);
             state.status = LocationResolveStatus::Resolving;
             GeocodeRequest {
@@ -162,7 +158,7 @@ impl App {
             }
         };
         self.next_geocode_id += 1;
-        self.geocode.request(dispatch, crate::tui::geocode::resolve);
+        Some(dispatch)
     }
 
     /// Fold any finished geocode replies into the open dialog, ignoring stale ones

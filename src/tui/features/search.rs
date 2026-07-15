@@ -1,6 +1,15 @@
-use super::*;
+use std::time::Instant;
 
-impl App {
+use notema_domain::{Entry, EntryEncryptionState, SearchHit, normalize_feeling};
+
+use crate::tui::{
+    app::{AppModel, Focus, Mode, SearchScope},
+    features::metadata::metadata_values,
+    search::search_loaded_entries,
+    state::MetadataKind,
+};
+
+impl AppModel {
     pub(crate) fn begin_search(&mut self) {
         let scope = if self.nav.focus == Focus::Journals {
             SearchScope::AllJournals
@@ -12,7 +21,7 @@ impl App {
 
     /// Enter search mode with a prepared `query`/`hits`, focusing the entry list
     /// and selecting the first hit.
-    pub(super) fn enter_search(&mut self, scope: SearchScope, query: String, hits: Vec<SearchHit>) {
+    pub(crate) fn enter_search(&mut self, scope: SearchScope, query: String, hits: Vec<SearchHit>) {
         self.search.scope = scope;
         self.nav.mode = Mode::Search;
         self.nav.focus = Focus::Entries;
@@ -39,7 +48,7 @@ impl App {
 
     /// The search scope for a metadata/feeling drill-down: the selected journal,
     /// or all journals when none is selected.
-    pub(super) fn current_journal_scope(&self) -> SearchScope {
+    pub(crate) fn current_journal_scope(&self) -> SearchScope {
         self.selected_journal()
             .map(|journal| SearchScope::Journal(journal.name.clone()))
             .unwrap_or(SearchScope::AllJournals)
@@ -76,7 +85,7 @@ impl App {
         }
     }
 
-    pub(super) fn search_results(&self) -> Vec<SearchHit> {
+    pub(crate) fn search_results(&self) -> Vec<SearchHit> {
         let query = self.search.query.as_str();
         if let Some(tag) = query.strip_prefix("tags:") {
             self.search_results_by_metadata(MetadataKind::Tags, tag.trim())
@@ -117,7 +126,7 @@ impl App {
             .collect()
     }
 
-    pub(super) fn search_results_by_metadata(
+    pub(crate) fn search_results_by_metadata(
         &self,
         kind: MetadataKind,
         query: &str,
@@ -130,7 +139,7 @@ impl App {
         })
     }
 
-    pub(super) fn search_results_by_feeling(&self, feeling: &str) -> Vec<SearchHit> {
+    pub(crate) fn search_results_by_feeling(&self, feeling: &str) -> Vec<SearchHit> {
         let Some(feeling) = normalize_feeling(feeling) else {
             return Vec::new();
         };
@@ -142,7 +151,7 @@ impl App {
         })
     }
 
-    pub(super) fn search_results_by_starred(&self, want: bool) -> Vec<SearchHit> {
+    pub(crate) fn search_results_by_starred(&self, want: bool) -> Vec<SearchHit> {
         self.search_results_matching(|entry| entry.starred == want)
     }
 }

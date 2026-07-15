@@ -10,7 +10,7 @@ use notema_domain::{Entry, EntryEncryptionState};
 use std::path::Path;
 
 use crate::tui::{
-    app::{App, Focus, ReaderHeading, ReaderImageHits, ReaderLinkHit, RenderedEntryBody},
+    app::{AppModel, Focus, ReaderHeading, ReaderImageHits, ReaderLinkHit, RenderedEntryBody},
     image::{digit_for_image, sole_image_ref},
     render::{
         count_label, entry_metadata_layout, panel_block, render_centered_notice,
@@ -18,7 +18,7 @@ use crate::tui::{
     },
     state::HoverTarget,
     surface::{EntryMetadataValues, PanelGeometry, metadata_section_height},
-    theme::theme,
+    theme::Theme,
 };
 
 use super::markdown::render_text_chunk;
@@ -29,7 +29,13 @@ use super::metadata::{EntryMetadata, draw_metadata_section, metadata_section_lin
 /// folds into the scroll.
 const MIN_ENTRY_BODY_LINES: u16 = 20;
 
-pub(crate) fn draw_selected_reader(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
+pub(crate) fn draw_selected_reader(
+    active_theme: &crate::tui::theme::Theme,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &mut AppModel,
+    reader_view: &mut ReaderImageHits,
+) {
     if let Some((title, content)) = app.selected_reader() {
         let metadata = app
             .resolved_selected_entry()
@@ -46,15 +52,17 @@ pub(crate) fn draw_selected_reader(frame: &mut Frame<'_>, area: Rect, app: &mut 
         // so the viewer layers them onto the strip here; the editor renders
         // the same builder without them.
         let entry = app.resolved_selected_entry();
-        let entry_metadata = EntryMetadata::from_metadata(&metadata).with_environment(
-            entry.and_then(|entry| entry.weather.as_ref()),
-            entry.and_then(|entry| entry.celestial.as_ref()),
-            entry.and_then(|entry| entry.air_quality.as_ref()),
-        );
+        let entry_metadata = EntryMetadata::from_metadata(active_theme, &metadata)
+            .with_environment(
+                active_theme,
+                entry.and_then(|entry| entry.weather.as_ref()),
+                entry.and_then(|entry| entry.celestial.as_ref()),
+                entry.and_then(|entry| entry.air_quality.as_ref()),
+            );
 
         let (scroll, hits, content_rect, line_count) = draw_markdown_panel(
+            active_theme,
             frame,
-            area,
             app,
             PanelEntry {
                 title: &title,
@@ -63,12 +71,14 @@ pub(crate) fn draw_selected_reader(frame: &mut Frame<'_>, area: Rect, app: &mut 
                 metadata: entry_metadata,
                 attachments_openable,
             },
-            app.nav.scroll.reader,
-            app.nav.focus == Focus::Reader,
-            entry_path.as_deref(),
+            PanelPlacement {
+                area,
+                requested_scroll: app.nav.scroll.reader,
+                focused: app.nav.focus == Focus::Reader,
+                entry_path: entry_path.as_deref(),
+            },
         );
-        app.nav.scroll.reader = scroll;
-        app.reader_image_hits = ReaderImageHits {
+        *reader_view = ReaderImageHits {
             content_rect,
             scroll,
             line_count,
@@ -77,11 +87,11 @@ pub(crate) fn draw_selected_reader(frame: &mut Frame<'_>, area: Rect, app: &mut 
             headings: hits.headings,
         };
     } else {
-        let block = panel_block("Entry", app.nav.focus == Focus::Reader, None);
-        let content = PanelGeometry::new(area).content;
+        let block = panel_block(active_theme, "Entry", app.nav.focus == Focus::Reader, None);
+        let content = PanelGeometry::new(active_theme, area).content;
         frame.render_widget(block, area);
-        super::panel_focus_stripe(frame, area, app.nav.focus == Focus::Reader);
-        render_centered_notice(frame, content, "No entry selected");
+        super::panel_focus_stripe(active_theme, frame, area, app.nav.focus == Focus::Reader);
+        render_centered_notice(active_theme, frame, content, "No entry selected");
     }
 }
 
@@ -97,18 +107,23 @@ struct PanelEntry<'a> {
     attachments_openable: bool,
 }
 
+struct PanelPlacement<'a> {
+    area: Rect,
+    requested_scroll: u16,
+    focused: bool,
+    entry_path: Option<&'a Path>,
+}
+
 /// Draw the entry body and metadata, returning the applied scroll, the clickable
 /// image-label positions (`(body line index, image index)`), the body rect (for
 /// mapping clicks back to labels), and the total rendered line count (for scrollbar
 /// drag mapping).
 fn draw_markdown_panel(
+    active_theme: &crate::tui::theme::Theme,
     frame: &mut Frame<'_>,
-    area: Rect,
-    app: &App,
+    app: &AppModel,
     entry: PanelEntry<'_>,
-    requested_scroll: u16,
-    focused: bool,
-    entry_path: Option<&Path>,
+    placement: PanelPlacement<'_>,
 ) -> (u16, RenderedEntryBody, Rect, usize) {
     let PanelEntry {
         title,
@@ -117,15 +132,22 @@ fn draw_markdown_panel(
         metadata,
         attachments_openable,
     } = entry;
+    let PanelPlacement {
+        area,
+        requested_scroll,
+        focused,
+        entry_path,
+    } = placement;
     let block = panel_block(
+        active_theme,
         title,
         focused,
         Some(count_label(word_count, "word", "words")),
     );
-    let layout = entry_metadata_layout(area, metadata.values());
-    let metadata_scrolls = metadata_scrolls_with_body(area, metadata.values());
+    let layout = entry_metadata_layout(active_theme, area, metadata.values());
+    let metadata_scrolls = metadata_scrolls_with_body(active_theme, area, metadata.values());
     let content_rect = if metadata_scrolls {
-        PanelGeometry::new(area).content
+        PanelGeometry::new(active_theme, area).content
     } else {
         layout.content
     };
@@ -134,16 +156,20 @@ fn draw_markdown_panel(
     let body_rect = if metadata_scrolls {
         content_rect
     } else {
-        centered_body_rect(content_rect, app.config.ui.layout.reader.body_max_width)
+        centered_body_rect(
+            content_rect,
+            app.services.config.ui.layout.reader.body_max_width,
+        )
     };
 
     let width = body_rect.width.saturating_sub(1).max(1) as usize;
     // Memoized on (entry path, width, data version): the markdown parse + syntax
     // highlight + render is the reader's dominant per-frame cost, so a frame that
     // only scrolled, blinked, or ticked images reuses the rendered lines.
-    let show_link_urls = app.config.ui.layout.reader.show_link_urls;
+    let show_link_urls = app.services.config.ui.layout.reader.show_link_urls;
     let body = app.cached_entry_body(entry_path, width, || {
         build_body_lines(
+            active_theme,
             content,
             width,
             entry_path,
@@ -197,7 +223,7 @@ fn draw_markdown_panel(
         headings: body.headings.clone(),
     };
     if metadata_scrolls {
-        let meta_lines = metadata_section_lines(body_rect.width, &metadata);
+        let meta_lines = metadata_section_lines(active_theme, body_rect.width, &metadata);
         if !meta_lines.is_empty() {
             let height = body_rect.height as usize;
             if lines.len() + meta_lines.len() < height {
@@ -217,26 +243,28 @@ fn draw_markdown_panel(
     // Float a short entry in the vertical middle — but only when the metadata is
     // pinned (taller panes). On short panes the body flows from the top with the
     // metadata bottom-attached, so centering would fight that.
-    let body_rect = if app.config.ui.layout.reader.body_center_vertically && !metadata_scrolls {
-        center_body_vertically(body_rect, line_count, scroll)
-    } else {
-        body_rect
-    };
+    let body_rect =
+        if app.services.config.ui.layout.reader.body_center_vertically && !metadata_scrolls {
+            center_body_vertically(body_rect, line_count, scroll)
+        } else {
+            body_rect
+        };
 
     frame.render_widget(block, area);
-    super::panel_focus_stripe(frame, area, focused);
+    super::panel_focus_stripe(active_theme, frame, area, focused);
     frame.render_widget(
         Paragraph::new(lines)
-            .style(theme().text())
+            .style(active_theme.text())
             .scroll((scroll, 0)),
         body_rect,
     );
 
     if !metadata_scrolls && layout.metadata.is_some() {
-        draw_metadata_section(frame, layout, &metadata, app.hover);
+        draw_metadata_section(active_theme, frame, layout, &metadata, app.hover);
     }
 
     render_scrollbar_if_needed(
+        active_theme,
         frame,
         area,
         line_count,
@@ -251,8 +279,12 @@ fn draw_markdown_panel(
 /// Pin the metadata below the body only when doing so still leaves the body at least
 /// [`MIN_ENTRY_BODY_LINES`]; otherwise fold it into the scroll. With no metadata the
 /// height is zero and this reduces to a plain minimum-body check.
-pub(crate) fn metadata_scrolls_with_body(area: Rect, values: EntryMetadataValues<'_>) -> bool {
-    let inner = PanelGeometry::new(area).content;
+pub(crate) fn metadata_scrolls_with_body(
+    theme: &Theme,
+    area: Rect,
+    values: EntryMetadataValues<'_>,
+) -> bool {
+    let inner = PanelGeometry::new(theme, area).content;
     let metadata_height = metadata_section_height(inner.width, values);
     inner.height < MIN_ENTRY_BODY_LINES.saturating_add(metadata_height)
 }
@@ -290,6 +322,7 @@ fn center_body_vertically(rect: Rect, line_count: usize, scroll: u16) -> Rect {
 /// so clicks and the viewer agree on numbering. Without an entry path the body
 /// is rendered as-is.
 fn build_body_lines(
+    theme: &Theme,
     content: &str,
     width: usize,
     entry_path: Option<&Path>,
@@ -310,7 +343,7 @@ fn build_body_lines(
             &mut links,
             &mut headings,
             &mut group_base,
-            render_text_chunk(content, width, show_urls, None, false),
+            render_text_chunk(theme, content, width, show_urls, None, false),
         );
         dedupe_heading_anchors(&mut headings);
         return RenderedEntryBody {
@@ -357,6 +390,7 @@ fn build_body_lines(
                 &mut headings,
                 &mut group_base,
                 render_text_chunk(
+                    theme,
                     &buffer,
                     width,
                     show_urls,
@@ -372,7 +406,7 @@ fn build_body_lines(
         after_image = true;
 
         let start_row = lines.len();
-        lines.push(image_label_line(image_index, &alt));
+        lines.push(image_label_line(theme, image_index, &alt));
         labels.push((start_row, image_index));
         image_index += 1;
     }
@@ -384,6 +418,7 @@ fn build_body_lines(
             &mut headings,
             &mut group_base,
             render_text_chunk(
+                theme,
                 &buffer,
                 width,
                 show_urls,
@@ -457,7 +492,7 @@ fn patch_line_range(line: &mut Line<'static>, start: usize, end: usize, style: S
 /// A clickable `[Image N: alt - click here or press K]` label. The number is
 /// 1-based; images 1-9 bind to their digit, the tenth to `0`, and later images
 /// drop the `press K` hint (no digit left to bind).
-fn image_label_line(index: usize, alt: &str) -> Line<'static> {
+fn image_label_line(theme: &Theme, index: usize, alt: &str) -> Line<'static> {
     let alt = alt.trim();
     let number = index + 1;
     let head = if alt.is_empty() {
@@ -469,7 +504,7 @@ fn image_label_line(index: usize, alt: &str) -> Line<'static> {
         Some(key) => format!("[{head} - click here or press {key}]"),
         None => format!("[{head} - click here]"),
     };
-    Line::from(Span::styled(text, theme().md_link()))
+    Line::from(Span::styled(text, theme.md_link()))
 }
 
 #[cfg(test)]
@@ -497,11 +532,11 @@ mod image_tests {
     #[test]
     fn image_label_includes_alt_and_press_hint_and_is_one_based() {
         assert_eq!(
-            line_text(&image_label_line(0, "sunset")),
+            line_text(&image_label_line(&Theme::terminal_default(), 0, "sunset")),
             "[Image 1: sunset - click here or press 1]"
         );
         assert_eq!(
-            line_text(&image_label_line(3, "")),
+            line_text(&image_label_line(&Theme::terminal_default(), 3, "")),
             "[Image 4 - click here or press 4]"
         );
     }
@@ -509,7 +544,7 @@ mod image_tests {
     #[test]
     fn tenth_image_binds_to_zero_key() {
         assert_eq!(
-            line_text(&image_label_line(9, "")),
+            line_text(&image_label_line(&Theme::terminal_default(), 9, "")),
             "[Image 10 - click here or press 0]"
         );
     }
@@ -517,7 +552,7 @@ mod image_tests {
     #[test]
     fn image_label_past_ten_drops_press_hint() {
         assert_eq!(
-            line_text(&image_label_line(10, "late")),
+            line_text(&image_label_line(&Theme::terminal_default(), 10, "late")),
             "[Image 11: late - click here]"
         );
     }
@@ -537,7 +572,14 @@ mod image_tests {
             "Text below",
         );
 
-        let body = build_body_lines(content, 40, Some(&entry_path), true, false);
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            content,
+            40,
+            Some(&entry_path),
+            true,
+            false,
+        );
 
         let rendered: Vec<String> = body.lines.iter().map(line_text).collect();
         assert_eq!(
@@ -561,7 +603,14 @@ mod image_tests {
     #[test]
     fn unpaired_highlight_marker_does_not_leak_past_its_block() {
         use ratatui::style::Modifier;
-        let body = build_body_lines("a == b\n\nplain paragraph", 40, None, true, false);
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            "a == b\n\nplain paragraph",
+            40,
+            None,
+            true,
+            false,
+        );
         let plain = body
             .lines
             .iter()
@@ -579,13 +628,27 @@ mod image_tests {
     /// Without an entry path (no selected entry) the body renders untouched.
     #[test]
     fn no_labels_without_entry_path() {
-        let body = build_body_lines("just text", 40, None, true, false);
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            "just text",
+            40,
+            None,
+            true,
+            false,
+        );
         assert!(body.images.is_empty());
     }
 
     #[test]
     fn renderer_records_heading_anchors_and_link_cells() {
-        let body = build_body_lines("# My Heading\n\n[Jump](#my-heading)", 40, None, true, false);
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            "# My Heading\n\n[Jump](#my-heading)",
+            40,
+            None,
+            true,
+            false,
+        );
 
         assert_eq!(
             body.headings,
@@ -600,9 +663,15 @@ mod image_tests {
         // secondary style.
         let link_line = &body.lines[body.links[0].line];
         assert_eq!(link_line.spans[0].content, "Jump");
-        assert_eq!(link_line.spans[0].style, theme().md_link());
+        assert_eq!(
+            link_line.spans[0].style,
+            Theme::terminal_default().md_link()
+        );
         assert_eq!(link_line.spans.last().unwrap().content, " (#my-heading)");
-        assert_eq!(link_line.spans.last().unwrap().style, theme().muted());
+        assert_eq!(
+            link_line.spans.last().unwrap().style,
+            Theme::terminal_default().muted()
+        );
         assert_eq!((body.links[0].start, body.links[0].end), (0, 4));
     }
 
@@ -610,7 +679,14 @@ mod image_tests {
     /// clickable over its own text.
     #[test]
     fn autolink_renders_once_and_stays_clickable() {
-        let body = build_body_lines("<https://example.com>", 60, None, true, false);
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            "<https://example.com>",
+            60,
+            None,
+            true,
+            false,
+        );
 
         assert_eq!(body.links.len(), 1);
         assert_eq!(body.links[0].target, "https://example.com");
@@ -623,6 +699,7 @@ mod image_tests {
     #[test]
     fn hidden_link_urls_strip_the_trailer_but_keep_the_link() {
         let body = build_body_lines(
+            &Theme::terminal_default(),
             "See [the docs](https://example.com) now.",
             60,
             None,
@@ -639,6 +716,7 @@ mod image_tests {
 
         // Shown, the same source keeps the faint trailer.
         let shown = build_body_lines(
+            &Theme::terminal_default(),
             "See [the docs](https://example.com) now.",
             60,
             None,
@@ -667,7 +745,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             "http://ettext.taint.org/doc/",
         ];
 
-        let shown = build_body_lines(source, 80, None, true, false);
+        let shown = build_body_lines(&Theme::terminal_default(), source, 80, None, true, false);
         let targets: Vec<&str> = shown.links.iter().map(|hit| hit.target.as_str()).collect();
         assert_eq!(targets, expected);
         for hit in &shown.links {
@@ -677,7 +755,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
 
         // Hidden URLs: still all six, wrap now computed against the shorter text,
         // and no URL leaks into any rendered line.
-        let hidden = build_body_lines(source, 80, None, false, false);
+        let hidden = build_body_lines(&Theme::terminal_default(), source, 80, None, false, false);
         let hidden_targets: Vec<&str> =
             hidden.links.iter().map(|hit| hit.target.as_str()).collect();
         assert_eq!(hidden_targets, expected);
@@ -694,6 +772,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
     #[test]
     fn a_wrapping_link_name_is_clickable_on_every_row() {
         let body = build_body_lines(
+            &Theme::terminal_default(),
             "[the quick brown fox](https://example.com)",
             10,
             None,
@@ -717,6 +796,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
     #[test]
     fn distinct_links_have_distinct_groups() {
         let body = build_body_lines(
+            &Theme::terminal_default(),
             "[one](https://example.com) and [two](https://example.com)",
             80,
             None,
@@ -733,6 +813,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
     #[test]
     fn wrapping_heading_keeps_the_full_anchor_slug() {
         let body = build_body_lines(
+            &Theme::terminal_default(),
             "## A Very Long Heading That Certainly Wraps Across Rows",
             20,
             None,
@@ -752,14 +833,19 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
     /// A relative link target stays styled but is not clickable.
     #[test]
     fn relative_links_are_styled_but_not_clickable() {
-        let body = build_body_lines("See [the pic](photo.png) here.", 60, None, true, false);
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            "See [the pic](photo.png) here.",
+            60,
+            None,
+            true,
+            false,
+        );
 
         assert!(body.links.is_empty());
-        let styled = body
-            .lines
-            .iter()
-            .flat_map(|line| &line.spans)
-            .any(|span| span.content == "the pic" && span.style == theme().md_link());
+        let styled = body.lines.iter().flat_map(|line| &line.spans).any(|span| {
+            span.content == "the pic" && span.style == Theme::terminal_default().md_link()
+        });
         assert!(styled);
     }
 
@@ -771,21 +857,33 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
         let (_guard, entry_path) = entry_path_with_asset();
         let content = "Recording: [Audio attachment](2026-07-05T14-30-00-abc123.assets/x9k2.png)";
 
-        let openable = build_body_lines(content, 80, Some(&entry_path), true, true);
+        let openable = build_body_lines(
+            &Theme::terminal_default(),
+            content,
+            80,
+            Some(&entry_path),
+            true,
+            true,
+        );
         assert_eq!(openable.links.len(), 1);
         assert_eq!(
             openable.links[0].target,
             "2026-07-05T14-30-00-abc123.assets/x9k2.png"
         );
 
-        let inert = build_body_lines(content, 80, Some(&entry_path), true, false);
+        let inert = build_body_lines(
+            &Theme::terminal_default(),
+            content,
+            80,
+            Some(&entry_path),
+            true,
+            false,
+        );
         assert!(inert.links.is_empty());
         // Even inert, the link name keeps its styling.
-        let styled = inert
-            .lines
-            .iter()
-            .flat_map(|line| &line.spans)
-            .any(|span| span.content == "Audio attachment" && span.style == theme().md_link());
+        let styled = inert.lines.iter().flat_map(|line| &line.spans).any(|span| {
+            span.content == "Audio attachment" && span.style == Theme::terminal_default().md_link()
+        });
         assert!(styled);
     }
 
@@ -794,7 +892,14 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
         let (_guard, entry_path) = entry_path_with_asset();
         let content = "Inline ![photo](2026-07-05T14-30-00-abc123.assets/x9k2.png)";
 
-        let body = build_body_lines(content, 80, Some(&entry_path), true, true);
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            content,
+            80,
+            Some(&entry_path),
+            true,
+            true,
+        );
 
         assert!(body.links.is_empty());
     }

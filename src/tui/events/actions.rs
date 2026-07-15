@@ -3,13 +3,15 @@ use notema_domain::{EntryEncryptionState, Location, MetadataField};
 use notema_storage::EditOutcome;
 use std::path::{Path, PathBuf};
 
-use crate::tui::app::{App, EntryTarget, Focus};
+use crate::tui::app::{AppModel, EntryTarget, Focus};
 use crate::tui::editor_state::EditorTarget;
 use crate::tui::environment::environment_fields;
 use crate::tui::state::{MetadataKind, Overlay, ToastVariant};
 use std::time::Instant;
 
-pub(super) fn submit_new_journal(app: &mut App) -> AppResult<()> {
+use super::{Effect, OpenTarget};
+
+pub(super) fn submit_new_journal(app: &mut AppModel) -> AppResult<()> {
     let value = app
         .new_journal_input()
         .map(|input| input.as_str().trim())
@@ -21,7 +23,7 @@ pub(super) fn submit_new_journal(app: &mut App) -> AppResult<()> {
         return Ok(());
     }
 
-    let journal = app.store.create_journal(&value)?;
+    let journal = app.services.store.create_journal(&value)?;
     app.refresh()?;
     app.select_journal_by_name(&journal.name);
     app.toast(
@@ -88,16 +90,16 @@ fn save_variant(report: &notema_storage::AssetReport) -> ToastVariant {
     }
 }
 
-fn asset_options(app: &App) -> notema_storage::EntryAssetOptions {
+fn asset_options(app: &AppModel) -> notema_storage::EntryAssetOptions {
     notema_storage::EntryAssetOptions {
-        download_remote: app.config.attachments.download_remote_images,
+        download_remote: app.services.config.attachments.download_remote_images,
         replace_offline: false,
     }
 }
 
 /// Reports a friendly status and returns `false` when the target is a locked
 /// encrypted entry that cannot be read or written without the identity.
-fn reject_if_locked(app: &mut App, target: &EntryTarget) -> bool {
+fn reject_if_locked(app: &mut AppModel, target: &EntryTarget) -> bool {
     if target.locked {
         app.toast(ToastVariant::Error, "Encryption identity not available");
         return false;
@@ -105,14 +107,14 @@ fn reject_if_locked(app: &mut App, target: &EntryTarget) -> bool {
     true
 }
 
-fn reject_if_front_matter_invalid(app: &mut App) -> bool {
+fn reject_if_front_matter_invalid(app: &mut AppModel) -> bool {
     app.editor.is_some() || app.allow_selected_entry_edit()
 }
 
 /// The shared post-edit tail for an existing entry: ingest assets, refresh the
 /// entry, and back-fill weather after a real change.
 fn finish_existing_edit(
-    app: &mut App,
+    app: &mut AppModel,
     path: &Path,
     title: &str,
     outcome: EditOutcome,
@@ -143,7 +145,7 @@ fn clear_environment_fields() -> Vec<MetadataField> {
 
 /// The metadata fields for the editor's landed background environment, or empty when
 /// none arrived (a coordless location, or the fetch returned nothing).
-fn editor_environment_fields(app: &App) -> Vec<MetadataField> {
+fn editor_environment_fields(app: &AppModel) -> Vec<MetadataField> {
     app.editor
         .as_ref()
         .and_then(|editor| editor.environment.as_ref())
@@ -155,7 +157,7 @@ fn editor_environment_fields(app: &App) -> Vec<MetadataField> {
 /// "Fetching…" modal and tell the caller to abort this save. The event loop
 /// re-runs the save once the fetch lands or the timeout fires (see
 /// [`super::poll_fetching_environment`]).
-fn defer_for_pending_environment(app: &mut App) -> bool {
+fn defer_for_pending_environment(app: &mut AppModel) -> bool {
     if app
         .editor
         .as_ref()
@@ -170,7 +172,7 @@ fn defer_for_pending_environment(app: &mut App) -> bool {
 
 /// Save the open internal-editor buffer. The editor stays open until every
 /// fallible write/refresh step succeeds.
-pub(super) fn save_internal_editor(app: &mut App) -> AppResult<()> {
+pub(super) fn save_internal_editor(app: &mut AppModel) -> AppResult<()> {
     let Some(editor) = app.editor.as_ref() else {
         return Ok(());
     };
@@ -210,7 +212,7 @@ pub(super) fn save_internal_editor(app: &mut App) -> AppResult<()> {
                 }
                 editor_environment_fields(app)
             };
-            let save_result = app.store.save_entry_edit_if_revision(
+            let save_result = app.services.store.save_entry_edit_if_revision(
                 &path,
                 revision,
                 notema_storage::EntryEdit {
@@ -238,9 +240,10 @@ pub(super) fn save_internal_editor(app: &mut App) -> AppResult<()> {
                     }
                     let mut draft = notema_storage::EntryDraft::new(&journal, &text, &metadata);
                     draft.writing_seconds = (text != original_body).then_some(elapsed.as_secs());
-                    let created = app
-                        .store
-                        .create_entry_copy(&path, draft, asset_options(app))?;
+                    let created =
+                        app.services
+                            .store
+                            .create_entry_copy(&path, draft, asset_options(app))?;
                     app.toast(
                         ToastVariant::Warning,
                         save_status(
@@ -285,7 +288,7 @@ pub(super) fn save_internal_editor(app: &mut App) -> AppResult<()> {
                 draft.celestial = Some(&environment.celestial);
                 draft.air_quality = environment.air_quality.as_ref();
                 draft.writing_seconds = Some(elapsed.as_secs());
-                Some(app.store.create_entry(draft, asset_options(app))?)
+                Some(app.services.store.create_entry(draft, asset_options(app))?)
             };
             match created {
                 Some(created) => {
@@ -314,7 +317,7 @@ pub(super) fn save_internal_editor(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-pub(super) fn view_selected(app: &mut App) -> AppResult<()> {
+pub(super) fn view_selected(app: &mut AppModel) -> AppResult<()> {
     if !app.reload_selected_entry_from_disk()? {
         return Ok(());
     }
@@ -337,18 +340,22 @@ pub(super) fn view_selected(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-pub(super) fn open_reader_link(app: &mut App, target: &str) -> AppResult<()> {
+pub(super) fn open_reader_link(
+    app: &mut AppModel,
+    target: &str,
+    heading_line: Option<usize>,
+) -> AppResult<Option<Effect>> {
     if let Some(anchor) = target.strip_prefix('#') {
-        let Some(line) = app.reader_heading_line(anchor) else {
+        let Some(line) = heading_line else {
             app.toast(
                 ToastVariant::Warning,
                 format!("Heading not found: {anchor}"),
             );
-            return Ok(());
+            return Ok(None);
         };
         app.nav.scroll.reader = line.min(u16::MAX as usize) as u16;
         app.flash_reader_heading(line);
-        return Ok(());
+        return Ok(None);
     }
     if !(target.starts_with("https://")
         || target.starts_with("http://")
@@ -359,23 +366,25 @@ pub(super) fn open_reader_link(app: &mut App, target: &str) -> AppResult<()> {
         // default app. (Only plaintext entries reach here; encrypted assets are
         // `.age` on disk and never record a clickable hit.)
         if let Some(path) = selected_entry_attachment_path(app, target)? {
-            open::that(&path)?;
-            app.toast(ToastVariant::Info, "Opened attachment");
-            return Ok(());
+            return Ok(Some(Effect::Open {
+                target: OpenTarget::Path(path),
+                success_message: "Opened attachment".to_string(),
+            }));
         }
         app.toast(ToastVariant::Warning, "Unsupported link target");
-        return Ok(());
+        return Ok(None);
     }
-    open::that(target)?;
-    app.toast(ToastVariant::Info, "Opened link");
-    Ok(())
+    Ok(Some(Effect::Open {
+        target: OpenTarget::Uri(target.to_string()),
+        success_message: "Opened link".to_string(),
+    }))
 }
 
 /// Resolve a reader link into the selected entry's own asset folder to an
 /// absolute on-disk path, or `None` for any other target. Encrypted entries
 /// return `None`: their assets live on disk as `.age` and can't be opened
 /// directly.
-fn selected_entry_attachment_path(app: &App, target: &str) -> AppResult<Option<PathBuf>> {
+fn selected_entry_attachment_path(app: &AppModel, target: &str) -> AppResult<Option<PathBuf>> {
     let Some(entry) = app.resolved_selected_entry() else {
         return Ok(None);
     };
@@ -388,7 +397,7 @@ fn selected_entry_attachment_path(app: &App, target: &str) -> AppResult<Option<P
     notema_storage::resolve_entry_asset_path(&entry.path, &file_name)
 }
 
-pub(super) fn delete_selected(app: &mut App) -> AppResult<()> {
+pub(super) fn delete_selected(app: &mut AppModel) -> AppResult<()> {
     if !app.reload_selected_entry_from_disk()? {
         return Ok(());
     }
@@ -404,16 +413,16 @@ pub(super) fn delete_selected(app: &mut App) -> AppResult<()> {
         .unwrap_or(false);
 
     if has_body {
-        app.store.move_entry_to_trash(&target.path)?;
+        app.services.store.move_entry_to_trash(&target.path)?;
         app.toast(ToastVariant::Success, "Moved to trash");
     } else {
-        app.store.delete_empty_entry(&target.path)?;
+        app.services.store.delete_empty_entry(&target.path)?;
         app.toast(ToastVariant::Success, "Deleted");
     }
     Ok(())
 }
 
-pub(super) fn delete_selected_journal(app: &mut App) -> AppResult<()> {
+pub(super) fn delete_selected_journal(app: &mut AppModel) -> AppResult<()> {
     let Some(journal) = app.selected_journal() else {
         return Ok(());
     };
@@ -422,6 +431,7 @@ pub(super) fn delete_selected_journal(app: &mut App) -> AppResult<()> {
     let journal_id = journal.id.clone();
 
     let current = app
+        .services
         .store
         .list_journals()?
         .into_iter()
@@ -431,8 +441,9 @@ pub(super) fn delete_selected_journal(app: &mut App) -> AppResult<()> {
         anyhow::bail!("selected journal changed on disk; refresh and try again");
     }
 
-    let fresh_entries = app.store.read_entries(
-        app.store
+    let fresh_entries = app.services.store.read_entries(
+        app.services
+            .store
             .collect_entry_paths()?
             .into_iter()
             .filter(|entry| entry.journal == journal_name)
@@ -444,13 +455,14 @@ pub(super) fn delete_selected_journal(app: &mut App) -> AppResult<()> {
         .collect();
 
     let display = notema_storage::journal_display_name(&journal_name).to_string();
-    app.store
+    app.services
+        .store
         .delete_journal(&journal_name, &journal_path, &entries)?;
     app.toast(ToastVariant::Success, format!("Deleted journal {display}"));
     Ok(())
 }
 
-pub(super) fn toggle_archive_selected_journal(app: &mut App) -> AppResult<()> {
+pub(super) fn toggle_archive_selected_journal(app: &mut AppModel) -> AppResult<()> {
     let Some(journal) = app.selected_journal() else {
         return Ok(());
     };
@@ -460,6 +472,7 @@ pub(super) fn toggle_archive_selected_journal(app: &mut App) -> AppResult<()> {
     let display = journal.display_name().to_string();
 
     let current = app
+        .services
         .store
         .list_journals()?
         .into_iter()
@@ -469,7 +482,10 @@ pub(super) fn toggle_archive_selected_journal(app: &mut App) -> AppResult<()> {
         anyhow::bail!("selected journal changed on disk; refresh and try again");
     }
 
-    let new_journal = app.store.set_journal_archived(&old_name, archive)?;
+    let new_journal = app
+        .services
+        .store
+        .set_journal_archived(&old_name, archive)?;
     // The rename changes the journal's folder name, so the name-keyed
     // `config.journal.default` would go stale. Retarget it before reloading.
     app.retarget_journal_in_config(&old_name, &new_journal.name)?;
@@ -488,7 +504,7 @@ pub(super) fn toggle_archive_selected_journal(app: &mut App) -> AppResult<()> {
 }
 
 pub(super) fn set_metadata_on_entry(
-    app: &mut App,
+    app: &mut AppModel,
     kind: MetadataKind,
     values: &[String],
 ) -> AppResult<()> {
@@ -508,14 +524,16 @@ pub(super) fn set_metadata_on_entry(
         MetadataKind::People => MetadataField::People(values.to_vec()),
         MetadataKind::Activities => MetadataField::Activities(values.to_vec()),
     };
-    app.store.set_entry_metadata_field(&target.path, field)?;
+    app.services
+        .store
+        .set_entry_metadata_field(&target.path, field)?;
 
     app.toast(ToastVariant::Success, format!("{} saved", kind.title()));
     refresh_entry_path(app, &target.path)?;
     Ok(())
 }
 
-pub(super) fn set_feelings_on_entry(app: &mut App, feelings: &[String]) -> AppResult<()> {
+pub(super) fn set_feelings_on_entry(app: &mut AppModel, feelings: &[String]) -> AppResult<()> {
     let Some(target) = app.selected_entry_target() else {
         return Ok(());
     };
@@ -527,7 +545,8 @@ pub(super) fn set_feelings_on_entry(app: &mut App, feelings: &[String]) -> AppRe
         return Ok(());
     }
 
-    app.store
+    app.services
+        .store
         .set_entry_metadata_field(&target.path, MetadataField::Feelings(feelings.to_vec()))?;
 
     app.toast(ToastVariant::Success, "Feelings saved");
@@ -535,7 +554,7 @@ pub(super) fn set_feelings_on_entry(app: &mut App, feelings: &[String]) -> AppRe
     Ok(())
 }
 
-pub(super) fn set_mood_on_entry(app: &mut App, mood: Option<i8>) -> AppResult<()> {
+pub(super) fn set_mood_on_entry(app: &mut AppModel, mood: Option<i8>) -> AppResult<()> {
     let Some(target) = app.selected_entry_target() else {
         return Ok(());
     };
@@ -547,7 +566,8 @@ pub(super) fn set_mood_on_entry(app: &mut App, mood: Option<i8>) -> AppResult<()
         return Ok(());
     }
 
-    app.store
+    app.services
+        .store
         .set_entry_metadata_field(&target.path, MetadataField::Mood(mood))?;
 
     app.toast(ToastVariant::Success, "Mood saved");
@@ -555,16 +575,19 @@ pub(super) fn set_mood_on_entry(app: &mut App, mood: Option<i8>) -> AppResult<()
     Ok(())
 }
 
-pub(super) fn set_location_on_entry(app: &mut App, location: Option<Location>) -> AppResult<()> {
+pub(super) fn set_location_on_entry(
+    app: &mut AppModel,
+    location: Option<Location>,
+) -> AppResult<Option<crate::tui::environment::EnvironmentRequest>> {
     let Some(target) = app.selected_entry_target() else {
-        return Ok(());
+        return Ok(None);
     };
 
     if !reject_if_locked(app, &target) {
-        return Ok(());
+        return Ok(None);
     }
     if !reject_if_front_matter_invalid(app) {
-        return Ok(());
+        return Ok(None);
     }
 
     // Capture the date before the write so weather can be looked up for it.
@@ -577,7 +600,9 @@ pub(super) fn set_location_on_entry(app: &mut App, location: Option<Location>) -
     if location.is_none() {
         fields.extend(clear_environment_fields());
     }
-    app.store.set_entry_metadata_fields(&target.path, &fields)?;
+    app.services
+        .store
+        .set_entry_metadata_fields(&target.path, &fields)?;
 
     app.toast(
         ToastVariant::Success,
@@ -591,13 +616,15 @@ pub(super) fn set_location_on_entry(app: &mut App, location: Option<Location>) -
 
     // Fetch weather/air/celestial in the background; it's written back when it
     // lands, without touching `edited_at`. No date means no lookup is possible.
-    if let (Some(location), Some(datetime)) = (location, datetime) {
-        app.spawn_entry_environment_for(target.path.clone(), &location, datetime);
-    }
-    Ok(())
+    Ok(match (location, datetime) {
+        (Some(location), Some(datetime)) => {
+            app.prepare_entry_environment_for(target.path.clone(), &location, datetime)
+        }
+        _ => None,
+    })
 }
 
-pub(super) fn toggle_starred_on_entry(app: &mut App) -> AppResult<()> {
+pub(super) fn toggle_starred_on_entry(app: &mut AppModel) -> AppResult<()> {
     let Some(target) = app.selected_entry_target() else {
         return Ok(());
     };
@@ -610,7 +637,8 @@ pub(super) fn toggle_starred_on_entry(app: &mut App) -> AppResult<()> {
     }
 
     let starred = !app.selected_entry_starred();
-    app.store
+    app.services
+        .store
         .set_entry_metadata_field(&target.path, MetadataField::Starred(starred))?;
 
     app.toast(
@@ -621,7 +649,7 @@ pub(super) fn toggle_starred_on_entry(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-fn refresh_entry_path(app: &mut App, path: &Path) -> AppResult<()> {
+fn refresh_entry_path(app: &mut AppModel, path: &Path) -> AppResult<()> {
     app.refresh_paths(&[path.to_path_buf()])
 }
 
@@ -634,14 +662,14 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    fn new_app(config: Config) -> App {
+    fn new_app(config: Config) -> AppModel {
         let config_path = config.journal.path.join("config.toml");
         let store = JournalStore::for_config(&config_path, &config.journal.path).unwrap();
-        App::new(config_path, config, store).unwrap()
+        AppModel::new(config_path, config, store).unwrap()
     }
 
     /// The newest toast as `(message, variant)`.
-    fn last_toast(app: &App) -> (&str, ToastVariant) {
+    fn last_toast(app: &AppModel) -> (&str, ToastVariant) {
         let toast = app.toasts.items().last().expect("a toast was pushed");
         (toast.message.as_str(), toast.variant)
     }
@@ -694,12 +722,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let config = Config::new(dir.path().to_path_buf());
         let mut app = new_app(config);
-        app.reader_image_hits.headings = vec![crate::tui::app::ReaderHeading {
-            anchor: "details".to_string(),
-            line: 17,
-        }];
-
-        open_reader_link(&mut app, "#details").unwrap();
+        open_reader_link(&mut app, "#details", Some(17)).unwrap();
 
         assert_eq!(app.nav.scroll.reader, 17);
         assert_eq!(app.reader_anchor_flash.as_ref().unwrap().line, 17);
@@ -711,7 +734,7 @@ mod tests {
         let config = Config::new(dir.path().to_path_buf());
         let mut app = new_app(config);
 
-        open_reader_link(&mut app, "file:///tmp/private").unwrap();
+        open_reader_link(&mut app, "file:///tmp/private", None).unwrap();
 
         assert_eq!(last_toast(&app).0, "Unsupported link target");
     }
@@ -759,7 +782,7 @@ mod tests {
         assert_eq!(app.selected_entry_location(), None);
     }
 
-    fn app_with_entry(body: &str) -> (tempfile::TempDir, App, PathBuf) {
+    fn app_with_entry(body: &str) -> (tempfile::TempDir, AppModel, PathBuf) {
         let dir = tempdir().unwrap();
         let entry_dir = dir.path().join("work").join("2026-07-01");
         fs::create_dir_all(&entry_dir).unwrap();
@@ -835,6 +858,7 @@ mod tests {
         let target = app.selected_entry_target().unwrap();
         let journal = app.resolved_selected_entry().unwrap().journal.clone();
         let (_, revision) = app
+            .services
             .store
             .read_entry_with_revision(&journal, &target.path)
             .unwrap();
@@ -852,7 +876,7 @@ mod tests {
         save_internal_editor(&mut app).unwrap();
 
         assert!(app.editor.is_none());
-        let content = app.store.read_entry_content(&path).unwrap();
+        let content = app.services.store.read_entry_content(&path).unwrap();
         assert!(content.contains("# Edited body"));
         assert!(content.contains("edited_at"));
     }
@@ -860,14 +884,17 @@ mod tests {
     #[test]
     fn save_internal_editor_unchanged_body_does_not_rewrite() {
         let (_dir, mut app, path) = app_with_entry("+++\nschema_version = 1\n+++\n\n# Original\n");
-        let original = app.store.read_entry_content(&path).unwrap();
+        let original = app.services.store.read_entry_content(&path).unwrap();
 
         app.open_editor_for_selected().unwrap();
         save_internal_editor(&mut app).unwrap();
 
         assert!(app.editor.is_none());
         assert_eq!(last_toast(&app), ("No changes", ToastVariant::Info));
-        assert_eq!(app.store.read_entry_content(&path).unwrap(), original);
+        assert_eq!(
+            app.services.store.read_entry_content(&path).unwrap(),
+            original
+        );
     }
 
     #[test]
@@ -875,7 +902,11 @@ mod tests {
         let (_dir, mut app, path) = app_with_entry("+++\n[entry]\ntags = []\n+++\n\n# Original\n");
         let target = app.selected_entry_target().unwrap();
         let journal = app.resolved_selected_entry().unwrap().journal.clone();
-        let (_, revision) = app.store.read_entry_with_revision(&journal, &path).unwrap();
+        let (_, revision) = app
+            .services
+            .store
+            .read_entry_with_revision(&journal, &path)
+            .unwrap();
         let mut editor = EntryEditor::for_existing(
             journal,
             path,
@@ -910,7 +941,7 @@ mod tests {
 
         assert!(app.editor.is_none());
         assert_eq!(fs::read_to_string(&path).unwrap(), external);
-        let entries = app.store.scan_entries().unwrap();
+        let entries = app.services.store.scan_entries().unwrap();
         assert_eq!(entries.len(), 2);
         assert!(
             entries
@@ -934,7 +965,7 @@ mod tests {
         assert!(app.editor.is_none());
         assert_eq!(last_toast(&app), ("No changes", ToastVariant::Info));
         assert_eq!(fs::read_to_string(&path).unwrap(), external);
-        assert_eq!(app.store.scan_entries().unwrap().len(), 1);
+        assert_eq!(app.services.store.scan_entries().unwrap().len(), 1);
         assert_eq!(app.resolved_selected_entry().unwrap().body, "# External\n");
     }
 
@@ -944,6 +975,7 @@ mod tests {
         let target = app.selected_entry_target().unwrap();
         let journal = app.resolved_selected_entry().unwrap().journal.clone();
         let (_, revision) = app
+            .services
             .store
             .read_entry_with_revision(&journal, &target.path)
             .unwrap();
@@ -1056,10 +1088,10 @@ mod tests {
 
         // Loading the store already scanned and queued the located, environment-less
         // entry (celestial absent marks it); a re-scan must not double-queue it.
-        assert_eq!(app.backfill_queue.len(), 1);
+        assert_eq!(app.backfill.queue.len(), 1);
         let mut app = app;
         app.enqueue_environment_backfill();
-        assert_eq!(app.backfill_queue.len(), 1);
+        assert_eq!(app.backfill.queue.len(), 1);
     }
 
     #[test]
@@ -1068,22 +1100,23 @@ mod tests {
         // starts off the backfill queue.
         let body = "+++\nschema_version = 1\n[time]\ncreated_at = \"2026-07-01T10:00:00+00:00\"\n+++\n\n# A\n";
         let (_dir, mut app, path) = app_with_entry(body);
-        assert!(app.backfill_queue.is_empty());
+        assert!(app.backfill.queue.is_empty());
 
         let location = Location {
             latitude: Some(52.52),
             longitude: Some(13.405),
             ..Location::default()
         };
-        set_location_on_entry(&mut app, Some(location)).unwrap();
+        let request = set_location_on_entry(&mut app, Some(location)).unwrap();
+        assert!(request.is_some());
 
         // Setting the location enqueues the entry for backfill and also fires an
         // immediate fetch. The fetch claims the path, so it must not remain queued —
         // otherwise backfill would fetch and write the same environment a second time.
-        assert!(app.backfill_enqueued.contains(&path));
-        assert!(!app.backfill_queue.contains(&path));
-        app.dispatch_environment_backfill();
-        assert!(!app.backfill_queue.contains(&path));
+        assert!(app.backfill.enqueued.contains(&path));
+        assert!(!app.backfill.queue.contains(&path));
+        assert!(app.prepare_environment_backfill().is_none());
+        assert!(!app.backfill.queue.contains(&path));
     }
 
     #[test]
@@ -1091,7 +1124,7 @@ mod tests {
         use notema_context::compute_celestial;
         let body = "+++\nschema_version = 1\n[location]\nlatitude = 52.52\nlongitude = 13.405\n+++\n\n# A\n";
         let (_dir, mut app, path) = app_with_entry(body);
-        assert_eq!(app.backfill_queue.len(), 1);
+        assert_eq!(app.backfill.queue.len(), 1);
 
         // A direct location-set both queues the entry for backfill and fires an
         // immediate fetch. Simulate that fetch landing first: environment present.
@@ -1106,9 +1139,9 @@ mod tests {
         }
 
         // The queued job is now stale — dispatch drains it without a duplicate fetch.
-        app.dispatch_environment_backfill();
-        assert!(app.backfill_inflight.is_none());
-        assert!(app.backfill_queue.is_empty());
+        assert!(app.prepare_environment_backfill().is_none());
+        assert!(app.backfill.inflight.is_none());
+        assert!(app.backfill.queue.is_empty());
     }
 
     #[test]
@@ -1133,7 +1166,7 @@ mod tests {
 
         save_internal_editor(&mut app).unwrap();
 
-        let content = app.store.read_entry_content(&path).unwrap();
+        let content = app.services.store.read_entry_content(&path).unwrap();
         assert!(content.contains("work"), "front matter was: {content}");
         assert!(content.contains("focus"), "front matter was: {content}");
     }
@@ -1171,7 +1204,7 @@ mod tests {
         app.cancel_editor();
 
         assert!(app.editor.is_none());
-        let content = app.store.read_entry_content(&path).unwrap();
+        let content = app.services.store.read_entry_content(&path).unwrap();
         assert!(!content.contains("mutation"));
     }
 }

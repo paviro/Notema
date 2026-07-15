@@ -229,7 +229,7 @@ fn confirm_binding(store: &JournalStore) -> AppResult<LibraryDiscovery> {
     io::stdout().flush()?;
     let mut answer = String::new();
     io::stdin().read_line(&mut answer)?;
-    if !matches!(answer.trim(), "y" | "Y" | "yes" | "Yes" | "YES") {
+    if !crate::cli::prompts::is_yes(&answer) {
         bail!("journal folder binding was cancelled; nothing was changed");
     }
     Ok(discovery)

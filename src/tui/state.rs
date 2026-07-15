@@ -1,4 +1,4 @@
-//! Focused state containers held by [`App`](super::app::App), split out so the
+//! Focused state containers held by [`AppModel`](super::app::AppModel), split out so the
 //! reset/lifecycle logic for each concern lives in one place.
 
 use std::time::{Duration, Instant};
@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 use notema_domain::SearchHit;
 use ratatui::widgets::ListState;
 
-use super::app::{EditFeelingState, EditLocationState, EditMetadataState, SearchScope};
+use super::app::SearchScope;
+use super::features::{
+    feelings::EditFeelingState, location::EditLocationState, metadata::EditMetadataState,
+};
 use super::image::ImageAsset;
 use super::text_input::TextInput;
 
@@ -65,7 +68,7 @@ pub(crate) enum HoverTarget {
     None,
     Journal(usize),
     Entry(usize),
-    InsightsTab(crate::tui::render::insights::InsightsTab),
+    InsightsTab(crate::tui::features::insights::InsightsTab),
     FooterHint(crate::tui::render::HintId),
     /// A row in whichever list/menu dialog is open (settings menu, metadata
     /// menu, edit-metadata/feelings/location lists, theme picker) — only one is
@@ -240,32 +243,6 @@ impl Toasts {
             persistent: false,
         });
     }
-}
-
-/// A process-global queue for notifications raised where there is no `&mut App`
-/// to toast on — the theme load that runs during `App` construction, and any
-/// future background thread or non-UI layer that needs to reach the user. The
-/// event loop drains it once per iteration into real toasts; each entry carries
-/// its [`ToastVariant`], so warnings and errors both report through one seam.
-static PENDING_NOTIFICATIONS: std::sync::Mutex<Vec<(ToastVariant, String)>> =
-    std::sync::Mutex::new(Vec::new());
-
-/// Queue a notification for the event loop to surface as a toast.
-pub(crate) fn report_notification(variant: ToastVariant, message: impl Into<String>) {
-    PENDING_NOTIFICATIONS
-        .lock()
-        .expect("notification queue lock")
-        .push((variant, message.into()));
-}
-
-/// Take every notification queued since the last drain — the event loop, once
-/// per iteration.
-pub(crate) fn drain_notifications() -> Vec<(ToastVariant, String)> {
-    std::mem::take(
-        &mut *PENDING_NOTIFICATIONS
-            .lock()
-            .expect("notification queue lock"),
-    )
 }
 
 /// Search query, scope and the hits it currently matches.

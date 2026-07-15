@@ -8,7 +8,7 @@ use ratatui::{
 use notema_encryption::PendingRequest;
 
 use crate::tui::entry_rows::wrap_text;
-use crate::tui::theme::theme;
+use crate::tui::theme::Theme;
 
 /// Width of the request container, clamped to the available width.
 const CONTAINER_WIDTH: u16 = 68;
@@ -18,11 +18,13 @@ const CONTAINER_WIDTH: u16 = 68;
 /// `progress` carries `(done, total)` and the hint row becomes a re-encryption
 /// gauge.
 pub(crate) fn draw_pending_request(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     request: &PendingRequest,
     progress: Option<(usize, usize)>,
 ) {
     let inner = super::draw_modal_frame(
+        theme,
         frame,
         "Device access request",
         "",
@@ -34,8 +36,8 @@ pub(crate) fn draw_pending_request(
 
     let recipient = &request.recipient;
 
-    let dim = theme().muted();
-    let bold = theme().heading();
+    let dim = theme.muted();
+    let bold = theme.heading();
     let info_lines = vec![
         Line::from(vec![
             Span::raw("Device "),
@@ -57,7 +59,7 @@ pub(crate) fn draw_pending_request(
     // Chrome (border/padding, plus the flat-mode title row) + info lines + gap +
     // bottom row.
     let container_width = CONTAINER_WIDTH.min(inner.width);
-    let container = super::container_block("Grant access");
+    let container = super::container_block(theme, "Grant access");
     let overhead = super::container_block_vertical_inset(&container, inner);
     let container_height = (info_lines.len() as u16 + 2 + overhead).min(inner.height);
     let [group] = Layout::vertical([Constraint::Length(container_height)])
@@ -90,7 +92,7 @@ pub(crate) fn draw_pending_request(
             };
             frame.render_widget(
                 Gauge::default()
-                    .gauge_style(theme().chart_bar().style.bg(theme().raised_bg()))
+                    .gauge_style(theme.chart_bar().style.bg(theme.raised_bg()))
                     .ratio(ratio)
                     .label(format!("Re-encrypting… {done}/{total}")),
                 bottom,
@@ -119,8 +121,13 @@ pub(crate) enum AccessNotice {
 /// Draw the full-screen notice a device sees when it can't decrypt this encrypted
 /// store — either awaiting approval of its join request, or holding no usable key
 /// and needing to enroll. See [`AccessNotice`].
-pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, notice: &AccessNotice) {
-    let area = super::draw_modal_frame(frame, "Notema", "", "any key to exit");
+pub(crate) fn draw_pending_notice(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    device_name: &str,
+    notice: &AccessNotice,
+) {
+    let area = super::draw_modal_frame(theme, frame, "Notema", "", "any key to exit");
     if area.height == 0 || area.width == 0 {
         return;
     }
@@ -132,7 +139,7 @@ pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, noti
     } else {
         format!("Device '{device_name}'")
     };
-    let dim = theme().muted();
+    let dim = theme.muted();
 
     let container_width = CONTAINER_WIDTH.min(area.width);
     // The width the prose wraps to (borders + horizontal padding removed). Wrapping
@@ -178,7 +185,7 @@ pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, noti
         lines.push(Line::from(Span::styled(row, dim)));
     }
 
-    let block = super::container_block(title.trim());
+    let block = super::container_block(theme, title.trim());
     let overhead = super::container_block_vertical_inset(&block, area);
     let container_height = (lines.len() as u16 + overhead).min(area.height);
     let [group] = Layout::vertical([Constraint::Length(container_height)])
@@ -198,14 +205,14 @@ pub(crate) fn draw_pending_notice(frame: &mut Frame<'_>, device_name: &str, noti
 /// Draw the full-screen notice shown when encryption was disabled on another
 /// device: this device fell back to plaintext and retired its key and trust pins
 /// (renamed aside, not deleted). Dismissed on any key.
-pub(crate) fn draw_disable_notice(frame: &mut Frame<'_>) {
-    let area = super::draw_modal_frame(frame, "Notema", "", "any key to continue");
+pub(crate) fn draw_disable_notice(theme: &Theme, frame: &mut Frame<'_>) {
+    let area = super::draw_modal_frame(theme, frame, "Notema", "", "any key to continue");
     if area.height == 0 || area.width == 0 {
         return;
     }
 
-    let bold = theme().heading();
-    let dim = theme().muted();
+    let bold = theme.heading();
+    let dim = theme.muted();
 
     let container_width = CONTAINER_WIDTH.min(area.width);
     // Borders (1 each side) plus the 2-cell horizontal padding: the width the body
@@ -235,7 +242,7 @@ pub(crate) fn draw_disable_notice(frame: &mut Frame<'_>) {
         Span::raw("."),
     ]));
 
-    let block = super::container_block("Encryption disabled");
+    let block = super::container_block(theme, "Encryption disabled");
     let overhead = super::container_block_vertical_inset(&block, area);
     let container_height = (lines.len() as u16 + overhead).min(area.height);
     let [group] = Layout::vertical([Constraint::Length(container_height)])

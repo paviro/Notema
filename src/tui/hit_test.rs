@@ -5,7 +5,7 @@ use super::surface::{
     EntryListGeometry, EntryMetadataValues, chip_at, chip_index_at, entry_metadata_layout,
     point_in_rect,
 };
-use super::theme::PillCategory;
+use super::theme::{PillCategory, Theme};
 
 /// Maps a point in the journal panel's content to the journal index under it, or
 /// `None` for the leading offset, the "Archived" divider row, or empty space. The
@@ -73,12 +73,13 @@ pub(crate) enum MetadataChip {
 /// All categories share one label-less pill flow; the chip's position in it
 /// carries the category.
 pub(crate) fn metadata_at_point(
+    theme: &Theme,
     reader_area: Rect,
     x: u16,
     y: u16,
     values: EntryMetadataValues<'_>,
 ) -> Option<(MetadataChip, String)> {
-    let layout = entry_metadata_layout(reader_area, values);
+    let layout = entry_metadata_layout(theme, reader_area, values);
     let (category, value) = chip_at(layout.chips?, x, y, values)?;
     let chip = match category {
         PillCategory::Feelings => MetadataChip::Feelings,
@@ -93,11 +94,12 @@ pub(crate) fn metadata_at_point(
 /// point — the identity a hover highlight tracks. Shares
 /// [`metadata_at_point`]'s layout so hover and click land on the same pill.
 pub(crate) fn metadata_chip_index_at(
+    theme: &Theme,
     reader_area: Rect,
     x: u16,
     y: u16,
     values: EntryMetadataValues<'_>,
 ) -> Option<usize> {
-    let layout = entry_metadata_layout(reader_area, values);
+    let layout = entry_metadata_layout(theme, reader_area, values);
     chip_index_at(layout.chips?, x, y, values)
 }

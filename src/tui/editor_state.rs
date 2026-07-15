@@ -6,7 +6,7 @@ use notema_storage::EntryRevision;
 use ratatui::layout::Rect;
 use ratatui_textarea::{DataCursor, TextArea, WrapMode};
 
-use super::theme::theme;
+use super::theme::Theme;
 
 /// What the internal editor is writing to: an existing entry file, or a new
 /// entry to be created in a journal on save.
@@ -120,10 +120,10 @@ impl EntryEditor {
 
     /// Recompute markdown syntax highlighting and hand it to the textarea, but only
     /// when the body changed since the last call. Cheap to call every frame.
-    pub(crate) fn refresh_syntax_highlight(&mut self) {
+    pub(crate) fn refresh_syntax_highlight(&mut self, theme: &Theme) {
         let body = self.text();
         if self.last_highlight_src.as_deref() != Some(body.as_str()) {
-            let spans = super::editor_highlight::highlight_body(&body);
+            let spans = super::editor_highlight::highlight_body(theme, &body);
             self.textarea.set_syntax_spans(spans);
             self.last_highlight_src = Some(body);
         }
@@ -183,13 +183,14 @@ impl EntryEditor {
 }
 
 fn new_textarea(body: &str, placeholder: Option<&str>) -> TextArea<'static> {
+    let theme = Theme::terminal_default();
     let mut textarea = TextArea::new(body.split('\n').map(str::to_string).collect());
     // The cursor line defaults to no highlight, keeping the journal body
     // reading like the viewer rather than a code editor; themes may tint it.
-    textarea.set_cursor_line_style(theme().cursor_line());
+    textarea.set_cursor_line_style(theme.cursor_line());
     // Make selections visible (reversed video) so keyboard/mouse selection reads
     // clearly and can't silently swallow text.
-    textarea.set_selection_style(theme().selection());
+    textarea.set_selection_style(theme.selection());
     // Soft-wrap long lines like the viewer, splitting mid-word only when a word is
     // wider than the pane.
     textarea.set_wrap_mode(WrapMode::WordOrGlyph);
@@ -197,7 +198,7 @@ fn new_textarea(body: &str, placeholder: Option<&str>) -> TextArea<'static> {
         textarea.set_placeholder_text(text.to_string());
         // The widget's own default is a hardcoded dark gray; the theme's
         // placeholder ink matches the single-line fields instead.
-        textarea.set_placeholder_style(theme().placeholder());
+        textarea.set_placeholder_style(theme.placeholder());
     }
     textarea
 }

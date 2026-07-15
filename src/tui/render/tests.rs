@@ -1,8 +1,10 @@
 use super::*;
+use crate::tui::features::insights::InsightsTab;
 use crate::{
     config::Config,
     tui::{
-        app::{EditMetadataFocus, EditMetadataState, Focus, INLINE_READER_MIN_WIDTH, Mode},
+        app::{Focus, INLINE_READER_MIN_WIDTH, Mode},
+        features::metadata::{EditMetadataFocus, EditMetadataState},
         state::MetadataKind,
         test_support::{app_with_entries, app_with_entry, app_with_journals, new_app},
         theme,
@@ -43,17 +45,39 @@ fn render_to_rows(width: u16, height: u16, draw: impl FnOnce(&mut Frame)) -> Vec
         .collect()
 }
 
-fn render_text(mut app: App, width: u16, height: u16) -> String {
-    render_to_text(width, height, |frame| draw(frame, &mut app))
+fn draw_app(frame: &mut Frame<'_>, app: &mut AppModel, view: &mut crate::tui::ui::ViewState) {
+    let active_theme = app.appearance.theme.clone();
+    let mut context = crate::tui::ui::RenderContext::new(&active_theme, view);
+    draw(frame, app, &mut context);
 }
 
-fn render_app(mut app: App, width: u16, height: u16) -> TestBackend {
-    render_backend(width, height, |frame| draw(frame, &mut app))
+fn render_text(mut app: AppModel, width: u16, height: u16) -> String {
+    let mut view = crate::tui::ui::ViewState::default();
+    render_to_text(width, height, |frame| draw_app(frame, &mut app, &mut view))
 }
 
-fn render_edit_tags_dialog_text(mut state: EditMetadataState, width: u16, height: u16) -> String {
+fn render_app(mut app: AppModel, width: u16, height: u16) -> TestBackend {
+    let mut view = crate::tui::ui::ViewState::default();
+    render_backend(width, height, |frame| draw_app(frame, &mut app, &mut view))
+}
+
+fn render_edit_tags_dialog_text(state: EditMetadataState, width: u16, height: u16) -> String {
+    render_edit_tags_dialog_text_with_theme(&theme::Theme::terminal_default(), state, width, height)
+}
+
+fn render_edit_tags_dialog_text_with_theme(
+    theme: &theme::Theme,
+    mut state: EditMetadataState,
+    width: u16,
+    height: u16,
+) -> String {
     render_to_text(width, height, |frame| {
-        dialogs::draw_edit_metadata_dialog(frame, &mut state, crate::tui::state::HoverTarget::None)
+        dialogs::draw_edit_metadata_dialog(
+            theme,
+            frame,
+            &mut state,
+            crate::tui::state::HoverTarget::None,
+        )
     })
 }
 
@@ -75,6 +99,7 @@ fn metadata_values<'a>(
 fn render_confirm_delete_rows(width: u16, height: u16) -> Vec<String> {
     render_to_rows(width, height, |frame| {
         dialogs::draw_confirm_delete(
+            &theme::Theme::terminal_default(),
             frame,
             &crate::tui::state::DeleteContext::Entry { has_body: true },
             false,
@@ -281,6 +306,7 @@ fn journal_column_has_no_divider_without_archived_journals() {
 #[test]
 fn search_hit_box_flags_archived_journal_bottom_right() {
     let rendered = rendered_lines(&entry_box_lines(
+        &theme::Theme::terminal_default(),
         Some("Sun 05 Jul 2026"),
         "14:30",
         "hit body",
@@ -300,7 +326,8 @@ fn metadata_hit_map_accounts_for_mood_row() {
     let tags = vec!["work".to_string()];
     let feelings = vec!["focused".to_string()];
     let values = metadata_values(&tags, &feelings, Some(2));
-    let layout = crate::tui::surface::entry_metadata_layout(area, values);
+    let layout =
+        crate::tui::surface::entry_metadata_layout(&theme::Theme::terminal_default(), area, values);
     let chips = layout.chips.unwrap();
     // Mood bar on its own row, then a blank gap row, then the chips.
     assert_eq!(chips.y, layout.mood.unwrap().y + 2);
@@ -309,23 +336,49 @@ fn metadata_hit_map_accounts_for_mood_row() {
     // cells (its glyph, "focused", and padding), then a separator space, then
     // the tag pill.
     assert_eq!(
-        metadata_at_point(area, chips.x, chips.y, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            area,
+            chips.x,
+            chips.y,
+            values
+        ),
         Some((MetadataChip::Feelings, "focused".to_string()))
     );
     assert_eq!(
-        metadata_at_point(area, chips.x + 12, chips.y, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            area,
+            chips.x + 12,
+            chips.y,
+            values
+        ),
         Some((MetadataChip::Tags, "work".to_string()))
     );
     // The separator cell between the two pills hits nothing.
-    assert_eq!(metadata_at_point(area, chips.x + 11, chips.y, values), None);
+    assert_eq!(
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            area,
+            chips.x + 11,
+            chips.y,
+            values
+        ),
+        None
+    );
 }
 
 #[test]
 fn metadata_layout_places_environment_strip_before_mood_and_rows() {
     let area = Rect::new(42, 0, 60, 19);
     let tags = vec!["work".to_string()];
-    let environment =
-        crate::tui::env_strip::environment_items(Some("Testville, Testland"), None, None, None);
+    let environment = crate::tui::env_strip::environment_items(
+        &crate::tui::theme::Theme::terminal_default(),
+        Some("Testville, Testland"),
+        None,
+        None,
+        None,
+    );
     let values = EntryMetadataValues {
         tags: &tags,
         people: &[],
@@ -335,7 +388,8 @@ fn metadata_layout_places_environment_strip_before_mood_and_rows() {
         environment: &environment,
     };
 
-    let layout = crate::tui::surface::entry_metadata_layout(area, values);
+    let layout =
+        crate::tui::surface::entry_metadata_layout(&theme::Theme::terminal_default(), area, values);
     let strip = layout.environment.expect("environment strip is laid out");
     let mood = layout.mood.unwrap();
     let chips = layout.chips.unwrap();
@@ -345,15 +399,31 @@ fn metadata_layout_places_environment_strip_before_mood_and_rows() {
     assert_eq!(strip.y, layout.metadata.unwrap().y + 1);
     assert!(mood.y >= strip.y + strip.height);
     assert!(chips.y > mood.y);
-    assert_eq!(metadata_at_point(area, strip.x, strip.y, values), None);
+    assert_eq!(
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            area,
+            strip.x,
+            strip.y,
+            values
+        ),
+        None
+    );
 }
 
 #[test]
 fn environment_strip_height_reflects_wrapped_rows() {
     let area = Rect::new(0, 0, 24, 60);
 
-    let short = crate::tui::env_strip::environment_items(Some("Cafe"), None, None, None);
+    let short = crate::tui::env_strip::environment_items(
+        &crate::tui::theme::Theme::terminal_default(),
+        Some("Cafe"),
+        None,
+        None,
+        None,
+    );
     let long = crate::tui::env_strip::environment_items(
+        &crate::tui::theme::Theme::terminal_default(),
         Some("Grand Central Station Cafe"),
         None,
         None,
@@ -367,8 +437,16 @@ fn environment_strip_height_reflects_wrapped_rows() {
         mood: None,
         environment,
     };
-    let short_layout = crate::tui::surface::entry_metadata_layout(area, values(&short));
-    let long_layout = crate::tui::surface::entry_metadata_layout(area, values(&long));
+    let short_layout = crate::tui::surface::entry_metadata_layout(
+        &theme::Theme::terminal_default(),
+        area,
+        values(&short),
+    );
+    let long_layout = crate::tui::surface::entry_metadata_layout(
+        &theme::Theme::terminal_default(),
+        area,
+        values(&long),
+    );
 
     assert_eq!(short_layout.environment.unwrap().height, 1);
     assert!(long_layout.environment.unwrap().height >= 2);
@@ -391,6 +469,7 @@ fn reader_wraps_long_location_hanging_under_its_glyph() {
 
     let reader = Rect::new(0, 0, 24, 60 - footer_height(&app, 24));
     let environment = crate::tui::env_strip::environment_items(
+        &crate::tui::theme::Theme::terminal_default(),
         Some("Grand Central Station Cafe"),
         None,
         None,
@@ -404,7 +483,11 @@ fn reader_wraps_long_location_hanging_under_its_glyph() {
         mood: None,
         environment: &environment,
     };
-    let metadata = crate::tui::surface::entry_metadata_layout(reader, values);
+    let metadata = crate::tui::surface::entry_metadata_layout(
+        &theme::Theme::terminal_default(),
+        reader,
+        values,
+    );
     let strip = metadata.environment.expect("environment strip is laid out");
     assert!(strip.height >= 2, "label should wrap: {strip:?}");
 
@@ -415,7 +498,10 @@ fn reader_wraps_long_location_hanging_under_its_glyph() {
     // under it, so the glyph column stays blank below.
     assert_eq!(
         buffer.cell((strip.x, strip.y)).unwrap().symbol(),
-        crate::tui::theme::theme().env_glyphs().location.to_string()
+        crate::tui::theme::Theme::terminal_default()
+            .env_glyphs()
+            .location
+            .to_string()
     );
     assert_eq!(buffer.cell((strip.x, strip.y + 1)).unwrap().symbol(), " ");
     assert_eq!(
@@ -435,17 +521,30 @@ fn metadata_hit_map_uses_terminal_cell_width_for_wide_text() {
     let tags = vec!["集中".to_string()];
     let feelings = vec!["嬉しい".to_string()];
     let values = metadata_values(&tags, &feelings, None);
-    let layout = crate::tui::surface::entry_metadata_layout(area, values);
+    let layout =
+        crate::tui::surface::entry_metadata_layout(&theme::Theme::terminal_default(), area, values);
     let chips = layout.chips.unwrap();
 
     // " 嬉しい  集中 " — the feeling pill spans 8 terminal cells (6 for the
     // wide glyphs + padding), the tag pill starts one separator later.
     assert_eq!(
-        metadata_at_point(area, chips.x + 5, chips.y, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            area,
+            chips.x + 5,
+            chips.y,
+            values
+        ),
         Some((MetadataChip::Feelings, "嬉しい".to_string()))
     );
     assert_eq!(
-        metadata_at_point(area, chips.x + 9 + 2, chips.y, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            area,
+            chips.x + 9 + 2,
+            chips.y,
+            values
+        ),
         Some((MetadataChip::Tags, "集中".to_string()))
     );
 }
@@ -490,7 +589,11 @@ fn reader_wraps_metadata_rows_without_leading_space_or_separator() {
     ];
     let reader = Rect::new(0, 0, 24, 60 - footer_height(&app, 24));
     let values = metadata_values(&tags, &feelings, None);
-    let metadata = crate::tui::surface::entry_metadata_layout(reader, values);
+    let metadata = crate::tui::surface::entry_metadata_layout(
+        &theme::Theme::terminal_default(),
+        reader,
+        values,
+    );
     let chips = metadata.chips.unwrap();
 
     let backend = render_app(app, 24, 60);
@@ -515,20 +618,44 @@ fn reader_wraps_metadata_rows_without_leading_space_or_separator() {
     // The pill padding is part of the hit region, and the flow keeps each
     // value's category across the wrap.
     assert_eq!(
-        metadata_at_point(reader, chips.x, chips.y + 2, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            reader,
+            chips.x,
+            chips.y + 2,
+            values
+        ),
         Some((MetadataChip::Feelings, "tired".to_string()))
     );
     assert_eq!(
-        metadata_at_point(reader, chips.x, chips.y + 4, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            reader,
+            chips.x,
+            chips.y + 4,
+            values
+        ),
         Some((MetadataChip::Tags, "personal".to_string()))
     );
     // Spacer rows click nothing.
     assert_eq!(
-        metadata_at_point(reader, chips.x, chips.y + 1, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            reader,
+            chips.x,
+            chips.y + 1,
+            values
+        ),
         None
     );
     assert_eq!(
-        metadata_at_point(reader, chips.x, chips.y + 3, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            reader,
+            chips.x,
+            chips.y + 3,
+            values
+        ),
         None
     );
 }
@@ -579,8 +706,16 @@ fn metadata_pins_only_when_body_keeps_min_height() {
     };
     // Separator + one tag row = 2 metadata rows; inner height = area.height - 2. The
     // body needs 20 lines, so pin only once the inner height reaches 22 (area 24).
-    assert!(metadata_scrolls_with_body(Rect::new(0, 0, 80, 23), values)); // inner 21 → body 19
-    assert!(!metadata_scrolls_with_body(Rect::new(0, 0, 80, 24), values)); // inner 22 → body 20
+    assert!(metadata_scrolls_with_body(
+        &theme::Theme::terminal_default(),
+        Rect::new(0, 0, 80, 23),
+        values
+    )); // inner 21 → body 19
+    assert!(!metadata_scrolls_with_body(
+        &theme::Theme::terminal_default(),
+        Rect::new(0, 0, 80, 24),
+        values
+    )); // inner 22 → body 20
 }
 
 /// The scrolling layout must produce exactly the rows the pinned layout
@@ -619,14 +754,16 @@ fn metadata_scroll_lines_match_the_pinned_section_height() {
         european_aqi: Some(84),
         ..Default::default()
     };
-    let entry_metadata = super::metadata::EntryMetadata::from_metadata(&metadata).with_environment(
-        Some(&weather),
-        Some(&celestial),
-        Some(&air),
-    );
+    let active_theme = theme::Theme::terminal_default();
+    let entry_metadata = super::metadata::EntryMetadata::from_metadata(&active_theme, &metadata)
+        .with_environment(&active_theme, Some(&weather), Some(&celestial), Some(&air));
 
     for width in [20u16, 32, 48, 80] {
-        let lines = super::metadata::metadata_section_lines(width, &entry_metadata);
+        let lines = super::metadata::metadata_section_lines(
+            &theme::Theme::terminal_default(),
+            width,
+            &entry_metadata,
+        );
         let height = crate::tui::surface::metadata_section_height(width, entry_metadata.values());
         assert_eq!(
             lines.len() as u16,
@@ -645,11 +782,13 @@ fn pill_styles_share_geometry_across_reversed_bg_and_bracket() {
         tags: vec!["work".to_string()],
         ..Default::default()
     };
-    let entry_metadata = super::metadata::EntryMetadata::from_metadata(&metadata);
-    let tags_line = || super::metadata::metadata_section_lines(40, &entry_metadata)[1].clone();
+    let reversed_theme = theme::Theme::terminal_default();
+    let entry_metadata = super::metadata::EntryMetadata::from_metadata(&reversed_theme, &metadata);
+    let tags_line =
+        |theme| super::metadata::metadata_section_lines(theme, 40, &entry_metadata)[1].clone();
 
     // The default (classic/e-ink) look: inverted pills, led by the tag glyph.
-    let reversed = tags_line();
+    let reversed = tags_line(&reversed_theme);
     assert_eq!(reversed.spans[0].content.as_ref(), " # work ");
     assert!(
         reversed.spans[0]
@@ -658,20 +797,18 @@ fn pill_styles_share_geometry_across_reversed_bg_and_bracket() {
             .contains(Modifier::REVERSED)
     );
 
-    theme::set_test_theme(theme::test_theme_from_toml(
+    let bg_theme = theme::test_theme_from_toml(
         "[metadata.pills]\nstyle = \"bg\"\ntags = { fg = \"#101010\", bg = \"#aabbcc\" }",
-    ));
-    let bg = tags_line();
+    );
+    let bg = tags_line(&bg_theme);
     assert_eq!(bg.spans[0].content.as_ref(), " # work ");
     assert_eq!(
         bg.spans[0].style.bg,
         Some(ratatui::style::Color::Rgb(0xaa, 0xbb, 0xcc))
     );
 
-    theme::set_test_theme(theme::test_theme_from_toml(
-        "[metadata.pills]\nstyle = \"bracket\"",
-    ));
-    let bracket = tags_line();
+    let bracket_theme = theme::test_theme_from_toml("[metadata.pills]\nstyle = \"bracket\"");
+    let bracket = tags_line(&bracket_theme);
     assert_eq!(bracket.spans[0].content.as_ref(), "[# work]");
 
     assert_eq!(reversed.width(), bg.width());
@@ -749,13 +886,23 @@ fn chip_hit_test_accounts_for_the_environment_strip_rows() {
         mood: None,
         environment: &environment,
     };
-    let chips = crate::tui::surface::entry_metadata_layout(reader, values)
-        .chips
-        .unwrap();
+    let chips = crate::tui::surface::entry_metadata_layout(
+        &theme::Theme::terminal_default(),
+        reader,
+        values,
+    )
+    .chips
+    .unwrap();
 
     // A click on the drawn chips row resolves its pill…
     assert_eq!(
-        metadata_at_point(reader, chips.x + 1, chips.y, values),
+        metadata_at_point(
+            &theme::Theme::terminal_default(),
+            reader,
+            chips.x + 1,
+            chips.y,
+            values
+        ),
         Some((MetadataChip::Tags, "work".to_string()))
     );
     // …and the strip really is part of the section's shape: without it the
@@ -766,8 +913,18 @@ fn chip_hit_test_accounts_for_the_environment_strip_rows() {
         ..values
     };
     assert_ne!(
-        crate::tui::surface::entry_metadata_layout(reader, without_strip).metadata,
-        crate::tui::surface::entry_metadata_layout(reader, values).metadata,
+        crate::tui::surface::entry_metadata_layout(
+            &theme::Theme::terminal_default(),
+            reader,
+            without_strip
+        )
+        .metadata,
+        crate::tui::surface::entry_metadata_layout(
+            &theme::Theme::terminal_default(),
+            reader,
+            values
+        )
+        .metadata,
     );
 }
 
@@ -800,24 +957,24 @@ fn scrollbar_position_stays_at_start_when_content_fits() {
 #[test]
 fn scrollbar_bar_rect_matches_rendered_track() {
     let area = Rect::new(2, 3, 20, 10);
-    theme::set_test_theme(theme::test_flat_theme());
-    theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Flat));
-    let flat_bar = scrollbar_bar_rect(area);
-    let flat_content = PanelGeometry::new(area).content;
+    let flat =
+        theme::test_flat_theme().with_chrome_override(Some(crate::tui::theme::ChromeStyle::Flat));
+    let flat_bar = scrollbar_bar_rect(&flat, area);
+    let flat_content = PanelGeometry::new(&flat, area).content;
     assert_eq!(flat_bar, Rect::new(20, 4, 1, 8));
     assert_eq!(flat_content.x + flat_content.width, flat_bar.x - 1);
     assert_eq!(flat_bar.x + flat_bar.width + 1, area.x + area.width);
 
-    theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
-    let bordered_bar = scrollbar_bar_rect(area);
-    let bordered_content = PanelGeometry::new(area).content;
+    let bordered = theme::test_flat_theme()
+        .with_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
+    let bordered_bar = scrollbar_bar_rect(&bordered, area);
+    let bordered_content = PanelGeometry::new(&bordered, area).content;
     assert_eq!(bordered_bar, Rect::new(21, 4, 1, 8));
     assert_eq!(bordered_content.x, area.x + 2);
     assert_eq!(
         bordered_content.x + bordered_content.width,
         bordered_bar.x - 1
     );
-    theme::set_chrome_override(None);
 }
 
 #[test]
@@ -877,30 +1034,49 @@ fn scrollbar_thumb_none_when_bar_too_short() {
 
 #[test]
 fn list_dialogs_keep_preferred_width_until_they_hit_edges() {
-    let wide_tags = metadata_dialog_layout(Rect::new(0, 0, 120, 30), 20);
+    let wide_tags = metadata_dialog_layout(
+        &crate::tui::theme::Theme::terminal_default(),
+        Rect::new(0, 0, 120, 30),
+        20,
+    );
     assert_eq!(wide_tags.area.width, 44);
     assert_eq!(wide_tags.list.height, 14);
 
-    let narrow_tags = metadata_dialog_layout(Rect::new(0, 0, 40, 30), 20);
+    let narrow_tags = metadata_dialog_layout(
+        &crate::tui::theme::Theme::terminal_default(),
+        Rect::new(0, 0, 40, 30),
+        20,
+    );
     assert_eq!(narrow_tags.area.x, 0);
     assert_eq!(narrow_tags.area.width, 40);
 
     // 15 group headers + 155 feelings = 170 rows; the list caps at its max visible rows.
-    let wide_feelings = feelings_dialog_layout(Rect::new(0, 0, 120, 30), 170, &[]);
+    let wide_feelings = feelings_dialog_layout(
+        &crate::tui::theme::Theme::terminal_default(),
+        Rect::new(0, 0, 120, 30),
+        170,
+        &[],
+    );
     assert_eq!(wide_feelings.area.width, 44);
     assert_eq!(wide_feelings.list.height, 16);
 
-    let wide_mood = mood_dialog_layout(Rect::new(0, 0, 120, 30));
+    let wide_mood = mood_dialog_layout(
+        &crate::tui::theme::Theme::terminal_default(),
+        Rect::new(0, 0, 120, 30),
+    );
     assert_eq!(wide_mood.area.width, 90);
 
-    let narrow_mood = mood_dialog_layout(Rect::new(0, 0, 80, 30));
+    let narrow_mood = mood_dialog_layout(
+        &crate::tui::theme::Theme::terminal_default(),
+        Rect::new(0, 0, 80, 30),
+    );
     assert_eq!(narrow_mood.area.x, 0);
     assert_eq!(narrow_mood.area.width, 80);
 }
 
 #[test]
 fn feelings_dialog_folds_groups_and_marks_disclosure() {
-    use crate::tui::app::EditFeelingState;
+    use crate::tui::features::feelings::EditFeelingState;
     use notema_domain::{Feeling, FeelingGroup};
 
     static GROUPS: &[FeelingGroup] = &[
@@ -928,7 +1104,12 @@ fn feelings_dialog_folds_groups_and_marks_disclosure() {
     let mut state = EditFeelingState::new(GROUPS, vec!["calm".into()]);
     state.expanded[1] = true;
     let rows = render_to_rows(60, 24, |frame| {
-        dialogs::draw_edit_feelings_dialog(frame, &mut state, crate::tui::state::HoverTarget::None)
+        dialogs::draw_edit_feelings_dialog(
+            &theme::Theme::terminal_default(),
+            frame,
+            &mut state,
+            crate::tui::state::HoverTarget::None,
+        )
     });
 
     // Collapsed group: header keeps its stored casing (no all-caps), carries a
@@ -957,7 +1138,7 @@ fn feelings_dialog_folds_groups_and_marks_disclosure() {
 
 #[test]
 fn feelings_dialog_shows_no_matches_when_filter_is_empty() {
-    use crate::tui::app::EditFeelingState;
+    use crate::tui::features::feelings::EditFeelingState;
     use notema_domain::{Feeling, FeelingGroup};
 
     static GROUPS: &[FeelingGroup] = &[FeelingGroup {
@@ -973,7 +1154,12 @@ fn feelings_dialog_shows_no_matches_when_filter_is_empty() {
     state.rebuild_filter();
 
     let rows = render_to_rows(60, 24, |frame| {
-        dialogs::draw_edit_feelings_dialog(frame, &mut state, crate::tui::state::HoverTarget::None)
+        dialogs::draw_edit_feelings_dialog(
+            &theme::Theme::terminal_default(),
+            frame,
+            &mut state,
+            crate::tui::state::HoverTarget::None,
+        )
     });
     assert!(
         rows.iter().any(|row| row.contains("(no matches)")),
@@ -1106,7 +1292,7 @@ fn entry_hit_testing_ignores_month_divider_and_maps_boxed_entries() {
     let config = Config::new(dir.path().to_path_buf());
     let mut app = new_app(config);
     app.select_journal_by_name("work");
-    let area = EntryListGeometry::new(Rect::new(0, 0, 40, 16));
+    let area = EntryListGeometry::new(&theme::Theme::terminal_default(), Rect::new(0, 0, 40, 16));
     // text_width=10 wraps each preview onto 2 lines, so a box is 4 rows tall
     // (top border + 2 preview lines + bottom border). A single month divider
     // row leads the list; the day rides on the first entry's border, and a
@@ -1183,14 +1369,14 @@ fn first_month_rides_border_and_next_month_takes_over_after_scrolling() {
     assert!(top.contains("June 2026"), "top border was: {top:?}");
 }
 
-fn app_for(dir: &tempfile::TempDir) -> App {
+fn app_for(dir: &tempfile::TempDir) -> AppModel {
     let mut app = new_app(Config::new(dir.path().to_path_buf()));
     app.select_journal_by_name("work");
     app.nav.focus = Focus::Entries;
     app
 }
 
-fn render_top_border(app: App, width: u16, height: u16) -> String {
+fn render_top_border(app: AppModel, width: u16, height: u16) -> String {
     let backend = render_app(app, width, height);
     (0..width)
         .map(|x| backend.buffer().cell((x, 0)).unwrap().symbol().to_string())
@@ -1380,10 +1566,10 @@ fn selected_entry_is_not_reversed_when_journals_are_focused() {
     );
 }
 
-/// An `App` with a `work` journal holding one entry carrying mood, feelings, and
+/// An `AppModel` with a `work` journal holding one entry carrying mood, feelings, and
 /// a person, with `work` selected and the Journals column focused (so the tabbed
 /// insights panel is the visible right pane).
-fn app_with_metadata_entry() -> App {
+fn app_with_metadata_entry() -> AppModel {
     let dir = tempdir().unwrap();
     let entry_dir = dir.path().join("work").join("2026-07-01");
     fs::create_dir_all(&entry_dir).unwrap();
@@ -1401,7 +1587,7 @@ fn app_with_metadata_entry() -> App {
 
 /// Put `app` into the state where the insights panel is the visible, focused
 /// right pane: browsing with the panel focused and no entry selected.
-fn focus_insights(app: &mut App, tab: insights::InsightsTab) {
+fn focus_insights(app: &mut AppModel, tab: InsightsTab) {
     app.nav.selected_entry_index = None;
     app.nav.focus = Focus::Insights;
     app.nav.insights_tab = tab;
@@ -1410,7 +1596,7 @@ fn focus_insights(app: &mut App, tab: insights::InsightsTab) {
 #[test]
 fn insights_panel_shows_all_tabs_in_its_border() {
     let mut app = app_with_entry();
-    focus_insights(&mut app, insights::InsightsTab::Overview);
+    focus_insights(&mut app, InsightsTab::Overview);
     // Wide enough that the strip uses full titles rather than short/initials.
     let text = render_text(app, 170, 20);
 
@@ -1422,7 +1608,7 @@ fn insights_panel_shows_all_tabs_in_its_border() {
 #[test]
 fn insights_overview_tab_shows_journal_summary() {
     let mut app = app_with_entry();
-    focus_insights(&mut app, insights::InsightsTab::Overview);
+    focus_insights(&mut app, InsightsTab::Overview);
     let text = render_text(app, 140, 20);
 
     // The paired cards plus the totals in the title box.
@@ -1436,7 +1622,7 @@ fn insights_overview_tab_shows_journal_summary() {
 #[test]
 fn insights_switching_tab_changes_the_body() {
     let mut app = app_with_entry();
-    focus_insights(&mut app, insights::InsightsTab::Feelings);
+    focus_insights(&mut app, InsightsTab::Feelings);
 
     let text = render_text(app, 140, 20);
 
@@ -1449,7 +1635,7 @@ fn insights_switching_tab_changes_the_body() {
 #[test]
 fn insights_feelings_tab_renders_frequency_bar() {
     let mut app = app_with_metadata_entry();
-    focus_insights(&mut app, insights::InsightsTab::Feelings);
+    focus_insights(&mut app, InsightsTab::Feelings);
 
     // Tall enough that the feelings table still fits below Balance + the breakdowns.
     let text = render_text(app, 140, 26);
@@ -1460,7 +1646,7 @@ fn insights_feelings_tab_renders_frequency_bar() {
 
 /// A journal whose entries make `alex` a clear mood lift and `rain` a clear
 /// drain, each appearing enough times (≥3) to clear the Drivers noise guard.
-fn app_with_drivers() -> App {
+fn app_with_drivers() -> AppModel {
     let dir = tempdir().unwrap();
     let base = dir.path().join("work");
     let specs = [
@@ -1493,7 +1679,7 @@ fn app_with_drivers() -> App {
 #[test]
 fn insights_drivers_tab_ranks_lifts_and_drains() {
     let mut app = app_with_drivers();
-    focus_insights(&mut app, insights::InsightsTab::Drivers);
+    focus_insights(&mut app, InsightsTab::Drivers);
 
     let text = render_text(app, 140, 20);
 
@@ -1505,7 +1691,7 @@ fn insights_drivers_tab_ranks_lifts_and_drains() {
 #[test]
 fn insights_drivers_tab_renders_headed_table_with_mood_bar() {
     let mut app = app_with_drivers();
-    focus_insights(&mut app, insights::InsightsTab::Drivers);
+    focus_insights(&mut app, InsightsTab::Drivers);
     // Expanded to full screen — the "bigger screen" case with room for the bar.
     app.nav.insights_fullscreen = true;
 
@@ -1524,7 +1710,7 @@ fn insights_drivers_tab_renders_headed_table_with_mood_bar() {
 /// A journal where people `p00`..`p{count-1}` each ride high moods across three
 /// entries (clearing the ≥3 noise guard), plus baseline low-mood entries — so the
 /// Drivers ranking is a list long enough to scroll.
-fn app_with_many_drivers(count: usize) -> App {
+fn app_with_many_drivers(count: usize) -> AppModel {
     let dir = tempdir().unwrap();
     let base = dir.path().join("work");
     let people: Vec<String> = (0..count).map(|i| format!("\"p{i:02}\"")).collect();
@@ -1565,7 +1751,7 @@ fn app_with_many_drivers(count: usize) -> App {
 fn insights_list_scrolls_to_reveal_later_rows() {
     let focused_drivers = |scroll: u16| {
         let mut app = app_with_many_drivers(30);
-        focus_insights(&mut app, insights::InsightsTab::Drivers);
+        focus_insights(&mut app, InsightsTab::Drivers);
         app.nav.insights_fullscreen = true;
         app.nav.scroll.insights = scroll;
         render_text(app, 120, 12)
@@ -1592,7 +1778,7 @@ fn insights_list_scrolls_to_reveal_later_rows() {
 #[test]
 fn insights_feelings_tab_shows_balance_and_feeling_table() {
     let mut app = app_with_metadata_entry();
-    focus_insights(&mut app, insights::InsightsTab::Feelings);
+    focus_insights(&mut app, InsightsTab::Feelings);
 
     let text = render_text(app, 140, 30);
 
@@ -1609,7 +1795,7 @@ fn insights_feelings_tab_shows_balance_and_feeling_table() {
 #[test]
 fn insights_writing_tab_renders_habit_sections() {
     let mut app = app_with_metadata_entry();
-    focus_insights(&mut app, insights::InsightsTab::Writing);
+    focus_insights(&mut app, InsightsTab::Writing);
     // Wide + full screen so the weekday/hour charts sit side by side.
     app.nav.insights_fullscreen = true;
 
@@ -1628,7 +1814,7 @@ fn insights_writing_tab_renders_habit_sections() {
 #[test]
 fn insights_feelings_tab_renders_mood_breakdowns() {
     let mut app = app_with_metadata_entry();
-    focus_insights(&mut app, insights::InsightsTab::Feelings);
+    focus_insights(&mut app, InsightsTab::Feelings);
     // Wide + full screen so the three breakdown charts sit side by side.
     app.nav.insights_fullscreen = true;
 
@@ -1639,10 +1825,10 @@ fn insights_feelings_tab_renders_mood_breakdowns() {
         text.contains("By year") && text.contains("By weekday") && text.contains("By month"),
         "feelings tab missing the mood breakdown charts: {text}"
     );
-    // ...and drops the old Mood tab's abstract series.
+    // ...and no separate "Mood over time" series.
     assert!(
         !text.contains("Mood over time"),
-        "mood-over-time series should be gone: {text}"
+        "mood-over-time series should not render: {text}"
     );
 }
 
@@ -1652,33 +1838,45 @@ fn insights_tab_hit_test_maps_border_columns_to_tabs() {
     // Feelings · Drivers", the title starting one past the corner at 75.
     let area = Rect::new(74, 0, 49, 19);
     assert_eq!(
-        insights_tab_at(area, 78, 0),
-        Some(insights::InsightsTab::Overview) // 76..84
+        insights_tab_at(&theme::Theme::terminal_default(), area, 78, 0),
+        Some(InsightsTab::Overview) // 76..84
     );
     assert_eq!(
-        insights_tab_at(area, 90, 0),
-        Some(insights::InsightsTab::Writing)
+        insights_tab_at(&theme::Theme::terminal_default(), area, 90, 0),
+        Some(InsightsTab::Writing)
     ); // 87..94
     assert_eq!(
-        insights_tab_at(area, 100, 0),
-        Some(insights::InsightsTab::Feelings) // 97..112
+        insights_tab_at(&theme::Theme::terminal_default(), area, 100, 0),
+        Some(InsightsTab::Feelings) // 97..112
     );
     assert_eq!(
-        insights_tab_at(area, 118, 0),
-        Some(insights::InsightsTab::Drivers)
+        insights_tab_at(&theme::Theme::terminal_default(), area, 118, 0),
+        Some(InsightsTab::Drivers)
     ); // 115..122
     // The corner, the gaps, and other rows are not tabs.
-    assert_eq!(insights_tab_at(area, 74, 0), None);
-    assert_eq!(insights_tab_at(area, 85, 0), None); // " · " between Overview and Writing
-    assert_eq!(insights_tab_at(area, 96, 0), None); // " · " between Writing and Mood / Feelings
-    assert_eq!(insights_tab_at(area, 78, 1), None);
+    assert_eq!(
+        insights_tab_at(&theme::Theme::terminal_default(), area, 74, 0),
+        None
+    );
+    assert_eq!(
+        insights_tab_at(&theme::Theme::terminal_default(), area, 85, 0),
+        None
+    ); // " · " between Overview and Writing
+    assert_eq!(
+        insights_tab_at(&theme::Theme::terminal_default(), area, 96, 0),
+        None
+    ); // " · " between Writing and Mood / Feelings
+    assert_eq!(
+        insights_tab_at(&theme::Theme::terminal_default(), area, 78, 1),
+        None
+    );
 }
 
 #[test]
 fn insights_active_tab_inverts_only_when_panel_is_focused() {
     // Focused: the active tab in the border uses the reversed style.
     let mut focused = app_with_entry();
-    focus_insights(&mut focused, insights::InsightsTab::Overview);
+    focus_insights(&mut focused, InsightsTab::Overview);
     let backend = render_app(focused, 140, 20);
     assert!(
         insights_border_has_reversed_text(&backend, 140),
@@ -1996,7 +2194,12 @@ fn plain_entry(created_at: Option<&str>, preview: &str) -> Entry {
 fn entry_list_lines_put_time_on_right_of_border() {
     let entry = plain_entry(Some("2026-07-01T10:23:00+02:00"), "Preview");
 
-    let rendered = rendered_lines(&entry_list_lines(&entry, None, 30));
+    let rendered = rendered_lines(&entry_list_lines(
+        &theme::Theme::terminal_default(),
+        &entry,
+        None,
+        30,
+    ));
 
     assert_eq!(rendered.len(), 3);
     // No date on the first line here, so the time sits alone on the right.
@@ -2013,7 +2216,12 @@ fn entry_list_lines_put_time_on_right_of_border() {
 fn entry_list_lines_put_day_left_and_time_right() {
     let entry = plain_entry(Some("2026-07-05T14:30:00+02:00"), "Body");
 
-    let rendered = rendered_lines(&entry_list_lines(&entry, Some("Sunday 05"), 30));
+    let rendered = rendered_lines(&entry_list_lines(
+        &theme::Theme::terminal_default(),
+        &entry,
+        Some("Sunday 05"),
+        30,
+    ));
 
     assert!(rendered[0].starts_with("┌ Sunday 05 "));
     assert!(rendered[0].ends_with("14:30 ┐"));
@@ -2022,7 +2230,15 @@ fn entry_list_lines_put_day_left_and_time_right() {
 
 #[test]
 fn entry_box_lines_without_timestamp_render_plain_top_border() {
-    let rendered = rendered_lines(&entry_box_lines(None, "", "just a preview", None, None, 30));
+    let rendered = rendered_lines(&entry_box_lines(
+        &theme::Theme::terminal_default(),
+        None,
+        "",
+        "just a preview",
+        None,
+        None,
+        30,
+    ));
 
     assert_eq!(rendered[0], format!("┌{}┐", "─".repeat(32)));
     assert!(rendered[1].starts_with("│ just a preview"));
@@ -2031,6 +2247,7 @@ fn entry_box_lines_without_timestamp_render_plain_top_border() {
 #[test]
 fn search_hit_box_shows_date_time_and_journal() {
     let rendered = rendered_lines(&entry_box_lines(
+        &theme::Theme::terminal_default(),
         Some("Sun 05 Jul 2026"),
         "14:30",
         "hit body",
@@ -2114,7 +2331,7 @@ fn render_unlock_text(input: &str, error: Option<&str>) -> String {
         field.insert(ch);
     }
     render_to_text(60, 16, |frame| {
-        draw_unlock(frame, &field, error);
+        draw_unlock(&theme::Theme::terminal_default(), frame, &field, error);
     })
 }
 
@@ -2145,7 +2362,7 @@ fn unlock_screen_replaces_hint_with_error() {
 fn render_unlock_rows(width: u16, height: u16, error: Option<&str>) -> Vec<String> {
     let input = crate::tui::text_input::PassphraseInput::default();
     render_to_rows(width, height, |frame| {
-        draw_unlock(frame, &input, error);
+        draw_unlock(&theme::Theme::terminal_default(), frame, &input, error);
     })
     .into_iter()
     .map(|row| row.trim().to_string())
@@ -2165,8 +2382,16 @@ fn unlock_status_wraps_on_a_narrow_terminal() {
 }
 
 fn render_pending_notice_text(device_name: &str, notice: &AccessNotice) -> String {
+    render_pending_notice_text_with_theme(&theme::Theme::terminal_default(), device_name, notice)
+}
+
+fn render_pending_notice_text_with_theme(
+    theme: &theme::Theme,
+    device_name: &str,
+    notice: &AccessNotice,
+) -> String {
     render_to_text(72, 20, |frame| {
-        draw_pending_notice(frame, device_name, notice)
+        draw_pending_notice(theme, frame, device_name, notice)
     })
 }
 
@@ -2207,7 +2432,9 @@ fn pending_notice_awaiting_points_at_approval() {
 fn disable_notice_renders_in_the_journal_chrome_frame() {
     let backend = TestBackend::new(72, 20);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(draw_disable_notice).unwrap();
+    terminal
+        .draw(|frame| draw_disable_notice(&theme::Theme::terminal_default(), frame))
+        .unwrap();
     let text: String = terminal
         .backend()
         .buffer()
@@ -2291,7 +2518,7 @@ fn internal_editor_shows_entry_location() {
 #[test]
 fn editor_shortcuts_list_grouped_bindings() {
     let text = render_to_text(90, 44, |frame| {
-        super::menus::draw_editor_shortcuts(frame, &mut 0)
+        super::menus::draw_editor_shortcuts(&theme::Theme::terminal_default(), frame, &mut 0)
     });
     assert!(text.contains("Editor Shortcuts"));
     // A group header, plus bindings from each section.
@@ -2308,33 +2535,45 @@ fn editor_shortcuts_list_grouped_bindings() {
 }
 
 #[test]
-fn editor_metadata_menu_hit_tests_rows() {
+fn editor_metadata_menu_registers_row_and_close_regions() {
+    use crate::tui::ui::{DialogId, InteractionKind};
+
+    let mut app = app_with_entries(1);
+    app.select_entry_index(0);
+    app.open_editor_for_selected().unwrap();
+    app.editor.as_mut().unwrap().prompt = crate::tui::editor_state::EditorPrompt::MetadataMenu;
     let area = Rect::new(0, 0, 64, 30);
-    let mut found_tags = false;
-    let mut found_feelings = false;
-    let mut found_mood = false;
-    for y in 0..area.height {
-        for x in 0..area.width {
-            let mode = super::menus::MetadataMenuMode::Editor;
-            match super::menus::metadata_menu_choice_at_point(area, mode, x, y) {
-                Some(super::menus::MetadataChoice::Metadata(MetadataKind::Tags)) => {
-                    found_tags = true;
-                }
-                Some(super::menus::MetadataChoice::Feelings) => found_feelings = true,
-                Some(super::menus::MetadataChoice::Mood) => found_mood = true,
+    let mut view = crate::tui::ui::ViewState::default();
+    render_backend(area.width, area.height, |frame| {
+        draw_app(frame, &mut app, &mut view)
+    });
+
+    // Every menu row (tags/people/activities/feelings/mood/location) and the
+    // close footer must be resolvable through the interaction map — this is
+    // what the mouse click path dispatches from.
+    let mut seen = [false; 6];
+    let mut close = false;
+    for row in 0..area.height {
+        for col in 0..area.width {
+            match view.interactions.hit(col, row) {
+                Some(InteractionKind::DialogRow {
+                    dialog: DialogId::EditorMetadataMenu,
+                    index,
+                }) if *index < 6 => seen[*index] = true,
+                Some(InteractionKind::DialogClose(DialogId::EditorMetadataMenu)) => close = true,
                 _ => {}
             }
         }
     }
-
-    assert!(found_tags);
-    assert!(found_feelings);
-    assert!(found_mood);
+    assert_eq!(seen, [true; 6], "all six menu rows registered");
+    assert!(close, "close footer registered");
 }
 
 #[test]
 fn help_cheatsheet_lists_grouped_bindings() {
-    let text = render_to_text(72, 44, |frame| menus::draw_help(frame, &mut 0));
+    let text = render_to_text(72, 44, |frame| {
+        menus::draw_help(&theme::Theme::terminal_default(), frame, &mut 0)
+    });
     assert!(text.contains("Keyboard Shortcuts"));
     // A bare metadata key the footer no longer advertises, plus a grouped label.
     assert!(text.contains("Tags"));
@@ -2351,8 +2590,12 @@ fn help_cheatsheet_lists_grouped_bindings() {
 fn help_cheatsheet_scrolls_when_the_terminal_is_short() {
     // "This help" (the `?` binding) sits low in its column, so it is below the
     // fold at scroll 0 on a short terminal but reachable once scrolled.
-    let top = render_to_text(72, 14, |frame| menus::draw_help(frame, &mut 0));
-    let bottom = render_to_text(72, 14, |frame| menus::draw_help(frame, &mut 9999));
+    let top = render_to_text(72, 14, |frame| {
+        menus::draw_help(&theme::Theme::terminal_default(), frame, &mut 0)
+    });
+    let bottom = render_to_text(72, 14, |frame| {
+        menus::draw_help(&theme::Theme::terminal_default(), frame, &mut 9999)
+    });
 
     // The footer is pinned in both — the box never clips it away.
     assert!(top.contains("press any key to close"));
@@ -2410,28 +2653,160 @@ fn balanced_splits_minimizes_the_tallest_column() {
 // ── Settings menu / theme picker ─────────────────────────────────────────────
 
 #[test]
-fn settings_menu_lists_the_theme_row_and_hit_tests_it() {
-    let text = render_to_text(64, 20, |frame| menus::draw_settings_menu(frame, None));
+fn settings_menu_lists_the_theme_row_and_registers_its_regions() {
+    use crate::tui::ui::{DialogId, InteractionKind};
+
+    let text = render_to_text(64, 20, |frame| {
+        menus::draw_settings_menu(&theme::Theme::terminal_default(), frame, None)
+    });
     assert!(text.contains("Settings"));
     assert!(text.contains("Theme…"));
     assert!(text.contains("enter select · esc close"));
 
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings_menu();
     let area = Rect::new(0, 0, 64, 20);
+    let mut view = crate::tui::ui::ViewState::default();
+    render_backend(area.width, area.height, |frame| {
+        draw_app(frame, &mut app, &mut view)
+    });
+
     let mut found_theme = false;
     let mut close_found = false;
-    for y in 0..area.height {
-        for x in 0..area.width {
-            if matches!(
-                menus::settings_menu_choice_at_point(area, x, y),
-                Some(menus::SettingsChoice::Theme)
-            ) {
-                found_theme = true;
+    for row in 0..area.height {
+        for col in 0..area.width {
+            match view.interactions.hit(col, row) {
+                Some(InteractionKind::DialogRow {
+                    dialog: DialogId::Settings,
+                    index: 0,
+                }) => found_theme = true,
+                Some(InteractionKind::DialogClose(DialogId::Settings)) => close_found = true,
+                _ => {}
             }
-            close_found |= menus::settings_menu_close_at_point(area, x, y);
         }
     }
-    assert!(found_theme);
-    assert!(close_found);
+    assert!(found_theme, "theme row registered");
+    assert!(close_found, "close footer registered");
+}
+
+#[test]
+fn rendering_registers_visible_rows_above_their_panel() {
+    let mut app = app_with_journals(&["work", "zeta"]);
+    let area = Rect::new(0, 0, 120, 20);
+    let journals = tui_layout(area, &app).journals.expect("journals panel");
+    let list = journal_list_rect(journals.content);
+    let mut view = crate::tui::ui::ViewState::default();
+
+    render_backend(area.width, area.height, |frame| {
+        draw_app(frame, &mut app, &mut view)
+    });
+
+    assert_eq!(
+        view.interactions.hit(list.x + 1, list.y + 1),
+        Some(&crate::tui::ui::InteractionKind::Row {
+            panel: crate::tui::ui::interaction::PanelId::Journals,
+            index: 0,
+        })
+    );
+}
+
+#[test]
+fn rendering_registers_scrollbar_regions_only_when_content_overflows() {
+    use crate::tui::ui::InteractionKind;
+
+    // An overflowing entry list registers the bar's widened grab region,
+    // carrying the same metrics the renderer drew the bar from.
+    let mut app = app_with_entries(60);
+    let area = Rect::new(0, 0, 120, 20);
+    let entries = tui_layout(area, &app).entries.expect("entries panel");
+    let bar = crate::tui::scroll::scrollbar_bar_rect(&app.appearance.theme, entries.panel.area);
+    let mut view = crate::tui::ui::ViewState::default();
+    render_backend(area.width, area.height, |frame| {
+        draw_app(frame, &mut app, &mut view)
+    });
+
+    let hit = view.interactions.hit(bar.x, bar.y + 1);
+    let Some(InteractionKind::Scrollbar(metrics)) = hit else {
+        panic!("expected a scrollbar region on the bar, got {hit:?}");
+    };
+    assert_eq!(metrics.which, crate::tui::app::ScrollbarDrag::EntryList);
+    assert_eq!(metrics.bar, bar);
+    assert_eq!(
+        metrics.max_scroll,
+        metrics
+            .content_length
+            .saturating_sub(metrics.viewport as usize)
+    );
+    // The grab region spans one extra column on each side of the bar.
+    assert!(matches!(
+        view.interactions.hit(bar.x - 1, bar.y + 1),
+        Some(InteractionKind::Scrollbar(_))
+    ));
+    assert!(matches!(
+        view.interactions.hit(bar.x + 1, bar.y + 1),
+        Some(InteractionKind::Scrollbar(_))
+    ));
+
+    // A list that fits registers no scrollbar region; the same point falls
+    // through to the panel underneath.
+    let mut app = app_with_entries(1);
+    let mut view = crate::tui::ui::ViewState::default();
+    render_backend(area.width, area.height, |frame| {
+        draw_app(frame, &mut app, &mut view)
+    });
+    assert!(!matches!(
+        view.interactions.hit(bar.x, bar.y + 1),
+        Some(InteractionKind::Scrollbar(_))
+    ));
+}
+
+#[test]
+fn rendering_keeps_navigation_state_and_records_effective_scroll_in_the_view() {
+    let mut app = app_with_entry();
+    app.nav.focus = Focus::Reader;
+    app.nav.scroll.reader = u16::MAX;
+    *app.nav.journal_list.offset_mut() = usize::MAX;
+    *app.nav.entry_list.offset_mut() = usize::MAX;
+    let before = (
+        app.nav.focus,
+        app.nav.selected_entry_index,
+        app.nav.scroll.reader,
+        app.nav.reader_fullscreen,
+        app.nav.journal_list.offset(),
+        app.nav.entry_list.offset(),
+    );
+    let mut view = crate::tui::ui::ViewState::default();
+
+    render_backend(140, 20, |frame| draw_app(frame, &mut app, &mut view));
+
+    assert_eq!(
+        before,
+        (
+            app.nav.focus,
+            app.nav.selected_entry_index,
+            app.nav.scroll.reader,
+            app.nav.reader_fullscreen,
+            app.nav.journal_list.offset(),
+            app.nav.entry_list.offset(),
+        )
+    );
+    assert!(view.reader.scroll < u16::MAX);
+    assert_eq!(view.journal_offset, Some(0));
+    assert_eq!(view.entry_offset, Some(0));
+}
+
+#[test]
+fn overlay_region_wins_over_underlying_rows() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings_menu();
+    let mut view = crate::tui::ui::ViewState::default();
+
+    render_backend(64, 20, |frame| draw_app(frame, &mut app, &mut view));
+
+    assert_eq!(
+        view.interactions.hit(32, 10),
+        Some(&crate::tui::ui::InteractionKind::Overlay)
+    );
 }
 
 #[test]
@@ -2440,10 +2815,11 @@ fn theme_picker_lists_bundled_themes_with_the_active_row_marked() {
     // Pin a configured theme near the top of the sorted list so the active row
     // is on screen without scrolling — keeps this test independent of whatever
     // the default theme happens to be (the list caps at 14 visible rows).
-    app.config.ui.theme = "blossom".to_string();
+    app.services.config.ui.theme = "blossom".to_string();
     app.open_theme_picker();
 
-    let rows = render_to_rows(90, 30, |frame| draw(frame, &mut app));
+    let mut view = crate::tui::ui::ViewState::default();
+    let rows = render_to_rows(90, 30, |frame| draw_app(frame, &mut app, &mut view));
     let text = rows.join("\n");
 
     // Dialog frame with its scope-naming title and hint row. With no per-journal
@@ -2468,12 +2844,13 @@ fn theme_picker_lists_bundled_themes_with_the_active_row_marked() {
 #[test]
 fn theme_picker_renders_broken_rows_in_the_error_style() {
     let mut app = app_with_journals(&["work"]);
-    let themes = crate::tui::theme::themes_dir(&app.config_path);
+    let themes = crate::tui::theme::themes_dir(&app.services.config_path);
     fs::create_dir_all(&themes).unwrap();
     fs::write(themes.join("busted.toml"), "surfaces = 12\n").unwrap();
     app.open_theme_picker();
     let state = app.theme_picker_state().unwrap();
     let (len, hint_inputs) = (state.entries.len(), state.hint_state());
+    let active_theme = app.appearance.theme.clone();
 
     let backend = render_app(app, 90, 30);
     let buffer = backend.buffer();
@@ -2489,10 +2866,10 @@ fn theme_picker_renders_broken_rows_in_the_error_style() {
         .expect("broken row rendered");
     let x = line.find("busted").unwrap() as u16;
 
-    let error_fg = crate::tui::theme::theme().error().fg.unwrap();
+    let error_fg = active_theme.error().fg.unwrap();
     assert_eq!(buffer[(x, y as u16)].fg, error_fg);
     // The layout the mouse handler uses matches where the list was drawn.
-    let layout = theme_picker_layout(Rect::new(0, 0, 90, 30), len, hint_inputs);
+    let layout = theme_picker_layout(&active_theme, Rect::new(0, 0, 90, 30), len, hint_inputs);
     assert!(point_in_rect(layout.list, x, y as u16));
 }
 
@@ -2503,9 +2880,13 @@ mod flat_chrome_tests {
     use crate::tui::state::{HoverTarget, MetadataKind};
     use crate::tui::theme;
 
-    fn pin_flat() {
-        theme::set_test_theme(theme::test_flat_theme());
-        theme::set_chrome_override(None);
+    fn flat_theme() -> theme::Theme {
+        theme::test_flat_theme()
+    }
+
+    fn flat_app(mut app: AppModel) -> AppModel {
+        app.appearance.theme = flat_theme();
+        app
     }
 
     fn tags_state() -> EditMetadataState {
@@ -2528,8 +2909,7 @@ mod flat_chrome_tests {
 
     #[test]
     fn dialogs_drop_borders_for_a_title_row_with_esc_hint() {
-        pin_flat();
-        let rendered = render_edit_tags_dialog_text(tags_state(), 80, 24);
+        let rendered = render_edit_tags_dialog_text_with_theme(&flat_theme(), tags_state(), 80, 24);
         assert!(!rendered.contains('┌'), "flat dialog still draws corners");
         assert!(
             !rendered.contains('│'),
@@ -2541,30 +2921,35 @@ mod flat_chrome_tests {
 
     #[test]
     fn dialog_surface_carries_the_dialog_background() {
-        pin_flat();
-        let dialog_bg = theme::test_flat_theme().dialog_bg();
+        let theme = flat_theme();
+        let dialog_bg = theme.dialog_bg();
         let backend = render_backend(80, 24, |frame| {
             dialogs::draw_edit_metadata_dialog(
+                &theme,
                 frame,
                 &mut tags_state(),
                 crate::tui::state::HoverTarget::None,
             )
         });
-        let area = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2).area;
+        let area = metadata_dialog_layout(&theme, Rect::new(0, 0, 80, 24), 2).area;
         let cell = &backend.buffer()[(area.x + 1, area.y + 1)];
         assert_eq!(cell.bg, dialog_bg);
     }
 
     #[test]
     fn bordered_dialog_list_keeps_one_cell_before_the_frame_and_scrollbar() {
-        pin_flat();
-        theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
+        let theme = flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered));
         let frame_area = Rect::new(0, 0, 80, 20);
-        let layout = metadata_dialog_layout(frame_area, 20);
+        let layout = metadata_dialog_layout(&theme, frame_area, 20);
         let backend = render_backend(frame_area.width, frame_area.height, |frame| {
-            dialogs::draw_edit_metadata_dialog(frame, &mut many_tags_state(), HoverTarget::None)
+            dialogs::draw_edit_metadata_dialog(
+                &theme,
+                frame,
+                &mut many_tags_state(),
+                HoverTarget::None,
+            )
         });
-        let bar = scrollbar_bar_rect(layout.area);
+        let bar = scrollbar_bar_rect(&theme, layout.area);
         let row = layout.list.y;
 
         assert_eq!(layout.list.x, layout.area.x + 2);
@@ -2572,16 +2957,16 @@ mod flat_chrome_tests {
         assert_eq!(backend.buffer()[(layout.area.x + 1, row)].symbol(), " ");
         assert_eq!(backend.buffer()[(bar.x - 1, row)].symbol(), " ");
         assert_ne!(backend.buffer()[(bar.x, row)].symbol(), " ");
-        theme::set_chrome_override(None);
     }
 
     #[test]
     fn selection_is_a_bg_fill_not_reversed() {
-        pin_flat();
-        let selection = theme::test_flat_theme().selection();
-        let layout = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2);
+        let theme = flat_theme();
+        let selection = theme.selection();
+        let layout = metadata_dialog_layout(&theme, Rect::new(0, 0, 80, 24), 2);
         let backend = render_backend(80, 24, |frame| {
             dialogs::draw_edit_metadata_dialog(
+                &theme,
                 frame,
                 &mut tags_state(),
                 crate::tui::state::HoverTarget::None,
@@ -2595,8 +2980,7 @@ mod flat_chrome_tests {
 
     #[test]
     fn focused_panel_gets_a_stripe_instead_of_a_thick_border() {
-        pin_flat();
-        let app = app_with_journals(&["alpha", "beta"]);
+        let app = flat_app(app_with_journals(&["alpha", "beta"]));
         let backend = render_app(app, 120, 30);
         let rendered: String = backend
             .buffer()
@@ -2614,25 +2998,22 @@ mod flat_chrome_tests {
 
     #[test]
     fn journal_cards_keep_a_uniform_row_geometry() {
-        pin_flat();
-        let app = app_with_journals(&["work", "zeta", "old.archived"]);
+        let app = flat_app(app_with_journals(&["work", "zeta", "old.archived"]));
         let rows = crate::tui::entry_rows::journal_list_rows(&app, 16);
         let meta = crate::tui::entry_rows::rows_meta(&rows);
         // Same shape as the bordered column, one separator row taller: uniform
         // rows (divider included) so scroll and hit-testing stay a multiply.
         let indices: Vec<Option<usize>> = meta.iter().map(|m| m.item_index).collect();
         assert_eq!(indices, vec![Some(0), Some(1), None, Some(2)]);
-        assert!(
-            meta.iter()
-                .all(|m| m.height == crate::tui::render::journal_row_height())
-        );
+        assert!(meta.iter().all(|m| {
+            m.height == crate::tui::render::journal_row_height(&app.appearance.theme)
+        }));
     }
 
     #[test]
     fn journal_cards_carry_selection_and_element_backgrounds() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
-        let app = app_with_journals(&["work", "zeta"]);
+        let theme = flat_theme();
+        let app = flat_app(app_with_journals(&["work", "zeta"]));
         let layout = tui_layout(Rect::new(0, 0, 120, 30), &app);
         let journals = layout.journals.unwrap();
         let list = journal_list_rect(journals.content);
@@ -2667,9 +3048,8 @@ mod flat_chrome_tests {
 
     #[test]
     fn all_journals_search_floods_every_card_but_not_the_divider() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
-        let mut app = app_with_journals(&["work", "zeta", "old.archived"]);
+        let theme = flat_theme();
+        let mut app = flat_app(app_with_journals(&["work", "zeta", "old.archived"]));
         app.nav.mode = crate::tui::app::Mode::Search;
         app.search.scope = crate::tui::app::SearchScope::AllJournals;
 
@@ -2697,9 +3077,8 @@ mod flat_chrome_tests {
 
     #[test]
     fn hovered_journal_card_lifts_to_the_hover_background() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
-        let mut app = app_with_journals(&["work", "zeta"]);
+        let theme = flat_theme();
+        let mut app = flat_app(app_with_journals(&["work", "zeta"]));
         app.hover = crate::tui::state::HoverTarget::Journal(1);
         let layout = tui_layout(Rect::new(0, 0, 120, 30), &app);
         let list = journal_list_rect(layout.journals.unwrap().content);
@@ -2716,9 +3095,8 @@ mod flat_chrome_tests {
 
     #[test]
     fn entry_cards_sit_on_the_element_surface_with_plain_spacers() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
-        let mut app = app_with_entries(2);
+        let theme = flat_theme();
+        let mut app = flat_app(app_with_entries(2));
         app.nav.selected_entry_index = None;
         let layout = tui_layout(Rect::new(0, 0, 120, 30), &app);
         let content = layout.entries.unwrap().panel.content;
@@ -2735,9 +3113,8 @@ mod flat_chrome_tests {
 
     #[test]
     fn hovered_entry_box_carries_the_hover_background() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
-        let mut app = app_with_entry();
+        let theme = flat_theme();
+        let mut app = flat_app(app_with_entry());
         // Deselect so the selection highlight doesn't own the hovered row.
         app.nav.selected_entry_index = None;
         app.hover = crate::tui::state::HoverTarget::Entry(0);
@@ -2752,17 +3129,16 @@ mod flat_chrome_tests {
 
     #[test]
     fn hovered_insights_tab_uses_hint_style_text_without_hover_background() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
-        let mut app = app_with_entry();
-        focus_insights(&mut app, insights::InsightsTab::Overview);
-        app.hover = HoverTarget::InsightsTab(insights::InsightsTab::Writing);
+        let theme = flat_theme();
+        let mut app = flat_app(app_with_entry());
+        focus_insights(&mut app, InsightsTab::Overview);
+        app.hover = HoverTarget::InsightsTab(InsightsTab::Writing);
         let layout = tui_layout(Rect::new(0, 0, 140, 30), &app);
         let insights = layout.insights.expect("insights panel");
         let col = (insights.area.x..insights.area.x + insights.area.width)
             .find(|col| {
-                insights_tab_at(insights.area, *col, insights.area.y)
-                    == Some(insights::InsightsTab::Writing)
+                insights_tab_at(&theme, insights.area, *col, insights.area.y)
+                    == Some(InsightsTab::Writing)
             })
             .expect("writing tab");
 
@@ -2774,16 +3150,15 @@ mod flat_chrome_tests {
 
     #[test]
     fn focused_insights_active_tab_uses_the_accent_title_style_not_a_fill() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
-        let mut app = app_with_entry();
-        focus_insights(&mut app, insights::InsightsTab::Overview);
+        let theme = flat_theme();
+        let mut app = flat_app(app_with_entry());
+        focus_insights(&mut app, InsightsTab::Overview);
         let layout = tui_layout(Rect::new(0, 0, 140, 30), &app);
         let insights = layout.insights.expect("insights panel");
         let col = (insights.area.x..insights.area.x + insights.area.width)
             .find(|col| {
-                insights_tab_at(insights.area, *col, insights.area.y)
-                    == Some(insights::InsightsTab::Overview)
+                insights_tab_at(&theme, insights.area, *col, insights.area.y)
+                    == Some(InsightsTab::Overview)
             })
             .expect("overview tab");
 
@@ -2798,8 +3173,9 @@ mod flat_chrome_tests {
 
     #[test]
     fn entry_cards_embed_the_border_labels_inside_padding() {
-        pin_flat();
+        let flat_theme = flat_theme();
         let flat = rendered_lines(&entry_box_lines(
+            &flat_theme,
             Some("Sunday 05"),
             "14:30",
             "hello world",
@@ -2807,8 +3183,9 @@ mod flat_chrome_tests {
             Some("Archived"),
             40,
         ));
-        crate::tui::theme::set_test_theme(crate::tui::theme::Theme::terminal_default());
+        let bordered_theme = theme::Theme::terminal_default();
         let bordered = rendered_lines(&entry_box_lines(
+            &bordered_theme,
             Some("Sunday 05"),
             "14:30",
             "hello world",
@@ -2844,22 +3221,22 @@ mod flat_chrome_tests {
         // A colored theme forced into bordered chrome must not fall back to
         // the terminal-default background inside its dialogs (`Clear` alone
         // would). Classic is unaffected: its panel is the terminal default.
-        theme::set_test_theme(theme::test_flat_theme());
-        theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
-        let dialog_bg = theme::test_flat_theme().dialog_bg();
+        let theme = flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered));
+        let dialog_bg = theme.dialog_bg();
         let backend = render_backend(80, 24, |frame| {
             dialogs::draw_edit_metadata_dialog(
+                &theme,
                 frame,
                 &mut tags_state(),
                 crate::tui::state::HoverTarget::None,
             )
         });
-        let area = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2).area;
+        let area = metadata_dialog_layout(&theme, Rect::new(0, 0, 80, 24), 2).area;
         let border = &backend.buffer()[(area.x, area.y)];
         assert_eq!(border.symbol(), "┌", "chrome override not applied");
         assert_eq!(
             border.fg,
-            theme::test_flat_theme().dialog_border().fg.unwrap(),
+            theme.dialog_border().fg.unwrap(),
             "dialog frame fell back to terminal-default ink"
         );
         let interior = &backend.buffer()[(area.x + 1, area.y + 1)];
@@ -2877,11 +3254,10 @@ mod flat_chrome_tests {
             Some(crate::tui::theme::ChromeStyle::Flat),
             Some(crate::tui::theme::ChromeStyle::Bordered),
         ] {
-            theme::set_test_theme(theme::test_flat_theme());
-            theme::set_chrome_override(chrome);
-            let ink = theme::theme().text().fg.expect("flat theme has body ink");
+            let theme = flat_theme().with_chrome_override(chrome);
+            let ink = theme.text().fg.expect("flat theme has body ink");
             let backend = render_backend(80, 24, |frame| {
-                frames::draw_dialog_frame(frame, Rect::new(10, 5, 40, 10), "Title", false);
+                frames::draw_dialog_frame(&theme, frame, Rect::new(10, 5, 40, 10), "Title", false);
             });
             let interior = &backend.buffer()[(12, 10)];
             assert_eq!(
@@ -2889,7 +3265,6 @@ mod flat_chrome_tests {
                 "dialog interior lost the theme ink ({chrome:?})"
             );
         }
-        theme::set_chrome_override(None);
     }
 
     #[test]
@@ -2897,8 +3272,7 @@ mod flat_chrome_tests {
         // The rendered body bakes in markdown colors, glyphs, and syntax
         // highlighting; the picker's live preview swaps themes without
         // touching the entry, so the memo key must notice.
-        theme::set_test_theme(theme::test_flat_theme());
-        let app = app_with_journals(&["alpha"]);
+        let mut app = flat_app(app_with_journals(&["alpha"]));
         let builds = std::cell::Cell::new(0);
         let build = || {
             builds.set(builds.get() + 1);
@@ -2907,21 +3281,20 @@ mod flat_chrome_tests {
         app.cached_entry_body(None, 80, build);
         app.cached_entry_body(None, 80, build);
         assert_eq!(builds.get(), 1, "same theme must hit the cache");
-        theme::set_test_theme(theme::test_eclipse_theme());
+        app.appearance.theme = theme::test_eclipse_theme();
         app.cached_entry_body(None, 80, build);
         assert_eq!(builds.get(), 2, "a theme change must rebuild the body");
     }
 
     #[test]
     fn bordered_key_chips_carry_the_key_hint_token() {
-        // Bordered chrome used to hardcode REVERSED|BOLD chips; the token's
-        // default is that same chip, so classic is a no-op — but a flat theme
-        // forced to bordered must keep its own key_hint ink.
-        theme::set_test_theme(theme::test_flat_theme());
-        theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
-        let theme = theme::test_flat_theme();
-        let app = app_with_journals(&["alpha"]);
-        let text = footer::footer_lines(&app, 120);
+        // The key_hint token defaults to the classic REVERSED|BOLD chip, so
+        // classic is a no-op — but a flat theme forced to bordered must keep its
+        // own key_hint ink.
+        let theme = flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered));
+        let mut app = app_with_journals(&["alpha"]);
+        app.appearance.theme = theme.clone();
+        let text = footer::footer_lines(&app.appearance.theme, &app, 120);
         let spans: Vec<_> = text
             .lines
             .iter()
@@ -2933,25 +3306,22 @@ mod flat_chrome_tests {
             .expect("quit label in the browse footer");
         let chip = spans[label - 1];
         assert_eq!(chip.style, theme.key_hint(), "chip ignored the token");
-        theme::set_chrome_override(None);
     }
 
     #[test]
     fn scrollbars_carry_the_scrollbar_tokens_on_both_chromes() {
         use ratatui::widgets::ScrollbarState;
-        theme::set_test_theme(theme::test_flat_theme());
-        let theme = theme::test_flat_theme();
         for (chrome_override, scrollbar_x) in [
             (crate::tui::theme::ChromeStyle::Flat, 2),
             (crate::tui::theme::ChromeStyle::Bordered, 3),
         ] {
-            theme::set_chrome_override(Some(chrome_override));
+            let theme = flat_theme().with_chrome_override(Some(chrome_override));
             let backend = render_backend(4, 12, |frame| {
                 let mut state = ScrollbarState::default()
                     .content_length(100)
                     .viewport_content_length(10)
                     .position(0);
-                chrome::render_vertical_scrollbar(frame, frame.area(), &mut state, true);
+                chrome::render_vertical_scrollbar(&theme, frame, frame.area(), &mut state, true);
             });
             // One vertical margin row and an arrow on each end; the thumb hugs
             // the top at position 0 and the track fills the rest.
@@ -2960,24 +3330,25 @@ mod flat_chrome_tests {
             assert_eq!(thumb.fg, theme.scrollbar_thumb(true).fg.unwrap());
             assert_eq!(track.fg, theme.scrollbar_track(true).fg.unwrap());
         }
-        theme::set_chrome_override(None);
     }
 
     #[test]
     fn themed_border_set_draws_panels_cards_and_tables() {
-        theme::set_test_theme(theme::test_theme_from_toml(
-            "[borders]\nstyle = \"rounded\"",
-        ));
+        let rounded = theme::test_theme_from_toml("[borders]\nstyle = \"rounded\"");
         let corner = |focused: bool| {
+            let active_theme = rounded.clone();
             let backend = render_backend(20, 5, move |frame| {
-                frame.render_widget(chrome::panel_block("t", focused, None), frame.area());
+                frame.render_widget(
+                    chrome::panel_block(&active_theme, "t", focused, None),
+                    frame.area(),
+                );
             });
             backend.buffer()[(0u16, 0u16)].symbol().to_string()
         };
         assert_eq!(corner(false), "╭", "unfocused panel ignored the set");
         assert_eq!(corner(true), "┏", "focus must stay thick");
 
-        theme::set_test_theme(theme::test_theme_from_toml("[borders]\nstyle = \"ascii\""));
+        let ascii = theme::test_theme_from_toml("[borders]\nstyle = \"ascii\"");
         let text = |line: ratatui::text::Line| -> String {
             line.spans
                 .iter()
@@ -2986,6 +3357,7 @@ mod flat_chrome_tests {
         };
         assert_eq!(
             text(crate::tui::entry_rows::border_line(
+                &ascii,
                 crate::tui::entry_rows::BoxEdge::Top,
                 10,
                 None,
@@ -2994,7 +3366,8 @@ mod flat_chrome_tests {
             "+--------+"
         );
         assert_eq!(
-            text(table::rule(
+            text(table::themed_rule(
+                &ascii,
                 &[3],
                 table::RulePos::Top,
                 ratatui::style::Style::default(),
@@ -3010,31 +3383,33 @@ mod flat_chrome_tests {
         // inactive panel borders in the terminal-default ink — that reads
         // *brighter* than the focused border on a muted palette. Classic is
         // unaffected: its `border_inactive` is the terminal default.
-        theme::set_test_theme(theme::test_flat_theme());
-        theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
-        let theme = theme::test_flat_theme();
+        let theme = flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered));
+        let render_theme = theme.clone();
         let corner = |focused: bool| {
+            let active_theme = render_theme.clone();
             let backend = render_backend(20, 5, move |frame| {
-                frame.render_widget(chrome::panel_block("t", focused, None), frame.area());
+                frame.render_widget(
+                    chrome::panel_block(&active_theme, "t", focused, None),
+                    frame.area(),
+                );
             });
             backend.buffer()[(0u16, 0u16)].clone()
         };
         assert_eq!(corner(false).fg, theme.inactive_border().fg.unwrap());
         assert_eq!(corner(true).fg, theme.focus_border().fg.unwrap());
-        theme::set_chrome_override(None);
     }
 
     #[test]
     fn hovered_dialog_row_lifts_even_when_it_is_the_hidden_selection() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
+        let theme = flat_theme();
         // Focus on the input: the list's selection highlight is hidden, so the
         // selected row (index 0, the default) must still respond to hover.
         let mut state = tags_state();
-        state.focus = crate::tui::app::EditMetadataFocus::Input;
-        let layout = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2);
+        state.focus = EditMetadataFocus::Input;
+        let layout = metadata_dialog_layout(&theme, Rect::new(0, 0, 80, 24), 2);
         let backend = render_backend(80, 24, |frame| {
             dialogs::draw_edit_metadata_dialog(
+                &theme,
                 frame,
                 &mut state,
                 crate::tui::state::HoverTarget::DialogRow(0),
@@ -3046,11 +3421,10 @@ mod flat_chrome_tests {
 
     #[test]
     fn hovered_footer_hint_label_lifts_out_of_the_muted_row() {
-        pin_flat();
-        let theme = theme::test_flat_theme();
-        let mut app = app_with_journals(&["alpha"]);
+        let theme = flat_theme();
+        let mut app = flat_app(app_with_journals(&["alpha"]));
         app.hover = crate::tui::state::HoverTarget::FooterHint(footer::HintId::Quit);
-        let text = footer::footer_lines(&app, 120);
+        let text = footer::footer_lines(&app.appearance.theme, &app, 120);
         let label = text
             .lines
             .iter()
@@ -3062,12 +3436,11 @@ mod flat_chrome_tests {
 
     #[test]
     fn bordered_footer_hint_labels_keep_flat_text_styles() {
-        pin_flat();
-        theme::set_chrome_override(Some(crate::tui::theme::ChromeStyle::Bordered));
-        let theme = theme::test_flat_theme();
+        let theme = flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered));
         let mut app = app_with_journals(&["alpha"]);
-        let label_style = |app: &App| {
-            footer::footer_lines(app, 120)
+        app.appearance.theme = theme.clone();
+        let label_style = |app: &AppModel| {
+            footer::footer_lines(&app.appearance.theme, app, 120)
                 .lines
                 .iter()
                 .flat_map(|line| line.spans.iter())
@@ -3079,13 +3452,11 @@ mod flat_chrome_tests {
         assert_eq!(label_style(&app), theme.muted());
         app.hover = crate::tui::state::HoverTarget::FooterHint(footer::HintId::Quit);
         assert_eq!(label_style(&app), theme.text());
-        theme::set_chrome_override(None);
     }
 
     #[test]
     fn footer_key_chips_are_not_reversed() {
-        pin_flat();
-        let app = app_with_journals(&["alpha"]);
+        let app = flat_app(app_with_journals(&["alpha"]));
         let backend = render_app(app, 120, 30);
         let buffer = backend.buffer();
         for y in 0..30u16 {
@@ -3100,16 +3471,17 @@ mod flat_chrome_tests {
 
     #[test]
     fn flat_dialogs_pad_the_title_and_footer_off_the_card_edge() {
-        pin_flat();
+        let theme = flat_theme();
         // Regular dialog: blank row, then the title row.
         let backend = render_backend(80, 24, |frame| {
             dialogs::draw_edit_metadata_dialog(
+                &theme,
                 frame,
                 &mut tags_state(),
                 crate::tui::state::HoverTarget::None,
             )
         });
-        let area = metadata_dialog_layout(Rect::new(0, 0, 80, 24), 2).area;
+        let area = metadata_dialog_layout(&theme, Rect::new(0, 0, 80, 24), 2).area;
         let row_text = |y: u16| -> String {
             (area.x..area.x + area.width)
                 .map(|x| backend.buffer()[(x, y)].symbol())
@@ -3129,7 +3501,9 @@ mod flat_chrome_tests {
         );
 
         // Table dialog: the footer sits above the bottom padding row.
-        let text_rows = render_to_rows(64, 20, |frame| menus::draw_settings_menu(frame, None));
+        let text_rows = render_to_rows(64, 20, |frame| {
+            menus::draw_settings_menu(&theme, frame, None)
+        });
         let footer_row = text_rows
             .iter()
             .position(|row| row.contains("esc close"))
@@ -3152,7 +3526,6 @@ mod flat_chrome_tests {
 
     #[test]
     fn dialog_inner_uses_the_shared_surface_gutter_in_both_chromes() {
-        pin_flat();
         let area = Rect::new(10, 5, 44, 20);
         for (chrome, expected) in [
             (
@@ -3164,19 +3537,20 @@ mod flat_chrome_tests {
                 Rect::new(12, 6, 40, 18),
             ),
         ] {
-            theme::set_chrome_override(Some(chrome));
-            let inner = frames::dialog_inner(area);
+            let theme = flat_theme().with_chrome_override(Some(chrome));
+            let inner = frames::dialog_inner(&theme, area);
             assert_eq!(inner, expected);
             assert_eq!(inner.x, area.x + 2);
-            assert_eq!(inner.x + inner.width, scrollbar_bar_rect(area).x - 1);
+            assert_eq!(
+                inner.x + inner.width,
+                scrollbar_bar_rect(&theme, area).x - 1
+            );
         }
-        theme::set_chrome_override(None);
     }
 
     #[test]
     fn toast_renders_top_right_with_variant_edges() {
-        pin_flat();
-        let mut app = app_with_journals(&["alpha"]);
+        let mut app = flat_app(app_with_journals(&["alpha"]));
         app.toast(crate::tui::state::ToastVariant::Success, "Entry saved");
 
         let backend = render_app(app, 120, 30);
@@ -3221,8 +3595,7 @@ mod flat_chrome_tests {
 
     #[test]
     fn toasts_stack_with_a_blank_row_between() {
-        pin_flat();
-        let mut app = app_with_journals(&["alpha"]);
+        let mut app = flat_app(app_with_journals(&["alpha"]));
         app.toast(crate::tui::state::ToastVariant::Info, "First");
         app.toast(crate::tui::state::ToastVariant::Error, "Second");
 
@@ -3240,8 +3613,7 @@ mod flat_chrome_tests {
 
     #[test]
     fn expired_toast_shows_no_countdown_line() {
-        pin_flat();
-        let mut app = app_with_journals(&["alpha"]);
+        let mut app = flat_app(app_with_journals(&["alpha"]));
         app.toasts
             .push_expired(crate::tui::state::ToastVariant::Info, "Gone");
 
@@ -3261,25 +3633,30 @@ mod flat_chrome_tests {
 
     #[test]
     fn pending_notice_shows_the_enroll_command_in_flat_chrome() {
-        pin_flat();
-        let text =
-            render_pending_notice_text("phone", &AccessNotice::NeedsEnroll { retired_key: false });
+        let text = render_pending_notice_text_with_theme(
+            &flat_theme(),
+            "phone",
+            &AccessNotice::NeedsEnroll { retired_key: false },
+        );
         assert!(text.contains("Not authorized"));
         assert!(text.contains(crate::ENROLL_CMD));
     }
 
     #[test]
     fn pending_notice_shows_the_approve_command_in_flat_chrome() {
-        pin_flat();
-        let text = render_pending_notice_text("phone", &AccessNotice::AwaitingApproval);
+        let text = render_pending_notice_text_with_theme(
+            &flat_theme(),
+            "phone",
+            &AccessNotice::AwaitingApproval,
+        );
         assert!(text.contains("Awaiting approval"));
         assert!(text.contains(&format!("{} phone", crate::APPROVE_CMD)));
     }
 
     #[test]
     fn disable_notice_shows_the_enable_hint_in_flat_chrome() {
-        pin_flat();
-        let backend = render_backend(72, 20, draw_disable_notice);
+        let theme = flat_theme();
+        let backend = render_backend(72, 20, |frame| draw_disable_notice(&theme, frame));
         let text: String = backend
             .buffer()
             .content()
@@ -3309,7 +3686,7 @@ mod toast_bordered_tests {
         assert_eq!(buffer[(117u16, 1u16)].symbol(), "┐");
         assert_eq!(buffer[(74u16, 4u16)].symbol(), "└");
         assert_eq!(buffer[(117u16, 4u16)].symbol(), "┘");
-        if let Some(fg) = crate::tui::theme::theme().error().fg {
+        if let Some(fg) = crate::tui::theme::Theme::terminal_default().error().fg {
             assert_eq!(buffer[(74u16, 1u16)].fg, fg);
         }
         // Row 3 carries the countdown line, inset one column inside the border.
@@ -3335,7 +3712,7 @@ mod scrim_tests {
 
     #[test]
     fn scrim_blends_rgb_cells_and_dims_the_rest() {
-        theme::set_test_theme(theme::test_flat_theme()); // scrim strength 0.45
+        let theme = theme::test_flat_theme(); // scrim strength 0.45
         let area = Rect::new(0, 0, 3, 1);
         let mut buf = Buffer::empty(area);
         buf.set_string(0, 0, "abc", Style::default());
@@ -3344,7 +3721,7 @@ mod scrim_tests {
         buf[(1u16, 0u16)].fg = Color::Reset;
         buf[(2u16, 0u16)].set_diff_option(ratatui::buffer::CellDiffOption::Skip);
 
-        chrome::scrim(&mut buf, area);
+        chrome::scrim(&theme, &mut buf, area);
 
         // 0x80 * (1 - 0.45) = 0x46; the blended cell gains no DIM.
         assert_eq!(buf[(0u16, 0u16)].fg, Color::Rgb(0x46, 0x46, 0x46));
@@ -3364,7 +3741,7 @@ mod scrim_tests {
         let mut buf = Buffer::empty(area);
         buf[(0u16, 0u16)].fg = Color::Rgb(0x80, 0x80, 0x80);
 
-        chrome::scrim(&mut buf, area);
+        chrome::scrim(&theme::Theme::terminal_default(), &mut buf, area);
 
         assert_eq!(buf[(0u16, 0u16)].fg, Color::Rgb(0x80, 0x80, 0x80));
         assert!(buf[(0u16, 0u16)].modifier.contains(Modifier::DIM));

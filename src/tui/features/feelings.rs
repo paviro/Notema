@@ -1,8 +1,11 @@
-use super::*;
-use crate::tui::state::{ListNav, SelectableList};
-use notema_domain::FeelingGroup;
+use notema_domain::{FEELING_GROUPS, FeelingGroup};
 
-impl App {
+use crate::tui::state::{ListNav, SelectableList};
+use crate::tui::{
+    app::AppModel, features::metadata::EditMetadataFocus, state::Overlay, text_input::TextInput,
+};
+
+impl AppModel {
     pub(crate) fn begin_edit_feelings(&mut self) {
         if self.editor.is_none() && !self.allow_selected_entry_edit() {
             return;
@@ -16,6 +19,20 @@ impl App {
         let scope = self.current_journal_scope();
         let hits = self.search_results_by_feeling(feeling);
         self.enter_search(scope, format!("feelings:{feeling}"), hits);
+    }
+
+    pub(crate) fn edit_feeling_state(&self) -> Option<&EditFeelingState> {
+        match &self.overlay {
+            Overlay::EditFeelings(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn edit_feeling_state_mut(&mut self) -> Option<&mut EditFeelingState> {
+        match &mut self.overlay {
+            Overlay::EditFeelings(state) => Some(state),
+            _ => None,
+        }
     }
 }
 

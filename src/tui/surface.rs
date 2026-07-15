@@ -3,7 +3,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::tui::{
     env_strip::{EnvItem, env_strip_height},
-    theme::{ChromeStyle, PillCategory, theme},
+    theme::{ChromeStyle, PillCategory, Theme},
 };
 
 /// Per-entry box chrome consumed horizontally: a left/right border plus one
@@ -17,9 +17,9 @@ pub(crate) struct PanelGeometry {
 }
 
 impl PanelGeometry {
-    pub(crate) fn new(area: Rect) -> Self {
+    pub(crate) fn new(theme: &Theme, area: Rect) -> Self {
         let inner = panel_inner(area);
-        let content = surface_content_inner(inner);
+        let content = surface_content_inner(theme, inner);
         Self { area, content }
     }
 }
@@ -32,8 +32,8 @@ pub(crate) struct EntryListGeometry {
 }
 
 impl EntryListGeometry {
-    pub(crate) fn new(area: Rect) -> Self {
-        let panel = PanelGeometry::new(area);
+    pub(crate) fn new(theme: &Theme, area: Rect) -> Self {
+        let panel = PanelGeometry::new(theme, area);
         Self {
             text_width: panel.content.width.saturating_sub(ENTRY_BOX_H_OVERHEAD),
             viewport_height: panel.content.height,
@@ -81,9 +81,9 @@ pub(crate) fn panel_inner(area: Rect) -> Rect {
 /// Content always stays one cell off the left frame and one cell before the
 /// scrollbar. Flat chrome also reserves the blank surface-edge column after
 /// its inset scrollbar.
-pub(crate) fn surface_content_inner(area: Rect) -> Rect {
+pub(crate) fn surface_content_inner(theme: &Theme, area: Rect) -> Rect {
     let pad = 1;
-    let right_pad = pad + u16::from(theme().chrome() == ChromeStyle::Flat);
+    let right_pad = pad + u16::from(theme.chrome() == ChromeStyle::Flat);
     Rect {
         x: area.x.saturating_add(pad),
         width: area.width.saturating_sub(pad + right_pad).max(1),
@@ -94,8 +94,8 @@ pub(crate) fn surface_content_inner(area: Rect) -> Rect {
 /// The vertical scrollbar column shared by drawing and mouse hit-testing.
 /// Bordered chrome uses the right border; flat chrome leaves one blank column
 /// between the scrollbar and the surface edge.
-pub(crate) fn scrollbar_bar_rect(area: Rect) -> Rect {
-    let right_padding = u16::from(theme().chrome() == ChromeStyle::Flat);
+pub(crate) fn scrollbar_bar_rect(theme: &Theme, area: Rect) -> Rect {
+    let right_padding = u16::from(theme.chrome() == ChromeStyle::Flat);
     Rect {
         x: area
             .x
@@ -108,10 +108,10 @@ pub(crate) fn scrollbar_bar_rect(area: Rect) -> Rect {
 
 /// Outer width required for `content_width` cells plus the shared gutters,
 /// frame/scrollbar column, and the flat surface-edge column when present.
-pub(crate) fn surface_outer_width(content_width: u16) -> u16 {
+pub(crate) fn surface_outer_width(theme: &Theme, content_width: u16) -> u16 {
     content_width
         .saturating_add(4)
-        .saturating_add(u16::from(theme().chrome() == ChromeStyle::Flat))
+        .saturating_add(u16::from(theme.chrome() == ChromeStyle::Flat))
 }
 
 pub(crate) fn point_in_rect(area: Rect, x: u16, y: u16) -> bool {
@@ -125,10 +125,11 @@ pub(crate) fn point_in_rect(area: Rect, x: u16, y: u16) -> bool {
 const METADATA_ROW_GAP: u16 = 1;
 
 pub(crate) fn entry_metadata_layout(
+    theme: &Theme,
     reader_area: Rect,
     values: EntryMetadataValues<'_>,
 ) -> EntryMetadataLayout {
-    let inner = PanelGeometry::new(reader_area).content;
+    let inner = PanelGeometry::new(theme, reader_area).content;
     let metadata_height = metadata_section_height(inner.width, values);
     let show_metadata = metadata_height > 0 && inner.height > metadata_height;
 

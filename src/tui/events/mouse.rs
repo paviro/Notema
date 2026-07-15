@@ -1,195 +1,166 @@
 use crate::AppResult;
 use crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
+use ratatui::{
+    Terminal,
+    backend::{Backend, CrosstermBackend},
+    layout::Rect,
+};
 use std::io;
 
 use crate::tui::{
-    app::{
-        App, EditLocationFocus, EditMetadataFocus, Focus, Mode, ScrollbarDrag,
-        inline_reader_is_visible,
-    },
+    app::{AppModel, Focus, Mode, ScrollbarDrag, inline_reader_is_visible},
     editor_state::EditorPrompt,
+    features::{location::EditLocationFocus, metadata::EditMetadataFocus},
     render,
     state::{HoverTarget, ListNav, MetadataKind, Overlay},
+    ui::{ConfirmId, DialogId, DialogInputId, InteractionKind, ViewState, interaction::PanelId},
 };
 
 use super::DispatchOutcome;
-use super::action::{Action, InsightsAction};
-use super::actions::view_selected;
+use super::action::{
+    Action, BrowserAction, DialogListTarget, EditMetadataFocusTarget, EditorAction, ImageAction,
+    InsightsAction, LocationAction, MetadataAction, MetadataSearchTarget, MouseAction,
+    OverlayAction, ScrollbarMetrics, SearchAction, SettingsAction, TextFieldTarget,
+};
 
-fn editor_mouse_action(app: &App, mouse: MouseEvent) -> Option<Action> {
+mod overlay;
+use overlay::{
+    footer_area, footer_click_to_action, footer_hint_at, mapped_hover_target, overlay_mouse_action,
+    prompt_mouse_action, text_field_hover_at, text_field_mouse_action,
+};
+
+fn editor_mouse_action(app: &AppModel, mouse: MouseEvent) -> Option<Action> {
     match mouse.kind {
-        MouseEventKind::ScrollDown => Some(Action::EditorScroll(1)),
-        MouseEventKind::ScrollUp => Some(Action::EditorScroll(-1)),
-        MouseEventKind::Down(MouseButton::Left) => Some(Action::EditorStartSelection {
-            col: mouse.column,
-            row: mouse.row,
-        }),
-        MouseEventKind::Drag(MouseButton::Left) if app.editor.as_ref()?.mouse_selecting => {
-            Some(Action::EditorDragSelection {
+        MouseEventKind::ScrollDown => Some(Action::Editor(EditorAction::Scroll(1))),
+        MouseEventKind::ScrollUp => Some(Action::Editor(EditorAction::Scroll(-1))),
+        MouseEventKind::Down(MouseButton::Left) => {
+            Some(Action::Editor(EditorAction::StartSelection {
                 col: mouse.column,
                 row: mouse.row,
-            })
+            }))
         }
-        MouseEventKind::Up(MouseButton::Left) => Some(Action::EditorEndSelection),
+        MouseEventKind::Drag(MouseButton::Left) if app.editor.as_ref()?.mouse_selecting => {
+            Some(Action::Editor(EditorAction::DragSelection {
+                col: mouse.column,
+                row: mouse.row,
+            }))
+        }
+        MouseEventKind::Up(MouseButton::Left) => Some(Action::Editor(EditorAction::EndSelection)),
         _ => None,
     }
 }
 
-fn editor_prompt_is_open(app: &App) -> bool {
+fn editor_prompt_is_open(app: &AppModel) -> bool {
     !matches!(
         app.editor.as_ref().map(|editor| &editor.prompt),
         None | Some(EditorPrompt::None)
     )
 }
 
-fn editor_prompt_mouse_action(app: &App, mouse: MouseEvent, area: Rect) -> Option<Action> {
-    let prompt = app.editor.as_ref().map(|editor| &editor.prompt)?;
-    match prompt {
-        EditorPrompt::None => None,
-        EditorPrompt::ConfirmDiscard { .. } => match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                render::editor_discard_choice_at_point(area, mouse.column, mouse.row).map(
-                    |discard| {
-                        if discard {
-                            Action::EditorDiscard
-                        } else {
-                            Action::EditorClosePrompt
-                        }
-                    },
-                )
-            }
-            _ => None,
-        },
-        EditorPrompt::MetadataMenu => match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                let mode = render::MetadataMenuMode::Editor;
-                if render::metadata_menu_close_at_point(area, mode, mouse.column, mouse.row) {
-                    return Some(Action::EditorClosePrompt);
-                }
-                match render::metadata_menu_choice_at_point(area, mode, mouse.column, mouse.row) {
-                    Some(render::MetadataChoice::Metadata(kind)) => {
-                        Some(Action::BeginEditMetadata(kind))
-                    }
-                    Some(render::MetadataChoice::Feelings) => Some(Action::BeginEditFeelings),
-                    Some(render::MetadataChoice::Mood) => Some(Action::BeginEditMood),
-                    Some(render::MetadataChoice::Location) => Some(Action::BeginEditLocation),
-                    None => None,
-                }
-            }
-            _ => None,
-        },
-        // The shortcut sheet is a reference: any click dismisses it.
-        EditorPrompt::Help { .. } => match mouse.kind {
-            MouseEventKind::ScrollDown => Some(Action::EditorScrollHelp(1)),
-            MouseEventKind::ScrollUp => Some(Action::EditorScrollHelp(-1)),
-            MouseEventKind::Down(MouseButton::Left) => Some(Action::EditorClosePrompt),
-            _ => None,
-        },
-    }
-}
-
 pub(crate) fn handle_mouse(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
+    app: &mut AppModel,
     mouse: MouseEvent,
+    view: &ViewState,
 ) -> AppResult<DispatchOutcome> {
     let area = super::terminal_area(terminal)?;
-    super::dispatch_action(terminal, app, Action::PointerInput { event: mouse, area })
+    let Some(action) = mouse_to_action(app, mouse, area, view) else {
+        return Ok(DispatchOutcome::Continue);
+    };
+    super::dispatch_action(terminal, app, action)
 }
 
-pub(super) fn apply_pointer(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
+pub(super) fn mouse_to_action(
+    app: &AppModel,
     mouse: MouseEvent,
     area: Rect,
-) -> AppResult<DispatchOutcome> {
-    if try_toast_dismiss(app, mouse, area) {
-        return Ok(DispatchOutcome::Continue);
+    view: &ViewState,
+) -> Option<Action> {
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        && let Some(index) = render::toast_at_point(app, area, mouse.column, mouse.row)
+    {
+        return Some(Action::Mouse(MouseAction::DismissToast(index)));
     }
 
     if app.has_overlay() {
-        handle_overlay_mouse(Some(terminal), app, mouse, area)?;
-        return Ok(DispatchOutcome::Continue);
+        return overlay_mouse_action(app, mouse, area, view);
     }
 
-    if let Some(action) = editor_prompt_mouse_action(app, mouse, area) {
-        return super::dispatch_action(terminal, app, action);
+    if let Some(action) = prompt_mouse_action(app, mouse, view) {
+        return Some(action);
     } else if editor_prompt_is_open(app) {
-        return Ok(DispatchOutcome::Continue);
+        return None;
     }
 
     if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+        match view.interactions.hit(mouse.column, mouse.row) {
+            Some(InteractionKind::Hint(id)) => return hint_id_to_action(app, *id),
+            Some(InteractionKind::Image(index)) => {
+                return Some(Action::Images(ImageAction::OpenViewer(*index)));
+            }
+            Some(InteractionKind::Link {
+                target,
+                heading_line,
+            }) => {
+                return Some(Action::Browser(BrowserAction::OpenReaderLink {
+                    target: target.clone(),
+                    heading_line: *heading_line,
+                }));
+            }
+            _ => {}
+        }
         let footer = footer_area(app, area);
         if render::point_in_rect(footer, mouse.column, mouse.row) {
             if let Some(action) = footer_click_to_action(app, mouse, footer) {
-                return super::dispatch_action(terminal, app, action);
+                return Some(action);
             }
-            return Ok(DispatchOutcome::Continue);
-        }
-        // Clicking an entry-view `[Image N …]` label opens the viewer via the
-        // same action as the footer hint and keyboard shortcut.
-        if let Some(index) = app.image_label_at(mouse.column, mouse.row) {
-            return super::dispatch_action(terminal, app, Action::OpenImageViewer(index));
-        }
-        if let Some(target) = app.reader_link_at(mouse.column, mouse.row) {
-            return super::dispatch_action(terminal, app, Action::OpenReaderLink(target));
+            return None;
         }
     }
 
     if app.editor.is_some() {
         if let Some(action) = editor_mouse_action(app, mouse) {
-            return super::dispatch_action(terminal, app, action);
+            return Some(action);
         }
-        return Ok(DispatchOutcome::Continue);
+        return None;
     }
 
-    apply_pointer_in_area(app, mouse, area)?;
-    Ok(DispatchOutcome::Continue)
-}
-
-/// A left press on a toast dismisses it. Probed before everything else —
-/// toasts render topmost, so they must win the hit-test.
-fn try_toast_dismiss(app: &mut App, mouse: MouseEvent, area: Rect) -> bool {
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return false;
-    }
-    let Some(index) = render::toast_at_point(app, area, mouse.column, mouse.row) else {
-        return false;
-    };
-    app.toasts.dismiss(index);
-    app.hover = HoverTarget::None;
-    true
-}
-
-pub(super) fn apply_pointer_in_area(app: &mut App, mouse: MouseEvent, area: Rect) -> AppResult<()> {
-    if try_toast_dismiss(app, mouse, area) {
-        return Ok(());
-    }
-    if app.has_overlay() {
-        handle_overlay_mouse(None, app, mouse, area)?;
-        return Ok(());
-    }
-    if handle_text_field_mouse(app, mouse) {
-        return Ok(());
+    if let Some(action) = text_field_mouse_action(app, mouse, view) {
+        return Some(Action::Mouse(action));
     }
 
-    let layout = render::tui_layout(area, app);
-
+    let layout = view.layout.unwrap_or_else(|| render::tui_layout(area, app));
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            if !try_scrollbar_press(app, mouse, &layout) {
-                handle_left_click(app, mouse, layout)?;
+            match view.interactions.hit(mouse.column, mouse.row) {
+                Some(InteractionKind::Scrollbar(metrics)) => {
+                    Some(Action::Mouse(MouseAction::ScrollbarPress {
+                        metrics: *metrics,
+                        row: mouse.row,
+                    }))
+                }
+                Some(InteractionKind::Row { panel, index }) => {
+                    panel_click_action(app, *panel, Some(*index), &layout, mouse)
+                }
+                Some(InteractionKind::Panel(panel)) => {
+                    panel_click_action(app, *panel, None, &layout, mouse)
+                }
+                _ => None,
             }
         }
-        MouseEventKind::Drag(MouseButton::Left) => handle_scrollbar_drag(app, mouse, &layout),
-        MouseEventKind::Up(MouseButton::Left) => app.scrollbar.active = None,
-        MouseEventKind::ScrollUp => handle_wheel(app, mouse, layout, -1),
-        MouseEventKind::ScrollDown => handle_wheel(app, mouse, layout, 1),
-        _ => {}
+        MouseEventKind::Drag(MouseButton::Left) => app.scrollbar.active.and_then(|which| {
+            view.interactions.scrollbar(which).map(|metrics| {
+                Action::Mouse(MouseAction::ScrollbarDrag {
+                    metrics,
+                    row: mouse.row,
+                })
+            })
+        }),
+        MouseEventKind::Up(MouseButton::Left) => Some(Action::Mouse(MouseAction::ScrollbarRelease)),
+        MouseEventKind::ScrollUp => wheel_action(app, mouse, layout, -1, view),
+        MouseEventKind::ScrollDown => wheel_action(app, mouse, layout, 1, view),
+        _ => None,
     }
-
-    Ok(())
 }
 
 /// True for the two wheel event kinds.
@@ -230,26 +201,17 @@ pub(crate) fn fold_leading_wheel(events: &[Event]) -> (i16, usize) {
 /// wheel path of `apply_pointer_in_area`; the caller guarantees no overlay is open.
 pub(crate) fn handle_scroll(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
+    app: &mut AppModel,
     mouse: MouseEvent,
     area: Rect,
     net_delta: i16,
+    view: &ViewState,
 ) -> AppResult<()> {
-    super::dispatch_action(
-        terminal,
-        app,
-        Action::PointerScroll {
-            event: mouse,
-            area,
-            delta: net_delta,
-        },
-    )?;
+    let layout = view.layout.unwrap_or_else(|| render::tui_layout(area, app));
+    if let Some(action) = wheel_action(app, mouse, layout, net_delta, view) {
+        super::dispatch_action(terminal, app, action)?;
+    }
     Ok(())
-}
-
-pub(super) fn apply_scroll(app: &mut App, mouse: MouseEvent, area: Rect, net_delta: i16) {
-    let layout = render::tui_layout(area, app);
-    handle_wheel(app, mouse, layout, net_delta);
 }
 
 /// A pane's scrollbar geometry, resolved from the live layout and caches so both a
@@ -278,108 +240,21 @@ impl ScrollbarTarget {
     }
 }
 
-/// Resolve a pane's scrollbar geometry, or `None` when the pane is absent or does not
-/// overflow (so no bar is drawn — matching `render_scrollbar_if_needed`'s guard).
-fn pane_target(
-    app: &App,
-    which: ScrollbarDrag,
-    layout: &render::TuiLayout,
-) -> Option<ScrollbarTarget> {
-    let (area, content_length, viewport, scroll) = match which {
-        ScrollbarDrag::Reader => {
-            let area = layout.reader?;
-            let hits = &app.reader_image_hits;
-            (
-                area.area,
-                hits.line_count,
-                hits.content_rect.height,
-                app.nav.scroll.reader as usize,
-            )
+impl From<ScrollbarMetrics> for ScrollbarTarget {
+    fn from(metrics: ScrollbarMetrics) -> Self {
+        Self {
+            which: metrics.which,
+            bar: metrics.bar,
+            max_scroll: metrics.max_scroll,
+            content_length: metrics.content_length,
+            viewport: metrics.viewport,
+            position: metrics.position,
         }
-        ScrollbarDrag::EntryList => {
-            let area = layout.entries?;
-            let cache = app.entry_rows(area.text_width);
-            (
-                area.panel.area,
-                cache.total_height,
-                area.viewport_height,
-                app.nav.entry_list.offset(),
-            )
-        }
-        ScrollbarDrag::Journals => {
-            if app.nav.mode != Mode::Browse {
-                return None;
-            }
-            let area = layout.journals?;
-            let (_, meta, list_area) = app.journal_rows(area.content);
-            let total_height = crate::tui::entry_rows::total_row_height(&meta);
-            (
-                area.area,
-                total_height,
-                list_area.height,
-                app.nav.journal_list.offset(),
-            )
-        }
-        ScrollbarDrag::Insights => {
-            // The list tabs record their geometry at render time; other tabs leave
-            // `total == 0`, so no bar is offered.
-            let geometry = &app.insights_scroll;
-            (
-                geometry.area,
-                geometry.total,
-                geometry.viewport,
-                app.nav.scroll.insights as usize,
-            )
-        }
-    };
-    let max_scroll = content_length.saturating_sub(viewport as usize);
-    let bar = crate::tui::scroll::scrollbar_bar_rect(area);
-    if max_scroll == 0 || bar.height == 0 {
-        return None;
     }
-    let position = crate::tui::scroll::scrollbar_position(scroll, content_length, viewport);
-    Some(ScrollbarTarget {
-        which,
-        bar,
-        max_scroll,
-        content_length,
-        viewport,
-        position,
-    })
-}
-
-/// The scrollbar target under the cursor, if any. Panes are probed independently;
-/// their bars sit on distinct panel edges, so at most one contains the cursor.
-fn scrollbar_target_at(
-    app: &App,
-    column: u16,
-    row: u16,
-    layout: &render::TuiLayout,
-) -> Option<ScrollbarTarget> {
-    [
-        ScrollbarDrag::Reader,
-        ScrollbarDrag::EntryList,
-        ScrollbarDrag::Journals,
-        ScrollbarDrag::Insights,
-    ]
-    .into_iter()
-    .filter_map(|which| pane_target(app, which, layout))
-    .find(|target| cursor_on_bar(target, column, row))
-}
-
-/// Whether `(column, row)` lands on `target`'s grab region — the bar column plus one
-/// on each side, so the one-cell bar is easier to hit. The bar sits on the panel's
-/// right border, so the right-neighbour column is the adjacent panel's left edge;
-/// that pane's own bar is on its far side and never claims this column back, so a
-/// click there just scrolls this pane.
-fn cursor_on_bar(target: &ScrollbarTarget, column: u16, row: u16) -> bool {
-    let bar = target.bar;
-    let on_column = column >= bar.x.saturating_sub(1) && column <= bar.x.saturating_add(1);
-    on_column && row >= bar.y && row < bar.y + bar.height
 }
 
 /// Set a pane's scroll offset directly (already clamped to its `max_scroll`).
-fn set_pane_scroll(app: &mut App, which: ScrollbarDrag, offset: usize) {
+fn set_pane_scroll(app: &mut AppModel, which: ScrollbarDrag, offset: usize) {
     match which {
         ScrollbarDrag::Journals => {
             *app.nav.journal_list.offset_mut() = offset;
@@ -401,7 +276,7 @@ fn set_pane_scroll(app: &mut App, which: ScrollbarDrag, offset: usize) {
 }
 
 /// Step a pane's scroll by one line, reusing the same setters the wheel uses.
-fn step_pane_scroll(app: &mut App, target: &ScrollbarTarget, delta: i16) {
+fn step_pane_scroll(app: &mut AppModel, target: &ScrollbarTarget, delta: i16) {
     match target.which {
         ScrollbarDrag::Journals => {
             app.scroll_journal_list(delta, target.content_length, target.viewport);
@@ -425,7 +300,7 @@ fn step_pane_scroll(app: &mut App, target: &ScrollbarTarget, delta: i16) {
 /// Map the dragged cursor row to a scroll offset so the grabbed point of the thumb
 /// (`scrollbar.grab` rows below its top) tracks the cursor. The cursor column is
 /// ignored, so the drag survives drifting off the narrow bar.
-fn apply_thumb_drag(app: &mut App, target: &ScrollbarTarget, row: u16) {
+fn apply_thumb_drag(app: &mut AppModel, target: &ScrollbarTarget, row: u16) {
     let (_, thumb_len) = target.thumb();
     let track_top = target.bar.y.saturating_add(1);
     let track_len = target.bar.height.saturating_sub(2);
@@ -440,126 +315,70 @@ fn apply_thumb_drag(app: &mut App, target: &ScrollbarTarget, row: u16) {
     set_pane_scroll(app, target.which, offset);
 }
 
-/// On a left press over a pane's scrollbar: the arrow rows step by one line; pressing
-/// the thumb grabs it without moving; pressing empty track jumps the thumb under the
-/// cursor. Returns whether the press was consumed.
-fn try_scrollbar_press(app: &mut App, mouse: MouseEvent, layout: &render::TuiLayout) -> bool {
-    let Some(target) = scrollbar_target_at(app, mouse.column, mouse.row, layout) else {
-        return false;
-    };
-    let bar = target.bar;
-
-    // Top / bottom arrow rows step one line, like the wheel, rather than jumping.
-    if mouse.row == bar.y {
-        step_pane_scroll(app, &target, -1);
-        return true;
-    }
-    if mouse.row == bar.y + bar.height - 1 {
-        step_pane_scroll(app, &target, 1);
-        return true;
-    }
-
-    let (thumb_top, thumb_len) = target.thumb();
-    app.scrollbar.active = Some(target.which);
-    if mouse.row >= thumb_top && mouse.row < thumb_top + thumb_len {
-        // Grabbing the thumb itself: remember where, and leave the scroll untouched so
-        // a click straight on the handle doesn't jump.
-        app.scrollbar.grab = mouse.row - thumb_top;
-    } else {
-        // Empty track: centre the thumb on the cursor and jump there.
-        app.scrollbar.grab = thumb_len / 2;
-        apply_thumb_drag(app, &target, mouse.row);
-    }
-    true
-}
-
-/// While a scrollbar drag is active, map the cursor row to the pane's scroll offset.
-fn handle_scrollbar_drag(app: &mut App, mouse: MouseEvent, layout: &render::TuiLayout) {
-    let Some(which) = app.scrollbar.active else {
-        return;
-    };
-    if let Some(target) = pane_target(app, which, layout) {
-        apply_thumb_drag(app, &target, mouse.row);
-    }
-}
-
-fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout) -> AppResult<()> {
-    if app.nav.mode == Mode::Browse
-        && let Some(area) = layout.journals
-        && render::point_in_rect(area.area, mouse.column, mouse.row)
-    {
-        app.focus_journals_from_click(layout.single_panel);
-        let (_, meta, _) = app.journal_rows(area.content);
-        if let Some(index) = render::journal_index_at(
-            area.content,
-            mouse.column,
-            mouse.row,
-            app.nav.journal_list.offset(),
-            &meta,
-        ) {
-            app.select_journal(index);
+/// Translate a click on a registered panel (or row) region into its action,
+/// preserving each panel's mode/selection guards.
+fn panel_click_action(
+    app: &AppModel,
+    panel: PanelId,
+    index: Option<usize>,
+    layout: &render::TuiLayout,
+    mouse: MouseEvent,
+) -> Option<Action> {
+    match panel {
+        PanelId::Journals => {
+            (app.nav.mode == Mode::Browse).then_some(Action::Mouse(MouseAction::JournalClick {
+                index,
+                compact: layout.single_panel,
+            }))
         }
-        return Ok(());
-    }
-
-    if let Some(area) = layout.entries
-        && render::point_in_rect(area.panel.area, mouse.column, mouse.row)
-    {
-        app.focus_entries();
-        let cache = app.entry_rows(area.text_width);
-        if let Some(index) = render::entry_index_at(
-            area,
-            mouse.column,
-            mouse.row,
-            app.nav.entry_list.offset(),
-            &cache.meta,
-        ) {
-            app.select_entry_index(index);
-            if !inline_reader_is_visible(layout.content.width) {
-                view_selected(app)?;
+        PanelId::Entries => Some(Action::Mouse(MouseAction::EntryClick {
+            index,
+            open_reader: !inline_reader_is_visible(layout.content.width),
+            clear_empty: app.nav.mode == Mode::Browse,
+        })),
+        PanelId::Insights => {
+            if app.nav.mode != Mode::Browse {
+                return None;
             }
-        } else if app.nav.mode == Mode::Browse {
-            // Clicking empty space in the list deselects, revealing journal insights.
-            app.clear_entry_selection();
+            let area = layout.insights?;
+            // Clicking a tab in the border selects it; clicking elsewhere just focuses.
+            let tab =
+                render::insights_tab_at(&app.appearance.theme, area.area, mouse.column, mouse.row);
+            Some(Action::Mouse(MouseAction::InsightsClick(tab)))
         }
-        return Ok(());
-    }
-
-    if let Some(area) = layout.insights
-        && render::point_in_rect(area.area, mouse.column, mouse.row)
-        && app.nav.mode == Mode::Browse
-    {
-        app.focus_insights();
-        // Clicking a tab in the border selects it; clicking elsewhere just focuses.
-        if let Some(tab) = render::insights_tab_at(area.area, mouse.column, mouse.row) {
-            app.select_insights_tab(tab);
-        }
-        return Ok(());
-    }
-
-    if let Some(area) = layout.reader
-        && render::point_in_rect(area.area, mouse.column, mouse.row)
-        && app.has_selected_entry_target()
-    {
-        let metadata = app.selected_entry_metadata_values();
-        if let Some((chip, value)) =
-            render::metadata_at_point(area.area, mouse.column, mouse.row, metadata.values())
-        {
-            match chip {
-                render::MetadataChip::Feelings => app.begin_feeling_search(&value),
-                render::MetadataChip::People => app.begin_people_search(&value),
-                render::MetadataChip::Activities => app.begin_activity_search(&value),
-                render::MetadataChip::Tags => app.begin_tag_search(&value),
+        PanelId::Reader => {
+            let area = layout.reader?;
+            if !app.has_selected_entry_target() {
+                return None;
             }
-            return Ok(());
+            let metadata = app.selected_entry_metadata_values();
+            if let Some((chip, value)) = render::metadata_at_point(
+                &app.appearance.theme,
+                area.area,
+                mouse.column,
+                mouse.row,
+                metadata.values(),
+            ) {
+                let kind = match chip {
+                    render::MetadataChip::Feelings => MetadataSearchTarget::Feelings,
+                    render::MetadataChip::People => {
+                        MetadataSearchTarget::Metadata(MetadataKind::People)
+                    }
+                    render::MetadataChip::Activities => {
+                        MetadataSearchTarget::Metadata(MetadataKind::Activities)
+                    }
+                    render::MetadataChip::Tags => {
+                        MetadataSearchTarget::Metadata(MetadataKind::Tags)
+                    }
+                };
+                return Some(Action::Mouse(MouseAction::MetadataSearch { kind, value }));
+            }
+            // Focus the viewer on the pane. A click already inside a full-screen viewer
+            // must not collapse it, so `focus_reader_from_click` only resets fullscreen
+            // when focus enters from another column.
+            Some(Action::Mouse(MouseAction::ReaderClick))
         }
-        // Focus the viewer on the pane. A click already inside a full-screen viewer
-        // must not collapse it, so `focus_reader_from_click` only resets fullscreen
-        // when focus enters from another column.
-        app.focus_reader_from_click();
     }
-
-    Ok(())
 }
 
 /// Pixel-row lists (entry list, journal column) scroll this many rows per
@@ -567,35 +386,46 @@ fn handle_left_click(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout
 /// line-granular panes reads as a crawl there.
 const WHEEL_PIXELS_PER_NOTCH: i16 = 2;
 
-fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, delta: i16) {
+fn wheel_action(
+    app: &AppModel,
+    mouse: MouseEvent,
+    layout: render::TuiLayout,
+    delta: i16,
+    view: &ViewState,
+) -> Option<Action> {
     // Probed first, and via the rendered geometry rather than a layout slot, so it
     // also catches the insights shown in the reader column when no entry is selected.
-    if app.insights_scroll.total > 0
-        && render::point_in_rect(app.insights_scroll.area, mouse.column, mouse.row)
+    if view.insights.total > 0 && render::point_in_rect(view.insights.area, mouse.column, mouse.row)
     {
-        app.focus_insights();
-        app.scroll_insights(delta);
-        return;
+        return Some(Action::Mouse(MouseAction::ScrollPanel {
+            panel: PanelId::Insights,
+            delta,
+            content_length: view.insights.total,
+            viewport: view.insights.viewport,
+        }));
     }
 
     if let Some(area) = layout.reader
         && render::point_in_rect(area.area, mouse.column, mouse.row)
     {
-        app.focus_reader_from_click();
-        app.scroll_reader(delta);
-        return;
+        return Some(Action::Mouse(MouseAction::ScrollPanel {
+            panel: PanelId::Reader,
+            delta,
+            content_length: view.reader.line_count,
+            viewport: view.reader.content_rect.height,
+        }));
     }
 
     if let Some(area) = layout.entries
         && render::point_in_rect(area.panel.area, mouse.column, mouse.row)
     {
         let cache = app.entry_rows(area.text_width);
-        app.scroll_entry_list(
-            delta.saturating_mul(WHEEL_PIXELS_PER_NOTCH),
-            cache.total_height,
-            area.viewport_height,
-        );
-        return;
+        return Some(Action::Mouse(MouseAction::ScrollPanel {
+            panel: PanelId::Entries,
+            delta: delta.saturating_mul(WHEEL_PIXELS_PER_NOTCH),
+            content_length: cache.total_height,
+            viewport: area.viewport_height,
+        }));
     }
 
     if app.nav.mode == Mode::Browse
@@ -604,11 +434,247 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
     {
         let (_, meta, list_area) = app.journal_rows(area.content);
         let total_height = crate::tui::entry_rows::total_row_height(&meta);
-        app.scroll_journal_list(
-            delta.saturating_mul(WHEEL_PIXELS_PER_NOTCH),
-            total_height,
-            list_area.height,
-        );
+        return Some(Action::Mouse(MouseAction::ScrollPanel {
+            panel: PanelId::Journals,
+            delta: delta.saturating_mul(WHEEL_PIXELS_PER_NOTCH),
+            content_length: total_height,
+            viewport: list_area.height,
+        }));
+    }
+    None
+}
+
+pub(super) fn apply_mouse_action(
+    app: &mut AppModel,
+    action: MouseAction,
+) -> AppResult<Option<Action>> {
+    match action {
+        MouseAction::DismissToast(index) => {
+            app.toasts.dismiss(index);
+            app.hover = HoverTarget::None;
+        }
+        MouseAction::TextFieldPress { target, column } => {
+            focus_text_field(app, target);
+            if let Some(input) = text_field_mut(app, target) {
+                input.begin_mouse_selection(column);
+                app.nav.input_selecting = true;
+            }
+        }
+        MouseAction::TextFieldDrag { column } => {
+            if let Some(input) = app.focused_text_input_mut() {
+                input.drag_mouse_selection(column);
+            }
+        }
+        MouseAction::TextFieldRelease => {
+            app.nav.input_selecting = false;
+            if let Some(input) = app.focused_text_input_mut() {
+                input.end_mouse_selection();
+            }
+        }
+        MouseAction::JournalClick { index, compact } => {
+            app.focus_journals_from_click(compact);
+            if let Some(index) = index {
+                app.select_journal(index);
+            }
+        }
+        MouseAction::EntryClick {
+            index,
+            open_reader,
+            clear_empty,
+        } => {
+            app.focus_entries();
+            if let Some(index) = index {
+                app.select_entry_index(index);
+                if open_reader {
+                    return Ok(Some(Action::Browser(BrowserAction::ViewSelected)));
+                }
+            } else if clear_empty {
+                app.clear_entry_selection();
+            }
+        }
+        MouseAction::InsightsClick(tab) => {
+            app.focus_insights();
+            if let Some(tab) = tab {
+                app.select_insights_tab(tab);
+            }
+        }
+        MouseAction::ReaderClick => app.focus_reader_from_click(),
+        MouseAction::MetadataSearch { kind, value } => match kind {
+            MetadataSearchTarget::Feelings => app.begin_feeling_search(&value),
+            MetadataSearchTarget::Metadata(MetadataKind::People) => app.begin_people_search(&value),
+            MetadataSearchTarget::Metadata(MetadataKind::Activities) => {
+                app.begin_activity_search(&value)
+            }
+            MetadataSearchTarget::Metadata(MetadataKind::Tags) => app.begin_tag_search(&value),
+        },
+        MouseAction::ScrollPanel {
+            panel,
+            delta,
+            content_length,
+            viewport,
+        } => match panel {
+            PanelId::Journals => app.scroll_journal_list(delta, content_length, viewport),
+            PanelId::Entries => app.scroll_entry_list(delta, content_length, viewport),
+            PanelId::Reader => {
+                app.focus_reader_from_click();
+                app.scroll_reader(delta);
+            }
+            PanelId::Insights => {
+                app.focus_insights();
+                app.scroll_insights(delta);
+            }
+        },
+        MouseAction::ScrollbarPress { metrics, row } => {
+            apply_scrollbar_press(app, metrics.into(), row);
+        }
+        MouseAction::ScrollbarDrag { metrics, row } => {
+            let target = ScrollbarTarget::from(metrics);
+            apply_thumb_drag(app, &target, row);
+        }
+        MouseAction::ScrollbarRelease => app.scrollbar.active = None,
+        MouseAction::DialogRow { target, index } => match target {
+            DialogListTarget::Metadata => {
+                if let Some(state) = app.edit_metadata_state_mut() {
+                    state.focus = EditMetadataFocus::List;
+                    state.select_index(index);
+                    state.toggle_selected();
+                }
+            }
+            DialogListTarget::Feelings => {
+                if let Some(state) = app.edit_feeling_state_mut() {
+                    state.focus = EditMetadataFocus::List;
+                    state.select_index(index);
+                    state.toggle_selected();
+                }
+            }
+            DialogListTarget::Location => {
+                if let Some(state) = app.edit_location_state_mut() {
+                    state.focus = EditLocationFocus::List;
+                    state.select_index(index);
+                    return Ok(Some(Action::Location(LocationAction::SelectRow)));
+                }
+            }
+            DialogListTarget::ThemePicker => {
+                return Ok(Some(Action::Settings(SettingsAction::ThemePickerSelect(
+                    index,
+                ))));
+            }
+        },
+        MouseAction::DialogFocusMetadata(focus) => {
+            let focus = match focus {
+                EditMetadataFocusTarget::List => EditMetadataFocus::List,
+                EditMetadataFocusTarget::Input => EditMetadataFocus::Input,
+            };
+            if let Some(state) = app.edit_metadata_state_mut() {
+                state.focus = focus;
+            } else if let Some(state) = app.edit_feeling_state_mut() {
+                state.focus = focus;
+            }
+        }
+        MouseAction::DialogFocusLocation(focus) => {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.focus = focus;
+            }
+        }
+        MouseAction::DialogScroll {
+            target,
+            delta,
+            viewport,
+        } => match target {
+            DialogListTarget::Metadata => {
+                if let Some(state) = app.edit_metadata_state_mut() {
+                    state.scroll_by(delta, viewport);
+                }
+            }
+            DialogListTarget::Feelings => {
+                if let Some(state) = app.edit_feeling_state_mut() {
+                    state.scroll_by(delta, viewport);
+                }
+            }
+            DialogListTarget::Location => {
+                if let Some(state) = app.edit_location_state_mut() {
+                    state.scroll_by(delta, viewport);
+                }
+            }
+            DialogListTarget::ThemePicker => {
+                if let Some(state) = app.theme_picker_state_mut() {
+                    state.scroll_by(delta, viewport);
+                }
+            }
+        },
+        MouseAction::SetMood(score) => {
+            if let Some(state) = app.edit_mood_state_mut() {
+                state.draft = score;
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn focus_text_field(app: &mut AppModel, target: TextFieldTarget) {
+    match target {
+        TextFieldTarget::Search => app.nav.focus = Focus::Entries,
+        TextFieldTarget::Metadata => {
+            if let Some(state) = app.edit_metadata_state_mut() {
+                state.focus = EditMetadataFocus::Input;
+            }
+        }
+        TextFieldTarget::Feelings => {
+            if let Some(state) = app.edit_feeling_state_mut() {
+                state.focus = EditMetadataFocus::Input;
+            }
+        }
+        TextFieldTarget::LocationQuery => {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.focus = EditLocationFocus::Query;
+            }
+        }
+        TextFieldTarget::LocationName => {
+            if let Some(state) = app.edit_location_state_mut() {
+                state.focus = EditLocationFocus::Name;
+            }
+        }
+        TextFieldTarget::NewJournal => {}
+    }
+}
+
+fn text_field_mut(
+    app: &mut AppModel,
+    target: TextFieldTarget,
+) -> Option<&mut crate::tui::text_input::TextInput> {
+    match target {
+        TextFieldTarget::Search => Some(&mut app.search.query),
+        TextFieldTarget::NewJournal => match &mut app.overlay {
+            Overlay::NewJournal(input) => Some(input),
+            _ => None,
+        },
+        TextFieldTarget::Metadata => app.edit_metadata_state_mut().map(|state| &mut state.input),
+        TextFieldTarget::Feelings => app.edit_feeling_state_mut().map(|state| &mut state.input),
+        TextFieldTarget::LocationQuery => {
+            app.edit_location_state_mut().map(|state| &mut state.query)
+        }
+        TextFieldTarget::LocationName => app.edit_location_state_mut().map(|state| &mut state.name),
+    }
+}
+
+fn apply_scrollbar_press(app: &mut AppModel, target: ScrollbarTarget, row: u16) {
+    let bar = target.bar;
+    if row == bar.y {
+        step_pane_scroll(app, &target, -1);
+        return;
+    }
+    if row == bar.y + bar.height - 1 {
+        step_pane_scroll(app, &target, 1);
+        return;
+    }
+
+    let (thumb_top, thumb_len) = target.thumb();
+    app.scrollbar.active = Some(target.which);
+    if row >= thumb_top && row < thumb_top + thumb_len {
+        app.scrollbar.grab = row - thumb_top;
+    } else {
+        app.scrollbar.grab = thumb_len / 2;
+        apply_thumb_drag(app, &target, row);
     }
 }
 
@@ -620,50 +686,58 @@ fn handle_wheel(app: &mut App, mouse: MouseEvent, layout: render::TuiLayout, del
 /// side effects: journal switch, reader swap) and not in dialogs (the theme
 /// picker previews on click, not hover). It only highlights the row under the
 /// cursor.
-pub(crate) fn update_hover(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
+pub(crate) fn update_hover<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppModel,
     col: u16,
     row: u16,
     area: Rect,
+    view: &ViewState,
 ) -> AppResult<bool> {
     let previous = app.hover;
-    super::dispatch_action(
-        terminal,
-        app,
-        Action::PointerHover {
-            column: col,
-            row,
-            area,
-        },
-    )?;
+    let action = match view.interactions.hit(col, row) {
+        Some(InteractionKind::Row {
+            panel: PanelId::Journals,
+            index,
+        }) => Action::SetHover(HoverTarget::Journal(*index)),
+        Some(InteractionKind::Row {
+            panel: PanelId::Entries,
+            index,
+        }) => Action::SetHover(HoverTarget::Entry(*index)),
+        _ => Action::SetHover(hover_target_at(app, col, row, area, view)),
+    };
+    super::dispatch_action(terminal, app, action)?;
     Ok(previous != app.hover)
 }
 
-pub(super) fn apply_hover(app: &mut App, col: u16, row: u16, area: Rect) -> bool {
-    let target = hover_target_at(app, col, row, area);
-    if target == app.hover {
-        return false;
-    }
-    app.hover = target;
-    true
+/// The hover target under `(col, row)`, probed in the click paths' priority
+/// order and through the same registered regions, so hover and click can never
+/// disagree about what's under the cursor.
+#[cfg(test)]
+pub(super) fn hover_action_at(
+    app: &AppModel,
+    col: u16,
+    row: u16,
+    area: Rect,
+    view: &ViewState,
+) -> Action {
+    Action::SetHover(hover_target_at(app, col, row, area, view))
 }
 
-/// The hover target under `(col, row)`, probed in the click paths' priority
-/// order and through the same geometry helpers, so hover and click can never
-/// disagree about what's under the cursor.
-fn hover_target_at(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
+fn hover_target_at(
+    app: &AppModel,
+    col: u16,
+    row: u16,
+    area: Rect,
+    view: &ViewState,
+) -> HoverTarget {
     // Toasts render topmost, so they win the probe like they win clicks.
     if let Some(index) = render::toast_at_point(app, area, col, row) {
         return HoverTarget::Toast(index);
     }
 
-    if app.has_overlay() {
-        return overlay_hover_target(app, col, row, area);
-    }
-
-    if editor_prompt_is_open(app) {
-        return editor_prompt_hover_target(app, col, row, area);
+    if app.has_overlay() || editor_prompt_is_open(app) {
+        return mapped_hover_target(col, row, view);
     }
 
     // The footer first: it overlays nothing, so it can't shadow a list row.
@@ -682,23 +756,23 @@ fn hover_target_at(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
 
     // The search query field rides the entries panel's border, so it wins
     // over the panel probe below.
-    if let Some(target) = text_field_hover_at(app, col, row) {
+    if let Some(target) = text_field_hover_at(col, row, view) {
         return target;
     }
 
     // Reader links and image labels, matching the click path's priority
     // (labels before links). Both self-bound-check the reader's content rect.
-    if let Some(line) = app.reader_image_line_at(col, row) {
+    if let Some(line) = view.reader_image_line_at(col, row) {
         return HoverTarget::ReaderImage(line);
     }
-    if let Some((line, start, end)) = app.reader_link_hit_at(col, row) {
+    if let Some((line, start, end)) = view.reader_link_hit_at(col, row) {
         return HoverTarget::ReaderLink { line, start, end };
     }
 
-    let layout = render::tui_layout(area, app);
+    let layout = view.layout.unwrap_or_else(|| render::tui_layout(area, app));
     if let Some(panel) = layout.insights
         && render::point_in_rect(panel.area, col, row)
-        && let Some(tab) = render::insights_tab_at(panel.area, col, row)
+        && let Some(tab) = render::insights_tab_at(&app.appearance.theme, panel.area, col, row)
     {
         return HoverTarget::InsightsTab(tab);
     }
@@ -710,8 +784,13 @@ fn hover_target_at(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
         && app.has_selected_entry_target()
     {
         let metadata = app.selected_entry_metadata_values();
-        if let Some(index) = render::metadata_chip_index_at(panel.area, col, row, metadata.values())
-        {
+        if let Some(index) = render::metadata_chip_index_at(
+            &app.appearance.theme,
+            panel.area,
+            col,
+            row,
+            metadata.values(),
+        ) {
             return HoverTarget::MetadataChip(index);
         }
     }
@@ -749,671 +828,101 @@ fn hover_target_at(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
     HoverTarget::None
 }
 
-/// The text field under `(col, row)`, identified by its last-drawn rect —
-/// the read-only sibling of [`focus_text_field_at`], probing the same fields.
-fn text_field_hover_at(app: &App, col: u16, row: u16) -> Option<HoverTarget> {
-    let field = |input: &crate::tui::text_input::TextInput| {
-        input
-            .hit_col(col, row)
-            .map(|_| HoverTarget::TextField(input.last_area()))
-    };
-    match &app.overlay {
-        Overlay::NewJournal(input) => field(input),
-        Overlay::EditMetadata(state) => field(&state.input),
-        Overlay::EditFeelings(state) => field(&state.input),
-        Overlay::EditLocation(state) => field(&state.query).or_else(|| field(&state.name)),
-        Overlay::None if app.nav.mode == Mode::Search => field(&app.search.query),
-        _ => None,
-    }
-}
-
-/// The hover target inside the open overlay, mirroring [`overlay_left_click`]'s
-/// per-dialog geometry: list/menu rows, confirm buttons, and hint chips.
-fn overlay_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
-    if let Some(target) = text_field_hover_at(app, col, row) {
-        return target;
-    }
-    let hint = |hints_area: Rect, hints: &[render::Hint]| -> Option<HoverTarget> {
-        render::point_in_rect(hints_area, col, row)
-            .then(|| {
-                render::hint_id_at_wrapped(
-                    hints,
-                    hints_area.x + 1,
-                    hints_area.y,
-                    hints_area.width.saturating_sub(1),
-                    col,
-                    row,
-                )
-            })
-            .flatten()
-            .map(HoverTarget::FooterHint)
-    };
-
-    match &app.overlay {
-        Overlay::SettingsMenu => {
-            if let Some(index) = render::settings_menu_row_at_point(area, col, row) {
-                return HoverTarget::DialogRow(index);
-            }
-        }
-        Overlay::MetadataMenu => {
-            if let Some(index) =
-                render::metadata_menu_row_at_point(area, render::MetadataMenuMode::Viewer, col, row)
-            {
-                return HoverTarget::DialogRow(index);
-            }
-        }
-        Overlay::ConfirmDelete(ctx, _) => {
-            let inner = render::confirm_delete_inner(area, ctx);
-            if let Some(yes) = render::confirm_button_at(inner, col, row) {
-                return HoverTarget::ConfirmButton(yes);
-            }
-        }
-        _ => {}
-    }
-
-    if let Some(state) = app.theme_picker_state() {
-        let hint_inputs = state.hint_state();
-        let layout = render::theme_picker_layout(area, state.entries.len(), hint_inputs);
-        if render::point_in_rect(layout.list, col, row)
-            && let Some(index) =
-                list_row_at(layout.list, col, row, state.offset(), state.entries.len())
-        {
-            return HoverTarget::DialogRow(index);
-        }
-        return hint(layout.hints, &render::theme_picker_hints(hint_inputs)).unwrap_or_default();
-    }
-
-    if let Some(state) = app.edit_metadata_state() {
-        let layout = render::metadata_dialog_layout(area, state.filtered.len());
-        if render::point_in_rect(layout.list, col, row)
-            && let Some(index) =
-                list_row_at(layout.list, col, row, state.offset(), state.filtered.len())
-        {
-            return HoverTarget::DialogRow(index);
-        }
-        let hints =
-            render::metadata_dialog_hints(state.focus, state.input.as_str().trim().is_empty());
-        return hint(layout.hints, hints).unwrap_or_default();
-    }
-
-    if let Some(state) = app.edit_feeling_state() {
-        let layout = render::feelings_dialog_layout(area, state.item_count(), &state.selected);
-        if render::point_in_rect(layout.list, col, row)
-            && let Some(index) =
-                list_row_at(layout.list, col, row, state.offset(), state.item_count())
-        {
-            return HoverTarget::DialogRow(index);
-        }
-        return hint(layout.hints, render::feelings_dialog_hints(state.focus)).unwrap_or_default();
-    }
-
-    if let Some(state) = app.edit_location_state() {
-        let labels = state.list_labels();
-        let layout = render::location_dialog_layout(area, &labels);
-        if render::point_in_rect(layout.list, col, row)
-            && let Some(index) =
-                render::location_list_row_at(layout.list, &labels, state.offset(), row)
-        {
-            return HoverTarget::DialogRow(index);
-        }
-        let hints = render::location_dialog_hints(state.focus, state.query_looked_up);
-        return hint(layout.hints, hints).unwrap_or_default();
-    }
-
-    if app.edit_mood_state().is_some() {
-        let layout = render::mood_dialog_layout(area);
-        return hint(layout.hints, render::mood_dialog_hints()).unwrap_or_default();
-    }
-
-    HoverTarget::None
-}
-
-/// The hover target inside an open editor prompt (they float like overlays but
-/// live on the editor, not `app.overlay`).
-fn editor_prompt_hover_target(app: &App, col: u16, row: u16, area: Rect) -> HoverTarget {
-    match app.editor.as_ref().map(|editor| &editor.prompt) {
-        Some(EditorPrompt::ConfirmDiscard { .. }) => {
-            match render::editor_discard_choice_at_point(area, col, row) {
-                Some(yes) => HoverTarget::ConfirmButton(yes),
-                None => HoverTarget::None,
-            }
-        }
-        Some(EditorPrompt::MetadataMenu) => {
-            match render::metadata_menu_row_at_point(
-                area,
-                render::MetadataMenuMode::Editor,
-                col,
-                row,
-            ) {
-                Some(index) => HoverTarget::DialogRow(index),
-                None => HoverTarget::None,
-            }
-        }
-        _ => HoverTarget::None,
-    }
-}
-
-// ── Footer click ──────────────────────────────────────────────────────────────
-
-/// The footer hint under `(col, row)`.
-fn footer_hint_at(app: &App, footer: Rect, col: u16, row: u16) -> Option<render::HintId> {
-    render::footer_hint_id_at_point(app, footer.x, footer.y, footer.width, col, row)
-}
-
-fn footer_click_to_action(app: &App, mouse: MouseEvent, footer: Rect) -> Option<Action> {
-    footer_hint_at(app, footer, mouse.column, mouse.row).and_then(|id| hint_id_to_action(app, id))
-}
-
-fn footer_area(app: &App, area: Rect) -> Rect {
-    if app.reader_is_fullscreen(area.width) {
-        let height = render::footer_height(app, area.width).min(area.height);
-        return Rect {
-            x: area.x,
-            y: area.y + area.height.saturating_sub(height),
-            width: area.width,
-            height,
-        };
-    }
-
-    render::tui_layout(area, app).footer
-}
-
-// ── Dialog mouse routing ──────────────────────────────────────────────────────
-
-fn handle_overlay_mouse(
-    terminal: Option<&mut Terminal<CrosstermBackend<io::Stdout>>>,
-    app: &mut App,
-    mouse: MouseEvent,
-    area: Rect,
-) -> AppResult<()> {
-    if handle_text_field_mouse(app, mouse) {
-        return Ok(());
-    }
-    let action = match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => overlay_left_click(app, mouse, area),
-        MouseEventKind::Drag(MouseButton::Left) => {
-            handle_overlay_drag(app, mouse, area);
-            None
-        }
-        MouseEventKind::ScrollUp => {
-            handle_overlay_wheel(app, mouse, area, -1);
-            None
-        }
-        MouseEventKind::ScrollDown => {
-            handle_overlay_wheel(app, mouse, area, 1);
-            None
-        }
-        _ => None,
-    };
-
-    if let Some(action) = action
-        && let Some(terminal) = terminal
-    {
-        super::dispatch_action(terminal, app, action)?;
-    }
-
-    Ok(())
-}
-
-/// Mouse editing for the single-line text fields (the search box and dialog
-/// inputs): a press in a field focuses it, places the caret, and arms a
-/// selection; a drag extends it; release finishes it. Returns whether the
-/// event was consumed by a field, mirroring the editor's selection flow.
-fn handle_text_field_mouse(app: &mut App, mouse: MouseEvent) -> bool {
-    match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
-            let Some(col) = focus_text_field_at(app, mouse.column, mouse.row) else {
-                return false;
-            };
-            if let Some(input) = app.focused_text_input_mut() {
-                input.begin_mouse_selection(col);
-                app.nav.input_selecting = true;
-            }
-            true
-        }
-        MouseEventKind::Drag(MouseButton::Left) if app.nav.input_selecting => {
-            if let Some(input) = app.focused_text_input_mut() {
-                let rect = input.last_area();
-                let col = mouse
-                    .column
-                    .clamp(rect.x, rect.x + rect.width.saturating_sub(1))
-                    - rect.x;
-                input.drag_mouse_selection(col);
-            }
-            true
-        }
-        MouseEventKind::Up(MouseButton::Left) if app.nav.input_selecting => {
-            app.nav.input_selecting = false;
-            if let Some(input) = app.focused_text_input_mut() {
-                input.end_mouse_selection();
-            }
-            true
-        }
-        _ => false,
-    }
-}
-
-/// The text field under `(col, row)`, if any: focuses it and returns the click
-/// column within the field.
-fn focus_text_field_at(app: &mut App, col: u16, row: u16) -> Option<u16> {
-    match &mut app.overlay {
-        Overlay::NewJournal(input) => input.hit_col(col, row),
-        Overlay::EditMetadata(state) => {
-            let hit = state.input.hit_col(col, row)?;
-            state.focus = EditMetadataFocus::Input;
-            Some(hit)
-        }
-        Overlay::EditFeelings(state) => {
-            let hit = state.input.hit_col(col, row)?;
-            state.focus = EditMetadataFocus::Input;
-            Some(hit)
-        }
-        Overlay::EditLocation(state) => {
-            if let Some(hit) = state.query.hit_col(col, row) {
-                state.focus = EditLocationFocus::Query;
-                Some(hit)
-            } else if let Some(hit) = state.name.hit_col(col, row) {
-                state.focus = EditLocationFocus::Name;
-                Some(hit)
-            } else {
-                None
-            }
-        }
-        Overlay::None if app.nav.mode == Mode::Search => {
-            let hit = app.search.query.hit_col(col, row)?;
-            app.nav.focus = Focus::Entries;
-            Some(hit)
-        }
-        _ => None,
-    }
-}
-
-/// Route a click landing on a dialog's hint bar to its action, if any.
-fn dialog_hint_action(
-    app: &App,
-    hints_area: Rect,
-    hints: &[render::Hint],
-    col: u16,
-    row: u16,
-) -> Option<Action> {
-    if !render::point_in_rect(hints_area, col, row) {
-        return None;
-    }
-    let id = render::hint_id_at_wrapped(
-        hints,
-        hints_area.x + 1,
-        hints_area.y,
-        hints_area.width.saturating_sub(1),
-        col,
-        row,
-    )?;
-    hint_id_to_action(app, id)
-}
-
-fn overlay_left_click(app: &mut App, mouse: MouseEvent, area: Rect) -> Option<Action> {
-    let col = mouse.column;
-    let row = mouse.row;
-
-    if matches!(app.overlay, Overlay::MetadataMenu) {
-        let mode = render::MetadataMenuMode::Viewer;
-        if render::metadata_menu_close_at_point(area, mode, col, row) {
-            return Some(Action::CancelOverlay);
-        }
-        return match render::metadata_menu_choice_at_point(area, mode, col, row)? {
-            render::MetadataChoice::Metadata(MetadataKind::Tags) => {
-                Some(Action::BeginEditMetadata(MetadataKind::Tags))
-            }
-            render::MetadataChoice::Metadata(MetadataKind::People) => {
-                Some(Action::BeginEditMetadata(MetadataKind::People))
-            }
-            render::MetadataChoice::Metadata(MetadataKind::Activities) => {
-                Some(Action::BeginEditMetadata(MetadataKind::Activities))
-            }
-            render::MetadataChoice::Feelings => Some(Action::BeginEditFeelings),
-            render::MetadataChoice::Mood => Some(Action::BeginEditMood),
-            render::MetadataChoice::Location => Some(Action::BeginEditLocation),
-        };
-    }
-
-    if matches!(app.overlay, Overlay::SettingsMenu) {
-        if render::settings_menu_close_at_point(area, col, row) {
-            return Some(Action::CancelOverlay);
-        }
-        return match render::settings_menu_choice_at_point(area, col, row)? {
-            render::SettingsChoice::Theme => Some(Action::OpenThemePicker),
-        };
-    }
-
-    // The help cheatsheet is a reference: any click dismisses it.
-    if matches!(app.overlay, Overlay::Help { .. }) {
-        return Some(Action::CancelOverlay);
-    }
-
-    if let Some(state) = app.theme_picker_state() {
-        let len = state.entries.len();
-        let offset = state.offset();
-        let hint_inputs = state.hint_state();
-        let layout = render::theme_picker_layout(area, len, hint_inputs);
-        if let Some(action) = dialog_hint_action(
-            app,
-            layout.hints,
-            &render::theme_picker_hints(hint_inputs),
-            col,
-            row,
-        ) {
-            return Some(action);
-        }
-        if render::point_in_rect(layout.list, col, row)
-            && let Some(index) = list_row_at(layout.list, col, row, offset, len)
-        {
-            return Some(Action::ThemePickerSelect(index));
-        }
-        return None;
-    }
-
-    if let Some((focus, input_is_empty)) = app
-        .edit_metadata_state()
-        .map(|s| (s.focus, s.input.as_str().trim().is_empty()))
-    {
-        let filtered_len = app.edit_metadata_state().map_or(0, |s| s.filtered.len());
-        let layout = render::metadata_dialog_layout(area, filtered_len);
-        if let Some(action) = dialog_hint_action(
-            app,
-            layout.hints,
-            render::metadata_dialog_hints(focus, input_is_empty),
-            col,
-            row,
-        ) {
-            return Some(action);
-        }
-        if render::point_in_rect(layout.list, col, row) {
-            if let Some(state) = app.edit_metadata_state_mut() {
-                state.focus = EditMetadataFocus::List;
-                if let Some(index) =
-                    list_row_at(layout.list, col, row, state.offset(), filtered_len)
-                {
-                    state.select_index(index);
-                    state.toggle_selected();
-                }
-            }
-            return None;
-        }
-        if render::point_in_rect(layout.input, col, row) {
-            if let Some(state) = app.edit_metadata_state_mut() {
-                state.focus = EditMetadataFocus::Input;
-            }
-            return None;
-        }
-        return None;
-    }
-
-    if let Some(focus) = app.edit_feeling_state().map(|s| s.focus) {
-        let layout = app.edit_feeling_state().map_or_else(
-            || render::feelings_dialog_layout(area, 0, &[]),
-            |state| render::feelings_dialog_layout(area, state.item_count(), &state.selected),
-        );
-        if let Some(action) = dialog_hint_action(
-            app,
-            layout.hints,
-            render::feelings_dialog_hints(focus),
-            col,
-            row,
-        ) {
-            return Some(action);
-        }
-        if render::point_in_rect(layout.list, col, row) {
-            if let Some(state) = app.edit_feeling_state_mut() {
-                state.focus = EditMetadataFocus::List;
-                if let Some(index) =
-                    list_row_at(layout.list, col, row, state.offset(), state.item_count())
-                    && index < state.item_count()
-                {
-                    // Clicking a header folds it; clicking a feeling toggles it.
-                    state.select_index(index);
-                    state.toggle_selected();
-                }
-            }
-            return None;
-        }
-        if render::point_in_rect(layout.input, col, row) {
-            if let Some(state) = app.edit_feeling_state_mut() {
-                state.focus = EditMetadataFocus::Input;
-            }
-            return None;
-        }
-        return None;
-    }
-
-    if app.edit_mood_state().is_some() {
-        let layout = render::mood_dialog_layout(area);
-        if let Some(action) =
-            dialog_hint_action(app, layout.hints, render::mood_dialog_hints(), col, row)
-        {
-            return Some(action);
-        }
-        if render::point_in_rect(layout.bar, col, row)
-            && let Some(state) = app.edit_mood_state_mut()
-        {
-            state.draft = mood_score_at(layout.bar, col);
-        }
-        return None;
-    }
-
-    if let Some((focus, query_looked_up)) = app
-        .edit_location_state()
-        .map(|s| (s.focus, s.query_looked_up))
-    {
-        let labels = app
-            .edit_location_state()
-            .map_or_else(Vec::new, |state| state.list_labels());
-        let layout = render::location_dialog_layout(area, &labels);
-        if let Some(action) = dialog_hint_action(
-            app,
-            layout.hints,
-            render::location_dialog_hints(focus, query_looked_up),
-            col,
-            row,
-        ) {
-            return Some(action);
-        }
-        if render::point_in_rect(layout.query, col, row) {
-            if let Some(state) = app.edit_location_state_mut() {
-                state.focus = EditLocationFocus::Query;
-            }
-            return None;
-        }
-        if render::point_in_rect(layout.name, col, row) {
-            if let Some(state) = app.edit_location_state_mut() {
-                state.focus = EditLocationFocus::Name;
-            }
-            return None;
-        }
-        if render::point_in_rect(layout.list, col, row) {
-            let offset = app.edit_location_state().map_or(0, |s| s.offset());
-            let index = render::location_list_row_at(layout.list, &labels, offset, row);
-            if let Some(state) = app.edit_location_state_mut() {
-                state.focus = EditLocationFocus::List;
-                if let Some(index) = index {
-                    state.select_index(index);
-                    return Some(Action::LocationSelectRow);
-                }
-            }
-            return None;
-        }
-        return None;
-    }
-
-    if let Overlay::ConfirmDelete(ctx, _) = &app.overlay {
-        let inner = render::confirm_delete_inner(area, ctx);
-        return match render::confirm_button_at(inner, col, row) {
-            Some(true) => Some(Action::ConfirmDelete),
-            Some(false) => Some(Action::CancelOverlay),
-            None => None,
-        };
-    }
-
-    None
-}
-
-fn handle_overlay_drag(app: &mut App, mouse: MouseEvent, area: Rect) {
-    if app.edit_mood_state().is_none() {
-        return;
-    }
-
-    let layout = render::mood_dialog_layout(area);
-    if render::point_in_rect(layout.bar, mouse.column, mouse.row)
-        && let Some(state) = app.edit_mood_state_mut()
-    {
-        state.draft = mood_score_at(layout.bar, mouse.column);
-    }
-}
-
-fn handle_overlay_wheel(app: &mut App, mouse: MouseEvent, area: Rect, delta: i16) {
-    if let Overlay::Help { scroll } = &mut app.overlay {
-        *scroll = scroll.saturating_add_signed(delta);
-        return;
-    }
-
-    if app.edit_metadata_state().is_some() {
-        let filtered_len = app.edit_metadata_state().map_or(0, |s| s.filtered.len());
-        let layout = render::metadata_dialog_layout(area, filtered_len);
-        if render::point_in_rect(layout.list, mouse.column, mouse.row)
-            && let Some(state) = app.edit_metadata_state_mut()
-        {
-            state.scroll_by(delta, layout.list.height);
-        }
-        return;
-    }
-
-    if app.edit_feeling_state().is_some() {
-        let layout = app.edit_feeling_state().map_or_else(
-            || render::feelings_dialog_layout(area, 0, &[]),
-            |state| render::feelings_dialog_layout(area, state.item_count(), &state.selected),
-        );
-        if render::point_in_rect(layout.list, mouse.column, mouse.row)
-            && let Some(state) = app.edit_feeling_state_mut()
-        {
-            state.scroll_by(delta, layout.list.height);
-        }
-        return;
-    }
-
-    if let Some(labels) = app.edit_location_state().map(|s| s.list_labels()) {
-        let layout = render::location_dialog_layout(area, &labels);
-        if render::point_in_rect(layout.list, mouse.column, mouse.row)
-            && let Some(state) = app.edit_location_state_mut()
-        {
-            state.scroll_by(delta, layout.list.height);
-        }
-        return;
-    }
-
-    if let Some((len, hint_inputs)) = app
-        .theme_picker_state()
-        .map(|s| (s.entries.len(), s.hint_state()))
-    {
-        let layout = render::theme_picker_layout(area, len, hint_inputs);
-        if render::point_in_rect(layout.list, mouse.column, mouse.row)
-            && let Some(state) = app.theme_picker_state_mut()
-        {
-            state.scroll_by(delta, layout.list.height);
-        }
-    }
-}
-
-fn list_row_at(list: Rect, _col: u16, row: u16, offset: usize, len: usize) -> Option<usize> {
-    let relative_row = row.checked_sub(list.y)? as usize;
-    if relative_row >= list.height as usize {
-        return None;
-    }
-    let index = offset.saturating_add(relative_row);
-    (index < len).then_some(index)
-}
-
-fn mood_score_at(bar: Rect, column: u16) -> i8 {
-    if bar.width <= 1 {
-        return 0;
-    }
-
-    let relative = column.saturating_sub(bar.x).min(bar.width - 1);
-    let scaled = (relative as f32 / (bar.width - 1) as f32 * 10.0).round() as i8;
-    (scaled - 5).clamp(-5, 5)
-}
-
-/// Pure: maps a typed hint id to an Action.
-pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action> {
+/// Map a typed hint id to its Action, applying the same focus/target guards as
+/// the keyboard so a footer click and its key can't diverge.
+pub(super) fn hint_id_to_action(app: &AppModel, id: render::HintId) -> Option<Action> {
     match id {
-        render::HintId::InputSelectAll => Some(Action::InputSelectAll),
-        render::HintId::NewJournal => Some(Action::NewJournal),
+        render::HintId::InputSelectAll => Some(Action::Overlay(OverlayAction::InputSelectAll)),
+        render::HintId::NewJournal => Some(Action::Settings(SettingsAction::NewJournal)),
         render::HintId::ToggleArchiveJournal
             if app.nav.focus == Focus::Journals && app.selected_journal().is_some() =>
         {
-            Some(Action::ToggleArchiveJournal)
+            Some(Action::Settings(SettingsAction::ToggleArchiveJournal))
         }
-        render::HintId::NewEntry => Some(Action::NewEntry),
-        render::HintId::BeginSearch => Some(Action::BeginSearch),
+        render::HintId::NewEntry => Some(Action::Browser(BrowserAction::NewEntry)),
+        render::HintId::BeginSearch => Some(Action::Search(SearchAction::Begin)),
         render::HintId::Quit => Some(Action::Quit),
         render::HintId::EditSelected if app.can_act_on_selected_entry() => {
-            Some(Action::EditSelected)
+            Some(Action::Browser(BrowserAction::EditSelected))
         }
-        render::HintId::BeginDelete if app.has_selected_entry_target() => Some(Action::BeginDelete),
-        render::HintId::ExitSearch => Some(Action::ExitSearch),
-        render::HintId::CancelOverlay => Some(Action::CancelOverlay),
+        render::HintId::BeginDelete if app.has_selected_entry_target() => {
+            Some(Action::Browser(BrowserAction::BeginDelete))
+        }
+        render::HintId::ExitSearch => Some(Action::Search(SearchAction::Exit)),
+        render::HintId::CancelOverlay => Some(Action::Overlay(OverlayAction::Cancel)),
         render::HintId::MetadataToggle
             if app
                 .edit_metadata_state()
                 .is_some_and(|state| !state.filtered.is_empty()) =>
         {
-            Some(Action::MetadataToggle)
+            Some(Action::Metadata(MetadataAction::Toggle))
         }
-        render::HintId::MetadataSwitchFocus => Some(Action::MetadataSwitchFocus),
-        render::HintId::MetadataAddFromInput => Some(Action::MetadataAddFromInput),
-        render::HintId::MetadataSave => Some(Action::MetadataSave),
-        render::HintId::FeelingsToggle => Some(Action::FeelingsToggle),
-        render::HintId::FeelingsExpand => Some(Action::FeelingsExpand),
-        render::HintId::FeelingsCollapse => Some(Action::FeelingsCollapse),
-        render::HintId::FeelingsSwitchFocus => Some(Action::FeelingsSwitchFocus),
-        render::HintId::FeelingsSave => Some(Action::FeelingsSave),
-        render::HintId::MoodDecrease => Some(Action::AdjustMood(-1)),
-        render::HintId::MoodIncrease => Some(Action::AdjustMood(1)),
-        render::HintId::MoodSave => Some(Action::MoodSave),
-        render::HintId::MoodClear => Some(Action::MoodClear),
-        render::HintId::LocationSwitchFocus => Some(Action::LocationSwitchFocus),
-        render::HintId::LocationResolve => Some(Action::LocationResolve),
-        render::HintId::LocationGrabDevice => Some(Action::LocationGrabDevice),
-        render::HintId::LocationSelectRow => Some(Action::LocationSelectRow),
-        render::HintId::LocationSave => Some(Action::LocationSave),
-        render::HintId::LocationClear => Some(Action::LocationClear),
+        render::HintId::MetadataSwitchFocus => Some(Action::Metadata(MetadataAction::SwitchFocus)),
+        render::HintId::MetadataAddFromInput => {
+            Some(Action::Metadata(MetadataAction::AddFromInput))
+        }
+        render::HintId::MetadataSave => Some(Action::Metadata(MetadataAction::Save)),
+        render::HintId::FeelingsToggle => Some(Action::Metadata(MetadataAction::FeelingsToggle)),
+        render::HintId::FeelingsExpand => Some(Action::Metadata(MetadataAction::FeelingsExpand)),
+        render::HintId::FeelingsCollapse => {
+            Some(Action::Metadata(MetadataAction::FeelingsCollapse))
+        }
+        render::HintId::FeelingsSwitchFocus => {
+            Some(Action::Metadata(MetadataAction::FeelingsSwitchFocus))
+        }
+        render::HintId::FeelingsSave => Some(Action::Metadata(MetadataAction::FeelingsSave)),
+        render::HintId::MoodDecrease => Some(Action::Metadata(MetadataAction::AdjustMood(-1))),
+        render::HintId::MoodIncrease => Some(Action::Metadata(MetadataAction::AdjustMood(1))),
+        render::HintId::MoodSave => Some(Action::Metadata(MetadataAction::MoodSave)),
+        render::HintId::MoodClear => Some(Action::Metadata(MetadataAction::MoodClear)),
+        render::HintId::LocationSwitchFocus => Some(Action::Location(LocationAction::SwitchFocus)),
+        render::HintId::LocationResolve => Some(Action::Location(LocationAction::Resolve)),
+        render::HintId::LocationGrabDevice => Some(Action::Location(LocationAction::GrabDevice)),
+        render::HintId::LocationSelectRow => Some(Action::Location(LocationAction::SelectRow)),
+        render::HintId::LocationSave => Some(Action::Location(LocationAction::Save)),
+        render::HintId::LocationClear => Some(Action::Location(LocationAction::Clear)),
         render::HintId::OpenImageViewer if app.selected_entry_image_count() > 0 => {
-            Some(Action::OpenImageViewer(0))
+            Some(Action::Images(ImageAction::OpenViewer(0)))
         }
         // The per-type metadata chips (and star) open their editor for the
         // selected entry, the same as the bare keys.
-        render::HintId::EditTags if app.can_act_on_selected_entry() => {
-            Some(Action::BeginEditMetadata(MetadataKind::Tags))
-        }
-        render::HintId::EditPeople if app.can_act_on_selected_entry() => {
-            Some(Action::BeginEditMetadata(MetadataKind::People))
-        }
-        render::HintId::EditActivities if app.can_act_on_selected_entry() => {
-            Some(Action::BeginEditMetadata(MetadataKind::Activities))
-        }
+        render::HintId::EditTags if app.can_act_on_selected_entry() => Some(Action::Metadata(
+            MetadataAction::BeginEdit(MetadataKind::Tags),
+        )),
+        render::HintId::EditPeople if app.can_act_on_selected_entry() => Some(Action::Metadata(
+            MetadataAction::BeginEdit(MetadataKind::People),
+        )),
+        render::HintId::EditActivities if app.can_act_on_selected_entry() => Some(
+            Action::Metadata(MetadataAction::BeginEdit(MetadataKind::Activities)),
+        ),
         render::HintId::EditFeelings if app.can_act_on_selected_entry() => {
-            Some(Action::BeginEditFeelings)
+            Some(Action::Metadata(MetadataAction::BeginFeelings))
         }
-        render::HintId::EditMood if app.can_act_on_selected_entry() => Some(Action::BeginEditMood),
+        render::HintId::EditMood if app.can_act_on_selected_entry() => {
+            Some(Action::Metadata(MetadataAction::BeginMood))
+        }
         render::HintId::EditLocation if app.can_act_on_selected_entry() => {
-            Some(Action::BeginEditLocation)
+            Some(Action::Location(LocationAction::BeginEdit))
         }
         render::HintId::ToggleStarred if app.can_act_on_selected_entry() => {
-            Some(Action::ToggleStarred)
+            Some(Action::Browser(BrowserAction::ToggleStarred))
         }
-        render::HintId::ThemePickerApply => Some(Action::ThemePickerConfirm),
-        render::HintId::ThemePickerRevert => Some(Action::ThemePickerCancel),
-        render::HintId::ThemePickerChrome => Some(Action::ThemePickerCycleChrome),
-        render::HintId::ThemePickerMode => Some(Action::ThemePickerCycleMode),
-        render::HintId::ThemePickerScope => Some(Action::ThemePickerToggleScope),
-        render::HintId::Help => Some(Action::OpenHelp),
+        render::HintId::ThemePickerApply => {
+            Some(Action::Settings(SettingsAction::ThemePickerConfirm))
+        }
+        render::HintId::ThemePickerRevert => {
+            Some(Action::Settings(SettingsAction::ThemePickerCancel))
+        }
+        render::HintId::ThemePickerChrome => {
+            Some(Action::Settings(SettingsAction::ThemePickerCycleChrome))
+        }
+        render::HintId::ThemePickerMode => {
+            Some(Action::Settings(SettingsAction::ThemePickerCycleMode))
+        }
+        render::HintId::ThemePickerScope => {
+            Some(Action::Settings(SettingsAction::ThemePickerToggleScope))
+        }
+        render::HintId::Help => Some(Action::Overlay(OverlayAction::OpenHelp)),
         // Clicking the scope hint toggles it, only while the insights panel is focused.
         render::HintId::InsightsScope if app.insights_panel_focused() => {
             Some(Action::Insights(InsightsAction::ToggleScope))
@@ -1427,11 +936,11 @@ pub(super) fn hint_id_to_action(app: &App, id: render::HintId) -> Option<Action>
         render::HintId::CloseInsights if app.insights_panel_focused() => {
             Some(Action::Insights(InsightsAction::SetFullscreen(false)))
         }
-        render::HintId::EditorSave => Some(Action::EditorSave),
-        render::HintId::EditorDiscard => Some(Action::EditorRequestDiscard),
-        render::HintId::EditorFullscreen => Some(Action::EditorToggleFullscreen),
-        render::HintId::EditorMetadata => Some(Action::EditorOpenMetadataMenu),
-        render::HintId::EditorHelp => Some(Action::EditorOpenHelp),
+        render::HintId::EditorSave => Some(Action::Editor(EditorAction::Save)),
+        render::HintId::EditorDiscard => Some(Action::Editor(EditorAction::RequestDiscard)),
+        render::HintId::EditorFullscreen => Some(Action::Editor(EditorAction::ToggleFullscreen)),
+        render::HintId::EditorMetadata => Some(Action::Editor(EditorAction::OpenMetadataMenu)),
+        render::HintId::EditorHelp => Some(Action::Editor(EditorAction::OpenHelp)),
         _ => None,
     }
 }

@@ -2,11 +2,9 @@
 
 mod cli;
 mod config;
-mod device;
-mod encryption_cli;
-mod ish;
 mod licenses;
-mod prompts;
+mod platform;
+mod startup;
 mod tui;
 
 pub(crate) type AppResult<T> = anyhow::Result<T>;

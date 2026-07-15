@@ -1,9 +1,9 @@
-use super::{App, Focus};
+use crate::tui::app::{AppModel, Focus};
 use crate::tui::editor_state::{EditorTarget, EntryEditor};
 use crate::tui::state::{MetadataKind, ToastVariant};
 use notema_domain::Metadata;
 
-impl App {
+impl AppModel {
     pub(crate) fn selected_entry_edit_warning(&self) -> Option<String> {
         self.resolved_selected_entry()?.warning.clone()
     }
@@ -37,6 +37,7 @@ impl App {
             return Ok(());
         };
         let (entry, revision) = self
+            .services
             .store
             .read_entry_with_revision(&journal, &target.path)?;
         self.replace_entry_from_disk(entry.clone());
@@ -52,7 +53,7 @@ impl App {
             entry.metadata_bundle(),
         ));
         self.nav.focus = Focus::Reader;
-        if self.config.editor.start_fullscreen {
+        if self.services.config.editor.start_fullscreen {
             self.nav.reader_fullscreen = true;
         }
         Ok(())
@@ -69,7 +70,7 @@ impl App {
         };
         self.editor = Some(EntryEditor::for_new(journal));
         self.nav.focus = Focus::Reader;
-        if self.config.editor.start_fullscreen {
+        if self.services.config.editor.start_fullscreen {
             self.nav.reader_fullscreen = true;
         }
     }
@@ -149,10 +150,11 @@ impl App {
 
     /// Write a location edit into the open editor's buffer (applied to the
     /// entry only on save). No-op when the editor is closed.
-    pub(crate) fn set_editor_location(&mut self, location: Option<notema_domain::Location>) {
-        let Some(editor) = self.editor.as_mut() else {
-            return;
-        };
+    pub(crate) fn set_editor_location(
+        &mut self,
+        location: Option<notema_domain::Location>,
+    ) -> Option<crate::tui::environment::EnvironmentRequest> {
+        let editor = self.editor.as_mut()?;
         let cleared = location.is_none();
         editor.metadata.location = location;
         self.toast(
@@ -166,7 +168,7 @@ impl App {
         // Fetch weather/air/celestial in the background now, so it's ready to
         // attach on save (or the save waits briefly on it). A cleared/coordless
         // location abandons any in-flight fetch.
-        self.spawn_editor_environment();
+        self.prepare_editor_environment()
     }
 
     /// Write a metadata edit into the open editor's buffer (applied to the entry

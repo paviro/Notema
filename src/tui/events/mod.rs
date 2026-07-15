@@ -1,15 +1,15 @@
 mod action;
 mod actions;
+mod handlers;
 mod keyboard;
 mod mouse;
 
-use ratatui::{Terminal, backend::CrosstermBackend, layout::Rect};
-use std::io;
+use ratatui::{Terminal, backend::Backend, layout::Rect};
 
 use crate::{
     AppResult,
     tui::{
-        app::{App, Focus, reader_is_available},
+        app::{AppModel, Focus, reader_is_available},
         editor_state::{EditorPrompt, EditorTarget},
         render,
         state::{ListNav, Overlay, ToastVariant},
@@ -17,27 +17,71 @@ use crate::{
 };
 use ratatui_textarea::CursorMove;
 
-pub(crate) use action::Action;
-use action::{InsightsAction, ReaderAction};
+pub(crate) use action::{
+    Action, BackgroundAction, BrowserAction, EditorAction, ImageAction, InsightsAction,
+    LocationAction, MetadataAction, OverlayAction, ReaderAction, SearchAction, SettingsAction,
+};
 use actions::{
     delete_selected, delete_selected_journal, open_reader_link, save_internal_editor,
     set_feelings_on_entry, set_location_on_entry, set_metadata_on_entry, set_mood_on_entry,
     submit_new_journal, toggle_archive_selected_journal, toggle_starred_on_entry, view_selected,
 };
-use keyboard::{keep_selection_visible, move_focus_left, move_focus_right};
-
 pub(crate) use keyboard::handle_key;
 pub(crate) use mouse::{fold_leading_wheel, handle_mouse, handle_scroll, is_wheel, update_hover};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum DispatchOutcome {
+pub(crate) enum ControlFlow {
     Continue,
     Quit,
 }
 
+#[derive(Debug, PartialEq)]
+pub(crate) struct DispatchOutcome {
+    pub(crate) control: ControlFlow,
+    pub(crate) redraw: bool,
+    pub(crate) effects: Vec<Effect>,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum Effect {
+    Redraw,
+    Geocode(crate::tui::geocode::GeocodeRequest),
+    Environment(crate::tui::environment::EnvironmentRequest),
+    PrepareImages(crate::tui::image::WarmRequest),
+    Open {
+        target: OpenTarget,
+        success_message: String,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum OpenTarget {
+    Path(std::path::PathBuf),
+    Uri(String),
+}
+
 impl DispatchOutcome {
-    pub(crate) const fn should_quit(self) -> bool {
-        matches!(self, Self::Quit)
+    #[allow(non_upper_case_globals)]
+    pub(crate) const Continue: Self = Self {
+        control: ControlFlow::Continue,
+        redraw: true,
+        effects: Vec::new(),
+    };
+
+    #[allow(non_upper_case_globals)]
+    pub(crate) const Quit: Self = Self {
+        control: ControlFlow::Quit,
+        redraw: false,
+        effects: Vec::new(),
+    };
+
+    pub(crate) fn should_quit(&self) -> bool {
+        matches!(self.control, ControlFlow::Quit)
+    }
+
+    fn with_effect(mut self, effect: Effect) -> Self {
+        self.effects.push(effect);
+        self
     }
 }
 
@@ -49,7 +93,7 @@ const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 /// fetch lands (or the timeout fires) close it and re-run the deferred save.
 /// Returns whether it acted, so the event loop knows to repaint. No-op when the
 /// modal isn't open.
-pub(crate) fn poll_fetching_environment(app: &mut App) -> bool {
+pub(crate) fn poll_fetching_environment(app: &mut AppModel) -> bool {
     let Overlay::FetchingEnvironment(started) = app.overlay else {
         return false;
     };
@@ -76,7 +120,7 @@ pub(crate) fn poll_fetching_environment(app: &mut App) -> bool {
 /// reader's selection/scroll/fullscreen afterward (the reload can reorder
 /// entries). Shared by the direct `EditorSave` action and the deferred re-run
 /// after a pending environment fetch, so both restore the reader identically.
-fn save_editor_with_reader_restore(app: &mut App) -> AppResult<()> {
+fn save_editor_with_reader_restore(app: &mut AppModel) -> AppResult<()> {
     let restore_existing = matches!(
         app.editor.as_ref().map(|editor| &editor.target),
         Some(EditorTarget::Existing { .. })
@@ -91,12 +135,12 @@ fn save_editor_with_reader_restore(app: &mut App) -> AppResult<()> {
     Ok(())
 }
 
-pub(crate) fn dispatch_action(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
+pub(crate) fn dispatch_action<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppModel,
     action: Action,
 ) -> AppResult<DispatchOutcome> {
-    let action_reads_selected = matches!(&action, Action::ViewSelected);
+    let action_reads_selected = matches!(&action, Action::Browser(BrowserAction::ViewSelected));
     let before_reader_target = (app.nav.focus == Focus::Reader)
         .then(|| app.selected_entry_target().map(|target| target.path))
         .flatten();
@@ -117,7 +161,7 @@ pub(crate) fn dispatch_action(
 }
 
 fn recover_action_error(
-    app: &mut App,
+    app: &mut AppModel,
     result: AppResult<DispatchOutcome>,
 ) -> AppResult<DispatchOutcome> {
     match result {
@@ -129,7 +173,7 @@ fn recover_action_error(
     }
 }
 
-fn report_action_error(app: &mut App, error: &anyhow::Error) {
+fn report_action_error(app: &mut AppModel, error: &anyhow::Error) {
     let detail = error.to_string();
     let first_line = detail.lines().next().unwrap_or("Unknown error");
     let mut concise: String = first_line.chars().take(120).collect();
@@ -139,393 +183,88 @@ fn report_action_error(app: &mut App, error: &anyhow::Error) {
     app.toast(ToastVariant::Error, format!("Action failed: {concise}"));
 }
 
-fn apply_action(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
+fn apply_action<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppModel,
     action: Action,
 ) -> AppResult<DispatchOutcome> {
-    use crate::tui::app::EditMetadataFocus;
-
     match action {
-        Action::PointerInput { event, area } => {
-            return mouse::apply_pointer(terminal, app, event, area);
+        Action::Mouse(action) => {
+            if let Some(followup) = mouse::apply_mouse_action(app, action)? {
+                return apply_action(terminal, app, followup);
+            }
         }
-        Action::PointerScroll { event, area, delta } => {
-            mouse::apply_scroll(app, event, area, delta);
+        Action::SetHover(target) => app.hover = target,
+        Action::ViewRendered {
+            reader_scroll,
+            insights_scroll,
+            journal_offset,
+            entry_offset,
+        } => {
+            if let Some(scroll) = reader_scroll {
+                app.nav.scroll.reader = scroll;
+            }
+            if let Some(scroll) = insights_scroll {
+                app.nav.scroll.insights = scroll;
+            }
+            if let Some(offset) = journal_offset {
+                *app.nav.journal_list.offset_mut() = offset;
+            }
+            if let Some(offset) = entry_offset {
+                *app.nav.entry_list.offset_mut() = offset;
+            }
         }
-        Action::PointerHover { column, row, area } => {
-            mouse::apply_hover(app, column, row, area);
+        Action::SyncImages(size) => {
+            if let Some(request) = app.prepare_image_warm(size) {
+                return Ok(DispatchOutcome::Continue.with_effect(Effect::PrepareImages(request)));
+            }
         }
         Action::Quit => return Ok(DispatchOutcome::Quit),
         Action::RefreshLibrary => {
             app.begin_manual_refresh();
-            if let Err(error) = terminal.draw(|frame| render::draw(frame, app)) {
+            let mut view = crate::tui::ui::ViewState::default();
+            let active_theme = app.appearance.theme.clone();
+            let mut context = crate::tui::ui::RenderContext::new(&active_theme, &mut view);
+            if let Err(error) = terminal.draw(|frame| render::draw(frame, app, &mut context)) {
                 app.finish_manual_refresh();
-                return Err(error.into());
+                return Err(anyhow::anyhow!(error.to_string()));
             }
             let refresh = app.refresh();
             app.finish_manual_refresh();
             refresh?;
             app.toast(ToastVariant::Success, "Refreshed from disk");
+            return Ok(DispatchOutcome::Continue.with_effect(Effect::Redraw));
         }
-        Action::LibraryValidated(snapshot) => app.install_library_snapshot(*snapshot),
-        Action::LibraryValidationFailed(error) => {
-            app.finish_initial_library_loading();
-            app.toast(
-                ToastVariant::Error,
-                format!("Journal changes not loaded: {error}"),
-            );
+        Action::Background(action) => {
+            return Ok(apply_background_action(app, action));
         }
 
-        Action::FocusLeft => move_focus_left(app),
-        Action::FocusRight => {
-            let available = reader_is_available(terminal.size()?.width);
-            move_focus_right(app, available);
-        }
-        Action::MoveSelection(delta) => {
-            app.move_selection(delta);
-            keep_selection_visible(terminal, app)?;
-        }
-
-        Action::Reader(action) => match action {
-            ReaderAction::ScrollLines(delta) => app.scroll_reader(delta),
-            ReaderAction::ScrollPages(delta) => app.page_reader(delta),
-            ReaderAction::ScrollToStart => app.nav.scroll.reader = 0,
-            ReaderAction::ScrollToEnd => app.nav.scroll.reader = u16::MAX,
-            ReaderAction::SetFullscreen(fullscreen) => app.nav.reader_fullscreen = fullscreen,
-        },
-        Action::Insights(action) => match action {
-            InsightsAction::ScrollLines(delta) => app.scroll_insights(delta),
-            InsightsAction::ScrollPages(delta) => app.page_insights(delta),
-            InsightsAction::ScrollToStart => app.nav.scroll.insights = 0,
-            InsightsAction::ScrollToEnd => app.nav.scroll.insights = u16::MAX,
-            InsightsAction::SetFullscreen(fullscreen) => {
-                app.nav.insights_fullscreen = fullscreen;
-            }
-            InsightsAction::ToggleScope => {
-                app.nav.insights_scope = app.nav.insights_scope.toggle();
-                app.nav.scroll.reset_insights();
-            }
-            InsightsAction::CycleTimeframe => {
-                app.nav.insights_timeframe = app.nav.insights_timeframe.next();
-                app.nav.scroll.reset_insights();
-            }
-        },
-
-        Action::BeginSearch => {
-            app.begin_search();
-        }
-        Action::ExitSearch => {
-            app.exit_search();
-        }
-        Action::EditSelected => app.open_editor_for_selected()?,
-        Action::EditorSave => save_editor_with_reader_restore(app)?,
-        Action::EditorRequestDiscard => request_editor_discard(app),
-        Action::EditorDiscard => app.cancel_editor(),
-        Action::EditorToggleFullscreen => {
-            app.nav.reader_fullscreen = !app.nav.reader_fullscreen;
-        }
-        Action::EditorOpenMetadataMenu => set_editor_prompt(app, EditorPrompt::MetadataMenu),
-        Action::EditorOpenHelp => set_editor_prompt(app, EditorPrompt::Help { scroll: 0 }),
-        Action::EditorClosePrompt => set_editor_prompt(app, EditorPrompt::None),
-        Action::EditorScrollHelp(delta) => scroll_editor_help(app, delta),
-        Action::EditorInput(key) => {
-            if let Some(editor) = app.editor.as_mut() {
-                editor.textarea.input(key);
+        Action::Browser(action) => {
+            if let Some(outcome) = handlers::browser(terminal, app, action)? {
+                return Ok(outcome);
             }
         }
-        Action::EditorSelectAll => {
-            if let Some(editor) = app.editor.as_mut() {
-                editor.textarea.select_all();
+        Action::Search(action) => handlers::search(app, action),
+        Action::Editor(action) => handlers::editor(app, action)?,
+        Action::Metadata(action) => {
+            if let Some(outcome) = handlers::metadata(terminal, app, action)? {
+                return Ok(outcome);
             }
         }
-        Action::EditorUndo => {
-            if let Some(editor) = app.editor.as_mut() {
-                editor.textarea.undo();
+        Action::Location(action) => {
+            if let Some(outcome) = handlers::location(app, action)? {
+                return Ok(outcome);
             }
         }
-        Action::EditorRedo => {
-            if let Some(editor) = app.editor.as_mut() {
-                editor.textarea.redo();
+        Action::Settings(action) => handlers::settings(terminal, app, action)?,
+        Action::Images(action) => {
+            if let Some(outcome) = handlers::images(terminal, app, action)? {
+                return Ok(outcome);
             }
         }
-        Action::EditorCut => {
-            if let Some(editor) = app.editor.as_mut() {
-                editor.textarea.cut();
-            }
-        }
-        Action::EditorCopy => {
-            if let Some(editor) = app.editor.as_mut() {
-                editor.textarea.copy();
-            }
-        }
-        Action::EditorPaste => {
-            if let Some(editor) = app.editor.as_mut() {
-                editor.textarea.paste();
-            }
-        }
-        Action::EditorScroll(delta) => {
-            if let Some(editor) = app.editor.as_mut() {
-                editor.scroll_lines(delta);
-            }
-        }
-        Action::EditorStartSelection { col, row } => start_editor_selection(app, col, row),
-        Action::EditorDragSelection { col, row } => drag_editor_selection(app, col, row),
-        Action::EditorEndSelection => end_editor_selection(app),
-        Action::ViewSelected => view_selected(app)?,
-        Action::OpenReaderLink(target) => open_reader_link(app, &target)?,
-        Action::BeginDelete => app.begin_confirm_delete(),
-        Action::ConfirmDelete => confirm_delete(app)?,
-        Action::ConfirmSelect(yes) => set_confirm_selection(app, yes),
-        Action::CancelOverlay => {
-            if app.has_overlay() {
-                if matches!(app.overlay, Overlay::NewJournal(_)) {
-                    app.toast(ToastVariant::Info, "Cancelled");
-                }
-                app.close_overlay();
-            }
-        }
-        Action::OpenHelp => app.open_help(),
-        Action::HelpScroll(delta) => scroll_help(app, delta),
-        Action::OpenMetadataMenu => {
-            if app.editor.is_none() {
-                app.reload_selected_entry_from_disk()?;
-            }
-            app.open_metadata_menu();
-        }
-        Action::BeginEditMetadata(kind) => {
-            set_editor_prompt(app, EditorPrompt::None);
-            match kind {
-                crate::tui::state::MetadataKind::Tags => app.begin_edit_tags(),
-                crate::tui::state::MetadataKind::People => app.begin_edit_people(),
-                crate::tui::state::MetadataKind::Activities => app.begin_edit_activities(),
-            }
-            reveal_open_dialog_selection(terminal, app)?;
-        }
-        Action::BeginEditFeelings => {
-            set_editor_prompt(app, EditorPrompt::None);
-            // No open-scroll to the selection here: feelings groups are collapsible,
-            // so there's no stable single row to reveal.
-            app.begin_edit_feelings();
-        }
-        Action::BeginEditMood => {
-            set_editor_prompt(app, EditorPrompt::None);
-            app.begin_edit_mood();
-        }
-        Action::ToggleStarred => {
-            app.reload_selected_entry_from_disk()?;
-            commit_entry_edit(app, toggle_starred_on_entry)?;
-        }
-        Action::NewEntry => app.open_editor_for_new(),
-        Action::NewJournal => app.begin_new_journal_input(),
-        Action::ToggleArchiveJournal => {
-            toggle_archive_selected_journal(app)?;
-            keep_selection_visible(terminal, app)?;
-        }
-
-        Action::JournalInputSubmit => submit_new_journal(app)?,
-
-        Action::InputKey(key) => app.handle_text_input_key(key),
-        Action::InputSelectAll => {
-            if let Some(input) = app.focused_text_input_mut() {
-                input.select_all();
-            }
-        }
-
-        Action::MoveDialogSelection(delta) => {
-            let theme_picker = matches!(app.overlay, Overlay::ThemePicker(_));
-            navigate_open_dialog(terminal, app, |list| {
-                if delta < 0 {
-                    list.move_up();
-                } else if delta > 0 {
-                    list.move_down();
-                }
-            })?;
-            if theme_picker {
-                app.theme_picker_preview();
-            }
-        }
-        Action::MetadataToggle => {
-            if let Some(state) = app.edit_metadata_state_mut() {
-                state.toggle_selected();
-            }
-        }
-        Action::MetadataSwitchFocus => {
-            if let Some(state) = app.edit_metadata_state_mut() {
-                state.focus = match state.focus {
-                    EditMetadataFocus::List => EditMetadataFocus::Input,
-                    EditMetadataFocus::Input => EditMetadataFocus::List,
-                };
-            }
-        }
-        Action::MetadataAddFromInput => {
-            if let Some(state) = app.edit_metadata_state_mut() {
-                state.add_from_input();
-            }
-        }
-        Action::MetadataSave => {
-            let Some((kind, tags)) = app
-                .edit_metadata_state()
-                .map(|s| (s.kind, s.selected.clone()))
-            else {
-                return Ok(DispatchOutcome::Continue);
-            };
-            edit_or_commit(
-                app,
-                |app| app.set_editor_metadata(kind, &tags),
-                |app| set_metadata_on_entry(app, kind, &tags),
-            )?;
-        }
-
-        Action::FeelingsToggle => {
-            let list_height = open_dialog_list_height(terminal, app)?;
-            if let Some(state) = app.edit_feeling_state_mut() {
-                state.toggle_selected();
-                state.ensure_selected_visible(list_height);
-            }
-        }
-        Action::FeelingsExpand => {
-            let list_height = open_dialog_list_height(terminal, app)?;
-            if let Some(state) = app.edit_feeling_state_mut() {
-                state.expand_selected();
-                state.ensure_selected_visible(list_height);
-            }
-        }
-        Action::FeelingsCollapse => {
-            let list_height = open_dialog_list_height(terminal, app)?;
-            if let Some(state) = app.edit_feeling_state_mut() {
-                state.collapse_selected();
-                state.ensure_selected_visible(list_height);
-            }
-        }
-        Action::FeelingsSwitchFocus => {
-            if let Some(state) = app.edit_feeling_state_mut() {
-                state.switch_focus();
-            }
-        }
-        Action::FeelingsSave => {
-            let Some(feelings) = app.edit_feeling_state().map(|s| s.selected.clone()) else {
-                return Ok(DispatchOutcome::Continue);
-            };
-            edit_or_commit(
-                app,
-                |app| app.set_editor_feelings(&feelings),
-                |app| set_feelings_on_entry(app, &feelings),
-            )?;
-        }
-
-        Action::AdjustMood(delta) => {
-            if let Some(state) = app.edit_mood_state_mut() {
-                state.draft = state.draft.saturating_add(delta).clamp(-5, 5);
-            }
-        }
-        Action::MoodSave => {
-            let Some(mood) = app.edit_mood_state().map(|s| s.draft) else {
-                return Ok(DispatchOutcome::Continue);
-            };
-            edit_or_commit(
-                app,
-                |app| app.set_editor_mood(Some(mood)),
-                |app| set_mood_on_entry(app, Some(mood)),
-            )?;
-        }
-        Action::MoodClear => {
-            let saved = app.edit_mood_state().and_then(|s| s.saved);
-            edit_or_commit(
-                app,
-                |app| app.set_editor_mood(None),
-                |app| {
-                    if saved.is_some() {
-                        set_mood_on_entry(app, None)?;
-                    }
-                    Ok(())
-                },
-            )?;
-        }
-
-        Action::BeginEditLocation => {
-            // No open-scroll here: the dialog opens focused on the query field, so
-            // its preset list draws no selection to reveal.
-            set_editor_prompt(app, EditorPrompt::None);
-            if app.editor.is_none() {
-                app.reload_selected_entry_from_disk()?;
-            }
-            app.begin_edit_location();
-        }
-        Action::LocationSwitchFocus => {
-            if let Some(state) = app.edit_location_state_mut() {
-                state.switch_focus();
-            }
-        }
-        Action::LocationResolve => app.resolve_location_query(),
-        Action::LocationGrabDevice => app.grab_device_location(),
-        Action::LocationSelectRow => {
-            if let Some(state) = app.edit_location_state_mut() {
-                state.select_row();
-            }
-            let Some(location) = app.edit_location_state().map(|state| state.composed()) else {
-                return Ok(DispatchOutcome::Continue);
-            };
-            edit_or_commit(
-                app,
-                |app| app.set_editor_location(location.clone()),
-                |app| set_location_on_entry(app, location.clone()),
-            )?;
-        }
-        Action::LocationSave => {
-            let Some(location) = app.edit_location_state().map(|state| state.composed()) else {
-                return Ok(DispatchOutcome::Continue);
-            };
-            edit_or_commit(
-                app,
-                |app| app.set_editor_location(location.clone()),
-                |app| set_location_on_entry(app, location.clone()),
-            )?;
-        }
-        Action::LocationClear => {
-            edit_or_commit(
-                app,
-                |app| app.set_editor_location(None),
-                |app| set_location_on_entry(app, None),
-            )?;
-        }
-
-        Action::OpenSettingsMenu => app.open_settings_menu(),
-        Action::OpenThemePicker => {
-            app.open_theme_picker();
-            reveal_open_dialog_selection(terminal, app)?;
-        }
-        Action::ThemePickerSelect(index) => app.theme_picker_select(index),
-        Action::ThemePickerConfirm => app.theme_picker_confirm(),
-        Action::ThemePickerCancel => app.theme_picker_cancel(),
-        Action::ThemePickerCycleChrome => app.theme_picker_cycle_chrome(),
-        Action::ThemePickerCycleMode => app.theme_picker_cycle_mode(),
-        Action::ThemePickerToggleScope => {
-            app.theme_picker_toggle_scope();
-            // The scope's theme may sit outside the current window; scroll it back
-            // into view so the highlight follows the preview.
-            reveal_open_dialog_selection(terminal, app)?;
-        }
-
-        Action::OpenImageViewer(index) => app.begin_image_viewer(index),
-        Action::StepImageViewer(delta) => app.image_viewer_step(delta),
-
-        Action::ToggleHints => {
-            app.state.ui.show_hints = !app.state.ui.show_hints;
-            crate::config::save_state(&app.config_path, &app.state)?;
-        }
-
-        Action::ToggleJournals => {
-            app.state.ui.show_journals = !app.state.ui.show_journals;
-            if app.state.ui.show_journals {
-                // Focus the column so narrow/medium layouts actually reveal it.
-                app.nav.focus = Focus::Journals;
-            } else if app.nav.focus == Focus::Journals {
-                // Don't leave focus on a now-hidden pane.
-                app.nav.focus = Focus::Entries;
-            }
-            crate::config::save_state(&app.config_path, &app.state)?;
-        }
+        Action::Overlay(action) => handlers::overlay(app, action)?,
+        Action::Reader(action) => handlers::reader(app, action),
+        Action::Insights(action) => handlers::insights(app, action),
     }
 
     // One-shot compose (`notema log` with no body) quits as soon as its editor
@@ -537,6 +276,97 @@ fn apply_action(
     Ok(DispatchOutcome::Continue)
 }
 
+fn apply_background_action(app: &mut AppModel, action: BackgroundAction) -> DispatchOutcome {
+    let mut outcome = DispatchOutcome {
+        control: ControlFlow::Continue,
+        redraw: false,
+        effects: Vec::new(),
+    };
+    outcome.redraw = match action {
+        BackgroundAction::LibraryValidated(snapshot) => {
+            app.install_library_snapshot(*snapshot);
+            true
+        }
+        BackgroundAction::LibraryValidationStale => {
+            match app
+                .services
+                .store
+                .load_library(notema_storage::CachePolicy::Normal)
+            {
+                Ok(snapshot) => app.install_library_snapshot(snapshot),
+                Err(error) => {
+                    app.finish_initial_library_loading();
+                    app.toast(
+                        ToastVariant::Error,
+                        format!("Journal changes not loaded: {error:#}"),
+                    );
+                }
+            }
+            true
+        }
+        BackgroundAction::LibraryValidationFailed(error) => {
+            app.finish_initial_library_loading();
+            app.toast(
+                ToastVariant::Error,
+                format!("Journal changes not loaded: {error}"),
+            );
+            true
+        }
+        BackgroundAction::ExternalOpenCompleted(message) => {
+            app.toast(ToastVariant::Info, message);
+            true
+        }
+        BackgroundAction::ExternalOpenFailed(error) => {
+            app.toast(ToastVariant::Error, format!("Couldn't open link: {error}"));
+            true
+        }
+        BackgroundAction::PollImages => app.image.runtime.poll_results(),
+        BackgroundAction::PollGeocode => app.apply_geocode_results(),
+        BackgroundAction::PollEnvironment => {
+            let changed = app.apply_environment_results();
+            if let Some(request) = app.prepare_environment_backfill() {
+                outcome.effects.push(Effect::Environment(request));
+            }
+            changed
+        }
+        BackgroundAction::PollTimers => {
+            let toasts_expired = app.expire_toasts();
+            let flash_expired = app.expire_reader_heading_flash();
+            let environment_saved = poll_fetching_environment(app);
+            toasts_expired || flash_expired || environment_saved
+        }
+        BackgroundAction::LibraryPathsChanged(paths) => {
+            if let Err(error) = app.refresh_paths(&paths) {
+                app.toast(
+                    ToastVariant::Error,
+                    format!("Journal changes not reloaded: {error}"),
+                );
+            }
+            true
+        }
+        BackgroundAction::ReloadTheme(name) => {
+            let path = crate::tui::theme::themes_dir(&app.services.config_path)
+                .join(format!("{name}.toml"));
+            match crate::tui::theme::load_file(&path, app.appearance.mode()) {
+                Ok(reloaded) => app.appearance.theme = app.appearance.resolve(reloaded),
+                Err(error) => app.toast(
+                    ToastVariant::Error,
+                    format!(
+                        "Theme not reloaded: {name}.toml: {}",
+                        crate::tui::concise_error(&error)
+                    ),
+                ),
+            }
+            true
+        }
+        BackgroundAction::CommitSearch => {
+            app.update_search_results();
+            true
+        }
+    };
+    outcome
+}
+
 struct ReaderSnapshot {
     id: String,
     focus: Focus,
@@ -545,7 +375,7 @@ struct ReaderSnapshot {
 }
 
 impl ReaderSnapshot {
-    fn capture(app: &App) -> Option<Self> {
+    fn capture(app: &AppModel) -> Option<Self> {
         let target = app.selected_entry_target()?;
         Some(Self {
             id: target.id,
@@ -555,7 +385,7 @@ impl ReaderSnapshot {
         })
     }
 
-    fn restore(self, app: &mut App) -> bool {
+    fn restore(self, app: &mut AppModel) -> bool {
         if !app.select_entry_by_id(&self.id, false) {
             return false;
         }
@@ -566,7 +396,7 @@ impl ReaderSnapshot {
     }
 }
 
-fn restore_reader_or_close(app: &mut App, snapshot: Option<ReaderSnapshot>) {
+fn restore_reader_or_close(app: &mut AppModel, snapshot: Option<ReaderSnapshot>) {
     let Some(snapshot) = snapshot else {
         return;
     };
@@ -579,7 +409,10 @@ fn restore_reader_or_close(app: &mut App, snapshot: Option<ReaderSnapshot>) {
 
 /// Apply an edit-overlay change to the selected entry, then restore the entry
 /// view (the reload reorders entries) and close the overlay.
-fn commit_entry_edit(app: &mut App, edit: impl FnOnce(&mut App) -> AppResult<()>) -> AppResult<()> {
+fn commit_entry_edit(
+    app: &mut AppModel,
+    edit: impl FnOnce(&mut AppModel) -> AppResult<()>,
+) -> AppResult<()> {
     let snapshot = ReaderSnapshot::capture(app);
     edit(app)?;
     restore_reader_or_close(app, snapshot);
@@ -590,9 +423,9 @@ fn commit_entry_edit(app: &mut App, edit: impl FnOnce(&mut App) -> AppResult<()>
 /// Route a metadata-dialog save to the open editor's buffer (closing the dialog),
 /// or commit it to the selected entry when no editor is open.
 fn edit_or_commit(
-    app: &mut App,
-    to_editor: impl FnOnce(&mut App),
-    to_entry: impl FnOnce(&mut App) -> AppResult<()>,
+    app: &mut AppModel,
+    to_editor: impl FnOnce(&mut AppModel),
+    to_entry: impl FnOnce(&mut AppModel) -> AppResult<()>,
 ) -> AppResult<()> {
     if app.editor.is_some() {
         to_editor(app);
@@ -603,14 +436,31 @@ fn edit_or_commit(
     }
 }
 
-fn set_editor_prompt(app: &mut App, prompt: EditorPrompt) {
+fn edit_or_commit_location(
+    app: &mut AppModel,
+    location: Option<notema_domain::Location>,
+) -> AppResult<Option<crate::tui::environment::EnvironmentRequest>> {
+    if app.editor.is_some() {
+        let request = app.set_editor_location(location);
+        app.close_overlay();
+        Ok(request)
+    } else {
+        let snapshot = ReaderSnapshot::capture(app);
+        let request = set_location_on_entry(app, location)?;
+        restore_reader_or_close(app, snapshot);
+        app.close_overlay();
+        Ok(request)
+    }
+}
+
+fn set_editor_prompt(app: &mut AppModel, prompt: EditorPrompt) {
     if let Some(editor) = app.editor.as_mut() {
         editor.prompt = prompt;
     }
 }
 
 /// Point whichever confirm dialog is open at `yes` (the destructive button).
-fn set_confirm_selection(app: &mut App, yes: bool) {
+fn set_confirm_selection(app: &mut AppModel, yes: bool) {
     if let Overlay::ConfirmDelete(_, selected) = &mut app.overlay {
         *selected = yes;
     } else if let Some(EditorPrompt::ConfirmDiscard { discard_selected }) =
@@ -620,7 +470,7 @@ fn set_confirm_selection(app: &mut App, yes: bool) {
     }
 }
 
-fn request_editor_discard(app: &mut App) {
+fn request_editor_discard(app: &mut AppModel) {
     if app.editor.as_ref().is_some_and(|editor| editor.is_dirty()) {
         // Default the selection to Keep so a stray Enter never discards.
         set_editor_prompt(
@@ -636,13 +486,13 @@ fn request_editor_discard(app: &mut App) {
 
 /// Scroll the global help cheatsheet, clamping at the top; the draw clamps the
 /// bottom against the rendered height it alone knows.
-fn scroll_help(app: &mut App, delta: i16) {
+fn scroll_help(app: &mut AppModel, delta: i16) {
     if let Overlay::Help { scroll } = &mut app.overlay {
         *scroll = scroll.saturating_add_signed(delta);
     }
 }
 
-fn scroll_editor_help(app: &mut App, delta: i16) {
+fn scroll_editor_help(app: &mut AppModel, delta: i16) {
     if let Some(EditorPrompt::Help { scroll }) =
         app.editor.as_mut().map(|editor| &mut editor.prompt)
     {
@@ -650,7 +500,7 @@ fn scroll_editor_help(app: &mut App, delta: i16) {
     }
 }
 
-fn start_editor_selection(app: &mut App, col: u16, row: u16) {
+fn start_editor_selection(app: &mut AppModel, col: u16, row: u16) {
     let Some(editor) = app.editor.as_mut() else {
         return;
     };
@@ -662,7 +512,7 @@ fn start_editor_selection(app: &mut App, col: u16, row: u16) {
     }
 }
 
-fn drag_editor_selection(app: &mut App, col: u16, row: u16) {
+fn drag_editor_selection(app: &mut AppModel, col: u16, row: u16) {
     let Some(editor) = app.editor.as_mut() else {
         return;
     };
@@ -690,7 +540,7 @@ fn drag_editor_selection(app: &mut App, col: u16, row: u16) {
     }
 }
 
-fn end_editor_selection(app: &mut App) {
+fn end_editor_selection(app: &mut AppModel) {
     let Some(editor) = app.editor.as_mut() else {
         return;
     };
@@ -704,7 +554,7 @@ fn end_editor_selection(app: &mut App) {
     }
 }
 
-fn confirm_delete(app: &mut App) -> AppResult<()> {
+fn confirm_delete(app: &mut AppModel) -> AppResult<()> {
     let is_journal = matches!(
         &app.overlay,
         Overlay::ConfirmDelete(crate::tui::state::DeleteContext::Journal { .. }, _)
@@ -724,37 +574,47 @@ fn confirm_delete(app: &mut App) -> AppResult<()> {
     app.refresh()
 }
 
-pub(crate) fn terminal_area(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-) -> AppResult<Rect> {
-    let size = terminal.size()?;
+pub(crate) fn terminal_area<B: Backend>(terminal: &mut Terminal<B>) -> AppResult<Rect> {
+    let size = terminal
+        .size()
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     Ok(Rect::new(0, 0, size.width, size.height))
 }
 
 /// The list viewport height of whichever edit dialog is open, needed to keep the
 /// selection visible after a navigation. Only one edit dialog is open at a time,
 /// so the first matching state wins.
-fn open_dialog_list_height(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &App,
+fn open_dialog_list_height<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &AppModel,
 ) -> AppResult<u16> {
     let area = terminal_area(terminal)?;
     let height = if let Some(state) = app.edit_metadata_state() {
-        render::metadata_dialog_layout(area, state.filtered.len())
+        render::metadata_dialog_layout(&app.appearance.theme, area, state.filtered.len())
             .list
             .height
     } else if let Some(state) = app.edit_feeling_state() {
-        render::feelings_dialog_layout(area, state.item_count(), &state.selected)
-            .list
-            .height
+        render::feelings_dialog_layout(
+            &app.appearance.theme,
+            area,
+            state.item_count(),
+            &state.selected,
+        )
+        .list
+        .height
     } else if let Some(state) = app.edit_location_state() {
-        render::location_dialog_layout(area, &state.list_labels())
+        render::location_dialog_layout(&app.appearance.theme, area, &state.list_labels())
             .list
             .height
     } else if let Some(state) = app.theme_picker_state() {
-        render::theme_picker_layout(area, state.entries.len(), state.hint_state())
-            .list
-            .height
+        render::theme_picker_layout(
+            &app.appearance.theme,
+            area,
+            state.entries.len(),
+            state.hint_state(),
+        )
+        .list
+        .height
     } else {
         0
     };
@@ -762,7 +622,7 @@ fn open_dialog_list_height(
 }
 
 /// The open edit dialog's list, as a shared navigation handle.
-fn open_dialog_list_mut(app: &mut App) -> Option<&mut dyn ListNav> {
+fn open_dialog_list_mut(app: &mut AppModel) -> Option<&mut dyn ListNav> {
     if app.edit_metadata_state().is_some() {
         return app.edit_metadata_state_mut().map(|s| s as &mut dyn ListNav);
     }
@@ -779,9 +639,9 @@ fn open_dialog_list_mut(app: &mut App) -> Option<&mut dyn ListNav> {
 }
 
 /// Move within the open dialog's list, then scroll so the selection stays visible.
-fn navigate_open_dialog(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
+fn navigate_open_dialog<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppModel,
     nav: impl FnOnce(&mut dyn ListNav),
 ) -> AppResult<()> {
     let list_height = open_dialog_list_height(terminal, app)?;
@@ -796,9 +656,9 @@ fn navigate_open_dialog(
 /// dialog can open with the cursor well below the top — the theme picker seeds it
 /// on the active theme — and the offset defaults to zero, so without this the
 /// selection would sit off-screen until the first keypress.
-fn reveal_open_dialog_selection(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
+fn reveal_open_dialog_selection<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppModel,
 ) -> AppResult<()> {
     let list_height = open_dialog_list_height(terminal, app)?;
     if let Some(list) = open_dialog_list_mut(app) {

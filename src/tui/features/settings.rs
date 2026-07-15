@@ -1,8 +1,14 @@
-use super::*;
+//! Library administration driven by the settings menu and its sub-actions:
+//! journal creation, and the theme picker with its scoped (journal vs global)
+//! preview/confirm/cancel lifecycle.
 
-use crate::tui::state::{ListNav, ThemePickerState};
+use crate::tui::{
+    app::AppModel,
+    state::{ListNav, Overlay, ThemePickerState, ToastVariant},
+    text_input::TextInput,
+};
 
-impl App {
+impl AppModel {
     pub(crate) fn begin_new_journal_input(&mut self) {
         self.overlay = Overlay::NewJournal(Box::default());
     }
@@ -21,182 +27,8 @@ impl App {
         }
     }
 
-    /// One editing path for every single-line field: forward the key to the
-    /// field that owns the caret, then run its after-edit hook when the text
-    /// actually changed. Lives next to [`Self::focused_text_input_mut`] so a
-    /// new field is added to both in one place.
-    pub(crate) fn handle_text_input_key(&mut self, key: crossterm::event::KeyEvent) {
-        match &mut self.overlay {
-            Overlay::NewJournal(input) => {
-                input.input(key);
-            }
-            Overlay::EditMetadata(state) => {
-                if state.input.input(key) {
-                    state.rebuild_filter();
-                }
-            }
-            Overlay::EditFeelings(state) => {
-                if state.input.input(key) {
-                    state.rebuild_filter();
-                }
-            }
-            Overlay::EditLocation(state) => state.input_key(key),
-            _ => self.search_input_key(key),
-        }
-    }
-
-    /// The text field that currently owns the caret, if any: an overlay's
-    /// focused input, or the search box while typing in it. Selection and
-    /// caret commands route through here so every field shares one binding.
-    pub(crate) fn focused_text_input_mut(&mut self) -> Option<&mut TextInput> {
-        match &mut self.overlay {
-            Overlay::NewJournal(name) => Some(name),
-            Overlay::EditMetadata(state) if state.focus == EditMetadataFocus::Input => {
-                Some(&mut state.input)
-            }
-            Overlay::EditFeelings(state) if state.focus == EditMetadataFocus::Input => {
-                Some(&mut state.input)
-            }
-            Overlay::EditLocation(state) => match state.focus {
-                EditLocationFocus::Query => Some(&mut state.query),
-                EditLocationFocus::Name => Some(&mut state.name),
-                EditLocationFocus::List => None,
-            },
-            Overlay::None if self.nav.mode == Mode::Search && self.nav.focus == Focus::Entries => {
-                Some(&mut self.search.query)
-            }
-            _ => None,
-        }
-    }
-
-    pub(crate) fn edit_metadata_state(&self) -> Option<&EditMetadataState> {
-        match &self.overlay {
-            Overlay::EditMetadata(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn edit_metadata_state_mut(&mut self) -> Option<&mut EditMetadataState> {
-        match &mut self.overlay {
-            Overlay::EditMetadata(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn edit_feeling_state(&self) -> Option<&EditFeelingState> {
-        match &self.overlay {
-            Overlay::EditFeelings(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn edit_feeling_state_mut(&mut self) -> Option<&mut EditFeelingState> {
-        match &mut self.overlay {
-            Overlay::EditFeelings(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn selected_entry_mood(&self) -> Option<i8> {
-        self.resolved_selected_entry().and_then(|entry| entry.mood)
-    }
-
-    pub(crate) fn selected_entry_starred(&self) -> bool {
-        self.resolved_selected_entry()
-            .is_some_and(|entry| entry.starred)
-    }
-
-    /// The selected entry's location as a one-line label, if any.
-    #[cfg(test)]
-    pub(crate) fn selected_entry_location(&self) -> Option<String> {
-        self.resolved_selected_entry()
-            .and_then(|entry| entry.location.as_ref())
-            .and_then(|location| location.display_label())
-    }
-
-    pub(crate) fn begin_edit_mood(&mut self) {
-        if self.editor.is_none() && !self.allow_selected_entry_edit() {
-            return;
-        }
-        let saved = self.editing_mood();
-        let draft = saved.unwrap_or(0);
-        self.overlay = Overlay::EditMood(EditMoodState { saved, draft });
-    }
-
-    pub(crate) fn edit_mood_state(&self) -> Option<&EditMoodState> {
-        match &self.overlay {
-            Overlay::EditMood(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn edit_mood_state_mut(&mut self) -> Option<&mut EditMoodState> {
-        match &mut self.overlay {
-            Overlay::EditMood(state) => Some(state),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn begin_confirm_delete(&mut self) {
-        match self.nav.focus {
-            Focus::Journals => self.begin_confirm_delete_journal(),
-            // Insights never holds a delete target (its `d` stays unbound), but the
-            // match must stay total.
-            Focus::Entries | Focus::Reader | Focus::Insights => self.begin_confirm_delete_entry(),
-        }
-    }
-
-    fn begin_confirm_delete_entry(&mut self) {
-        let has_body = self
-            .selected_entry()
-            .map(|e| !e.body.trim().is_empty())
-            .unwrap_or(false);
-        // Default the selection to Cancel so a stray Enter never deletes.
-        self.overlay = Overlay::ConfirmDelete(DeleteContext::Entry { has_body }, false);
-    }
-
-    fn begin_confirm_delete_journal(&mut self) {
-        let Some(journal) = self.selected_journal() else {
-            return;
-        };
-        let name = journal.name.clone();
-        let trash_count = self
-            .library
-            .entries
-            .iter()
-            .filter(|e| e.journal == name && !e.body.trim().is_empty())
-            .count();
-        let delete_count = self
-            .library
-            .entries
-            .iter()
-            .filter(|e| e.journal == name && e.body.trim().is_empty())
-            .count();
-        self.overlay = Overlay::ConfirmDelete(
-            DeleteContext::Journal {
-                name,
-                trash_count,
-                delete_count,
-            },
-            false,
-        );
-    }
-
-    /// Open the metadata-shortcuts reference popup, if the selected entry can be
-    /// acted on. The shortcuts themselves stay live whether or not it is open.
-    pub(crate) fn open_metadata_menu(&mut self) {
-        if self.can_act_on_selected_entry() {
-            self.overlay = Overlay::MetadataMenu;
-        }
-    }
-
     pub(crate) fn open_settings_menu(&mut self) {
         self.overlay = Overlay::SettingsMenu;
-    }
-
-    /// Open the global keyboard-shortcut cheatsheet.
-    pub(crate) fn open_help(&mut self) {
-        self.overlay = Overlay::Help { scroll: 0 };
     }
 
     /// Open the theme picker: list the theme files on disk (parse results
@@ -205,7 +37,7 @@ impl App {
     pub(crate) fn open_theme_picker(&mut self) {
         use crate::tui::state::{SelectableList, ThemePickerEntry, ThemePickerState};
 
-        let dir = crate::tui::theme::themes_dir(&self.config_path);
+        let dir = crate::tui::theme::themes_dir(&self.services.config_path);
         if let Err(err) = crate::tui::theme::ensure_bundled(&dir) {
             self.toast(
                 ToastVariant::Error,
@@ -215,7 +47,7 @@ impl App {
                 ),
             );
         }
-        let mode = crate::tui::theme::mode();
+        let mode = self.appearance.mode();
         let mut entries: Vec<ThemePickerEntry> = std::fs::read_dir(&dir)
             .into_iter()
             .flatten()
@@ -267,16 +99,16 @@ impl App {
         };
         let seed_name = match &journal_theme {
             Some(theme) if scope == ThemePickerScope::Journal => theme.name.clone(),
-            _ => self.config.ui.theme.clone(),
+            _ => self.services.config.ui.theme.clone(),
         };
 
         let mut state = ThemePickerState {
             entries,
             list: SelectableList::default(),
-            previous: crate::tui::theme::theme(),
-            previous_name: self.config.ui.theme.clone(),
-            previous_chrome: crate::tui::theme::chrome_override(),
-            previous_color_mode: crate::tui::theme::color_mode(),
+            previous: self.appearance.theme.clone(),
+            previous_name: self.services.config.ui.theme.clone(),
+            previous_chrome: self.appearance.chrome_override,
+            previous_color_mode: self.appearance.color_mode,
             scope,
             journal,
             journal_theme,
@@ -318,9 +150,9 @@ impl App {
         let (next, name, color_mode, chrome) = match state.scope {
             ThemePickerScope::Journal => (
                 ThemePickerScope::Global,
-                self.config.ui.theme.clone(),
-                self.config.ui.color_mode,
-                self.config.ui.chrome,
+                self.services.config.ui.theme.clone(),
+                self.services.config.ui.color_mode,
+                self.services.config.ui.chrome,
             ),
             // Seed Journal scope on the journal's own theme, falling back to the
             // global values for anything it doesn't set — including the whole
@@ -331,23 +163,23 @@ impl App {
                     ThemePickerScope::Journal,
                     theme
                         .map(|t| t.name.clone())
-                        .unwrap_or_else(|| self.config.ui.theme.clone()),
+                        .unwrap_or_else(|| self.services.config.ui.theme.clone()),
                     theme
                         .and_then(|t| t.color_mode)
-                        .unwrap_or(self.config.ui.color_mode),
+                        .unwrap_or(self.services.config.ui.color_mode),
                     theme
                         .and_then(|t| t.chrome)
-                        .unwrap_or(self.config.ui.chrome),
+                        .unwrap_or(self.services.config.ui.chrome),
                 )
             }
         };
         if let Some(state) = self.theme_picker_state_mut() {
             state.scope = next;
         }
-        let mode_before = crate::tui::theme::mode();
-        crate::tui::theme::set_color_mode(color_mode);
-        crate::tui::theme::set_chrome_override(chrome.forced_style());
-        if crate::tui::theme::mode() != mode_before {
+        let mode_before = self.appearance.mode();
+        self.appearance.color_mode = color_mode;
+        self.appearance.chrome_override = crate::tui::theme::chrome_style(chrome);
+        if self.appearance.mode() != mode_before {
             self.theme_picker_reresolve_rows();
         }
         self.theme_picker_select_named(&name);
@@ -373,13 +205,13 @@ impl App {
         if let Some(theme) = self
             .theme_picker_state()
             .and_then(|state| state.selected_entry())
-            .and_then(|entry| entry.theme)
+            .and_then(|entry| entry.theme.clone())
         {
-            crate::tui::theme::install(theme);
+            self.appearance.theme = self.appearance.resolve(theme);
         }
     }
 
-    /// Move the picker selection to `index` and reader that row.
+    /// Move the picker selection to `index` and preview that row.
     pub(crate) fn theme_picker_select(&mut self, index: usize) {
         if let Some(state) = self.theme_picker_state_mut() {
             state.select_index(index);
@@ -388,16 +220,16 @@ impl App {
     }
 
     /// Cycle the chrome override (default → flat → bordered → default),
-    /// previewing live — `theme()` applies it on read, so the next frame
-    /// re-chromes.
+    /// previewing live on the next frame.
     /// Persisted on confirm; cancel restores the value from open time.
     pub(crate) fn theme_picker_cycle_chrome(&mut self) {
-        use crate::tui::theme::{ChromeStyle, chrome_override, set_chrome_override};
-        set_chrome_override(match chrome_override() {
+        use crate::tui::theme::ChromeStyle;
+        self.appearance.chrome_override = match self.appearance.chrome_override {
             None => Some(ChromeStyle::Flat),
             Some(ChromeStyle::Flat) => Some(ChromeStyle::Bordered),
             Some(ChromeStyle::Bordered) => None,
-        });
+        };
+        self.theme_picker_preview();
     }
 
     /// Cycle the color mode (auto → dark → light → auto), previewing live.
@@ -413,19 +245,19 @@ impl App {
         {
             return;
         }
-        crate::tui::theme::set_color_mode(match crate::tui::theme::color_mode() {
+        self.appearance.color_mode = match self.appearance.color_mode {
             ColorMode::Auto => ColorMode::Dark,
             ColorMode::Dark => ColorMode::Light,
             ColorMode::Light => ColorMode::Auto,
-        });
+        };
         self.theme_picker_reresolve_rows();
     }
 
     /// Re-resolve every row at the current mode and re-install the highlighted
     /// one — a mode change invalidates the flattened variants cached per row.
     fn theme_picker_reresolve_rows(&mut self) {
-        let dir = crate::tui::theme::themes_dir(&self.config_path);
-        let mode = crate::tui::theme::mode();
+        let dir = crate::tui::theme::themes_dir(&self.services.config_path);
+        let mode = self.appearance.mode();
         if let Some(state) = self.theme_picker_state_mut() {
             for entry in &mut state.entries {
                 let path = dir.join(format!("{}.toml", entry.name));
@@ -469,16 +301,18 @@ impl App {
                 // with it, so it looks the same on every device.
                 let theme = notema_storage::JournalTheme {
                     name: name.clone(),
-                    color_mode: Some(crate::tui::theme::color_mode().name().to_string()),
+                    color_mode: Some(self.appearance.color_mode.name().to_string()),
                     chrome: Some(
-                        crate::config::ChromeMode::from_override(
-                            crate::tui::theme::chrome_override(),
-                        )
-                        .name()
-                        .to_string(),
+                        crate::tui::theme::chrome_mode(self.appearance.chrome_override)
+                            .name()
+                            .to_string(),
                     ),
                 };
-                if let Err(err) = self.store.set_journal_theme(&journal_name, Some(&theme)) {
+                if let Err(err) = self
+                    .services
+                    .store
+                    .set_journal_theme(&journal_name, Some(&theme))
+                {
                     self.toast(
                         ToastVariant::Error,
                         format!("Couldn't set theme: {}", crate::tui::concise_error(&err)),
@@ -492,14 +326,14 @@ impl App {
                 )
             }
             (_, journal) => {
-                self.config.ui.theme = name.clone();
-                self.config.ui.color_mode = crate::tui::theme::color_mode();
-                self.config.ui.chrome =
-                    crate::config::ChromeMode::from_override(crate::tui::theme::chrome_override());
+                self.services.config.ui.theme = name.clone();
+                self.services.config.ui.color_mode = self.appearance.color_mode;
+                self.services.config.ui.chrome =
+                    crate::tui::theme::chrome_mode(self.appearance.chrome_override);
                 // Switching a journal to Global removes its own override so it
                 // follows the (possibly just-changed) global theme.
                 if let Some(journal_name) = journal {
-                    if let Err(err) = self.store.set_journal_theme(&journal_name, None) {
+                    if let Err(err) = self.services.store.set_journal_theme(&journal_name, None) {
                         self.toast(
                             ToastVariant::Error,
                             format!("Couldn't clear theme: {}", crate::tui::concise_error(&err)),
@@ -508,7 +342,9 @@ impl App {
                     }
                     self.set_local_journal_theme(&journal_name, None);
                 }
-                if let Err(err) = crate::config::save_config(&self.config_path, &self.config) {
+                if let Err(err) =
+                    crate::config::save_config(&self.services.config_path, &self.services.config)
+                {
                     self.toast(
                         ToastVariant::Error,
                         format!("Couldn't save config: {}", crate::tui::concise_error(&err)),
@@ -541,21 +377,17 @@ impl App {
     /// Cancel the picker: restore the theme, chrome override, and color mode
     /// from open time; the config was never touched.
     pub(crate) fn theme_picker_cancel(&mut self) {
-        if let Some(state) = self.theme_picker_state() {
-            crate::tui::theme::set_color_mode(state.previous_color_mode);
-            crate::tui::theme::set_chrome_override(state.previous_chrome);
-            crate::tui::theme::install(state.previous);
+        if let Some((color_mode, chrome, theme)) = self.theme_picker_state().map(|state| {
+            (
+                state.previous_color_mode,
+                state.previous_chrome,
+                state.previous.clone(),
+            )
+        }) {
+            self.appearance.color_mode = color_mode;
+            self.appearance.chrome_override = chrome;
+            self.appearance.theme = theme;
         }
         self.close_overlay();
-    }
-
-    pub(crate) fn has_overlay(&self) -> bool {
-        !matches!(self.overlay, Overlay::None)
-    }
-
-    pub(crate) fn close_overlay(&mut self) {
-        // Cache is scoped to the entry-viewing session, not the viewer overlay
-        // (see `sync_image_warm`), so reopening within the same entry stays warm.
-        self.overlay = Overlay::None;
     }
 }

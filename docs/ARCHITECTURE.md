@@ -3,6 +3,35 @@
 Notema is a Cargo workspace. Reusable logic lives in `notema-*` library crates; the
 application is the root package.
 
+## Root application
+
+The root crate keeps platform and delivery concerns separate from the reusable
+workspace crates:
+
+| Module | Owns |
+|---|---|
+| `cli` | Clap parsing, routing, log creation, imports, encryption commands, prompts |
+| `config` | Persisted config and UI-state models, load/save behavior |
+| `startup` | First-run setup, store preparation, cache progress |
+| `platform` | Device naming and iSH adapters |
+| `tui` | Terminal runtime, model, events, rendering, theme, and feature state |
+
+`notema::run` is the root library entry point. Command syntax, persisted
+formats, and workspace-crate APIs are independent of the module layout.
+
+The TUI lives inside the root crate:
+
+| TUI module | Owns |
+|---|---|
+| `app` | `AppModel`, `Services`, appearance, library and render-cache aggregates |
+| `features` | Browser, reader, editor, search, metadata, location/environment, insights, settings, overlay, and image behavior |
+| `events` | Semantic actions, input translation, dispatch, handlers, effects |
+| `runtime` | Terminal lifecycle, scheduling, redraw, watchers, workers, effect execution |
+| `ui` | Frame-local view state, ordered interaction regions, shared UI context |
+| `render` | Feature views and shared terminal widgets |
+| `theme` | Owned theme values, schema, loading, resolution, semantic accessors |
+| shared leaves | `state`, `surface`, `scroll`, `hit_test`, `text_input`, `editor_state`, `editor_highlight`, `syntax_highlight`, `entry_rows`, `env_strip`, `environment`, `geocode`, `search`, `errors`, `image` (plus cfg-gated `bench_support`/`test_support`) |
+
 ## Workspace crates
 
 | Package | Owns | Must not own |
@@ -39,18 +68,27 @@ caller silently.
 
 ## Application flow
 
-Keyboard and mouse handlers translate input into `Action` values. Only
-`dispatch_action` mutates application *model* state; the feature reducers it
-calls may mutate, but input translation may not. `DispatchOutcome` is the event
-loop control result.
+`AppModel` aggregates feature state. `Services` owns the config path, config,
+and journal store used by synchronous application operations. Appearance owns
+the resolved theme and warning-deduplication state.
 
-Rendering is a narrower rule than "never mutates": it may write view-derived
-state only — clamp a scroll offset or selection to the content it just laid out
-(so Home/End and a shrinking list stay in range), and record hit-test geometry
-for the mouse layer to read next frame. It must never write model or lasting
-navigation intent. Any such view-state a frame records (scroll geometry,
-image/link hit maps) is reset at the top of the next frame so a stale rect can't
-capture input for a panel that is no longer drawn there.
+Keyboard and mouse handlers translate input into `Action` values. Only
+`dispatch_action` mutates application model state. Browser, search, editor,
+metadata, location, settings, images, overlays, reader, and insights each have
+sub-actions and a handler. Worker, watcher, timer, and effect
+completions return as background actions. `DispatchOutcome` carries loop
+control, redraw intent, and typed effects. Geocoding, environment fetches, image
+preparation, and OS launches start only when the runtime executes those effects.
+
+`RenderContext` borrows the active owned theme and frame-local `ViewState`.
+Rendering records effective scroll offsets in that view state; the runtime then
+dispatches `ViewRendered` to apply them. Rendering never changes lasting
+navigation intent or starts background work. The ordered interaction map records
+panels, rows, text fields, hints, links, images, scrollbars (with their track
+metrics), dialog lists, buttons, and overlays. Mouse translation reads this map
+instead of reconstructing layout; only sub-region probes inside a hit panel —
+insights tabs, reader metadata chips — and wheel routing stay geometric. Later
+regions win, and every frame begins by clearing stale regions.
 
 Panel focus is separate from row selection, and Reader and Insights scroll
 independently of it. Render caches are keyed on the data, width, and theme
@@ -68,8 +106,8 @@ the per-journal `.journal.toml` sidecar, config and state (root crate), themes
 (`notema-encryption`, which owns the `.age/` sub-layout). Most live in the config
 directory and are device-local; the sidecar is the exception — it sits in the
 journal folder and syncs, staying plaintext even under encryption. This is a
-clean-slate v1: pre-release data predating the version field is intentionally
-unsupported, with no migrations.
+v1: pre-release data predating the version field is unsupported, with no
+migrations.
 
 Every persisted write goes through one fsync-ing atomic primitive
 (`notema_encryption::atomic_write`: write a per-process temp, fsync, rename,

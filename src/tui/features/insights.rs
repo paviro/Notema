@@ -1,10 +1,36 @@
 //! Navigation state for the tabbed insights panel: which tab is showing, the
-//! rolling timeframe the mood-driver views window to, and whether the analytic
-//! tabs aggregate the selected journal or every journal. The aggregation itself
-//! lives in the `notema-analytics` crate; this file is only the UI-side enums
-//! that `insights/` renders and the event layer drives.
+//! rolling timeframe the mood-driver views window to, whether the analytic
+//! tabs aggregate the selected journal or every journal, and the panel's
+//! scroll behavior. The aggregation itself lives in the `notema-analytics`
+//! crate; this file is only the UI side that `insights/` renders and the
+//! event layer drives.
 
 use chrono::{Duration, NaiveDate};
+
+use crate::tui::app::AppModel;
+
+use super::PAGE_STEP;
+
+impl AppModel {
+    /// Scroll the insights list by `delta` rows. The offset saturates here and is
+    /// clamped to the list's length when the panel renders, mirroring the entry
+    /// view — so `i16::MAX` from an End key just lands on the last page.
+    pub(crate) fn scroll_insights(&mut self, delta: i16) {
+        if delta.is_negative() {
+            self.nav.scroll.insights = self
+                .nav
+                .scroll
+                .insights
+                .saturating_sub(delta.unsigned_abs());
+        } else {
+            self.nav.scroll.insights = self.nav.scroll.insights.saturating_add(delta as u16);
+        }
+    }
+
+    pub(crate) fn page_insights(&mut self, delta: i16) {
+        self.scroll_insights(delta.saturating_mul(PAGE_STEP));
+    }
+}
 
 /// Which insight the panel is showing. `Overview` is an at-a-glance dashboard;
 /// the rest each sharpen the analytics toward "what makes me feel good/bad".
@@ -35,7 +61,7 @@ impl InsightsTab {
         matches!(self, Self::Drivers | Self::Feelings)
     }
 
-    /// Whether this tab's first section is a [`heading`](super::widgets)-led block,
+    /// Whether this tab's first section is a heading-led block,
     /// which already opens with its own blank row. Such tabs skip the panel's top
     /// margin so the first title sits one row below the border, not two.
     pub(crate) fn leads_with_heading(self) -> bool {

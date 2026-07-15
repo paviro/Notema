@@ -36,15 +36,20 @@ fn every_bundled_theme_parses_in_both_modes() {
 
 #[test]
 fn chrome_override_wins_over_the_theme_default() {
-    set_test_theme(test_flat_theme());
-    assert_eq!(theme().chrome(), ChromeStyle::Flat);
-    set_chrome_override(Some(ChromeStyle::Bordered));
-    assert_eq!(theme().chrome(), ChromeStyle::Bordered, "override ignored");
-    set_chrome_override(None);
+    let theme = test_flat_theme();
+    assert_eq!(theme.chrome(), ChromeStyle::Flat);
+    let overridden = theme
+        .clone()
+        .with_chrome_override(Some(ChromeStyle::Bordered));
     assert_eq!(
-        theme().chrome(),
+        overridden.chrome(),
+        ChromeStyle::Bordered,
+        "override ignored"
+    );
+    assert_eq!(
+        theme.chrome(),
         ChromeStyle::Flat,
-        "auto must follow the theme"
+        "the owned theme must stay unchanged"
     );
 }
 
@@ -908,7 +913,7 @@ fn terminal_default_matches_the_original_styles() {
 
 #[test]
 fn signed_distinguishes_positive_from_negative() {
-    let theme = theme();
+    let theme = Theme::terminal_default();
     assert_ne!(theme.signed(1.0), theme.signed(-1.0));
 }
 
@@ -1074,39 +1079,7 @@ fn load_falls_back_to_builtin_on_a_broken_theme() {
 }
 
 #[test]
-fn theme_load_warning_dedupes_per_name_and_reports_through_notify() {
-    use crate::tui::state::{ToastVariant, drain_notifications};
-
-    // A unique name/messages so the process-global warned-set and notify queue
-    // don't collide with other tests; we filter the drain to just our messages.
-    let name = "notify-dedup-probe";
-    let ours = |items: Vec<(ToastVariant, String)>| -> Vec<(ToastVariant, String)> {
-        items
-            .into_iter()
-            .filter(|(_, msg)| msg.starts_with("probe-"))
-            .collect()
-    };
-
-    // First failure reports; a repeat of the same name stays silent.
-    note_theme_load_warning(name, Some("probe-first".to_string()));
-    note_theme_load_warning(name, Some("probe-second".to_string()));
-    assert_eq!(
-        ours(drain_notifications()),
-        vec![(ToastVariant::Warning, "probe-first".to_string())]
-    );
-
-    // A clean load clears the name, so a genuine later break warns again.
-    note_theme_load_warning(name, None);
-    note_theme_load_warning(name, Some("probe-third".to_string()));
-    assert_eq!(
-        ours(drain_notifications()),
-        vec![(ToastVariant::Warning, "probe-third".to_string())]
-    );
-}
-
-#[test]
-fn test_theme_override_pins_this_thread() {
+fn owned_theme_can_be_cloned_without_global_installation() {
     let journal = builtin("journal", Mode::Dark).unwrap();
-    set_test_theme(journal);
-    assert_eq!(theme(), journal);
+    assert_eq!(journal.clone(), journal);
 }

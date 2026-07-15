@@ -9,8 +9,8 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::tui::surface::{point_in_rect, surface_content_inner};
-use crate::tui::theme::theme;
+use crate::tui::surface::surface_content_inner;
+use crate::tui::theme::Theme;
 
 use super::chrome::{centered_rect_fixed_size, clear_surface, flat_chrome, surface_style};
 use super::footer::key_chip_style;
@@ -20,8 +20,8 @@ use super::footer::key_chip_style;
 /// a blank row below the title on top, plus a padding row below the content —
 /// so nothing sits on the card's edge and the title breathes. Sizing helpers
 /// add this to their content rows.
-pub(crate) fn dialog_frame_rows() -> u16 {
-    if flat_chrome() { 4 } else { 2 }
+pub(crate) fn dialog_frame_rows(theme: &Theme) -> u16 {
+    if flat_chrome(theme) { 4 } else { 2 }
 }
 
 /// A dialog's content rect within its outer `area`. Draw functions and mouse
@@ -29,17 +29,17 @@ pub(crate) fn dialog_frame_rows() -> u16 {
 /// drift apart. Bordered chrome insets by the border; flat chrome trades the
 /// side borders for a wider breathing margin, with a blank padding row above
 /// the title and below the content.
-pub(crate) fn dialog_inner(area: Rect) -> Rect {
+pub(crate) fn dialog_inner(theme: &Theme, area: Rect) -> Rect {
     // Saturating per-axis (unlike `Rect::inner`, which zeroes the whole rect):
     // sizing helpers probe with height-1 rects and still need the real width.
-    let top = if flat_chrome() { 3 } else { 1 };
+    let top = if flat_chrome(theme) { 3 } else { 1 };
     let frame_inner = Rect {
         x: area.x.saturating_add(1),
         y: area.y.saturating_add(top),
         width: area.width.saturating_sub(2),
-        height: area.height.saturating_sub(dialog_frame_rows()),
+        height: area.height.saturating_sub(dialog_frame_rows(theme)),
     };
-    surface_content_inner(frame_inner)
+    surface_content_inner(theme, frame_inner)
 }
 
 /// Clear and frame a dialog, returning its content rect (always
@@ -47,16 +47,17 @@ pub(crate) fn dialog_inner(area: Rect) -> Rect {
 /// flat chrome paints a dialog-colored surface with a bold title row and, when
 /// `esc_hint` is set, a muted `esc` dismiss hint on the right.
 pub(crate) fn draw_dialog_frame(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     area: Rect,
     title: &str,
     esc_hint: bool,
 ) -> Rect {
-    clear_surface(frame, area, theme().dialog_bg());
+    clear_surface(theme, frame, area, theme.dialog_bg());
     let title = title.trim();
-    if flat_chrome() {
+    if flat_chrome(theme) {
         // The title sits below a blank padding row, off the card's edge.
-        let content = dialog_inner(area);
+        let content = dialog_inner(theme, area);
         let top = Rect {
             x: content.x,
             y: area.y + 1.min(area.height.saturating_sub(1)),
@@ -65,27 +66,27 @@ pub(crate) fn draw_dialog_frame(
         };
         if !title.is_empty() {
             frame.render_widget(
-                Paragraph::new(Span::styled(title.to_string(), theme().heading())),
+                Paragraph::new(Span::styled(title.to_string(), theme.heading())),
                 top,
             );
         }
         if esc_hint {
             frame.render_widget(
-                Paragraph::new(Span::styled("esc", theme().muted())).alignment(Alignment::Right),
+                Paragraph::new(Span::styled("esc", theme.muted())).alignment(Alignment::Right),
                 top,
             );
         }
     } else {
         let mut block = Block::default()
             .borders(Borders::ALL)
-            .border_set(theme().glyphs().borders.border_set())
-            .border_style(theme().dialog_border());
+            .border_set(theme.glyphs().borders.border_set())
+            .border_style(theme.dialog_border());
         if !title.is_empty() {
             block = block.title(format!(" {title} "));
         }
         frame.render_widget(block, area);
     }
-    dialog_inner(area)
+    dialog_inner(theme, area)
 }
 
 /// Width and gap of the two confirm buttons; sized for a comfortable click target
@@ -118,6 +119,7 @@ pub(crate) fn confirm_button_rects(inner: Rect) -> (Rect, Rect) {
 /// active button gets the accent chip, the other the neutral surface, and a
 /// hovered button takes the `button_hover` patch on top.
 pub(crate) fn render_confirm_buttons(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     inner: Rect,
     yes_label: &str,
@@ -130,22 +132,22 @@ pub(crate) fn render_confirm_buttons(
     for (area, label, is_yes) in [(yes, yes_label, true), (no, no_label, false)] {
         // Flat chrome pads a filled chip; bordered brackets it. Same rects either
         // way, so the click targets from `confirm_button_rects` stay valid.
-        let text = if flat_chrome() {
+        let text = if flat_chrome(theme) {
             format!(" {label} ")
         } else {
             format!("[ {label} ]")
         };
         let mut style = if is_yes == active {
-            if flat_chrome() {
-                theme().button()
+            if flat_chrome(theme) {
+                theme.button()
             } else {
-                key_chip_style()
+                key_chip_style(theme)
             }
         } else {
-            surface_style(theme().raised_bg()).patch(theme().muted())
+            surface_style(theme, theme.raised_bg()).patch(theme.muted())
         };
         if hovered == Some(is_yes) {
-            style = style.patch(theme().button_hover());
+            style = style.patch(theme.button_hover());
         }
         frame.render_widget(
             Paragraph::new(Span::styled(text, style)).alignment(Alignment::Center),
@@ -154,27 +156,16 @@ pub(crate) fn render_confirm_buttons(
     }
 }
 
-/// Map a click to a confirm button: `Some(true)` for yes, `Some(false)` for no.
-pub(crate) fn confirm_button_at(inner: Rect, col: u16, row: u16) -> Option<bool> {
-    let (yes, no) = confirm_button_rects(inner);
-    if point_in_rect(yes, col, row) {
-        Some(true)
-    } else if point_in_rect(no, col, row) {
-        Some(false)
-    } else {
-        None
-    }
-}
-
 /// Draw the internal editor's "Discard changes?" confirmation as a centered
 /// modal, matching the confirm-delete dialog's look.
 pub(crate) fn draw_editor_discard_confirm(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     selected: bool,
     hovered: Option<bool>,
 ) {
-    let area = editor_discard_confirm_area(frame.area());
-    let inner = draw_dialog_frame(frame, area, "Discard Changes", true);
+    let area = editor_discard_confirm_area(theme, frame.area());
+    let inner = draw_dialog_frame(theme, frame, area, "Discard Changes", true);
     let line = Rect {
         y: inner.y,
         height: 1,
@@ -184,17 +175,12 @@ pub(crate) fn draw_editor_discard_confirm(
         Paragraph::new("Discard unsaved changes?").alignment(Alignment::Center),
         line,
     );
-    render_confirm_buttons(frame, inner, "Discard", "Keep", selected, hovered);
+    render_confirm_buttons(theme, frame, inner, "Discard", "Keep", selected, hovered);
 }
 
-pub(crate) fn editor_discard_confirm_area(frame_area: Rect) -> Rect {
+pub(crate) fn editor_discard_confirm_area(theme: &Theme, frame_area: Rect) -> Rect {
     // Message + blank + buttons, inside the frame.
-    centered_rect_fixed_size(42, 3 + dialog_frame_rows(), frame_area)
-}
-
-pub(crate) fn editor_discard_choice_at_point(frame_area: Rect, col: u16, row: u16) -> Option<bool> {
-    let inner = dialog_inner(editor_discard_confirm_area(frame_area));
-    confirm_button_at(inner, col, row)
+    centered_rect_fixed_size(42, 3 + dialog_frame_rows(theme), frame_area)
 }
 
 /// Draw the full-screen "journal chrome" frame shared by the startup modals
@@ -204,18 +190,19 @@ pub(crate) fn editor_discard_choice_at_point(frame_area: Rect, col: u16, row: u1
 /// Clears the screen first and returns the inner area to lay the modal's
 /// content into.
 pub(crate) fn draw_modal_frame(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     title: &str,
     status: &str,
     key_hint: &str,
 ) -> Rect {
     let area = frame.area();
-    clear_surface(frame, area, theme().base_bg());
+    clear_surface(theme, frame, area, theme.base_bg());
 
-    if flat_chrome() {
+    if flat_chrome(theme) {
         // No outer border: the screen name and hints sit on full-width
         // element-surface bars along the top and bottom, like status bars.
-        let bar = Style::default().bg(theme().raised_bg());
+        let bar = Style::default().bg(theme.raised_bg());
         let top_bar = Rect {
             height: 1.min(area.height),
             ..area
@@ -227,7 +214,7 @@ pub(crate) fn draw_modal_frame(
             ..top_bar
         };
         frame.render_widget(
-            Paragraph::new(Span::styled(format!(" {title} "), theme().muted())),
+            Paragraph::new(Span::styled(format!(" {title} "), theme.muted())),
             top,
         );
         if area.height > 1 && (!status.is_empty() || !key_hint.is_empty()) {
@@ -242,13 +229,13 @@ pub(crate) fn draw_modal_frame(
             };
             if !status.is_empty() {
                 frame.render_widget(
-                    Paragraph::new(Span::styled(format!(" {status} "), theme().muted())),
+                    Paragraph::new(Span::styled(format!(" {status} "), theme.muted())),
                     bottom,
                 );
             }
             if !key_hint.is_empty() {
                 frame.render_widget(
-                    Paragraph::new(Span::styled(format!(" {key_hint} "), theme().muted()))
+                    Paragraph::new(Span::styled(format!(" {key_hint} "), theme.muted()))
                         .alignment(Alignment::Right),
                     bottom,
                 );
@@ -262,8 +249,8 @@ pub(crate) fn draw_modal_frame(
 
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_set(theme().glyphs().borders.border_set())
-        .border_style(theme().dialog_border())
+        .border_set(theme.glyphs().borders.border_set())
+        .border_style(theme.dialog_border())
         .title_top(Line::from(format!(" {title} ")));
     if !status.is_empty() {
         block = block.title_bottom(Line::from(format!(" {status} ")));

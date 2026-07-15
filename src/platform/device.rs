@@ -1,7 +1,7 @@
 //! Best-effort device naming for labelling encryption keys. The name is not a
 //! secret or a security boundary — it only helps a human tell their devices
-//! apart in `notema encryption device list`, so lookup falls back gracefully
-//! rather than failing.
+//! apart in `notema encryption device list`, so lookup falls back rather than
+//! failing.
 
 use std::process::Command;
 

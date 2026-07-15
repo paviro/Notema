@@ -1,4 +1,14 @@
-use super::*;
+use std::ops::Range;
+
+use notema_domain::{Entry, EntryEncryptionState, SearchHit};
+use notema_storage::{Journal, entry_timestamp_label};
+
+use crate::tui::{
+    app::{AppModel, EntryTarget, Focus, Mode, single_panel_is_active},
+    entry_rows::RowMeta,
+    features::{insights::InsightsTab, metadata::metadata_values},
+    state::{MetadataKind, move_list_selection},
+};
 
 /// Apply a wheel/keyboard scroll to a list's pixel offset. Shared by the entry
 /// list and journal column, which use the same pixel-row scroll model.
@@ -49,7 +59,7 @@ impl SelectedEntryMetadata {
     }
 }
 
-impl App {
+impl AppModel {
     pub(crate) fn selected_journal_index(&self) -> usize {
         self.nav.journal_list.selected().unwrap_or(0)
     }
@@ -77,10 +87,11 @@ impl App {
     /// journal column's rows are a uniform `journal_row_height()` tall — boxes
     /// and the "Archived" divider alike — so this is a plain multiply without
     /// building the rows.
-    pub(super) fn journal_row_top(&self, index: usize) -> usize {
+    pub(crate) fn journal_row_top(&self, index: usize) -> usize {
         let divider_before =
             usize::from(self.has_archived_journals() && index >= self.active_journal_count());
-        (index + divider_before) * crate::tui::render::journal_row_height() as usize
+        (index + divider_before)
+            * crate::tui::render::journal_row_height(&self.appearance.theme) as usize
     }
 
     /// Whether an entry is showing in the reader: one is selected *and* focus sits on
@@ -169,7 +180,7 @@ impl App {
         );
     }
 
-    pub(super) fn reset_entry_scroll(&mut self) {
+    pub(crate) fn reset_entry_scroll(&mut self) {
         *self.nav.entry_list.offset_mut() = 0;
         self.nav.scroll.reset_reader();
         self.reader_anchor_flash = None;
@@ -333,6 +344,59 @@ impl App {
         self.nav.focus = Focus::Insights;
     }
 
+    pub(crate) fn move_focus_left(&mut self) {
+        // Leaving the viewer always drops full-screen mode so re-entering starts from
+        // the focused reader pane again.
+        self.nav.reader_fullscreen = false;
+        self.nav.focus = match self.nav.focus {
+            // Left steps back through the insights tabs (staying expanded if it was);
+            // from the first tab it leaves the panel back to the entries column, which
+            // drops full-screen so re-entering starts collapsed.
+            Focus::Insights if self.nav.insights_tab.index() == 0 => {
+                self.nav.insights_fullscreen = false;
+                Focus::Entries
+            }
+            Focus::Insights => {
+                self.nav.insights_tab = self.nav.insights_tab.prev();
+                self.nav.scroll.reset_insights();
+                Focus::Insights
+            }
+            Focus::Reader => Focus::Entries,
+            // When the journal list is hidden, Left stops at Entries so focus never
+            // lands on a pane that isn't rendered — use `j` to bring the list back.
+            Focus::Entries if self.state.ui.show_journals => Focus::Journals,
+            Focus::Entries | Focus::Journals => self.nav.focus,
+        };
+    }
+
+    pub(crate) fn move_focus_right(&mut self, reader_available: bool) {
+        self.nav.focus = match self.nav.focus {
+            // Entering the entries column keeps whatever selection was there (none by
+            // default), so the insights panel stays put until an entry is picked and
+            // Right can carry on to the insights panel.
+            Focus::Journals => Focus::Entries,
+            Focus::Entries if reader_available && self.has_selected_entry_target() => {
+                // Focusing the viewer lands on the reader pane; full screen is a
+                // separate, explicit Enter away.
+                self.nav.reader_fullscreen = false;
+                Focus::Reader
+            }
+            // With no entry to show, the right column is the insights panel; Right
+            // focuses it (landing on the first tab). Reachable at single-panel width
+            // too, where it takes over the full screen.
+            Focus::Entries if self.show_journal_insights() => Focus::Insights,
+            // Right steps forward through the tabs, stopping at the last.
+            Focus::Insights => {
+                if self.nav.insights_tab.index() + 1 < InsightsTab::ALL.len() {
+                    self.nav.insights_tab = self.nav.insights_tab.next();
+                    self.nav.scroll.reset_insights();
+                }
+                Focus::Insights
+            }
+            Focus::Entries | Focus::Reader => self.nav.focus,
+        };
+    }
+
     pub(crate) fn select_insights_tab(&mut self, tab: InsightsTab) {
         if self.nav.insights_tab != tab {
             self.nav.insights_tab = tab;
@@ -382,7 +446,7 @@ impl App {
         Some(journal_name)
     }
 
-    pub(super) fn selected_entry(&self) -> Option<&Entry> {
+    pub(crate) fn selected_entry(&self) -> Option<&Entry> {
         let index = self.nav.selected_entry_index?;
         let range = self.selected_entry_range()?;
         (index < range.len()).then(|| &self.library.entries[range.start + index])
@@ -417,7 +481,7 @@ impl App {
         self.selected_entry_metadata(MetadataKind::Activities)
     }
 
-    pub(super) fn selected_entry_metadata(&self, kind: MetadataKind) -> Vec<String> {
+    pub(crate) fn selected_entry_metadata(&self, kind: MetadataKind) -> Vec<String> {
         self.resolved_selected_entry()
             .map(|entry| metadata_values(entry, kind).to_vec())
             .unwrap_or_default()
@@ -427,6 +491,23 @@ impl App {
         self.resolved_selected_entry()
             .map(|entry| entry.feelings.clone())
             .unwrap_or_default()
+    }
+
+    pub(crate) fn selected_entry_mood(&self) -> Option<i8> {
+        self.resolved_selected_entry().and_then(|entry| entry.mood)
+    }
+
+    pub(crate) fn selected_entry_starred(&self) -> bool {
+        self.resolved_selected_entry()
+            .is_some_and(|entry| entry.starred)
+    }
+
+    /// The selected entry's location as a one-line label, if any.
+    #[cfg(test)]
+    pub(crate) fn selected_entry_location(&self) -> Option<String> {
+        self.resolved_selected_entry()
+            .and_then(|entry| entry.location.as_ref())
+            .and_then(|location| location.display_label())
     }
 
     /// The selected entry's metadata exactly as the viewer draws it, owned in
@@ -456,6 +537,7 @@ impl App {
             .as_ref()
             .and_then(|location| location.display_label());
         crate::tui::env_strip::environment_items(
+            &self.appearance.theme,
             location.as_deref(),
             entry.weather.as_ref(),
             entry.celestial.as_ref(),

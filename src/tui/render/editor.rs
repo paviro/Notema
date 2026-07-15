@@ -5,7 +5,7 @@ use crate::tui::{
     render::{entry_metadata_layout, panel_block, render_scrollbar_if_needed},
     state::HoverTarget,
     surface::PanelGeometry,
-    theme::theme,
+    theme::Theme,
 };
 
 use super::metadata::{EntryMetadata, draw_metadata_section};
@@ -16,24 +16,25 @@ use super::reader::metadata_scrolls_with_body;
 /// metadata pinned below it. Honors the viewer's max-width and vertical-center
 /// settings, and shows an inline discard confirmation when one is pending.
 pub(crate) fn draw_entry_editor(
+    active_theme: &Theme,
     frame: &mut Frame<'_>,
     area: Rect,
     editor: &mut EntryEditor,
     side_margin: u16,
     top_margin: u16,
 ) {
-    let block = panel_block(editor.title(), true, None);
+    let block = panel_block(active_theme, editor.title(), true, None);
     frame.render_widget(block, area);
-    super::panel_focus_stripe(frame, area, true);
+    super::panel_focus_stripe(active_theme, frame, area, true);
 
     // Refresh markdown syntax styling before the textarea renders (it reads the
     // spans during render). No-op unless the body changed since the last frame.
     // Done here, ahead of the immutable metadata borrow taken just below.
-    editor.refresh_syntax_highlight();
+    editor.refresh_syntax_highlight(active_theme);
 
     // Same builder the viewer uses, from the buffered metadata — so location and
     // every other front-matter field show in edit mode too.
-    let metadata = EntryMetadata::from_metadata(&editor.metadata);
+    let metadata = EntryMetadata::from_metadata(active_theme, &editor.metadata);
 
     // The metadata section pins below the body only while the pane can still give the
     // body its minimum height; once the metadata would push it under that, it's
@@ -42,10 +43,10 @@ pub(crate) fn draw_entry_editor(
     // can't reach a read-only block past the text.) Nothing is lost: the Ctrl+G
     // dialogs show the current values as you edit them, and the viewer shows them in
     // full on save.
-    let (body_area, layout) = if metadata_scrolls_with_body(area, metadata.values()) {
-        (PanelGeometry::new(area).content, None)
+    let (body_area, layout) = if metadata_scrolls_with_body(active_theme, area, metadata.values()) {
+        (PanelGeometry::new(active_theme, area).content, None)
     } else {
-        let layout = entry_metadata_layout(area, metadata.values());
+        let layout = entry_metadata_layout(active_theme, area, metadata.values());
         (layout.content, Some(layout))
     };
 
@@ -64,10 +65,19 @@ pub(crate) fn draw_entry_editor(
     // the theme's cursor style — by default unstyled, leaving the native bar
     // cursor placed below as the only caret.
     let selecting = editor.textarea.selection_range().is_some();
+    editor
+        .textarea
+        .set_cursor_line_style(active_theme.cursor_line());
+    editor
+        .textarea
+        .set_selection_style(active_theme.selection());
+    editor
+        .textarea
+        .set_placeholder_style(active_theme.placeholder());
     editor.textarea.set_cursor_style(if selecting {
-        theme().selection()
+        active_theme.selection()
     } else {
-        theme().cursor()
+        active_theme.cursor()
     });
 
     editor.text_rect = text_rect;
@@ -92,6 +102,7 @@ pub(crate) fn draw_entry_editor(
     // Scroll offset and wrapped-line count are only valid after the textarea has
     // rendered (it stores them during render), so read them here.
     render_scrollbar_if_needed(
+        active_theme,
         frame,
         area,
         editor.textarea.screen_line_count(),
@@ -103,6 +114,6 @@ pub(crate) fn draw_entry_editor(
 
     if let Some(layout) = layout {
         // The editor's own metadata preview has no clickable chips, so no hover.
-        draw_metadata_section(frame, layout, &metadata, HoverTarget::None);
+        draw_metadata_section(active_theme, frame, layout, &metadata, HoverTarget::None);
     }
 }

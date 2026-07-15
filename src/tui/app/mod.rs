@@ -2,15 +2,13 @@ use crate::{
     AppResult,
     config::{Config, State},
 };
-use notema_domain::{Entry, EntryEncryptionState, SearchHit, entry_group_date};
-use notema_domain::{FEELING_GROUPS, normalize_feeling};
+use notema_domain::Entry;
 use notema_storage::{
-    CachePolicy, CachedLibrary, Journal, JournalStore, LibrarySnapshot, entry_timestamp_label,
-    is_entry_file,
+    CachePolicy, CachedLibrary, Journal, JournalStore, LibrarySnapshot, is_entry_file,
 };
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap},
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
@@ -23,17 +21,13 @@ use ratatui::{
     widgets::ListState,
 };
 
-use super::search::search_loaded_entries;
-use super::state::{
-    DeleteContext, EditMoodState, HoverTarget, ImageViewerState, MetadataKind, Overlay,
-    ScrollState, SearchState, ToastVariant, Toasts, move_list_selection,
-};
+use super::state::{HoverTarget, Overlay, ScrollState, SearchState, ToastVariant, Toasts};
 use crate::tui::editor_state::EntryEditor;
-use crate::tui::entry_rows::{EntryRowCache, RowMeta, build_entry_row_cache};
-use crate::tui::image::{ImageAsset, ImageRuntime, entry_images, viewer_image_size};
-use crate::tui::render::insights::{InsightsScope, InsightsTab, InsightsTimeframe};
-use crate::tui::text_input::TextInput;
-use notema_analytics::{Analytics, Correlations, analyze, build_correlations};
+use crate::tui::features::insights::{InsightsScope, InsightsTab, InsightsTimeframe};
+use crate::tui::image::{ImageAsset, ImageRuntime};
+
+mod cache;
+pub(crate) use cache::RenderCaches;
 
 pub(crate) const JOURNAL_LIST_WIDTH: u16 = 27;
 pub(crate) const ENTRY_LIST_INLINE_WIDTH: u16 = 47;
@@ -41,8 +35,6 @@ pub(crate) const ENTRY_LIST_MIN_WIDTH: u16 = 40;
 pub(crate) const TWO_PANEL_MIN_WIDTH: u16 = 87;
 pub(crate) const INLINE_READER_MIN_WIDTH: u16 = 125;
 
-/// Rows moved per PageUp/PageDown, as a multiple of a single-line scroll.
-const PAGE_STEP: i16 = 10;
 const INITIAL_LIBRARY_LOADING_TOAST: &str = "Loading journals from disk…";
 const MANUAL_REFRESH_TOAST: &str = "Refreshing from disk…";
 
@@ -65,7 +57,7 @@ pub(crate) enum Mode {
 pub(crate) use notema_domain::SearchScope;
 
 /// The theme, color mode, and chrome to display, resolved from the context
-/// journal's override and the `[ui]` config by [`App::effective_selection`].
+/// journal's override and the `[ui]` config by [`AppModel::effective_selection`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThemeSelection {
     pub(crate) name: String,
@@ -80,24 +72,6 @@ pub(crate) struct EntryTarget {
     pub(crate) title: String,
     /// Encrypted entry whose identity is not loaded — cannot be read or written.
     pub(crate) locked: bool,
-}
-
-/// Identifies the inputs that fully determine the entry-list rows, so a matching
-/// key means the cached [`EntryRowCache`] can be reused. Notably excludes the
-/// scroll offset and selected index — those are applied when drawing, not baked
-/// into the rows.
-#[derive(Clone, PartialEq)]
-struct EntryRowKey {
-    /// [`RenderCaches::rows_version`] — bumped whenever `entries` or
-    /// `search.hits` change, since the rows are built from the hits in Search
-    /// mode.
-    version: u64,
-    mode: Mode,
-    journal: Option<String>,
-    text_width: u16,
-    /// The rows bake in the theme's chrome, glyphs, and colors, and the theme
-    /// picker live-previews across themes — the key must notice any change.
-    theme: crate::tui::theme::Theme,
 }
 
 /// The Reader output of the Markdown parse/render pipeline, memoized because it
@@ -133,157 +107,6 @@ pub(crate) struct ReaderAnchorFlash {
     pub(crate) until: Instant,
 }
 
-/// Cache key for [`App::cached_entry_body`]: the rendered body is fully
-/// determined by which entry is shown (`path` + `version`), the wrap width,
-/// whether link URLs are shown, and the theme (markdown colors, glyphs, and
-/// syntax highlighting are baked
-/// into the lines — the picker's live preview must rebuild them). The
-/// `version` is [`RenderCaches::entries_version`] — not the rows version —
-/// because the body depends only on entry content, not on which search hits
-/// are showing (a hit change that swaps the shown entry already changes
-/// `path`).
-#[derive(Clone, PartialEq)]
-struct EntryBodyKey {
-    version: u64,
-    path: Option<PathBuf>,
-    width: usize,
-    theme: crate::tui::theme::Theme,
-    show_link_urls: bool,
-}
-
-/// The per-frame render memo caches and the version counters that invalidate
-/// them. Grouped so `App` carries one field instead of four and the versions
-/// have a single home. All three caches are read on the `&self` render/hit-test
-/// paths, so each is a `RefCell`.
-///
-/// Two counters, because the caches have different dependencies:
-/// - [`Self::entries_version`] bumps only when the `entries` Vec changes. It
-///   keys the body and analytics caches, which depend on entry content alone.
-/// - [`Self::rows_version`] bumps when entries **or** search hits change. It
-///   keys the row cache, which is built from the hits in Search mode.
-///
-/// A search recompute therefore bumps only `rows_version`, so the (more
-/// expensive) rendered-body and journal-insights memos survive keystroke-driven
-/// query edits instead of rebuilding every time.
-#[derive(Default)]
-struct RenderCaches {
-    /// Memoized entry-list rows, keyed by [`EntryRowKey`].
-    entry_row_cache: RefCell<Option<(EntryRowKey, Rc<EntryRowCache>)>>,
-    /// Memoized rendered body lines for the entry reader, keyed by
-    /// [`EntryBodyKey`]. Rebuilt only when the shown entry or wrap width changes,
-    /// so scroll and image ticks reuse it.
-    entry_body_cache: RefCell<Option<(EntryBodyKey, Rc<RenderedEntryBody>)>>,
-    /// Memoized analytics for the `(entries_version, scope key)` they were
-    /// computed for. The scope key is the journal name for `Journal` scope or a
-    /// sentinel for `All`, so switching tab/scope reuses the build instead of
-    /// rescanning every entry each frame.
-    analytics_cache: RefCell<Option<(u64, String, Rc<Analytics>)>>,
-    /// Memoized correlations for a *windowed* slice of the scope, keyed by
-    /// `(entries_version, scope key, timeframe)`. Separate from `analytics_cache`
-    /// because it recomputes against the window's own baseline mean (so `mood_delta`
-    /// answers "what lifts/drains me *this week*"), and only when the Drivers tab
-    /// needs it.
-    windowed_cache: RefCell<WindowedCache>,
-    entries_version: u64,
-    rows_version: u64,
-}
-
-/// The windowed-correlations memo: `(entries_version, scope key, timeframe)` and
-/// the correlations built for them.
-type WindowedCache = Option<(u64, String, InsightsTimeframe, Rc<Correlations>)>;
-
-impl RenderCaches {
-    /// The `entries` Vec changed: both the entries-keyed (body, analytics) and
-    /// rows-keyed caches are stale.
-    fn bump_entries(&mut self) {
-        self.entries_version = self.entries_version.wrapping_add(1);
-        self.rows_version = self.rows_version.wrapping_add(1);
-    }
-
-    /// Only the entry-list rows changed (a search recompute); the body and
-    /// analytics caches, keyed on [`Self::entries_version`], stay valid.
-    fn bump_rows(&mut self) {
-        self.rows_version = self.rows_version.wrapping_add(1);
-    }
-
-    /// Return the memoized rows for `key`, building them with `build` on a miss.
-    fn rows(&self, key: EntryRowKey, build: impl FnOnce() -> EntryRowCache) -> Rc<EntryRowCache> {
-        if let Some((cached_key, cache)) = self.entry_row_cache.borrow().as_ref()
-            && *cached_key == key
-        {
-            return cache.clone();
-        }
-        let cache = Rc::new(build());
-        *self.entry_row_cache.borrow_mut() = Some((key, cache.clone()));
-        cache
-    }
-
-    /// Return the memoized rendered body for `key`, building it with `build` on a
-    /// miss (entry or width changed, or the store reloaded).
-    fn body(
-        &self,
-        key: EntryBodyKey,
-        build: impl FnOnce() -> RenderedEntryBody,
-    ) -> Rc<RenderedEntryBody> {
-        if let Some((cached_key, body)) = self.entry_body_cache.borrow().as_ref()
-            && *cached_key == key
-        {
-            return body.clone();
-        }
-        let body = Rc::new(build());
-        *self.entry_body_cache.borrow_mut() = Some((key, body.clone()));
-        body
-    }
-
-    /// Return the memoized analytics for `scope_key` at `version`, building them
-    /// with `build` on a miss (scope/journal changed, or the store reloaded).
-    fn analytics(
-        &self,
-        version: u64,
-        scope_key: &str,
-        build: impl FnOnce() -> Analytics,
-    ) -> Rc<Analytics> {
-        if let Some((cached_version, key, analytics)) = self.analytics_cache.borrow().as_ref()
-            && *cached_version == version
-            && key == scope_key
-        {
-            return analytics.clone();
-        }
-        let analytics = Rc::new(build());
-        *self.analytics_cache.borrow_mut() =
-            Some((version, scope_key.to_string(), analytics.clone()));
-        analytics
-    }
-
-    /// Return the memoized windowed correlations for `(version, scope_key,
-    /// timeframe)`, building them with `build` on a miss (window, scope, or
-    /// entries changed).
-    fn windowed(
-        &self,
-        version: u64,
-        scope_key: &str,
-        timeframe: InsightsTimeframe,
-        build: impl FnOnce() -> Correlations,
-    ) -> Rc<Correlations> {
-        if let Some((cached_version, key, cached_tf, correlations)) =
-            self.windowed_cache.borrow().as_ref()
-            && *cached_version == version
-            && key == scope_key
-            && *cached_tf == timeframe
-        {
-            return correlations.clone();
-        }
-        let correlations = Rc::new(build());
-        *self.windowed_cache.borrow_mut() = Some((
-            version,
-            scope_key.to_string(),
-            timeframe,
-            correlations.clone(),
-        ));
-        correlations
-    }
-}
-
 /// The entry-view image subsystem: the terminal-image runtime plus the caches
 /// keyed by entry path (rather than by a [`RenderCaches`] version counter),
 /// invalidated together when the open entry changes or the store reloads.
@@ -292,16 +115,16 @@ pub(crate) struct ImageState {
     pub(crate) runtime: ImageRuntime,
     /// `(entry_path, viewer_size)` the runtime is warmed for, or `None` when no
     /// entry view is open. Compared against the desired context each tick.
-    warm: Option<(PathBuf, Size)>,
+    pub(crate) warm: Option<(PathBuf, Size)>,
     /// Selected entry's in-folder images, memoized by path; `RefCell` so `&self`
     /// render/hint/shortcut paths can read it. Re-parsed on a path change or when
     /// `refresh` clears it.
-    selected_cache: RefCell<Option<(PathBuf, Rc<Vec<ImageAsset>>)>>,
+    pub(crate) selected_cache: RefCell<Option<(PathBuf, Rc<Vec<ImageAsset>>)>>,
 }
 
 /// The loaded journals and their entries, plus the two derived lookup indexes
 /// that must stay in sync with `entries`. Grouped so the sync invariant lives
-/// behind [`Library::rebuild_indexes`] rather than being spread across `App` —
+/// behind [`Library::rebuild_indexes`] rather than being spread across `AppModel` —
 /// the whole in-memory reading collection.
 #[derive(Default)]
 pub(crate) struct Library {
@@ -350,13 +173,13 @@ impl Library {
     }
 
     /// Resolve an entry by id in O(1) via [`Self::entry_index_by_id`].
-    fn entry_by_id(&self, id: &str) -> Option<&Entry> {
+    pub(crate) fn entry_by_id(&self, id: &str) -> Option<&Entry> {
         self.entries.get(*self.entry_index_by_id.get(id)?)
     }
 
     /// Contiguous index range into `entries` for `journal`, or `None` when it has
     /// no entries.
-    fn range(&self, journal: &str) -> Option<Range<usize>> {
+    pub(crate) fn range(&self, journal: &str) -> Option<Range<usize>> {
         self.journal_ranges.get(journal).cloned()
     }
 }
@@ -418,12 +241,50 @@ impl Default for Nav {
     }
 }
 
-pub(crate) struct App {
+pub(crate) struct Services {
     pub(crate) config_path: PathBuf,
     pub(crate) config: Config,
+    pub(crate) store: JournalStore,
+}
+
+pub(crate) struct Appearance {
+    pub(crate) theme: crate::tui::theme::Theme,
+    pub(crate) color_mode: crate::config::ColorMode,
+    pub(crate) chrome_override: Option<crate::tui::theme::ChromeStyle>,
+    pub(crate) detected_mode: crate::tui::theme::Mode,
+    warned_themes: BTreeSet<String>,
+}
+
+impl Appearance {
+    pub(crate) fn mode(&self) -> crate::tui::theme::Mode {
+        match self.color_mode {
+            crate::config::ColorMode::Dark => crate::tui::theme::Mode::Dark,
+            crate::config::ColorMode::Light => crate::tui::theme::Mode::Light,
+            crate::config::ColorMode::Auto => self.detected_mode,
+        }
+    }
+
+    pub(crate) fn resolve(&self, theme: crate::tui::theme::Theme) -> crate::tui::theme::Theme {
+        theme.with_chrome_override(self.chrome_override)
+    }
+
+    fn warning(&mut self, name: &str, warning: Option<String>) -> Option<String> {
+        match warning {
+            Some(message) if self.warned_themes.insert(name.to_string()) => Some(message),
+            Some(_) => None,
+            None => {
+                self.warned_themes.remove(name);
+                None
+            }
+        }
+    }
+}
+
+pub(crate) struct AppModel {
+    pub(crate) services: Services,
+    pub(crate) appearance: Appearance,
     /// Per-device UI state persisted to `state.toml` (e.g. the last-open journal).
     pub(crate) state: State,
-    pub(crate) store: JournalStore,
     pub(crate) library: Library,
     /// Cached lists are usable immediately, but background write-backs wait
     /// until the source-tree reconciliation has completed.
@@ -431,7 +292,7 @@ pub(crate) struct App {
     /// Changes whenever source-backed library state is refreshed. Startup
     /// validation uses this to avoid installing a snapshot older than an edit
     /// or manual refresh completed while it was running.
-    library_generation: u64,
+    pub(crate) library_generation: u64,
     pub(crate) nav: Nav,
     pub(crate) search: SearchState,
     pub(crate) overlay: Overlay,
@@ -450,17 +311,8 @@ pub(crate) struct App {
     /// Background weather/air-quality/celestial fetching; spawned on first use.
     /// Serves the editor prefetch, direct location-sets, and the paced backfill.
     pub(crate) environment: crate::tui::environment::EnvironmentWorker,
-    /// Entries with a location but no captured environment, awaiting a backfill fetch.
-    /// Paced out one at a time (see [`Self::dispatch_environment_backfill`]) so the
-    /// interactive fetch never queues behind a batch and Open-Meteo isn't spammed.
-    pub(crate) backfill_queue: VecDeque<PathBuf>,
-    /// Paths ever queued for backfill this session, so a re-scan can't re-enqueue
-    /// one still in flight (its environment lands and clears the predicate later).
-    pub(crate) backfill_enqueued: HashSet<PathBuf>,
-    /// The id of the backfill request currently in flight, if any.
-    pub(crate) backfill_inflight: Option<u64>,
-    /// When the last backfill request was dispatched, for throttling.
-    pub(crate) backfill_last_dispatch: Option<Instant>,
+    /// Paced backfill of environment for located entries that never captured it.
+    pub(crate) backfill: crate::tui::features::environment::EnvironmentBackfill,
     /// Id counter for environment requests (editor fetches, backfill, direct
     /// location-set write-backs) — app-level so ids never repeat across editor
     /// sessions and a stale result can't be adopted by a later one.
@@ -468,20 +320,14 @@ pub(crate) struct App {
     /// Id counter for geocode requests, app-level for the same reason: a dialog
     /// reopened while an earlier lookup is still in flight must not reuse its id.
     pub(crate) next_geocode_id: u64,
-    /// Clickable `[Image N …]` label positions from the last entry-view render.
-    pub(crate) reader_image_hits: ReaderImageHits,
     pub(crate) reader_anchor_flash: Option<ReaderAnchorFlash>,
-    /// The insights list scrollbar geometry from the last render, so a mouse drag
-    /// can map cursor rows back to a scroll offset. `total == 0` means the current
-    /// tab has no scrollable list (no bar drawn).
-    pub(crate) insights_scroll: InsightsScrollGeometry,
     pub(crate) scrollbar: ScrollbarDragState,
     /// The row/hint under the mouse cursor, for hover highlights. Set by mouse
     /// motion, cleared by any key event (see [`HoverTarget`]).
     pub(crate) hover: HoverTarget,
     /// Per-frame render memo caches (rows, rendered body, journal insights) and the
     /// version counters that invalidate them. See [`RenderCaches`].
-    caches: RenderCaches,
+    pub(crate) caches: RenderCaches,
 }
 
 /// Clickable image label positions in the entry view, captured at render time so
@@ -508,6 +354,8 @@ pub(crate) struct InsightsScrollGeometry {
     pub(crate) total: usize,
     /// Rows visible at once.
     pub(crate) viewport: u16,
+    /// Effective clamped offset used for this frame.
+    pub(crate) scroll: u16,
 }
 
 /// Which pane's vertical scrollbar a mouse drag is currently manipulating.
@@ -531,7 +379,7 @@ pub(crate) struct ScrollbarDragState {
     pub(crate) grab: u16,
 }
 
-impl App {
+impl AppModel {
     #[cfg(any(test, feature = "bench"))]
     pub(crate) fn new(
         config_path: PathBuf,
@@ -539,7 +387,14 @@ impl App {
         store: JournalStore,
     ) -> AppResult<Self> {
         let snapshot = store.load_library(CachePolicy::Normal)?;
-        Self::new_with_snapshot(config_path, config, store, snapshot, true)
+        Self::new_with_snapshot(
+            config_path,
+            config,
+            store,
+            snapshot,
+            true,
+            crate::tui::theme::Mode::Dark,
+        )
     }
 
     /// Build from the decoded cache. The retained opaque cache is passed to the
@@ -549,6 +404,7 @@ impl App {
         config_path: PathBuf,
         config: Config,
         store: JournalStore,
+        detected_mode: crate::tui::theme::Mode,
     ) -> AppResult<(Self, Option<CachedLibrary>)> {
         let cache = store.read_cached_library(CachePolicy::Normal)?;
         let snapshot = match cache.cached.as_ref() {
@@ -559,7 +415,8 @@ impl App {
                 report: cache.report.clone(),
             },
         };
-        let mut app = Self::new_with_snapshot(config_path, config, store, snapshot, false)?;
+        let mut app =
+            Self::new_with_snapshot(config_path, config, store, snapshot, false, detected_mode)?;
         if cache.cached.is_none() {
             app.toasts
                 .push_persistent(ToastVariant::Info, INITIAL_LIBRARY_LOADING_TOAST);
@@ -573,13 +430,24 @@ impl App {
         store: JournalStore,
         snapshot: LibrarySnapshot,
         library_validated: bool,
+        detected_mode: crate::tui::theme::Mode,
     ) -> AppResult<Self> {
         let state = crate::config::load_state(&config_path)?;
+        let appearance = Appearance {
+            theme: crate::tui::theme::Theme::terminal_default(),
+            color_mode: config.ui.color_mode,
+            chrome_override: crate::tui::theme::chrome_style(config.ui.chrome),
+            detected_mode,
+            warned_themes: BTreeSet::new(),
+        };
         let mut app = Self {
-            config_path,
-            config,
+            services: Services {
+                config_path,
+                config,
+                store,
+            },
+            appearance,
             state,
-            store,
             library: Library::default(),
             library_validated,
             library_generation: 0,
@@ -592,15 +460,10 @@ impl App {
             image: ImageState::default(),
             geocode: crate::tui::geocode::GeocodeWorker::default(),
             environment: crate::tui::environment::EnvironmentWorker::default(),
-            backfill_queue: VecDeque::new(),
-            backfill_enqueued: HashSet::new(),
-            backfill_inflight: None,
-            backfill_last_dispatch: None,
+            backfill: crate::tui::features::environment::EnvironmentBackfill::default(),
             next_environment_id: 0,
             next_geocode_id: 0,
-            reader_image_hits: ReaderImageHits::default(),
             reader_anchor_flash: None,
-            insights_scroll: InsightsScrollGeometry::default(),
             scrollbar: ScrollbarDragState::default(),
             hover: HoverTarget::default(),
             caches: RenderCaches::default(),
@@ -626,7 +489,7 @@ impl App {
         if !app.state.ui.show_journals {
             app.nav.focus = Focus::Entries;
         }
-        // The startup journal is chosen only now, so the pre-App theme install
+        // The startup journal is chosen only now, so the pre-AppModel theme install
         // couldn't account for it.
         app.apply_effective_theme();
         Ok(app)
@@ -686,9 +549,9 @@ impl App {
         old_name: &str,
         new_name: &str,
     ) -> AppResult<()> {
-        if self.config.journal.default.as_deref() == Some(old_name) {
-            self.config.journal.default = Some(new_name.to_string());
-            crate::config::save_config(&self.config_path, &self.config)?;
+        if self.services.config.journal.default.as_deref() == Some(old_name) {
+            self.services.config.journal.default = Some(new_name.to_string());
+            crate::config::save_config(&self.services.config_path, &self.services.config)?;
         }
         Ok(())
     }
@@ -698,7 +561,7 @@ impl App {
     /// selected journal. An all-journals search has no context journal — it
     /// follows the global theme, so stepping through cross-journal hits doesn't
     /// re-theme per hit.
-    fn context_journal(&self) -> Option<&Journal> {
+    pub(crate) fn context_journal(&self) -> Option<&Journal> {
         if self.compose
             && let Some(editor) = &self.editor
             && let crate::tui::editor_state::EditorTarget::New { journal } = &editor.target
@@ -722,11 +585,11 @@ impl App {
     /// themes.
     pub(crate) fn effective_selection(&self) -> ThemeSelection {
         let global = ThemeSelection {
-            name: self.config.ui.theme.clone(),
-            color_mode: self.config.ui.color_mode,
-            chrome: self.config.ui.chrome,
+            name: self.services.config.ui.theme.clone(),
+            color_mode: self.services.config.ui.color_mode,
+            chrome: self.services.config.ui.chrome,
         };
-        if self.config.ui.ignore_journal_themes {
+        if self.services.config.ui.ignore_journal_themes {
             return global;
         }
         let Some(theme) = self.context_journal().and_then(|j| j.theme.as_ref()) else {
@@ -751,36 +614,37 @@ impl App {
         self.effective_selection().name
     }
 
-    /// Resolve and install the effective theme, color mode, and chrome. Called at
+    /// Resolve the effective theme, color mode, and chrome. Called at
     /// startup and whenever the theme context changes (journal switch, search
     /// enter/exit, compose), so the UI re-themes as you move around.
-    pub(crate) fn apply_effective_theme(&self) {
-        // Tests pin a known theme via `set_test_theme`; installing here would
-        // clobber it, so the global install runs only outside test builds.
-        // `effective_selection` stays testable on its own.
+    pub(crate) fn apply_effective_theme(&mut self) {
+        // Tests assign owned themes directly when they need a specific palette.
         #[cfg(not(test))]
         {
             let selection = self.effective_selection();
-            crate::tui::theme::set_color_mode(selection.color_mode);
-            crate::tui::theme::set_chrome_override(selection.chrome.forced_style());
+            self.appearance.color_mode = selection.color_mode;
+            self.appearance.chrome_override = crate::tui::theme::chrome_style(selection.chrome);
             let (theme, warn) = crate::tui::theme::load(
-                &self.config_path,
+                &self.services.config_path,
                 &selection.name,
-                crate::tui::theme::mode(),
+                self.appearance.mode(),
             );
-            crate::tui::theme::install(theme);
-            // Surfaced by the event loop's drain, deduped by theme name so the
-            // repeated applies during startup (construction, then the background
-            // library snapshot) and journal switches warn only once per theme.
-            crate::tui::theme::note_theme_load_warning(
-                &selection.name,
-                warn.map(|err| crate::tui::theme::format_theme_warning(&selection.name, &err)),
-            );
+            self.appearance.theme = self.appearance.resolve(theme);
+            let warning =
+                warn.map(|err| crate::tui::theme::format_theme_warning(&selection.name, &err));
+            if let Some(message) = self.appearance.warning(&selection.name, warning) {
+                self.toast(ToastVariant::Warning, message);
+            }
+        }
+        #[cfg(test)]
+        {
+            let selection = self.effective_selection();
+            let _ = self.appearance.warning(&selection.name, None);
         }
     }
 
     pub(crate) fn refresh(&mut self) -> AppResult<()> {
-        let snapshot = self.store.load_library(CachePolicy::Normal)?;
+        let snapshot = self.services.store.load_library(CachePolicy::Normal)?;
         self.install_library_snapshot(snapshot);
         Ok(())
     }
@@ -819,8 +683,8 @@ impl App {
     /// new or removed journal, an asset, or a directory event — falls back to a
     /// full [`Self::refresh`], since the journal list or grouping may have moved.
     pub(crate) fn refresh_paths(&mut self, paths: &[PathBuf]) -> AppResult<()> {
-        self.store.ensure()?;
-        let root = self.store.root().to_path_buf();
+        self.services.store.ensure()?;
+        let root = self.services.store.root().to_path_buf();
 
         // notify frequently reports the same path several times per change.
         let mut changed = paths.to_vec();
@@ -855,7 +719,7 @@ impl App {
 
         for (journal, path) in targets {
             if path.exists() {
-                let entry = self.store.read_entry(&journal, &path)?;
+                let entry = self.services.store.read_entry(&journal, &path)?;
                 self.upsert_entry(entry);
             } else {
                 self.remove_entry_by_path(&path);
@@ -902,7 +766,7 @@ impl App {
         };
         let journal = entry.journal.clone();
         let path = entry.path.clone();
-        let fresh = self.store.read_entry(&journal, &path)?;
+        let fresh = self.services.store.read_entry(&journal, &path)?;
         self.replace_entry_from_disk(fresh);
         Ok(true)
     }
@@ -918,147 +782,11 @@ impl App {
         }
     }
 
-    /// The memoized entry-list rows for the current state, rebuilt only when the
-    /// row-determining inputs (rows version, mode, journal, width) change. Returns
-    /// an `Rc` so callers can read it while holding a `&mut App` borrow elsewhere.
-    pub(crate) fn entry_rows(&self, text_width: u16) -> Rc<EntryRowCache> {
-        let key = EntryRowKey {
-            version: self.caches.rows_version,
-            mode: self.nav.mode.clone(),
-            journal: self.selected_journal().map(|journal| journal.name.clone()),
-            text_width,
-            theme: crate::tui::theme::theme(),
-        };
-        self.caches
-            .rows(key, || build_entry_row_cache(self, text_width))
-    }
-
-    /// Return the memoized rendered body for the entry at `path`/`width`, building
-    /// it with `build` only on a cache miss (entry or width changed, or the store
-    /// reloaded). The markdown parse+render `build` runs is the reader pane's
-    /// dominant per-frame cost, so this keeps scroll and image-tick redraws cheap.
-    pub(crate) fn cached_entry_body(
-        &self,
-        path: Option<&Path>,
-        width: usize,
-        build: impl FnOnce() -> RenderedEntryBody,
-    ) -> Rc<RenderedEntryBody> {
-        let key = EntryBodyKey {
-            version: self.caches.entries_version,
-            path: path.map(Path::to_path_buf),
-            width,
-            theme: crate::tui::theme::theme(),
-            show_link_urls: self.config.ui.layout.reader.show_link_urls,
-        };
-        self.caches.body(key, build)
-    }
-
     /// Precomputed word count of the entry currently shown in the reader, or 0
     /// when none is selected.
     pub(crate) fn selected_entry_word_count(&self) -> usize {
         self.resolved_selected_entry()
             .map_or(0, |entry| entry.word_count)
-    }
-
-    /// The memoized analytics for the current scope, or `None` in `Journal`
-    /// scope when no journal is selected. `All` scope always yields a value
-    /// (aggregating every loaded entry).
-    ///
-    /// `today` (for the current-streak calculation) is read from the wall clock
-    /// but deliberately kept out of the cache key: only `current_streak` depends
-    /// on it, so a streak that goes stale across a midnight boundary with no
-    /// reload is acceptable and self-heals on the next entry change. Keying on
-    /// the date instead would rebuild the whole aggregate every frame after
-    /// midnight for no real benefit.
-    pub(crate) fn cached_analytics(&self) -> Option<Rc<Analytics>> {
-        let today = chrono::Local::now().date_naive();
-        match self.nav.insights_scope {
-            InsightsScope::Journal => {
-                let name = self.selected_journal()?.name.clone();
-                Some(
-                    self.caches
-                        .analytics(self.caches.entries_version, &name, || {
-                            analyze(&self.selected_entries(), today)
-                        }),
-                )
-            }
-            InsightsScope::All => {
-                // A NUL-prefixed key can't collide with a journal name.
-                Some(
-                    self.caches
-                        .analytics(self.caches.entries_version, "\u{0}all", || {
-                            let entries: Vec<&Entry> = self.library.entries.iter().collect();
-                            analyze(&entries, today)
-                        }),
-                )
-            }
-        }
-    }
-
-    /// The memoized lift/drain correlations for the current scope, windowed to
-    /// `nav.insights_timeframe`. `None` in `Journal` scope with no journal selected.
-    /// Powers the Drivers ranking.
-    pub(crate) fn cached_windowed_correlations(&self) -> Option<Rc<Correlations>> {
-        let today = chrono::Local::now().date_naive();
-        let timeframe = self.nav.insights_timeframe;
-        let (scope_key, entries): (String, Vec<&Entry>) = match self.nav.insights_scope {
-            InsightsScope::Journal => (
-                self.selected_journal()?.name.clone(),
-                self.selected_entries(),
-            ),
-            InsightsScope::All => (
-                "\u{0}all".to_string(),
-                self.library.entries.iter().collect(),
-            ),
-        };
-        Some(
-            self.caches
-                .windowed(self.caches.entries_version, &scope_key, timeframe, || {
-                    let windowed: Vec<&Entry> = match timeframe.window(today) {
-                        None => entries.clone(),
-                        Some((start, end)) => entries
-                            .iter()
-                            .copied()
-                            .filter(|entry| {
-                                entry_group_date(entry)
-                                    .is_some_and(|date| start <= date && date <= end)
-                            })
-                            .collect(),
-                    };
-                    build_correlations(&windowed)
-                }),
-        )
-    }
-
-    pub(crate) fn scroll_reader(&mut self, delta: i16) {
-        if delta.is_negative() {
-            self.nav.scroll.reader = self.nav.scroll.reader.saturating_sub(delta.unsigned_abs());
-        } else {
-            self.nav.scroll.reader = self.nav.scroll.reader.saturating_add(delta as u16);
-        }
-    }
-
-    pub(crate) fn page_reader(&mut self, delta: i16) {
-        self.scroll_reader(delta.saturating_mul(PAGE_STEP));
-    }
-
-    /// Scroll the insights list by `delta` rows. The offset saturates here and is
-    /// clamped to the list's length when the panel renders, mirroring the entry
-    /// view — so `i16::MAX` from an End key just lands on the last page.
-    pub(crate) fn scroll_insights(&mut self, delta: i16) {
-        if delta.is_negative() {
-            self.nav.scroll.insights = self
-                .nav
-                .scroll
-                .insights
-                .saturating_sub(delta.unsigned_abs());
-        } else {
-            self.nav.scroll.insights = self.nav.scroll.insights.saturating_add(delta as u16);
-        }
-    }
-
-    pub(crate) fn page_insights(&mut self, delta: i16) {
-        self.scroll_insights(delta.saturating_mul(PAGE_STEP));
     }
 
     pub(crate) fn toast(&mut self, variant: ToastVariant, message: impl Into<String>) {
@@ -1075,13 +803,6 @@ impl App {
         self.toasts.deadline()
     }
 
-    /// Drop the hover highlight, reporting whether one was showing (a repaint
-    /// is due). Called on every key event — the keyboard half of the
-    /// [`HoverTarget`] input-mode rule.
-    pub(crate) fn clear_hover(&mut self) -> bool {
-        std::mem::take(&mut self.hover) != HoverTarget::None
-    }
-
     /// The footer/editor hint under the cursor, for hover-styling its label.
     pub(crate) fn hovered_footer_hint(&self) -> Option<crate::tui::render::HintId> {
         match self.hover {
@@ -1089,34 +810,6 @@ impl App {
             _ => None,
         }
     }
-}
-
-/// Helper for [`App::metadata_partitioned`]: counts per lowercased tag and per
-/// original-casing form so we can consolidate case variants.
-#[derive(Default)]
-struct CasingCount {
-    total: usize,
-    forms: std::collections::BTreeMap<String, usize>,
-}
-
-/// Consolidate a lowercased-key → [`CasingCount`] map into `(display, count)`
-/// pairs sorted by count descending then alphabetically. The displayed casing is
-/// the most frequent form (ties → first alphabetically).
-fn sort_casing(map: std::collections::BTreeMap<String, CasingCount>) -> Vec<(String, usize)> {
-    let mut pairs: Vec<_> = map
-        .into_values()
-        .map(|cc| {
-            let display = cc
-                .forms
-                .into_iter()
-                .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)))
-                .map(|(form, _)| form)
-                .unwrap_or_default();
-            (display, cc.total)
-        })
-        .collect();
-    pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    pairs
 }
 
 /// The journal owning `path`: the first path component beneath `root`. `None`
@@ -1138,14 +831,6 @@ fn is_asset_path(path: &Path) -> bool {
     })
 }
 
-fn metadata_values(entry: &Entry, kind: MetadataKind) -> &[String] {
-    match kind {
-        MetadataKind::Tags => &entry.tags,
-        MetadataKind::People => &entry.people,
-        MetadataKind::Activities => &entry.activities,
-    }
-}
-
 pub(crate) fn inline_reader_is_visible(width: u16) -> bool {
     width >= INLINE_READER_MIN_WIDTH
 }
@@ -1157,22 +842,6 @@ pub(crate) fn reader_is_available(width: u16) -> bool {
 pub(crate) fn single_panel_is_active(width: u16) -> bool {
     width < TWO_PANEL_MIN_WIDTH
 }
-
-mod editor;
-mod environment;
-mod feelings;
-mod images;
-mod location;
-mod metadata;
-mod overlays;
-mod search;
-mod selection;
-
-pub(crate) use feelings::{EditFeelingState, FeelingRow};
-#[cfg(test)]
-pub(crate) use location::LocationPreset;
-pub(crate) use location::{EditLocationFocus, EditLocationState, LocationResolveStatus};
-pub(crate) use metadata::{EditMetadataFocus, EditMetadataState};
 
 #[cfg(test)]
 mod tests;

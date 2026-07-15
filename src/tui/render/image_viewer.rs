@@ -12,6 +12,7 @@ use crate::tui::{
 /// Draw the fullscreen image viewer. The image number is 1-based to match the
 /// entry-view labels and the digit shortcut used to open it.
 pub(super) fn draw_image_viewer(
+    theme: &crate::tui::theme::Theme,
     frame: &mut Frame<'_>,
     state: &ImageViewerState,
     images: &ImageRuntime,
@@ -20,6 +21,7 @@ pub(super) fn draw_image_viewer(
     let count = state.assets.len();
     let index = state.index.min(count.saturating_sub(1));
     let inner = super::draw_modal_frame(
+        theme,
         frame,
         "Image Viewer",
         &format!("Image {} of {count}", index + 1),
@@ -39,7 +41,7 @@ pub(super) fn draw_image_viewer(
         return;
     }
 
-    match images.reserve(asset, viewer_image_size(area)) {
+    match images.status(asset, viewer_image_size(area)) {
         ImageStatus::Ready => images.render(frame, inner, asset),
         ImageStatus::Loading => draw_notice(frame, inner, &loading_notice()),
         ImageStatus::Unavailable => draw_notice(frame, inner, "Couldn't load this image"),

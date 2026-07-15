@@ -1,9 +1,240 @@
-use crossterm::event::{KeyEvent, MouseEvent};
-use ratatui::layout::Rect;
+use crossterm::event::KeyEvent;
 
-use crate::tui::state::MetadataKind;
+use crate::tui::{
+    features::{insights::InsightsTab, location::EditLocationFocus},
+    state::{HoverTarget, MetadataKind},
+    ui::interaction::{PanelId, TextFieldId},
+};
+
+pub(crate) use crate::tui::ui::interaction::ScrollbarMetrics;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TextFieldTarget {
+    Search,
+    NewJournal,
+    Metadata,
+    Feelings,
+    LocationQuery,
+    LocationName,
+}
+
+impl From<TextFieldId> for TextFieldTarget {
+    fn from(value: TextFieldId) -> Self {
+        match value {
+            TextFieldId::Search => Self::Search,
+            TextFieldId::NewJournal => Self::NewJournal,
+            TextFieldId::Metadata => Self::Metadata,
+            TextFieldId::Feelings => Self::Feelings,
+            TextFieldId::LocationQuery => Self::LocationQuery,
+            TextFieldId::LocationName => Self::LocationName,
+        }
+    }
+}
+
+impl From<TextFieldTarget> for TextFieldId {
+    fn from(value: TextFieldTarget) -> Self {
+        match value {
+            TextFieldTarget::Search => Self::Search,
+            TextFieldTarget::NewJournal => Self::NewJournal,
+            TextFieldTarget::Metadata => Self::Metadata,
+            TextFieldTarget::Feelings => Self::Feelings,
+            TextFieldTarget::LocationQuery => Self::LocationQuery,
+            TextFieldTarget::LocationName => Self::LocationName,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DialogListTarget {
+    Metadata,
+    Feelings,
+    Location,
+    ThemePicker,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MetadataSearchTarget {
+    Feelings,
+    Metadata(MetadataKind),
+}
 
 #[derive(Debug, PartialEq, Eq)]
+pub(crate) enum MouseAction {
+    DismissToast(usize),
+    TextFieldPress {
+        target: TextFieldTarget,
+        column: u16,
+    },
+    TextFieldDrag {
+        column: u16,
+    },
+    TextFieldRelease,
+    JournalClick {
+        index: Option<usize>,
+        compact: bool,
+    },
+    EntryClick {
+        index: Option<usize>,
+        open_reader: bool,
+        clear_empty: bool,
+    },
+    InsightsClick(Option<InsightsTab>),
+    ReaderClick,
+    MetadataSearch {
+        kind: MetadataSearchTarget,
+        value: String,
+    },
+    ScrollPanel {
+        panel: PanelId,
+        delta: i16,
+        content_length: usize,
+        viewport: u16,
+    },
+    ScrollbarPress {
+        metrics: ScrollbarMetrics,
+        row: u16,
+    },
+    ScrollbarDrag {
+        metrics: ScrollbarMetrics,
+        row: u16,
+    },
+    ScrollbarRelease,
+    DialogRow {
+        target: DialogListTarget,
+        index: usize,
+    },
+    DialogFocusMetadata(EditMetadataFocusTarget),
+    DialogFocusLocation(EditLocationFocus),
+    DialogScroll {
+        target: DialogListTarget,
+        delta: i16,
+        viewport: u16,
+    },
+    SetMood(i8),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditMetadataFocusTarget {
+    List,
+    Input,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum BackgroundAction {
+    LibraryValidated(Box<notema_storage::LibrarySnapshot>),
+    LibraryValidationStale,
+    LibraryValidationFailed(String),
+    ExternalOpenCompleted(String),
+    ExternalOpenFailed(String),
+    PollImages,
+    PollGeocode,
+    PollEnvironment,
+    PollTimers,
+    LibraryPathsChanged(Vec<std::path::PathBuf>),
+    ReloadTheme(String),
+    CommitSearch,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum BrowserAction {
+    FocusLeft,
+    FocusRight,
+    MoveSelection(isize),
+    EditSelected,
+    ViewSelected,
+    OpenReaderLink {
+        target: String,
+        heading_line: Option<usize>,
+    },
+    BeginDelete,
+    ConfirmDelete,
+    ToggleStarred,
+    NewEntry,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum SearchAction {
+    Begin,
+    Exit,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum EditorAction {
+    Save,
+    RequestDiscard,
+    Discard,
+    ToggleFullscreen,
+    OpenMetadataMenu,
+    OpenHelp,
+    ClosePrompt,
+    ScrollHelp(i16),
+    Input(KeyEvent),
+    SelectAll,
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    Scroll(i16),
+    StartSelection { col: u16, row: u16 },
+    DragSelection { col: u16, row: u16 },
+    EndSelection,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum MetadataAction {
+    OpenMenu,
+    BeginEdit(MetadataKind),
+    BeginFeelings,
+    BeginMood,
+    MoveSelection(isize),
+    Toggle,
+    SwitchFocus,
+    AddFromInput,
+    Save,
+    FeelingsToggle,
+    FeelingsExpand,
+    FeelingsCollapse,
+    FeelingsSwitchFocus,
+    FeelingsSave,
+    AdjustMood(i8),
+    MoodSave,
+    MoodClear,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum LocationAction {
+    BeginEdit,
+    SwitchFocus,
+    Resolve,
+    GrabDevice,
+    SelectRow,
+    Save,
+    Clear,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum SettingsAction {
+    NewJournal,
+    ToggleArchiveJournal,
+    JournalInputSubmit,
+    OpenMenu,
+    OpenThemePicker,
+    ThemePickerSelect(usize),
+    ThemePickerConfirm,
+    ThemePickerCancel,
+    ThemePickerCycleChrome,
+    ThemePickerCycleMode,
+    ThemePickerToggleScope,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum ImageAction {
+    OpenViewer(usize),
+    StepViewer(isize),
+}
+
+#[derive(Debug, PartialEq)]
 pub(crate) enum ReaderAction {
     ScrollLines(i16),
     ScrollPages(i16),
@@ -12,7 +243,7 @@ pub(crate) enum ReaderAction {
     SetFullscreen(bool),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum InsightsAction {
     ScrollLines(i16),
     ScrollPages(i16),
@@ -24,132 +255,40 @@ pub(crate) enum InsightsAction {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum Action {
-    PointerInput {
-        event: MouseEvent,
-        area: Rect,
-    },
-    PointerScroll {
-        event: MouseEvent,
-        area: Rect,
-        delta: i16,
-    },
-    PointerHover {
-        column: u16,
-        row: u16,
-        area: Rect,
-    },
-    // Global
-    Quit,
-    RefreshLibrary,
-    // Background startup-cache reconciliation.
-    LibraryValidated(Box<notema_storage::LibrarySnapshot>),
-    LibraryValidationFailed(String),
-    // Browse / search navigation
-    FocusLeft,
-    FocusRight,
-    MoveSelection(isize),
-    Reader(ReaderAction),
-    Insights(InsightsAction),
-    // Browse operations
-    BeginSearch,
-    ExitSearch,
-    EditSelected,
-    // Internal editor.
-    EditorSave,
-    EditorRequestDiscard,
-    EditorDiscard,
-    EditorToggleFullscreen,
-    EditorOpenMetadataMenu,
-    EditorOpenHelp,
-    EditorClosePrompt,
-    EditorScrollHelp(i16),
-    EditorInput(KeyEvent),
-    EditorSelectAll,
-    EditorUndo,
-    EditorRedo,
-    EditorCut,
-    EditorCopy,
-    EditorPaste,
-    EditorScroll(i16),
-    EditorStartSelection {
-        col: u16,
-        row: u16,
-    },
-    EditorDragSelection {
-        col: u16,
-        row: u16,
-    },
-    EditorEndSelection,
-    ViewSelected,
-    OpenReaderLink(String),
-    BeginDelete,
-    ConfirmDelete,
-    /// Move the selected button in whichever confirm dialog is open (delete
-    /// overlay or editor discard prompt). `true` selects the destructive button.
+pub(crate) enum OverlayAction {
     ConfirmSelect(bool),
-    // Cancel / close — covers Esc across all overlays
-    CancelOverlay,
-    // Global help cheatsheet overlay
+    Cancel,
     OpenHelp,
     HelpScroll(i16),
-    OpenMetadataMenu,
-    BeginEditMetadata(MetadataKind),
-    BeginEditFeelings,
-    BeginEditMood,
-    ToggleStarred,
-    NewEntry,
-    NewJournal,
-    ToggleArchiveJournal,
-    // New-journal input overlay
-    JournalInputSubmit,
-    // Tags overlay
-    MoveDialogSelection(isize),
-    MetadataToggle,
-    MetadataSwitchFocus,
-    MetadataAddFromInput,
-    MetadataSave,
-    // Feelings overlay
-    FeelingsToggle,
-    FeelingsExpand,
-    FeelingsCollapse,
-    FeelingsSwitchFocus,
-    FeelingsSave,
-    // Mood overlay
-    AdjustMood(i8),
-    MoodSave,
-    MoodClear,
-    // Location overlay
-    BeginEditLocation,
-    LocationSwitchFocus,
-    LocationResolve,
-    LocationGrabDevice,
-    LocationSelectRow,
-    LocationSave,
-    LocationClear,
-    // Settings menu + theme picker overlays
-    OpenSettingsMenu,
-    OpenThemePicker,
-    /// Select (and show in the reader) the row at this index — mouse click.
-    ThemePickerSelect(usize),
-    ThemePickerConfirm,
-    ThemePickerCancel,
-    /// Cycle the chrome override: default → flat → bordered → default.
-    ThemePickerCycleChrome,
-    /// Cycle the color mode: auto → dark → light → auto.
-    ThemePickerCycleMode,
-    /// Toggle the picker scope between this journal and the global default.
-    ThemePickerToggleScope,
-    // Image viewer overlay
-    OpenImageViewer(usize),
-    StepImageViewer(isize),
-    // Search text input (only active when mode=Search and focus=Entries)
-    /// A key press for whichever text field currently owns the caret (search
-    /// box or an open dialog's focused input): chars, backspace, caret
-    /// movement, shift-selection — everything the single-line textarea handles.
     InputKey(KeyEvent),
-    /// Select all text in the focused single-line field (Ctrl+A / hint click).
     InputSelectAll,
     ToggleHints,
     ToggleJournals,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum Action {
+    Mouse(MouseAction),
+    SetHover(HoverTarget),
+    ViewRendered {
+        reader_scroll: Option<u16>,
+        insights_scroll: Option<u16>,
+        journal_offset: Option<usize>,
+        entry_offset: Option<usize>,
+    },
+    SyncImages(ratatui::layout::Size),
+    // Global
+    Quit,
+    RefreshLibrary,
+    Background(BackgroundAction),
+    Browser(BrowserAction),
+    Search(SearchAction),
+    Editor(EditorAction),
+    Metadata(MetadataAction),
+    Location(LocationAction),
+    Settings(SettingsAction),
+    Images(ImageAction),
+    Overlay(OverlayAction),
+    Reader(ReaderAction),
+    Insights(InsightsAction),
 }

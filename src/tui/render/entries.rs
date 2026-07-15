@@ -7,18 +7,24 @@ use ratatui::{
 };
 
 use crate::tui::{
-    app::{App, Focus, Mode},
+    app::{AppModel, Focus, Mode},
     entry_rows::visible_box_items,
     render::{
         EntryListGeometry, clamp_scroll, count_label, list_state_for_render, panel_block,
         render_centered_notice, render_scrollbar_if_needed,
     },
-    theme::theme,
+    theme::Theme,
 };
 
-pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry, app: &mut App) {
+pub(crate) fn draw_entry_list(
+    active_theme: &Theme,
+    frame: &mut Frame<'_>,
+    geometry: EntryListGeometry,
+    app: &mut AppModel,
+) -> usize {
     let focused = app.nav.focus == Focus::Entries;
     let mut block = panel_block(
+        active_theme,
         match app.nav.mode {
             Mode::Search => "Search",
             Mode::Browse => "Entries",
@@ -35,7 +41,6 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
     let viewport_height = geometry.viewport_height;
     let total_height = cache.total_height;
     let pixel_offset = clamp_scroll(app.nav.entry_list.offset(), total_height, viewport_height);
-    *app.nav.entry_list.offset_mut() = pixel_offset;
 
     // iOS-style sticky section header: once a month's divider scrolls above the
     // viewport, pin that month's label to the panel's top-right border so the
@@ -68,16 +73,16 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
         _ => None,
     };
     let selected = app.nav.selected_entry_index.filter(|_| highlight_active);
-    let flat = super::flat_chrome();
+    let flat = super::flat_chrome(active_theme);
     let items: Vec<_> = if flat || (hovered.is_some() && hovered != selected) {
         items
             .into_iter()
             .zip(&item_indices)
             .map(|(item, index)| {
                 if index.is_some() && *index == hovered && *index != selected {
-                    item.style(theme().hover())
+                    item.style(active_theme.hover())
                 } else if flat && index.is_some() {
-                    item.style(Style::default().bg(theme().raised_bg()))
+                    item.style(Style::default().bg(active_theme.raised_bg()))
                 } else {
                     item
                 }
@@ -88,22 +93,23 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
     };
 
     let list = List::new(items)
-        .highlight_style(theme().selection())
+        .highlight_style(active_theme.selection())
         .highlight_spacing(HighlightSpacing::Never);
 
     let mut render_state =
         list_state_for_render(selected_visible, 0, viewport_height, highlight_active);
 
     frame.render_widget(block, geometry.panel.area);
-    super::panel_focus_stripe(frame, geometry.panel.area, focused);
+    super::panel_focus_stripe(active_theme, frame, geometry.panel.area, focused);
     // In search mode, the query renders as a fixed-width field on the panel's
     // top-right border — sized from the panel, not the typed text, so it
     // doesn't grow and shrink while typing.
     if app.nav.mode == Mode::Search {
-        draw_search_field(frame, geometry.panel.area, app);
+        draw_search_field(active_theme, frame, geometry.panel.area, app);
     }
     frame.render_stateful_widget(list, geometry.panel.content, &mut render_state);
     render_scrollbar_if_needed(
+        active_theme,
         frame,
         geometry.panel.area,
         total_height,
@@ -114,50 +120,58 @@ pub(crate) fn draw_entry_list(frame: &mut Frame<'_>, geometry: EntryListGeometry
 
     // An empty column gets a centered notice so it doesn't read as a rendering
     // glitch: a blank or unmatched search query, no journal selected to browse,
-    // or a selected journal that simply has no entries.
+    // or a selected journal with no entries.
     if cache.rows.is_empty() {
         let message = match app.nav.mode {
             Mode::Search => "No results",
             Mode::Browse if app.selected_journal().is_none() => "No journal selected",
             Mode::Browse => "No entries",
         };
-        render_centered_notice(frame, geometry.panel.content, message);
+        render_centered_notice(active_theme, frame, geometry.panel.content, message);
     }
+    pixel_offset
 }
 
 /// The search field on the panel's top-right border: a fixed-width single-line
 /// textarea (with the native bar cursor while typing in it), padded one cell on
 /// each side so it doesn't run into the border line.
-fn draw_search_field(frame: &mut Frame<'_>, area: Rect, app: &mut App) {
-    let field_w = (area.width / 2)
-        .clamp(12, 30)
-        .min(area.width.saturating_sub(6));
-    if field_w < 4 || area.height == 0 {
+fn draw_search_field(active_theme: &Theme, frame: &mut Frame<'_>, area: Rect, app: &mut AppModel) {
+    let Some(rect) = search_field_rect(area) else {
         return;
-    }
-    let rect = Rect {
-        x: area.x + area.width - field_w - 2,
-        y: area.y,
-        width: field_w,
-        height: 1,
     };
+    let field_w = rect.width;
     let pad = Rect {
         x: rect.x - 1,
         width: field_w + 2,
         ..rect
     };
     frame.render_widget(Clear, pad);
-    // Repaint the theme's background over the cleared strip — `Clear` resets
-    // to the terminal default, which shows on colored themes.
     frame
         .buffer_mut()
-        .set_style(pad, Style::default().bg(theme().base_bg()));
+        .set_style(pad, Style::default().bg(active_theme.base_bg()));
     let focused = app.is_search_input_active() && !app.has_overlay() && app.editor.is_none();
     let hovered = matches!(
         app.hover,
-        crate::tui::state::HoverTarget::TextField(r) if r == app.search.query.last_area()
+        crate::tui::state::HoverTarget::TextField(r) if r == rect
     );
-    app.search.query.render_in(frame, rect, focused, hovered);
+    app.search
+        .query
+        .render_in(active_theme, frame, rect, focused, hovered);
+}
+
+pub(super) fn search_field_rect(area: Rect) -> Option<Rect> {
+    let field_w = (area.width / 2)
+        .clamp(12, 30)
+        .min(area.width.saturating_sub(6));
+    if field_w < 4 || area.height == 0 {
+        return None;
+    }
+    Some(Rect {
+        x: area.x + area.width - field_w - 2,
+        y: area.y,
+        width: field_w,
+        height: 1,
+    })
 }
 
 /// The month label to pin on the panel border. The first month rides the border

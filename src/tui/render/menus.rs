@@ -11,9 +11,8 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use super::table;
-use crate::tui::state::MetadataKind;
-use crate::tui::surface::{point_in_rect, surface_outer_width};
-use crate::tui::theme::theme;
+use crate::tui::surface::surface_outer_width;
+use crate::tui::theme::Theme;
 
 use super::chrome::{
     centered_rect_fixed_size, clear_surface, flat_chrome, render_scrollbar_if_needed,
@@ -21,179 +20,11 @@ use super::chrome::{
 use super::footer::{key_chip_style, key_chip_text};
 use super::frames::{dialog_frame_rows, dialog_inner, draw_dialog_frame};
 
-const METADATA_MENU_ITEMS: [(&str, &str); 6] = [
-    ("t", "Tags"),
-    ("p", "People"),
-    ("a", "Activities"),
-    ("f", "Feelings"),
-    ("m", "Mood"),
-    ("l", "Location"),
-];
-
-fn metadata_menu_rows() -> Vec<Vec<String>> {
-    METADATA_MENU_ITEMS
-        .iter()
-        .map(|(key, label)| vec![key.to_string(), label.to_string()])
-        .collect()
-}
-
-fn metadata_menu_dialog(rows: &[Vec<String>], mode: MetadataMenuMode) -> TableDialog<'_> {
-    TableDialog {
-        title: "Add Metadata",
-        headers: &["Key", "Add"],
-        rows,
-        key_col: 0,
-        footer: mode.footer(),
-    }
-}
-
-/// Where the metadata chooser is shown. The editor gates its metadata keys behind
-/// this popup ("press key"); the viewer's keys work at any time, so there the popup
-/// is only a reference ("reference").
-#[derive(Clone, Copy)]
-pub(crate) enum MetadataMenuMode {
-    Editor,
-    Viewer,
-}
-
-impl MetadataMenuMode {
-    fn footer(self) -> &'static str {
-        match self {
-            Self::Editor => "press key · esc",
-            Self::Viewer => "reference · esc",
-        }
-    }
-}
-
-/// Draw the "Add metadata" chooser: a centered popup whose highlighted letters open
-/// the tags/people/activities/feelings/mood dialogs, laid out as a table matching
-/// the insights tabs. Shared by the internal editor and the entry viewer.
-pub(crate) fn draw_metadata_menu(
-    frame: &mut Frame<'_>,
-    mode: MetadataMenuMode,
-    hovered_row: Option<usize>,
-) {
-    let rows = metadata_menu_rows();
-    // The chooser always fits, so it never scrolls.
-    let mut scroll = 0;
-    draw_table_dialog(
-        frame,
-        &metadata_menu_dialog(&rows, mode),
-        &mut scroll,
-        hovered_row,
-    );
-}
-
-/// The metadata-menu data row under `(col, row)`, for hover highlighting.
-pub(crate) fn metadata_menu_row_at_point(
-    frame_area: Rect,
-    mode: MetadataMenuMode,
-    col: u16,
-    row: u16,
-) -> Option<usize> {
-    let rows = metadata_menu_rows();
-    table_dialog_row_at_point(frame_area, &metadata_menu_dialog(&rows, mode), 0, col, row)
-}
-
-pub(crate) enum MetadataChoice {
-    Metadata(MetadataKind),
-    Feelings,
-    Mood,
-    Location,
-}
-
-pub(crate) fn metadata_menu_choice_at_point(
-    frame_area: Rect,
-    mode: MetadataMenuMode,
-    col: u16,
-    row: u16,
-) -> Option<MetadataChoice> {
-    let rows = metadata_menu_rows();
-    let index =
-        table_dialog_row_at_point(frame_area, &metadata_menu_dialog(&rows, mode), 0, col, row)?;
-    match index {
-        0 => Some(MetadataChoice::Metadata(MetadataKind::Tags)),
-        1 => Some(MetadataChoice::Metadata(MetadataKind::People)),
-        2 => Some(MetadataChoice::Metadata(MetadataKind::Activities)),
-        3 => Some(MetadataChoice::Feelings),
-        4 => Some(MetadataChoice::Mood),
-        5 => Some(MetadataChoice::Location),
-        _ => None,
-    }
-}
-
-pub(crate) fn metadata_menu_close_at_point(
-    frame_area: Rect,
-    mode: MetadataMenuMode,
-    col: u16,
-    row: u16,
-) -> bool {
-    let rows = metadata_menu_rows();
-    table_dialog_footer_at_point(frame_area, &metadata_menu_dialog(&rows, mode), 0, col, row)
-}
-
-const SETTINGS_MENU_ITEMS: [(&str, &str); 1] = [("t", "Theme…")];
-
-fn settings_menu_rows() -> Vec<Vec<String>> {
-    SETTINGS_MENU_ITEMS
-        .iter()
-        .map(|(key, label)| vec![key.to_string(), label.to_string()])
-        .collect()
-}
-
-fn settings_menu_dialog(rows: &[Vec<String>]) -> TableDialog<'_> {
-    TableDialog {
-        title: "Settings",
-        headers: &["Key", "Setting"],
-        rows,
-        key_col: 0,
-        footer: "enter select · esc close",
-    }
-}
-
-/// A row of the settings menu, mapped from a click by
-/// [`settings_menu_choice_at_point`].
-pub(crate) enum SettingsChoice {
-    Theme,
-}
-
-/// Draw the settings menu: a centered chooser whose rows open the settings
-/// dialogs. Same table popup as the metadata menu.
-pub(crate) fn draw_settings_menu(frame: &mut Frame<'_>, hovered_row: Option<usize>) {
-    let rows = settings_menu_rows();
-    // The menu always fits, so it never scrolls.
-    let mut scroll = 0;
-    draw_table_dialog(
-        frame,
-        &settings_menu_dialog(&rows),
-        &mut scroll,
-        hovered_row,
-    );
-}
-
-/// The settings-menu data row under `(col, row)`, for hover highlighting.
-pub(crate) fn settings_menu_row_at_point(frame_area: Rect, col: u16, row: u16) -> Option<usize> {
-    let rows = settings_menu_rows();
-    table_dialog_row_at_point(frame_area, &settings_menu_dialog(&rows), 0, col, row)
-}
-
-pub(crate) fn settings_menu_choice_at_point(
-    frame_area: Rect,
-    col: u16,
-    row: u16,
-) -> Option<SettingsChoice> {
-    let rows = settings_menu_rows();
-    let index = table_dialog_row_at_point(frame_area, &settings_menu_dialog(&rows), 0, col, row)?;
-    match index {
-        0 => Some(SettingsChoice::Theme),
-        _ => None,
-    }
-}
-
-pub(crate) fn settings_menu_close_at_point(frame_area: Rect, col: u16, row: u16) -> bool {
-    let rows = settings_menu_rows();
-    table_dialog_footer_at_point(frame_area, &settings_menu_dialog(&rows), 0, col, row)
-}
+mod overlays;
+pub(crate) use overlays::{
+    MetadataMenuMode, draw_metadata_menu, draw_settings_menu, metadata_menu_interactions,
+    settings_menu_interactions,
+};
 
 const EDITOR_SHORTCUT_SECTIONS: [(&str, &[(&str, &str)]); 4] = [
     (
@@ -246,8 +77,9 @@ const EDITOR_SHORTCUT_SECTIONS: [(&str, &[(&str, &str)]); 4] = [
 /// Draw the internal editor's shortcut reference: the same centered, multi-column
 /// table as the global help overlay. Opened with Ctrl+T, scrolled with the
 /// arrows/page keys, dismissed by any other key or a click.
-pub(crate) fn draw_editor_shortcuts(frame: &mut Frame<'_>, scroll: &mut u16) {
+pub(crate) fn draw_editor_shortcuts(theme: &Theme, frame: &mut Frame<'_>, scroll: &mut u16) {
     draw_section_table(
+        theme,
         frame,
         &EDITOR_SHORTCUT_SECTIONS,
         "Editor Shortcuts",
@@ -279,19 +111,25 @@ fn dialog_widths(headers: &[&str], rows: &[Vec<String>], key_col: usize) -> Vec<
 
 /// One data cell's spans, padded to `width`: the key column as a reversed key chip
 /// (one space each side) left-aligned; a leading group column bold; the rest plain.
-fn dialog_cell(text: &str, col: usize, key_col: usize, width: usize) -> Vec<Span<'static>> {
+fn dialog_cell(
+    theme: &Theme,
+    text: &str,
+    col: usize,
+    key_col: usize,
+    width: usize,
+) -> Vec<Span<'static>> {
     if col == key_col && !text.is_empty() {
         let chip = key_chip_text(text);
         let padding = width.saturating_sub(UnicodeWidthStr::width(chip.as_str()));
         return vec![
-            Span::styled(chip, key_chip_style()),
+            Span::styled(chip, key_chip_style(theme)),
             Span::raw(" ".repeat(padding)),
         ];
     }
     let style = if col == 0 && col != key_col {
-        theme().heading()
+        theme.heading()
     } else {
-        theme().text()
+        theme.text()
     };
     vec![Span::styled(pad_display(text, width), style)]
 }
@@ -305,13 +143,13 @@ fn pad_display(text: &str, width: usize) -> String {
 /// A faint inter-row rule. Columns whose cell in `row` is empty (a spanning group
 /// cell continuing from the row above) are left blank so the group reads as one
 /// merged cell rather than a stack of separately-ruled blanks.
-fn row_separator(widths: &[usize], row: &[String], muted: Style) -> Line<'static> {
-    let faint = table::faint_rule_style();
-    let set = theme().glyphs().borders.line_set();
-    let mut spans = vec![Span::styled(set.vertical, muted)];
+fn row_separator(theme: &Theme, widths: &[usize], row: &[String], muted: Style) -> Line<'static> {
+    let faint = table::themed_faint_rule_style(theme);
+    let set = theme.glyphs().borders.line_set();
+    let mut spans = vec![Span::styled(set.vertical.to_string(), muted)];
     for (c, w) in widths.iter().enumerate() {
         if c > 0 {
-            spans.push(Span::styled(set.vertical, muted));
+            spans.push(Span::styled(set.vertical.to_string(), muted));
         }
         if row[c].is_empty() {
             spans.push(Span::raw(" ".repeat(w + 2)));
@@ -319,42 +157,70 @@ fn row_separator(widths: &[usize], row: &[String], muted: Style) -> Line<'static
             spans.push(Span::styled(set.horizontal.repeat(w + 2), faint));
         }
     }
-    spans.push(Span::styled(set.vertical, muted));
+    spans.push(Span::styled(set.vertical.to_string(), muted));
     Line::from(spans)
 }
 
 /// The full bordered grid (insights style): outer border, muted header, and a faint
 /// rule between each row. Returns the lines and the table's total column width.
-fn grid_table(headers: &[&str], rows: &[Vec<String>], key_col: usize) -> (Vec<Line<'static>>, u16) {
+fn grid_table(
+    theme: &Theme,
+    headers: &[&str],
+    rows: &[Vec<String>],
+    key_col: usize,
+) -> (Vec<Line<'static>>, u16) {
     let widths = dialog_widths(headers, rows, key_col);
-    let muted = table::border_style();
+    let muted = table::themed_border_style(theme);
 
     let mut lines = Vec::with_capacity(2 * rows.len() + 4);
-    lines.push(table::rule(&widths, table::RulePos::Top, muted, muted));
-    let mut header = vec![table::border()];
+    lines.push(table::themed_rule(
+        theme,
+        &widths,
+        table::RulePos::Top,
+        muted,
+        muted,
+    ));
+    let mut header = vec![table::themed_border(theme)];
     for (c, label) in headers.iter().enumerate() {
-        table::push_cell_spans(
+        table::themed_push_cell_spans(
+            theme,
             &mut header,
             vec![Span::styled(table::pad(label, widths[c], false), muted)],
         );
     }
     lines.push(Line::from(header));
-    lines.push(table::rule(&widths, table::RulePos::Mid, muted, muted));
+    lines.push(table::themed_rule(
+        theme,
+        &widths,
+        table::RulePos::Mid,
+        muted,
+        muted,
+    ));
     for (r, row) in rows.iter().enumerate() {
         // A faint rule between rows, its column borders running straight through as
         // plain `│` so the verticals stay continuous — matching the insights table.
         // A spanning group cell (empty on continuation rows) keeps its rule blank so
         // it reads as one merged cell.
         if r > 0 {
-            lines.push(row_separator(&widths, row, muted));
+            lines.push(row_separator(theme, &widths, row, muted));
         }
-        let mut spans = vec![table::border()];
+        let mut spans = vec![table::themed_border(theme)];
         for (c, text) in row.iter().enumerate() {
-            table::push_cell_spans(&mut spans, dialog_cell(text, c, key_col, widths[c]));
+            table::themed_push_cell_spans(
+                theme,
+                &mut spans,
+                dialog_cell(theme, text, c, key_col, widths[c]),
+            );
         }
         lines.push(Line::from(spans));
     }
-    lines.push(table::rule(&widths, table::RulePos::Bottom, muted, muted));
+    lines.push(table::themed_rule(
+        theme,
+        &widths,
+        table::RulePos::Bottom,
+        muted,
+        muted,
+    ));
 
     // Each column renders as `│ <content> `; the last cell adds the closing `│`.
     let width = widths.iter().map(|w| w + 3).sum::<usize>() + 1;
@@ -365,6 +231,7 @@ fn grid_table(headers: &[&str], rows: &[Vec<String>], key_col: usize) -> (Vec<Li
 /// aligned and separated by two spaces — the same collapse the insights tabs use
 /// when there isn't room for the full grid.
 fn compact_table(
+    theme: &Theme,
     headers: &[&str],
     rows: &[Vec<String>],
     key_col: usize,
@@ -378,7 +245,7 @@ fn compact_table(
                 if c > 0 {
                     spans.push(Span::raw("  "));
                 }
-                spans.extend(dialog_cell(text, c, key_col, widths[c]));
+                spans.extend(dialog_cell(theme, text, c, key_col, widths[c]));
             }
             Line::from(spans)
         })
@@ -392,6 +259,7 @@ fn compact_table(
 /// bottom-border footer label. Built once per dialog and threaded through the
 /// draw and both hit-tests so they can't disagree on what's being shown.
 struct TableDialog<'a> {
+    theme: &'a Theme,
     title: &'a str,
     headers: &'a [&'a str],
     rows: &'a [Vec<String>],
@@ -417,21 +285,28 @@ struct TableDialogMetrics {
     scroll: u16,
 }
 
+pub(crate) struct MenuInteractions {
+    pub(crate) rows: Vec<(Rect, usize)>,
+    pub(crate) footer: Rect,
+}
+
 fn table_dialog_metrics(frame_area: Rect, dialog: &TableDialog, scroll: u16) -> TableDialogMetrics {
+    let theme = dialog.theme;
     // Rows the frame takes around the table: the two border rows (which carry
     // the title and footer) when bordered; flat pads the title and gives the
     // footer its own row above the bottom padding.
-    let frame_rows = if flat_chrome() {
-        dialog_frame_rows() + 1
+    let frame_rows = if flat_chrome(theme) {
+        dialog_frame_rows(theme) + 1
     } else {
-        dialog_frame_rows()
+        dialog_frame_rows(theme)
     };
-    let (grid_lines, grid_w) = grid_table(dialog.headers, dialog.rows, dialog.key_col);
+    let (grid_lines, grid_w) = grid_table(theme, dialog.headers, dialog.rows, dialog.key_col);
     let avail_h = frame_area.height.saturating_sub(2).max(3);
     let (lines, content_w, grid) = if grid_lines.len() as u16 + frame_rows <= avail_h {
         (grid_lines, grid_w, true)
     } else {
-        let (compact_lines, compact_w) = compact_table(dialog.headers, dialog.rows, dialog.key_col);
+        let (compact_lines, compact_w) =
+            compact_table(theme, dialog.headers, dialog.rows, dialog.key_col);
         (compact_lines, compact_w, false)
     };
     let total = lines.len() as u16;
@@ -441,14 +316,14 @@ fn table_dialog_metrics(frame_area: Rect, dialog: &TableDialog, scroll: u16) -> 
     } else {
         dialog.footer.to_string()
     };
-    let border_label = |text: &str| surface_outer_width(UnicodeWidthStr::width(text) as u16);
-    let outer_w = surface_outer_width(content_w)
+    let border_label = |text: &str| surface_outer_width(theme, UnicodeWidthStr::width(text) as u16);
+    let outer_w = surface_outer_width(theme, content_w)
         .max(border_label(dialog.title))
         .max(border_label(&footer))
         .min(frame_area.width);
     let area = centered_rect_fixed_size(outer_w, outer_h, frame_area);
-    let mut content = dialog_inner(area);
-    if flat_chrome() {
+    let mut content = dialog_inner(theme, area);
+    if flat_chrome(theme) {
         // The last inner row belongs to the footer.
         content.height = content.height.saturating_sub(1);
     }
@@ -470,43 +345,42 @@ fn table_dialog_metrics(frame_area: Rect, dialog: &TableDialog, scroll: u16) -> 
     }
 }
 
-fn table_dialog_row_at_point(
+fn table_dialog_interactions(
     frame_area: Rect,
     dialog: &TableDialog,
     scroll: u16,
-    col: u16,
-    row: u16,
-) -> Option<usize> {
+) -> MenuInteractions {
     let metrics = table_dialog_metrics(frame_area, dialog, scroll);
-    if !point_in_rect(metrics.content, col, row) {
-        return None;
+    let rows = (0..metrics.content.height)
+        .filter_map(|visible_line| {
+            let content_line = visible_line.saturating_add(metrics.scroll);
+            let index = if metrics.grid {
+                if content_line < 3 || !(content_line - 3).is_multiple_of(2) {
+                    return None;
+                }
+                (content_line - 3) / 2
+            } else {
+                content_line
+            };
+            ((index as usize) < dialog.rows.len()).then_some((
+                Rect {
+                    y: metrics.content.y + visible_line,
+                    height: 1,
+                    ..metrics.content
+                },
+                index as usize,
+            ))
+        })
+        .collect();
+    MenuInteractions {
+        rows,
+        footer: Rect {
+            x: metrics.area.x,
+            y: metrics.area.y + metrics.area.height.saturating_sub(1),
+            width: metrics.area.width,
+            height: 1,
+        },
     }
-    let visible_line = row - metrics.content.y;
-    let content_line = visible_line + metrics.scroll;
-    let index = if metrics.grid {
-        if content_line < 3 || !(content_line - 3).is_multiple_of(2) {
-            return None;
-        }
-        (content_line - 3) / 2
-    } else {
-        content_line
-    };
-    (index as usize)
-        .lt(&dialog.rows.len())
-        .then_some(index as usize)
-}
-
-fn table_dialog_footer_at_point(
-    frame_area: Rect,
-    dialog: &TableDialog,
-    scroll: u16,
-    col: u16,
-    row: u16,
-) -> bool {
-    let metrics = table_dialog_metrics(frame_area, dialog, scroll);
-    row == metrics.area.y + metrics.area.height.saturating_sub(1)
-        && col >= metrics.area.x
-        && col < metrics.area.x + metrics.area.width
 }
 
 /// The global keyboard-shortcut cheatsheet, grouped by the panel/context each key
@@ -573,25 +447,27 @@ const HELP_RULE_PAD: u16 = 3;
 /// faint rule under it, then its bindings — each an aligned key chip followed by
 /// the action. The rows themselves are left ragged; `section_table_lines` pads
 /// every cell to the column width when it splices the columns together.
-fn section_block(group: &str, items: &[(&str, &str)], width: usize) -> Vec<Line<'static>> {
+fn section_block(
+    theme: &Theme,
+    group: &str,
+    items: &[(&str, &str)],
+    width: usize,
+) -> Vec<Line<'static>> {
     let chip_w = max_chip_width(items);
-    let set = theme().glyphs().borders.line_set();
+    let set = theme.glyphs().borders.line_set();
     let mut lines = Vec::with_capacity(items.len() + 2);
-    lines.push(Line::from(Span::styled(
-        group.to_string(),
-        theme().heading(),
-    )));
+    lines.push(Line::from(Span::styled(group.to_string(), theme.heading())));
     lines.push(Line::from(Span::styled(
         set.horizontal.repeat(width),
-        table::faint_rule_style(),
+        table::themed_faint_rule_style(theme),
     )));
     for (keys, action) in items {
         let chip = key_chip_text(keys);
         let gap = chip_w.saturating_sub(UnicodeWidthStr::width(chip.as_str())) + 2;
         lines.push(Line::from(vec![
-            Span::styled(chip, key_chip_style()),
+            Span::styled(chip, key_chip_style(theme)),
             Span::raw(" ".repeat(gap)),
-            Span::styled((*action).to_string(), theme().text()),
+            Span::styled((*action).to_string(), theme.text()),
         ]));
     }
     lines
@@ -707,16 +583,23 @@ pub(super) fn balanced_splits(sizes: &[usize], ncols: usize) -> Vec<usize> {
 /// Splice the columns into one table body, row by row, with a themed vertical
 /// rule between each pair. Short columns are padded with blank rows so the rules
 /// run straight to the bottom.
-fn section_table_lines(columns: &[Vec<Line<'static>>], col_w: usize) -> Vec<Line<'static>> {
+fn section_table_lines(
+    theme: &Theme,
+    columns: &[Vec<Line<'static>>],
+    col_w: usize,
+) -> Vec<Line<'static>> {
     let rows = columns.iter().map(Vec::len).max().unwrap_or(0);
-    let rule = theme().glyphs().borders.line_set().vertical;
+    let rule = theme.glyphs().borders.line_set().vertical.to_string();
     (0..rows)
         .map(|r| {
             let mut spans = Vec::new();
             for (c, column) in columns.iter().enumerate() {
                 if c > 0 {
                     spans.push(Span::raw(" "));
-                    spans.push(Span::styled(rule.to_string(), table::border_style()));
+                    spans.push(Span::styled(
+                        rule.to_string(),
+                        table::themed_border_style(theme),
+                    ));
                     spans.push(Span::raw(" "));
                 }
                 // Pad every cell — real, short, or missing — to the column
@@ -739,8 +622,9 @@ fn section_table_lines(columns: &[Vec<Line<'static>>], col_w: usize) -> Vec<Line
 
 /// Draw the global keyboard cheatsheet: the centered, multi-column reference
 /// table opened with `?` from browse or a search result.
-pub(crate) fn draw_help(frame: &mut Frame<'_>, scroll: &mut u16) {
+pub(crate) fn draw_help(theme: &Theme, frame: &mut Frame<'_>, scroll: &mut u16) {
     draw_section_table(
+        theme,
         frame,
         &HELP_SECTIONS,
         "Keyboard Shortcuts",
@@ -754,6 +638,7 @@ pub(crate) fn draw_help(frame: &mut Frame<'_>, scroll: &mut u16) {
 /// centered on screen. `scroll` only engages when a short terminal can't show
 /// every row. Shared by the global help overlay and the editor's reference.
 fn draw_section_table(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     sections: &[(&str, &[(&str, &str)])],
     title: &str,
@@ -769,23 +654,25 @@ fn draw_section_table(
 
     // Widen the grid until it either runs out of horizontal room or hits the
     // column cap; more columns means a shorter, squarer table.
-    let avail_w = frame_area.width.saturating_sub(surface_outer_width(0));
+    let avail_w = frame_area
+        .width
+        .saturating_sub(surface_outer_width(theme, 0));
     let fit = ((avail_w + HELP_RULE_PAD) / (col_w + HELP_RULE_PAD)).max(1) as usize;
     let ncols = fit.min(HELP_MAX_COLS).min(sections.len());
 
     let blocks: Vec<Vec<Line<'static>>> = sections
         .iter()
-        .map(|(group, items)| section_block(group, items, col_w as usize))
+        .map(|(group, items)| section_block(theme, group, items, col_w as usize))
         .collect();
     let columns = section_columns(&blocks, ncols);
     let ncols = columns.len() as u16;
-    let lines = section_table_lines(&columns, col_w as usize);
+    let lines = section_table_lines(theme, &columns, col_w as usize);
 
     let content_w = col_w * ncols + HELP_RULE_PAD * ncols.saturating_sub(1);
-    let frame_rows = if flat_chrome() {
-        dialog_frame_rows() + 1
+    let frame_rows = if flat_chrome(theme) {
+        dialog_frame_rows(theme) + 1
     } else {
-        dialog_frame_rows()
+        dialog_frame_rows(theme)
     };
     let avail_h = frame_area.height.saturating_sub(2).max(3);
     let total = lines.len() as u16;
@@ -793,15 +680,15 @@ fn draw_section_table(
     // taller than its content and the footer breathes off the last line.
     let outer_h = (total + frame_rows + 1).min(avail_h);
     let content_h = outer_h.saturating_sub(frame_rows + 1);
-    let border_label = |text: &str| surface_outer_width(UnicodeWidthStr::width(text) as u16);
-    let outer_w = surface_outer_width(content_w)
+    let border_label = |text: &str| surface_outer_width(theme, UnicodeWidthStr::width(text) as u16);
+    let outer_w = surface_outer_width(theme, content_w)
         .max(border_label(title))
         .max(border_label(footer))
         .min(frame_area.width);
     let area = centered_rect_fixed_size(outer_w, outer_h, frame_area);
 
-    let mut content = dialog_inner(area);
-    if flat_chrome() {
+    let mut content = dialog_inner(theme, area);
+    if flat_chrome(theme) {
         content.height = content.height.saturating_sub(1);
     }
     // Center the table within the (possibly wider) content box.
@@ -813,31 +700,32 @@ fn draw_section_table(
     };
     *scroll = (*scroll).min(total.saturating_sub(content.height));
 
-    if flat_chrome() {
-        draw_dialog_frame(frame, area, title, false);
+    if flat_chrome(theme) {
+        draw_dialog_frame(theme, frame, area, title, false);
         let bottom = Rect {
             y: area.y + area.height.saturating_sub(2),
             height: 1,
             ..area
         };
         frame.render_widget(
-            Paragraph::new(Span::styled(footer.to_string(), theme().muted()))
+            Paragraph::new(Span::styled(footer.to_string(), theme.muted()))
                 .alignment(Alignment::Center),
             bottom,
         );
     } else {
-        clear_surface(frame, area, theme().dialog_bg());
+        clear_surface(theme, frame, area, theme.dialog_bg());
         let block = Block::default()
             .title(format!(" {title} "))
             .title_bottom(Line::from(format!(" {footer} ")).centered())
             .borders(Borders::ALL)
-            .border_set(theme().glyphs().borders.border_set())
-            .border_style(theme().dialog_border());
+            .border_set(theme.glyphs().borders.border_set())
+            .border_style(theme.dialog_border());
         frame.render_widget(block, area);
     }
 
     frame.render_widget(Paragraph::new(lines).scroll((*scroll, 0)), content);
     render_scrollbar_if_needed(
+        theme,
         frame,
         area,
         total as usize,
@@ -858,19 +746,20 @@ fn draw_table_dialog(
     scroll: &mut u16,
     hovered_row: Option<usize>,
 ) {
+    let theme = dialog.theme;
     let mut metrics = table_dialog_metrics(frame.area(), dialog, *scroll);
     *scroll = metrics.scroll;
     // Lift the hovered data row; the line index mirrors
-    // `table_dialog_row_at_point`'s mapping so hover and click can't disagree.
+    // `table_dialog_interactions`'s mapping so hover and click can't disagree.
     if let Some(row) = hovered_row {
         let line = if metrics.grid { 3 + 2 * row } else { row };
         if let Some(line) = metrics.lines.get_mut(line) {
-            line.style = line.style.patch(theme().hover());
+            line.style = line.style.patch(theme.hover());
         }
     }
 
-    if flat_chrome() {
-        draw_dialog_frame(frame, metrics.area, dialog.title, false);
+    if flat_chrome(theme) {
+        draw_dialog_frame(theme, frame, metrics.area, dialog.title, false);
         // The footer moves from the bottom border to its own row above the
         // bottom padding.
         let bottom = Rect {
@@ -879,18 +768,18 @@ fn draw_table_dialog(
             ..metrics.area
         };
         frame.render_widget(
-            Paragraph::new(Span::styled(metrics.footer.clone(), theme().muted()))
+            Paragraph::new(Span::styled(metrics.footer.clone(), theme.muted()))
                 .alignment(Alignment::Center),
             bottom,
         );
     } else {
-        clear_surface(frame, metrics.area, theme().dialog_bg());
+        clear_surface(theme, frame, metrics.area, theme.dialog_bg());
         let block = Block::default()
             .title(format!(" {} ", dialog.title))
             .title_bottom(Line::from(format!(" {} ", metrics.footer)).centered())
             .borders(Borders::ALL)
-            .border_set(theme().glyphs().borders.border_set())
-            .border_style(theme().dialog_border());
+            .border_set(theme.glyphs().borders.border_set())
+            .border_style(theme.dialog_border());
         frame.render_widget(block, metrics.area);
     }
 
@@ -899,6 +788,7 @@ fn draw_table_dialog(
         metrics.content,
     );
     render_scrollbar_if_needed(
+        theme,
         frame,
         metrics.area,
         metrics.total as usize,

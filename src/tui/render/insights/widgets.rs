@@ -13,7 +13,7 @@ use ratatui::{
 
 use crate::tui::entry_rows::{DividerAlign, section_divider, text_width, truncate_ellipsis};
 use crate::tui::render::flat_chrome;
-use crate::tui::theme::theme;
+use crate::tui::theme::Theme;
 
 /// Intra-panel composition breakpoints, measured from the content `Rect` (not
 /// the terminal). Named so the responsiveness tests can pin them.
@@ -100,13 +100,14 @@ pub(crate) fn stack(area: Rect, sections: &[Section]) -> Vec<Option<Rect>> {
 /// headers and the journals column's "Archived" divider. One blank row precedes
 /// it to set it off from the section above; the title takes the lone row when the
 /// area is a single line high. Returns the area below the title.
-pub(crate) fn heading(frame: &mut Frame<'_>, area: Rect, text: &str) -> Rect {
+pub(crate) fn heading(theme: &Theme, frame: &mut Frame<'_>, area: Rect, text: &str) -> Rect {
     if area.height == 0 {
         return area;
     }
     let title_y = if area.height >= 2 { area.y + 1 } else { area.y };
     frame.render_widget(
         Paragraph::new(section_divider(
+            theme,
             area.width as usize,
             text,
             DividerAlign::Left,
@@ -126,12 +127,12 @@ pub(crate) fn heading(frame: &mut Frame<'_>, area: Rect, text: &str) -> Rect {
 }
 
 /// Draw a dim caption line (e.g. a histogram axis) in `area`'s first row.
-pub(crate) fn caption(frame: &mut Frame<'_>, area: Rect, text: &str) {
+pub(crate) fn caption(theme: &Theme, frame: &mut Frame<'_>, area: Rect, text: &str) {
     if area.height == 0 {
         return;
     }
     frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(text.to_string(), theme().muted()))),
+        Paragraph::new(Line::from(Span::styled(text.to_string(), theme.muted()))),
         Rect { height: 1, ..area },
     );
 }
@@ -182,11 +183,11 @@ pub(crate) struct Stat {
 }
 
 impl Stat {
-    pub(crate) fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
+    pub(crate) fn new(theme: &Theme, label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             label: label.into(),
             value: value.into(),
-            value_style: theme().heading(),
+            value_style: theme.heading(),
             sub: None,
         }
     }
@@ -199,12 +200,15 @@ impl Stat {
 
 /// Lay a row of headline metrics out as boxed cards, collapsing to compact
 /// one-line rows when the area is short.
-pub(crate) fn draw_stats(frame: &mut Frame<'_>, area: Rect, stats: &[Stat]) {
+pub(crate) fn draw_stats(theme: &Theme, frame: &mut Frame<'_>, area: Rect, stats: &[Stat]) {
     if stats.is_empty() || area.width == 0 || area.height == 0 {
         return;
     }
     if is_short(area) {
-        let lines: Vec<Line> = stats.iter().map(stat_row_line).collect();
+        let lines: Vec<Line> = stats
+            .iter()
+            .map(|stat| stat_row_line(theme, stat))
+            .collect();
         frame.render_widget(Paragraph::new(lines), area);
         return;
     }
@@ -213,7 +217,7 @@ pub(crate) fn draw_stats(frame: &mut Frame<'_>, area: Rect, stats: &[Stat]) {
     // Flat cards have no borders, so the contiguous grid cells would abut. Trim a
     // gutter off the trailing edge of every interior cell — 2 columns between
     // columns, 1 row between rows — matching the Overview grid's flat spacing.
-    let (hgap, vgap) = if flat_chrome() { (2, 1) } else { (0, 0) };
+    let (hgap, vgap) = if flat_chrome(theme) { (2, 1) } else { (0, 0) };
     for (index, (mut cell, stat)) in grid(area, cols, rows).into_iter().zip(stats).enumerate() {
         if index % cols < cols - 1 {
             cell.width = cell.width.saturating_sub(hgap);
@@ -221,14 +225,14 @@ pub(crate) fn draw_stats(frame: &mut Frame<'_>, area: Rect, stats: &[Stat]) {
         if index / cols < rows - 1 {
             cell.height = cell.height.saturating_sub(vgap);
         }
-        draw_stat_card(frame, cell, stat);
+        draw_stat_card(theme, frame, cell, stat);
     }
 }
 
 /// A metric as one compact line: `Label  Value  sub`.
-fn stat_row_line(stat: &Stat) -> Line<'static> {
+fn stat_row_line(theme: &Theme, stat: &Stat) -> Line<'static> {
     let mut spans = vec![
-        Span::styled(format!("{}  ", stat.label), theme().muted()),
+        Span::styled(format!("{}  ", stat.label), theme.muted()),
         Span::styled(stat.value.clone(), stat.value_style),
     ];
     if let Some(sub) = &stat.sub {
@@ -242,28 +246,28 @@ fn stat_row_line(stat: &Stat) -> Line<'static> {
 /// back to a single centered line if the cell is too short to box. The caller sizes
 /// the card — keep it compact so the tile hugs its content rather than boxing empty
 /// space.
-pub(crate) fn draw_stat_card(frame: &mut Frame<'_>, area: Rect, stat: &Stat) {
+pub(crate) fn draw_stat_card(theme: &Theme, frame: &mut Frame<'_>, area: Rect, stat: &Stat) {
     if area.height < 3 || area.width < 4 {
         frame.render_widget(
-            Paragraph::new(stat_row_line(stat)).alignment(Alignment::Center),
+            Paragraph::new(stat_row_line(theme, stat)).alignment(Alignment::Center),
             area,
         );
         return;
     }
     let lines = vec![
-        Line::from(Span::styled(stat.label.clone(), theme().muted())),
+        Line::from(Span::styled(stat.label.clone(), theme.muted())),
         Line::from(Span::styled(stat.value.clone(), stat.value_style)),
     ];
     // Flat mode drops the border and fills the tile with the card surface colour;
     // bordered mode keeps the drawn box. The inner height loses the two border rows
     // only when a border is drawn.
-    let flat = flat_chrome();
+    let flat = flat_chrome(theme);
     let block = if flat {
-        Block::new().style(Style::default().bg(theme().raised_bg()))
+        Block::new().style(Style::default().bg(theme.raised_bg()))
     } else {
         Block::default()
             .borders(Borders::ALL)
-            .border_style(theme().card_border())
+            .border_style(theme.card_border())
     };
     // Vertically centre the two lines (label / value) in the card; round the pad up
     // so the block never hugs the top edge on an even inner height.
@@ -292,7 +296,7 @@ pub(crate) struct Bar {
 
 /// Render `bars` as `label ████····  value`, showing the top rows that fit plus
 /// a dim `+k more` footer when the list overflows the area.
-pub(crate) fn draw_bars(frame: &mut Frame<'_>, area: Rect, bars: &[Bar]) {
+pub(crate) fn draw_bars(theme: &Theme, frame: &mut Frame<'_>, area: Rect, bars: &[Bar]) {
     if area.width == 0 || area.height == 0 || bars.is_empty() {
         return;
     }
@@ -324,16 +328,12 @@ pub(crate) fn draw_bars(frame: &mut Frame<'_>, area: Rect, bars: &[Bar]) {
                 // texture of the empty track rather than reading as a slab;
                 // themes may swap either glyph.
                 Span::styled(
-                    theme().chart_bar().glyph.to_string().repeat(filled),
+                    theme.chart_bar().glyph.to_string().repeat(filled),
                     bar.style,
                 ),
                 Span::styled(
-                    theme()
-                        .chart_track()
-                        .glyph
-                        .to_string()
-                        .repeat(bar_w - filled),
-                    theme().chart_track().style,
+                    theme.chart_track().glyph.to_string().repeat(bar_w - filled),
+                    theme.chart_track().style,
                 ),
                 Span::raw(" "),
                 Span::raw(format!("{:>value_w$}", bar.value)),
@@ -341,7 +341,7 @@ pub(crate) fn draw_bars(frame: &mut Frame<'_>, area: Rect, bars: &[Bar]) {
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), rows_area);
-    draw_more_note(frame, more);
+    draw_more_note(theme, frame, more);
 }
 
 /// Split `area` into a rows region and, when `total` overflows, a one-line
@@ -368,10 +368,10 @@ pub(crate) fn list_regions(area: Rect, total: usize) -> (Rect, usize, Option<(Re
     )
 }
 
-pub(crate) fn draw_more_note(frame: &mut Frame<'_>, more: Option<(Rect, String)>) {
+pub(crate) fn draw_more_note(theme: &Theme, frame: &mut Frame<'_>, more: Option<(Rect, String)>) {
     if let Some((area, text)) = more {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(text, theme().muted()))),
+            Paragraph::new(Line::from(Span::styled(text, theme.muted()))),
             area,
         );
     }
@@ -408,6 +408,7 @@ fn ramp_cell_down(ramp: &[char; 4], eighths: usize) -> char {
 /// columns show a full year and narrow ones an initial). `None` values leave an
 /// empty column with just its baseline tick, so gaps still read positionally.
 pub(crate) fn draw_signed_columns(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     area: Rect,
     values: &[Option<f32>],
@@ -450,7 +451,7 @@ pub(crate) fn draw_signed_columns(
 
     // The character each column shows on plot row `y`, with whether it is a
     // positive (green) or negative (red) cell.
-    let ramps = theme().glyphs().ramps;
+    let ramps = theme.glyphs().ramps.clone();
     let column_cell = |value: &Option<f32>, y: u16| -> (char, bool) {
         match value {
             Some(avg) if *avg > 0.0 && y < baseline_row => {
@@ -485,9 +486,9 @@ pub(crate) fn draw_signed_columns(
             }
             let (ch, positive) = column_cell(value, y);
             let style = if positive {
-                theme().positive()
+                theme.positive()
             } else {
-                theme().negative()
+                theme.negative()
             };
             spans.push(Span::styled(ch.to_string().repeat(col_w(i)), style));
         }
@@ -505,9 +506,9 @@ pub(crate) fn draw_signed_columns(
     // The dim zero baseline: a solid rule under each bar, the theme's lighter
     // tick across the gaps. The solid `─` stays fixed — the tick-vs-solid
     // weight difference is what marks bar-versus-gap without color.
-    let baseline = theme().chart_baseline();
-    let tick = theme().glyphs().chart_baseline.to_string();
-    let rule = theme().glyphs().chart_rule.to_string();
+    let baseline = theme.chart_baseline();
+    let tick = theme.glyphs().chart_baseline.to_string();
+    let rule = theme.glyphs().chart_rule.to_string();
     let mut base = vec![Span::styled(tick.repeat(edge), baseline)];
     for i in 0..n {
         if i > 0 {
@@ -534,7 +535,7 @@ pub(crate) fn draw_signed_columns(
         let label = labels.get(i).copied().unwrap_or("");
         label_spans.push(Span::styled(
             center_truncate(label, col_w(i)),
-            theme().chart_label(),
+            theme.chart_label(),
         ));
     }
     label_spans.push(Span::raw(" ".repeat(edge)));
@@ -564,7 +565,7 @@ fn center_truncate(text: &str, width: usize) -> String {
 /// A vertical bar chart of `values` drawn with the block ramp, scaled to the
 /// tallest bucket. One cell per column plus a space when it fits; degrades to a
 /// one-row sparkline when the area is a single line high.
-pub(crate) fn draw_histogram(frame: &mut Frame<'_>, area: Rect, values: &[usize]) {
+pub(crate) fn draw_histogram(theme: &Theme, frame: &mut Frame<'_>, area: Rect, values: &[usize]) {
     if area.width == 0 || area.height == 0 || values.is_empty() {
         return;
     }
@@ -574,7 +575,7 @@ pub(crate) fn draw_histogram(frame: &mut Frame<'_>, area: Rect, values: &[usize]
     let bar_h = area.height as usize;
     let eighths_per = bar_h * 8;
 
-    let ramp = theme().glyphs().ramps.up;
+    let ramp = theme.glyphs().ramps.up;
     let mut lines: Vec<Line> = Vec::with_capacity(bar_h);
     for row in 0..bar_h {
         // Row 0 is the top; `level` counts cells up from the baseline.
@@ -589,7 +590,7 @@ pub(crate) fn draw_histogram(frame: &mut Frame<'_>, area: Rect, values: &[usize]
             let cell = filled.saturating_sub(lower).min(8);
             spans.push(Span::styled(
                 ramp_cell(&ramp, cell).to_string(),
-                theme().chart_bar().style,
+                theme.chart_bar().style,
             ));
         }
         lines.push(Line::from(spans));
@@ -601,6 +602,7 @@ pub(crate) fn draw_histogram(frame: &mut Frame<'_>, area: Rect, values: &[usize]
 /// share, over `width` cells. Segment length carries the proportion (so it reads
 /// on monochrome); colour and weight distinguish the three.
 pub(crate) fn sentiment_segments(
+    theme: &Theme,
     positive: usize,
     neutral: usize,
     negative: usize,
@@ -608,7 +610,7 @@ pub(crate) fn sentiment_segments(
 ) -> Line<'static> {
     let total = positive + neutral + negative;
     if total == 0 || width == 0 {
-        let track = theme().chart_track();
+        let track = theme.chart_track();
         return Line::from(Span::styled(
             track.glyph.to_string().repeat(width),
             track.style,
@@ -633,9 +635,9 @@ pub(crate) fn sentiment_segments(
         Span::styled(fill.glyph.to_string().repeat(cells), fill.style)
     };
     Line::from(vec![
-        segment(theme().chart_positive(), pos),
-        segment(theme().chart_neutral(), neu),
-        segment(theme().chart_negative(), neg),
+        segment(theme.chart_positive(), pos),
+        segment(theme.chart_neutral(), neu),
+        segment(theme.chart_negative(), neg),
     ])
 }
 
@@ -653,7 +655,15 @@ mod tests {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|frame| draw_signed_columns(frame, rect(width, height), vals, labels))
+            .draw(|frame| {
+                draw_signed_columns(
+                    &Theme::terminal_default(),
+                    frame,
+                    rect(width, height),
+                    vals,
+                    labels,
+                )
+            })
             .unwrap();
         terminal
             .backend()
@@ -754,7 +764,7 @@ mod tests {
 
     #[test]
     fn sentiment_segments_fill_exactly_and_split_by_share() {
-        let line = sentiment_segments(3, 0, 1, 8);
+        let line = sentiment_segments(&Theme::terminal_default(), 3, 0, 1, 8);
         let width: usize = line
             .spans
             .iter()
@@ -770,8 +780,8 @@ mod tests {
     fn sentiment_segments_stay_distinguishable_without_color_on_eclipse() {
         // The eclipse theme separates the three series by glyph, not hue: each
         // rendered segment must use a different fill character.
-        crate::tui::theme::set_test_theme(crate::tui::theme::test_eclipse_theme());
-        let line = sentiment_segments(2, 2, 2, 9);
+        let theme = crate::tui::theme::test_eclipse_theme();
+        let line = sentiment_segments(&theme, 2, 2, 2, 9);
         let glyphs: Vec<char> = line
             .spans
             .iter()

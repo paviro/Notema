@@ -5,13 +5,13 @@ use ratatui::{
 };
 
 use crate::tui::{
-    app::{App, Focus, Mode, SearchScope},
+    app::{AppModel, Focus, Mode, SearchScope},
     entry_rows::{total_row_height, visible_box_items},
     render::{
         PanelGeometry, clamp_scroll, count_label, flat_chrome, list_state_for_render, panel_block,
         render_centered_notice, render_scrollbar_if_needed,
     },
-    theme::theme,
+    theme::Theme,
 };
 
 /// Rows occupied by one journal's bordered box (top border, name, bottom border).
@@ -21,8 +21,8 @@ pub(crate) const JOURNAL_BOX_HEIGHT: u16 = 3;
 /// rows (all background-filled, name centered) and add a blank separator row
 /// so adjacent cards read as distinct blocks. Uniform per chrome, so
 /// `journal_row_top` stays a plain multiply.
-pub(crate) fn journal_row_height() -> u16 {
-    if flat_chrome() {
+pub(crate) fn journal_row_height(theme: &Theme) -> u16 {
+    if flat_chrome(theme) {
         JOURNAL_BOX_HEIGHT + 1
     } else {
         JOURNAL_BOX_HEIGHT
@@ -43,7 +43,12 @@ pub(crate) fn journal_list_rect(content: Rect) -> Rect {
     }
 }
 
-pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app: &mut App) {
+pub(crate) fn draw_journals(
+    active_theme: &Theme,
+    frame: &mut Frame<'_>,
+    geometry: PanelGeometry,
+    app: &AppModel,
+) -> usize {
     let focused = app.nav.focus == Focus::Journals;
     // An all-journals search covers everything, so highlight every journal
     // rather than implying it's scoped to the selected one. A journal-scoped
@@ -51,11 +56,12 @@ pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app:
     let select_all = app.nav.mode == Mode::Search && app.search.scope == SearchScope::AllJournals;
     // Flat chrome bakes selection (and the all-journals flood) into the chip
     // lines themselves; only bordered mode drives the List highlight.
-    let styles_baked = flat_chrome();
+    let styles_baked = flat_chrome(active_theme);
     let highlight_active = !select_all && !styles_baked;
     // Archived journals are still journals, so the panel count includes them; the
     // "Archived" divider marks the split within the list.
     let block = panel_block(
+        active_theme,
         "Journals",
         focused,
         Some(count_label(
@@ -64,20 +70,20 @@ pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app:
             "journals",
         )),
     );
-    app.normalize_journal_selection();
-
     let (rows, meta, list_area) = app.journal_rows(geometry.content);
     let viewport_height = list_area.height;
     let total_height = total_row_height(&meta);
     let pixel_offset = clamp_scroll(app.nav.journal_list.offset(), total_height, viewport_height);
-    *app.nav.journal_list.offset_mut() = pixel_offset;
 
-    let highlight_style = theme().selection();
+    let highlight_style = active_theme.selection();
     let (items, selected_visible, item_indices) = visible_box_items(
         &rows,
         pixel_offset,
         viewport_height,
-        app.nav.journal_list.selected(),
+        app.nav
+            .journal_list
+            .selected()
+            .filter(|index| *index < app.library.journals.len()),
         highlight_active,
     );
     // An all-journals search highlights every journal box to signal the wide
@@ -107,9 +113,10 @@ pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app:
         list_state_for_render(selected_visible, 0, viewport_height, highlight_active);
 
     frame.render_widget(block, geometry.area);
-    super::panel_focus_stripe(frame, geometry.area, focused);
+    super::panel_focus_stripe(active_theme, frame, geometry.area, focused);
     frame.render_stateful_widget(list, list_area, &mut render_state);
     render_scrollbar_if_needed(
+        active_theme,
         frame,
         geometry.area,
         total_height,
@@ -121,6 +128,7 @@ pub(crate) fn draw_journals(frame: &mut Frame<'_>, geometry: PanelGeometry, app:
     // With no journals the column would otherwise be blank; a centered notice
     // matches the overview and entry list so it reads as intentional.
     if app.library.journals.is_empty() {
-        render_centered_notice(frame, geometry.content, "No journals");
+        render_centered_notice(active_theme, frame, geometry.content, "No journals");
     }
+    pixel_offset
 }

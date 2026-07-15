@@ -10,12 +10,12 @@ use super::widgets::{
     heading, stack,
 };
 use crate::tui::render::render_centered_notice;
-use crate::tui::theme::theme;
+use crate::tui::theme::Theme;
 
-pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics) {
+pub(super) fn draw(theme: &Theme, frame: &mut Frame<'_>, area: Rect, analytics: &Analytics) {
     let cadence = &analytics.cadence;
     if cadence.total_entries == 0 {
-        render_centered_notice(frame, area, "No entries yet");
+        render_centered_notice(theme, frame, area, "No entries");
         return;
     }
 
@@ -31,18 +31,23 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics) {
 
     if let Some(cards) = sections[0] {
         draw_stats(
+            theme,
             frame,
             cards,
             &[
-                Stat::new("Streak", format!("{}d", cadence.current_streak)),
-                Stat::new("Longest", format!("{}d", cadence.longest_streak)),
-                Stat::new("Longest gap", format!("{}d", cadence.longest_gap_days)),
+                Stat::new(theme, "Streak", format!("{}d", cadence.current_streak)),
+                Stat::new(theme, "Longest", format!("{}d", cadence.longest_streak)),
+                Stat::new(
+                    theme,
+                    "Longest gap",
+                    format!("{}d", cadence.longest_gap_days),
+                ),
             ],
         );
     }
 
     if let Some(area) = sections[1] {
-        let body = heading(frame, area, "Entries over time");
+        let body = heading(theme, frame, area, "Entries over time");
         let max = cadence
             .per_period
             .iter()
@@ -57,10 +62,10 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics) {
                 label: period.name.clone(),
                 fill: period.count as f32 / max as f32,
                 value: period.count.to_string(),
-                style: theme().chart_bar().style,
+                style: theme.chart_bar().style,
             })
             .collect();
-        draw_bars(frame, body, &bars);
+        draw_bars(theme, frame, body, &bars);
     }
 
     if let Some(area) = sections[2] {
@@ -80,28 +85,39 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics) {
             let cells = grid(area, 1, 2);
             (cells[0], cells[1])
         };
-        let body = heading(frame, weekday_area, "By weekday");
-        draw_axis_histogram(frame, body, &cadence.by_weekday, "Mon → Sun");
-        let body = heading(frame, hour_area, "By hour");
+        let body = heading(theme, frame, weekday_area, "By weekday");
+        draw_axis_histogram(theme, frame, body, &cadence.by_weekday, "Mon → Sun");
+        let body = heading(theme, frame, hour_area, "By hour");
         let bins = hour_bins(body.width);
-        draw_axis_histogram(frame, body, &bin(&cadence.by_hour, bins), "0h → 24h");
+        draw_axis_histogram(theme, frame, body, &bin(&cadence.by_hour, bins), "0h → 24h");
     }
 
     if let Some(cards) = sections[3] {
         draw_stats(
+            theme,
             frame,
             cards,
             &[
-                Stat::new("Total words", cadence.total_words.to_string()),
-                Stat::new("Avg / entry", format!("{:.0}", cadence.words_per_entry_avg)),
-                Stat::new("Median", cadence.words_per_entry_median.to_string()),
+                Stat::new(theme, "Total words", cadence.total_words.to_string()),
+                Stat::new(
+                    theme,
+                    "Avg / entry",
+                    format!("{:.0}", cadence.words_per_entry_avg),
+                ),
+                Stat::new(theme, "Median", cadence.words_per_entry_median.to_string()),
             ],
         );
     }
 }
 
 /// A histogram with a dim axis caption pinned to its bottom row.
-fn draw_axis_histogram(frame: &mut Frame<'_>, area: Rect, values: &[usize], axis: &str) {
+fn draw_axis_histogram(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    values: &[usize],
+    axis: &str,
+) {
     if area.height == 0 {
         return;
     }
@@ -114,8 +130,8 @@ fn draw_axis_histogram(frame: &mut Frame<'_>, area: Rect, values: &[usize], axis
         height: 1,
         ..area
     };
-    draw_histogram(frame, bars, values);
-    caption(frame, axis_row, axis);
+    draw_histogram(theme, frame, bars, values);
+    caption(theme, frame, axis_row, axis);
 }
 
 /// Group `values` into `groups` contiguous bins, summing each.

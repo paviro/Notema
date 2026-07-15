@@ -18,8 +18,10 @@ use notema_analytics::Correlation;
 use super::signed;
 use crate::tui::entry_rows::truncate_ellipsis;
 use crate::tui::render::render_centered_notice;
-use crate::tui::render::table::{self, border, pad, push_cell};
-use crate::tui::theme::theme;
+use crate::tui::render::table::{
+    self, pad, themed_border as border, themed_push_cell as push_cell,
+};
+use crate::tui::theme::Theme;
 
 /// Below this panel width the table's borders crowd the columns, so the compact
 /// one-line rows are used instead.
@@ -42,6 +44,7 @@ pub(super) struct InsightsListMetrics {
 /// or an empty notice. Clamps `*scroll` to the list length and returns the scroll
 /// metrics for the panel's scrollbar.
 pub(super) fn draw(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     area: Rect,
     items: &[Correlation],
@@ -51,7 +54,7 @@ pub(super) fn draw(
 ) -> InsightsListMetrics {
     if items.is_empty() {
         *scroll = 0;
-        render_centered_notice(frame, area, empty_msg);
+        render_centered_notice(theme, frame, area, empty_msg);
         return InsightsListMetrics {
             total: 0,
             viewport: 0,
@@ -62,9 +65,9 @@ pub(super) fn draw(
         .flatten();
     match columns {
         Some(columns) if area.height >= 5 => {
-            draw_table(frame, area, items, scroll, &columns, feeling_header)
+            draw_table(theme, frame, area, items, scroll, &columns, feeling_header)
         }
-        _ => draw_compact(frame, area, items, scroll),
+        _ => draw_compact(theme, frame, area, items, scroll),
     }
 }
 
@@ -79,6 +82,7 @@ fn visible_range(total: usize, viewport: usize, scroll: &mut u16) -> std::ops::R
 
 /// The narrow side-column layout: one line per correlate, no header or borders.
 fn draw_compact(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     area: Rect,
     items: &[Correlation],
@@ -89,7 +93,7 @@ fn draw_compact(
     let name_w = (area.width as usize / 4).clamp(8, 20);
     let lines: Vec<Line> = items[range]
         .iter()
-        .map(|correlate| correlate_line(correlate, name_w, true))
+        .map(|correlate| correlate_line(theme, correlate, name_w, true))
         .collect();
     frame.render_widget(Paragraph::new(lines), area);
     InsightsListMetrics {
@@ -103,6 +107,7 @@ fn draw_compact(
 /// take two rows and each data row carries a trailing rule, so a `height`-row
 /// panel shows `(height - 3) / 2` scrollable rows.
 fn draw_table(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     area: Rect,
     items: &[Correlation],
@@ -119,22 +124,22 @@ fn draw_table(
         .map(f32::abs)
         .fold(0.0_f32, f32::max);
 
-    let border = theme().muted();
+    let border = theme.muted();
     let mut lines: Vec<Line> = Vec::with_capacity(2 * viewport + 3);
-    lines.push(columns.rule(table::RulePos::Top, border, border));
-    lines.push(columns.header_row(feeling_header));
+    lines.push(columns.rule(theme, table::RulePos::Top, border, border));
+    lines.push(columns.header_row(theme, feeling_header));
     // The header/body divider keeps the border weight; the grid lines *between*
     // data rows fade their dashes and run the column borders straight through
     // (no junctions), so the vertical lines stay continuous and uniform even
     // though the faint dashes no longer connect to them.
-    lines.push(columns.rule(table::RulePos::Mid, border, border));
+    lines.push(columns.rule(theme, table::RulePos::Mid, border, border));
     for (row, correlate) in items[range.clone()].iter().enumerate() {
         if row > 0 {
-            lines.push(columns.rule(table::RulePos::Row, border, theme().faint_rule()));
+            lines.push(columns.rule(theme, table::RulePos::Row, border, theme.faint_rule()));
         }
-        lines.push(columns.data_row(correlate, max_abs));
+        lines.push(columns.data_row(theme, correlate, max_abs));
     }
-    lines.push(columns.rule(table::RulePos::Bottom, border, border));
+    lines.push(columns.rule(theme, table::RulePos::Bottom, border, border));
 
     frame.render_widget(Paragraph::new(lines), area);
     InsightsListMetrics {
@@ -210,51 +215,64 @@ impl Columns {
     }
 
     /// A horizontal border rule, e.g. `┌────┬────┐`, matching the column widths.
-    fn rule(&self, pos: table::RulePos, junction: Style, dash: Style) -> Line<'static> {
-        table::rule(&self.widths(), pos, junction, dash)
+    fn rule(
+        &self,
+        theme: &Theme,
+        pos: table::RulePos,
+        junction: Style,
+        dash: Style,
+    ) -> Line<'static> {
+        table::themed_rule(theme, &self.widths(), pos, junction, dash)
     }
 
     /// The dim header row, its labels padded to the column widths. `feeling_header`
     /// names the trailing column, which differs by tab (associated vs. co-occurring
     /// feelings).
-    fn header_row(&self, feeling_header: &str) -> Line<'static> {
-        let mut spans = vec![border()];
+    fn header_row(&self, theme: &Theme, feeling_header: &str) -> Line<'static> {
+        let mut spans = vec![border(theme)];
         push_cell(
+            theme,
             &mut spans,
-            Span::styled(pad("Name", self.name, false), theme().muted()),
+            Span::styled(pad("Name", self.name, false), theme.muted()),
         );
         push_cell(
+            theme,
             &mut spans,
-            Span::styled(pad("Count", COUNT_W, true), theme().muted()),
+            Span::styled(pad("Count", COUNT_W, true), theme.muted()),
         );
         push_cell(
+            theme,
             &mut spans,
-            Span::styled(pad("Avg", AVG_W, true), theme().muted()),
+            Span::styled(pad("Avg", AVG_W, true), theme.muted()),
         );
         push_cell(
+            theme,
             &mut spans,
-            Span::styled(pad("Δ", DELTA_W, true), theme().muted()),
+            Span::styled(pad("Δ", DELTA_W, true), theme.muted()),
         );
         if let Some(bar) = self.bar {
             // Reads left-to-right to match the diverging bar: drains fill left of
             // the centre marker, lifts fill right.
             push_cell(
+                theme,
                 &mut spans,
-                Span::styled(pad("Drains / lifts", bar, false), theme().muted()),
+                Span::styled(pad("Drains / lifts", bar, false), theme.muted()),
             );
         }
         push_cell(
+            theme,
             &mut spans,
-            Span::styled(pad(feeling_header, self.feeling, false), theme().muted()),
+            Span::styled(pad(feeling_header, self.feeling, false), theme.muted()),
         );
         Line::from(spans)
     }
 
     /// One data row: name, count, avg mood, delta, an optional diverging bar, and
     /// the top feeling — each boxed by the `│` column borders.
-    fn data_row(&self, correlate: &Correlation, max_abs: f32) -> Line<'static> {
-        let mut spans = vec![border()];
+    fn data_row(&self, theme: &Theme, correlate: &Correlation, max_abs: f32) -> Line<'static> {
+        let mut spans = vec![border(theme)];
         push_cell(
+            theme,
             &mut spans,
             Span::raw(pad(
                 &truncate_ellipsis(&correlate.name, self.name),
@@ -263,37 +281,40 @@ impl Columns {
             )),
         );
         push_cell(
+            theme,
             &mut spans,
             Span::raw(format!("{:>COUNT_W$}", correlate.count)),
         );
         push_cell(
+            theme,
             &mut spans,
             match correlate.avg_mood {
-                Some(avg) => Span::styled(format!("{:>AVG_W$}", signed(avg)), theme().signed(avg)),
-                None => Span::styled(format!("{:>AVG_W$}", "—"), theme().muted()),
+                Some(avg) => Span::styled(format!("{:>AVG_W$}", signed(avg)), theme.signed(avg)),
+                None => Span::styled(format!("{:>AVG_W$}", "—"), theme.muted()),
             },
         );
         push_cell(
+            theme,
             &mut spans,
             match correlate.mood_delta {
-                Some(delta) => Span::styled(
-                    format!("{:>DELTA_W$}", signed(delta)),
-                    theme().signed(delta),
-                ),
-                None => Span::styled(format!("{:>DELTA_W$}", "—"), theme().muted()),
+                Some(delta) => {
+                    Span::styled(format!("{:>DELTA_W$}", signed(delta)), theme.signed(delta))
+                }
+                None => Span::styled(format!("{:>DELTA_W$}", "—"), theme.muted()),
             },
         );
         if let Some(bar) = self.bar {
             // The bar is many spans, so splice them in between the pad + borders
             // rather than through the single-span `push_cell`.
             spans.push(Span::raw(" "));
-            spans.extend(delta_bar(correlate.mood_delta, max_abs, bar).spans);
+            spans.extend(delta_bar(theme, correlate.mood_delta, max_abs, bar).spans);
             spans.push(Span::raw(" "));
-            spans.push(border());
+            spans.push(border(theme));
         }
         // The most-common feelings with their counts, joined to fill the column and
         // ellipsized when they overflow (a wide panel shows several, a snug one the top).
         push_cell(
+            theme,
             &mut spans,
             Span::styled(
                 pad(
@@ -301,7 +322,7 @@ impl Columns {
                     self.feeling,
                     false,
                 ),
-                theme().muted(),
+                theme.muted(),
             ),
         );
         Line::from(spans)
@@ -326,7 +347,7 @@ fn feelings_label(correlate: &Correlation) -> String {
 /// sadder (`negative`), its length proportional to `delta / max_abs`. The dim `·`
 /// track and `▓` fill share the panel's bar vocabulary; a `None`/zero delta or a
 /// flat journal (`max_abs == 0`) leaves the bare track.
-fn delta_bar(delta: Option<f32>, max_abs: f32, width: usize) -> Line<'static> {
+fn delta_bar(theme: &Theme, delta: Option<f32>, max_abs: f32, width: usize) -> Line<'static> {
     // The centre marker plus two halves span exactly `width`; the right half keeps
     // any odd cell so the box border stays aligned.
     let track = width.saturating_sub(1);
@@ -356,10 +377,10 @@ fn delta_bar(delta: Option<f32>, max_abs: f32, width: usize) -> Line<'static> {
 
     // Filled cells carry the sign colour; empty ones read as the muted `·`
     // groove, so length alone conveys magnitude on monochrome. Resolve the theme
-    // once — `theme()` copies the whole ~1KB `Theme` by value, and this runs per
+    // once — the theme contains the complete resolved palette, and this runs per
     // cell. A filled cell is the bar glyph in the sign colour (direction already
     // carries the meaning); an empty cell is the groove track.
-    let t = theme();
+    let t = theme;
     let bar_glyph = t.chart_bar().glyph.to_string();
     let track_glyph = t.glyphs().diverge_track.to_string();
     let track_style = t.chart_track().style;
@@ -388,6 +409,7 @@ fn delta_bar(delta: Option<f32>, max_abs: f32, width: usize) -> Line<'static> {
 /// columns are tinted by sign. Set `show_feeling` off where the top feeling would
 /// just be the row itself (the Feelings tab's mood ranking).
 pub(super) fn correlate_line(
+    theme: &Theme,
     correlate: &Correlation,
     name_w: usize,
     show_feeling: bool,
@@ -400,21 +422,21 @@ pub(super) fn correlate_line(
     match correlate.avg_mood {
         Some(avg) => spans.push(Span::styled(
             format!("{:>5}", signed(avg)),
-            theme().signed(avg),
+            theme.signed(avg),
         )),
-        None => spans.push(Span::styled("    —", theme().muted())),
+        None => spans.push(Span::styled("    —", theme.muted())),
     }
     match correlate.mood_delta {
         Some(delta) => spans.push(Span::styled(
             format!("  Δ{:>5}", signed(delta)),
-            theme().signed(delta),
+            theme.signed(delta),
         )),
-        None => spans.push(Span::styled("       ", theme().muted())),
+        None => spans.push(Span::styled("       ", theme.muted())),
     }
     if show_feeling && let Some((feeling, count)) = correlate.top_feelings.first() {
         spans.push(Span::styled(
             format!("  {feeling} ({count})"),
-            theme().muted(),
+            theme.muted(),
         ));
     }
     Line::from(spans)
@@ -446,7 +468,7 @@ mod tests {
 
     #[test]
     fn delta_bar_has_a_centre_marker_and_fixed_width() {
-        let (width, left, right) = bar_shape(&delta_bar(None, 2.0, 11));
+        let (width, left, right) = bar_shape(&delta_bar(&Theme::terminal_default(), None, 2.0, 11));
         // 11 → 5 groove + marker + 5 groove; a None delta leaves the bare track.
         assert_eq!(width, 11);
         assert_eq!((left, right), (0, 0));
@@ -455,14 +477,16 @@ mod tests {
     #[test]
     fn positive_delta_fills_right_and_negative_fills_left() {
         // A full-magnitude delta fills its whole half; the other side stays empty.
-        let (_, left, right) = bar_shape(&delta_bar(Some(2.0), 2.0, 11));
+        let (_, left, right) =
+            bar_shape(&delta_bar(&Theme::terminal_default(), Some(2.0), 2.0, 11));
         assert_eq!((left, right), (0, 5));
 
-        let (_, left, right) = bar_shape(&delta_bar(Some(-2.0), 2.0, 11));
+        let (_, left, right) =
+            bar_shape(&delta_bar(&Theme::terminal_default(), Some(-2.0), 2.0, 11));
         assert_eq!((left, right), (5, 0));
 
         // Half-magnitude fills half the side, proportional to `delta / max_abs`.
-        let (_, _, right) = bar_shape(&delta_bar(Some(1.0), 2.0, 11));
+        let (_, _, right) = bar_shape(&delta_bar(&Theme::terminal_default(), Some(1.0), 2.0, 11));
         assert_eq!(right, 3); // round(0.5 * 5)
     }
 
@@ -482,10 +506,18 @@ mod tests {
             let inner: usize = columns.widths().iter().map(|w| w + 3).sum::<usize>() + 1;
             assert_eq!(inner, panel, "columns should tile the panel width");
             assert_eq!(
-                width(columns.rule(table::RulePos::Top, theme().muted(), theme().muted())),
+                width(columns.rule(
+                    &Theme::terminal_default(),
+                    table::RulePos::Top,
+                    Theme::terminal_default().muted(),
+                    Theme::terminal_default().muted()
+                )),
                 panel
             );
-            assert_eq!(width(columns.header_row("Feelings")), panel);
+            assert_eq!(
+                width(columns.header_row(&Theme::terminal_default(), "Feelings")),
+                panel
+            );
 
             let sample = Correlation {
                 name: "alex".to_string(),
@@ -494,7 +526,10 @@ mod tests {
                 top_feelings: vec![("calm".to_string(), 2)],
                 mood_delta: Some(1.5),
             };
-            assert_eq!(width(columns.data_row(&sample, 3.0)), panel);
+            assert_eq!(
+                width(columns.data_row(&Theme::terminal_default(), &sample, 3.0)),
+                panel
+            );
         }
     }
 

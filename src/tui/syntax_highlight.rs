@@ -7,7 +7,7 @@ use ratatui::{
 };
 use tree_sitter_highlight::{Highlight, HighlightConfiguration, HighlightEvent, Highlighter};
 
-use crate::tui::theme::{Syntax, theme};
+use crate::tui::theme::{Syntax, Theme};
 
 const HIGHLIGHT_NAMES: &[&str] = &[
     "attribute",
@@ -97,8 +97,8 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
-pub(crate) fn highlight(language: &str, code: &str) -> Option<Vec<Line<'static>>> {
-    if !theme().syntax().any_color() {
+pub(crate) fn highlight(theme: &Theme, language: &str, code: &str) -> Option<Vec<Line<'static>>> {
+    if !theme.syntax().any_color() {
         return None;
     }
     let key = language.trim().to_ascii_lowercase();
@@ -123,7 +123,7 @@ pub(crate) fn highlight(language: &str, code: &str) -> Option<Vec<Line<'static>>
             .highlight(configuration, code.as_bytes(), None, |_| None)
             .ok()?;
 
-        let syntax = theme().syntax();
+        let syntax = theme.syntax();
         let mut active = Vec::new();
         let mut lines = vec![Line::default()];
         for event in events {
@@ -131,8 +131,8 @@ pub(crate) fn highlight(language: &str, code: &str) -> Option<Vec<Line<'static>>
                 HighlightEvent::Source { start, end } => {
                     let style = active
                         .last()
-                        .map(|index| style_for(*index, syntax))
-                        .unwrap_or_else(|| theme().md_code());
+                        .map(|index| style_for(*index, syntax, theme.md_code()))
+                        .unwrap_or_else(|| theme.md_code());
                     // Tree-sitter byte offsets are char-aligned in practice, but a
                     // non-boundary slice would panic mid-draw and take down the TUI;
                     // fall back to unhighlighted rendering instead.
@@ -163,7 +163,7 @@ fn push_source(lines: &mut Vec<Line<'static>>, source: &str, style: Style) {
     }
 }
 
-fn style_for(index: usize, syntax: Syntax) -> Style {
+fn style_for(index: usize, syntax: Syntax, fallback: Style) -> Style {
     let name = HIGHLIGHT_NAMES.get(index).copied().unwrap_or_default();
     match name {
         "comment" | "comment.documentation" => Style::new()
@@ -190,6 +190,6 @@ fn style_for(index: usize, syntax: Syntax) -> Style {
         "tag" => Style::new().fg(syntax.tag),
         "label" => Style::new().fg(syntax.label),
         "error" => Style::new().fg(syntax.error),
-        _ => theme().md_code(),
+        _ => fallback,
     }
 }

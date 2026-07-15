@@ -15,14 +15,13 @@ use std::ops::Range;
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag};
 use ratatui::style::{Modifier, Style};
 
-use crate::tui::theme::theme;
+use crate::tui::theme::Theme;
 
 /// Compute per-line syntax styling for the whole body. The returned outer `Vec`
 /// has one entry per `text.split('\n')` line (matching `TextArea::lines`), each a
 /// list of non-overlapping, ordered `(start_byte, end_byte, style)` ranges
 /// relative to that line. Bytes with no entry keep the editor's base styling.
-pub(crate) fn highlight_body(text: &str) -> Vec<Vec<(usize, usize, Style)>> {
-    let theme = theme();
+pub(crate) fn highlight_body(theme: &Theme, text: &str) -> Vec<Vec<(usize, usize, Style)>> {
     let muted = theme.muted();
     let md_heading = theme.md_heading();
     let md_heading2 = theme.md_heading2();
@@ -283,7 +282,7 @@ mod tests {
             for body in bodies {
                 let mut ta = TextArea::new(body.split('\n').map(str::to_string).collect());
                 ta.set_wrap_mode(WrapMode::WordOrGlyph);
-                ta.set_syntax_spans(highlight_body(body));
+                ta.set_syntax_spans(highlight_body(&Theme::terminal_default(), body));
                 // Move the cursor onto a styled line to mimic editing.
                 ta.move_cursor(ratatui_textarea::CursorMove::Bottom);
                 let backend = TestBackend::new(width, 12);
@@ -317,7 +316,7 @@ mod tests {
             "text é** unmatched",
         ];
         for s in samples {
-            let out = highlight_body(s);
+            let out = highlight_body(&Theme::terminal_default(), s);
             assert_eq!(out.len(), s.split('\n').count(), "line count for {s:?}");
             // Ranges must be within their line and valid char boundaries.
             for (line, ranges) in s.split('\n').zip(&out) {
@@ -335,13 +334,16 @@ mod tests {
     #[test]
     fn line_count_matches_split() {
         let text = "a\n\nb\nc";
-        assert_eq!(highlight_body(text).len(), text.split('\n').count());
+        assert_eq!(
+            highlight_body(&Theme::terminal_default(), text).len(),
+            text.split('\n').count()
+        );
     }
 
     #[test]
     fn bold_dims_markers_and_bolds_content() {
-        let muted = theme().muted();
-        let ranges = &highlight_body("**bold**")[0];
+        let muted = Theme::terminal_default().muted();
+        let ranges = &highlight_body(&Theme::terminal_default(), "**bold**")[0];
         // ** (0..2) muted, bold (2..6) bold, ** (6..8) muted.
         assert_eq!(ranges.len(), 3);
         assert_eq!((ranges[0].0, ranges[0].1), (0, 2));
@@ -354,8 +356,8 @@ mod tests {
 
     #[test]
     fn heading_marker_is_dimmed() {
-        let muted = theme().muted();
-        let ranges = &highlight_body("## Title")[0];
+        let muted = Theme::terminal_default().muted();
+        let ranges = &highlight_body(&Theme::terminal_default(), "## Title")[0];
         // "##" dimmed; the space stays unstyled; "Title" is heading-colored.
         assert_eq!(ranges[0].2, muted);
         assert_eq!((ranges[0].0, ranges[0].1), (0, 2));
@@ -365,15 +367,21 @@ mod tests {
     #[test]
     fn plain_prose_has_no_ranges() {
         // Emphasis-lookalikes must not be styled.
-        for line in highlight_body("snake_case_word and a * b * c math") {
+        for line in highlight_body(
+            &Theme::terminal_default(),
+            "snake_case_word and a * b * c math",
+        ) {
             assert!(line.is_empty(), "unexpected styling: {line:?}");
         }
     }
 
     #[test]
     fn fenced_code_body_is_colored_across_lines() {
-        let md_code = theme().md_code();
-        let out = highlight_body("```\nlet x = 1;\nlet y = 2;\n```");
+        let md_code = Theme::terminal_default().md_code();
+        let out = highlight_body(
+            &Theme::terminal_default(),
+            "```\nlet x = 1;\nlet y = 2;\n```",
+        );
         // Lines 1 and 2 are the code body, colored as code end to end.
         assert!(out[1].iter().any(|&(_, _, st)| st == md_code));
         assert!(out[2].iter().any(|&(_, _, st)| st == md_code));
@@ -381,9 +389,9 @@ mod tests {
 
     #[test]
     fn link_text_colored_brackets_dimmed() {
-        let muted = theme().muted();
-        let md_link = theme().md_link();
-        let ranges = &highlight_body("[hi](https://x)")[0];
+        let muted = Theme::terminal_default().muted();
+        let md_link = Theme::terminal_default().md_link();
+        let ranges = &highlight_body(&Theme::terminal_default(), "[hi](https://x)")[0];
         // "hi" (1..3) is link-colored; the surrounding [](url) is dimmed.
         assert!(
             ranges

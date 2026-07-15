@@ -1,14 +1,18 @@
-use crate::{AppResult, config, encryption_cli, prompts, tui};
-use anyhow::{Context, bail};
+use crate::{AppResult, config, startup, tui};
+
+mod encryption;
+mod import;
+mod log;
+pub(crate) mod prompts;
+#[cfg(feature = "fuse")]
+use anyhow::Context;
+use anyhow::bail;
 use clap::{Args, Parser, Subcommand};
-use notema_domain::{MOOD_RANGE, Metadata, validate_feelings};
 use notema_encryption::{PendingRequest, SecretString};
 use notema_storage::JournalStore;
-use std::{
-    collections::HashSet,
-    io::{self, Read},
-    path::{Path, PathBuf},
-};
+#[cfg(feature = "fuse")]
+use std::path::Path;
+use std::path::PathBuf;
 
 #[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
@@ -212,21 +216,21 @@ pub(crate) fn run() -> AppResult<()> {
         bail!("piped entry text requires `notema log`; run `notema log` with piped stdin");
     }
 
-    let config::Startup {
+    let startup::Startup {
         config_path,
         config,
         store,
         discovery,
-    } = config::load_or_setup_with_path(cli.config.as_deref())?;
+    } = startup::load_or_setup_with_path(cli.config.as_deref())?;
     tui::run(config_path, config, store, discovery)
 }
 
 fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppResult<()> {
     match command {
-        CliCommand::Log(args) => create_entry_from_log_command(cli, args, stdin_is_pipe),
+        CliCommand::Log(args) => log::run(cli, args, stdin_is_pipe),
         CliCommand::Use { name } => set_default_journal(cli, name),
         CliCommand::Import { source } => match source {
-            ImportSource::Dayone(args) => import_dayone_command(cli, args),
+            ImportSource::Dayone(args) => import::run_dayone(cli, args),
         },
         CliCommand::Encryption { command } => handle_encryption_command(cli, command),
         CliCommand::Licenses { dependency } => crate::licenses::run(dependency.clone()),
@@ -238,13 +242,13 @@ fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppRe
 fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResult<()> {
     match command {
         EncryptionCommand::Enable(args) => {
-            let config::Startup { config, store, .. } =
-                config::load_existing(cli.config.as_deref())?;
-            encryption_cli::encrypt_store(&store, &config, args.name.as_deref(), args.no_passphrase)
+            let startup::Startup { config, store, .. } =
+                startup::load_existing(cli.config.as_deref())?;
+            encryption::encrypt_store(&store, &config, args.name.as_deref(), args.no_passphrase)
         }
         EncryptionCommand::Disable(args) => {
-            let config::Startup { config, store, .. } =
-                config::load_existing(cli.config.as_deref())?;
+            let startup::Startup { config, store, .. } =
+                startup::load_existing(cli.config.as_deref())?;
             if !prompts::confirm(
                 "Decrypt every entry and turn encryption off for this journal?",
                 args.yes,
@@ -252,7 +256,7 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
                 println!("Aborted.");
                 return Ok(());
             }
-            encryption_cli::decrypt_store(store, &config)
+            encryption::decrypt_store(store, &config)
         }
         EncryptionCommand::Device { command } => handle_device_command(cli, command),
     }
@@ -274,11 +278,11 @@ fn handle_device_command(cli: &Cli, command: &DeviceCommand) -> AppResult<()> {
 /// Open the store and unlock this device's identity, prompting for a passphrase
 /// only when the identity is passphrase-protected. Returns the passphrase too
 /// (for rotation, which re-wraps the new key with it). Used by the device
-/// operations that must decrypt in order to re-encrypt.
+/// operations that must decrypt to re-encrypt.
 fn open_unlocked_store_with_passphrase(
     cli: &Cli,
 ) -> AppResult<(JournalStore, Option<SecretString>)> {
-    let config::Startup { mut store, .. } = config::load_existing(cli.config.as_deref())?;
+    let startup::Startup { mut store, .. } = startup::load_existing(cli.config.as_deref())?;
     if !store.unlock_available() {
         bail!(
             "no encryption identity on this device; run `{}` first",
@@ -300,7 +304,7 @@ fn open_unlocked_store(cli: &Cli) -> AppResult<JournalStore> {
 
 /// Unlock this device's identity when the store is encrypted, prompting only
 /// for a passphrase-protected key. A no-op for plaintext stores.
-fn unlock_if_encrypted(store: &mut JournalStore) -> AppResult<()> {
+pub(super) fn unlock_if_encrypted(store: &mut JournalStore) -> AppResult<()> {
     if !store.encryption_enabled() {
         return Ok(());
     }
@@ -330,7 +334,7 @@ fn unlock_if_encrypted(store: &mut JournalStore) -> AppResult<()> {
 /// it doesn't exist. Either way, a directory we created is removed after unmount.
 #[cfg(feature = "fuse")]
 fn mount_command(cli: &Cli, mountpoint: Option<&Path>) -> AppResult<()> {
-    let config::Startup { mut store, .. } = config::load_existing(cli.config.as_deref())?;
+    let startup::Startup { mut store, .. } = startup::load_existing(cli.config.as_deref())?;
 
     if !store.encryption_enabled() {
         bail!(
@@ -393,7 +397,7 @@ fn mount_command(cli: &Cli, mountpoint: Option<&Path>) -> AppResult<()> {
 }
 
 fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> {
-    let config::Startup { store, .. } = config::load_existing(cli.config.as_deref())?;
+    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     let Some(info) = store.this_device()? else {
         bail!(
             "no encryption identity on this device; run `{}` first",
@@ -435,8 +439,7 @@ fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> 
 
 fn device_rotate_command(cli: &Cli) -> AppResult<()> {
     let (mut store, passphrase) = open_unlocked_store_with_passphrase(cli)?;
-    let summary =
-        store.rotate_identity(passphrase.as_ref(), encryption_cli::cli_progress("files"))?;
+    let summary = store.rotate_identity(passphrase.as_ref(), encryption::cli_progress("files"))?;
     println!(
         "Rotated this device's key and re-encrypted {} file(s).",
         summary.migrated_files
@@ -446,7 +449,7 @@ fn device_rotate_command(cli: &Cli) -> AppResult<()> {
 }
 
 fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
-    let config::Startup { store, .. } = config::load_existing(cli.config.as_deref())?;
+    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     if !store.encryption_enabled() {
         bail!(
             "this journal is not encrypted yet; run `notema encryption enable` to turn it on for this device"
@@ -493,7 +496,7 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
 }
 
 fn device_list_command(cli: &Cli) -> AppResult<()> {
-    let config::Startup { store, .. } = config::load_existing(cli.config.as_deref())?;
+    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
 
     let recipients = store.recipients()?;
     if recipients.is_empty() {
@@ -540,7 +543,7 @@ fn device_revoke_command(cli: &Cli, name: &str, skip_confirm: bool) -> AppResult
         return Ok(());
     }
     let store = open_unlocked_store(cli)?;
-    let summary = store.revoke_recipient(name, encryption_cli::cli_progress("files"))?;
+    let summary = store.revoke_recipient(name, encryption::cli_progress("files"))?;
     println!(
         "Revoked '{name}' and re-encrypted {} file(s).",
         summary.migrated_files
@@ -590,7 +593,7 @@ fn device_approve_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<(
     }
 
     for request in select_requests(pending, args, "approve")? {
-        let summary = store.approve_pending(&request, encryption_cli::cli_progress("files"))?;
+        let summary = store.approve_pending(&request, encryption::cli_progress("files"))?;
         println!(
             "Approved '{}' and re-encrypted {} file(s).",
             request.recipient.name, summary.migrated_files
@@ -601,7 +604,7 @@ fn device_approve_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<(
 
 fn device_reject_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<()> {
     // Rejecting only deletes the request file, so no unlock/re-encryption needed.
-    let config::Startup { store, .. } = config::load_existing(cli.config.as_deref())?;
+    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     let pending = store.pending_requests()?;
     if pending.is_empty() {
         println!("No pending requests.");
@@ -615,313 +618,21 @@ fn device_reject_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<()
     Ok(())
 }
 
-fn import_dayone_command(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
-    let config::Startup {
-        config, mut store, ..
-    } = config::load_existing(cli.config.as_deref())?;
-    let journal = args
-        .journal
-        .as_deref()
-        .or(config.journal.default.as_deref())
-        .context("no journal specified; pass --journal or set one with `notema use <name>`")?;
-    // Validate the name only — the importer creates the journal if it's missing.
-    let journal = JournalStore::validate_journal_name(journal)?;
-
-    // Duplicate detection reads existing entries' `[import]` provenance, which
-    // on an encrypted store requires the unlocked identity.
-    unlock_if_encrypted(&mut store)?;
-
-    let batch = notema_import::parse_dayone(&args.path)?;
-    if !store
-        .list_journals()?
-        .iter()
-        .any(|existing| existing.name == journal)
-    {
-        store.create_journal(&journal)?;
-    }
-    let mut seen: HashSet<_> = store.scan_import_sources()?.into_iter().collect();
-    let mut report = ImportReport::default();
-    for warning in batch.warnings {
-        report
-            .failures
-            .push(format!("{}: {}", warning.entry_id, warning.message));
-    }
-    let total = batch.entries.len();
-    let mut progress = encryption_cli::cli_progress("entries");
-    for (idx, entry) in batch.entries.into_iter().enumerate() {
-        progress(idx, total);
-        if !seen.insert(entry.provenance.clone()) {
-            report.skipped_duplicate += 1;
-            continue;
-        }
-        let created = store.create_entry(
-            notema_storage::EntryDraft {
-                journal: &journal,
-                body: &entry.body,
-                metadata: &entry.metadata,
-                created_at: Some(entry.created_at),
-                edited_at: Some(entry.edited_at),
-                timezone: entry.timezone.as_deref(),
-                location: entry.location.as_ref(),
-                weather: entry.weather.as_ref(),
-                celestial: entry.celestial.as_ref(),
-                air_quality: None,
-                writing_seconds: entry.writing_seconds,
-                import: Some(&entry.provenance),
-            },
-            notema_storage::EntryAssetOptions {
-                download_remote: args.download_images,
-                replace_offline: args.download_images,
-            },
-        )?;
-        report.imported += 1;
-        report.attachments_copied += created.assets.attachments_stored;
-        report.images_stored += created.assets.images_stored();
-        for failure in created.assets.failed {
-            match failure {
-                notema_storage::AssetFailure::RemoteUnavailable { .. } => {
-                    report.remote_images_skipped += 1;
-                }
-                notema_storage::AssetFailure::Ingest { source, error } => {
-                    report.images_failed += 1;
-                    report
-                        .failures
-                        .push(format!("{}: {source}: {error}", entry.provenance.id));
-                }
-                notema_storage::AssetFailure::AttachmentIngest { source, error } => {
-                    report.attachments_failed += 1;
-                    report
-                        .failures
-                        .push(format!("{}: {source}: {error}", entry.provenance.id));
-                }
-            }
-        }
-    }
-    progress(total, total);
-
-    println!(
-        "{}",
-        import_report_summary(&report, &journal, args.download_images)
-    );
-    for failure in &report.failures {
-        eprintln!("  ! {failure}");
-    }
-    Ok(())
-}
-
-fn import_report_summary(report: &ImportReport, journal: &str, download_images: bool) -> String {
-    let mut parts = vec![format!(
-        "Imported {} {} into '{journal}'",
-        report.imported,
-        plural(report.imported, "entry", "entries"),
-    )];
-    if report.skipped_duplicate > 0 {
-        parts.push(format!(
-            "{} already imported (skipped)",
-            report.skipped_duplicate
-        ));
-    }
-    if report.images_stored > 0 {
-        parts.push(format!(
-            "{} {} stored",
-            report.images_stored,
-            plural(report.images_stored, "image", "images")
-        ));
-    }
-    if report.attachments_copied > 0 {
-        parts.push(format!(
-            "{} audio/video/pdf {} copied",
-            report.attachments_copied,
-            plural(report.attachments_copied, "attachment", "attachments")
-        ));
-    }
-    if report.attachments_failed > 0 {
-        parts.push(format!(
-            "{} audio/video/pdf {} not copied",
-            report.attachments_failed,
-            plural(report.attachments_failed, "attachment", "attachments")
-        ));
-    }
-    if report.remote_images_skipped > 0 {
-        if download_images {
-            parts.push(format!(
-                "{} offline {} replaced with [Offline Image]",
-                report.remote_images_skipped,
-                plural(report.remote_images_skipped, "image", "images")
-            ));
-        } else {
-            parts.push(format!(
-                "{} remote {} left as links (pass --download-images to fetch)",
-                report.remote_images_skipped,
-                plural(report.remote_images_skipped, "link", "links")
-            ));
-        }
-    }
-    if report.images_failed > 0 {
-        parts.push(format!(
-            "{} {} not stored",
-            report.images_failed,
-            plural(report.images_failed, "image", "images")
-        ));
-    }
-    parts.join("; ")
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-struct ImportReport {
-    imported: usize,
-    skipped_duplicate: usize,
-    images_stored: usize,
-    images_failed: usize,
-    remote_images_skipped: usize,
-    attachments_copied: usize,
-    attachments_failed: usize,
-    failures: Vec<String>,
-}
-
 fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
     if count == 1 { one } else { many }
 }
 
 fn set_default_journal(cli: &Cli, journal: &str) -> AppResult<()> {
-    let config::Startup {
+    let startup::Startup {
         config_path: path,
         mut config,
         ..
-    } = config::load_existing(cli.config.as_deref())?;
-    validate_existing_journal(&config.journal.path, journal)?;
+    } = startup::load_existing(cli.config.as_deref())?;
+    log::validate_existing_journal(&config.journal.path, journal)?;
     config.journal.default = Some(journal.to_string());
     config::save_config(&path, &config)?;
     println!("Default journal set to {journal}");
     Ok(())
-}
-
-fn create_entry_from_log_command(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<()> {
-    let body_from_args = !args.body.is_empty();
-    if body_from_args && stdin_is_pipe {
-        bail!("entry text cannot be combined with piped stdin");
-    }
-
-    let config::Startup {
-        config_path,
-        config,
-        store,
-        ..
-    } = config::load_existing(cli.config.as_deref())?;
-    let journal = args
-        .journal
-        .as_deref()
-        .or(config.journal.default.as_deref())
-        .context("no journal specified; pass --journal or set one with `notema use <name>`")?;
-    validate_existing_journal(&config.journal.path, journal)?;
-    let tags = comma_separated_values(&args.tag);
-    let people = comma_separated_values(&args.person);
-    let activities = comma_separated_values(&args.activity);
-    let feelings = validate_feelings(
-        args.feeling
-            .iter()
-            .flat_map(|f| f.split(','))
-            .map(str::trim)
-            .filter(|f| !f.is_empty()),
-    )
-    .map_err(anyhow::Error::msg)?;
-    let mood = if let Some(score) = args.mood {
-        if !MOOD_RANGE.contains(&score) {
-            bail!(
-                "--mood must be between {} and {}, got {score}",
-                MOOD_RANGE.start(),
-                MOOD_RANGE.end()
-            );
-        }
-        Some(score)
-    } else {
-        None
-    };
-    let metadata = Metadata {
-        tags,
-        people,
-        activities,
-        feelings,
-        mood,
-        starred: false,
-        location: None,
-    };
-
-    // No inline text: compose interactively in the fullscreen built-in editor. It
-    // handles asset ingest and status on save, so nothing is printed here.
-    if !body_from_args && !stdin_is_pipe {
-        let journal = journal.to_string();
-        return tui::run_compose(config_path, config, store, journal, metadata);
-    }
-
-    let body = if body_from_args {
-        args.body.join(" ")
-    } else {
-        let mut body = String::new();
-        io::stdin().read_to_string(&mut body)?;
-        body
-    };
-    let created = store.create_entry(
-        notema_storage::EntryDraft::new(journal, &body, &metadata),
-        notema_storage::EntryAssetOptions {
-            download_remote: config.attachments.download_remote_images,
-            replace_offline: false,
-        },
-    )?;
-    if !created.assets.is_noop() {
-        eprintln!("{}", asset_report_message(&created.assets));
-    }
-    println!("{}", created.path.display());
-    Ok(())
-}
-
-fn asset_report_message(report: &notema_storage::AssetReport) -> String {
-    let mut parts = Vec::new();
-    let images_stored = report.images_stored();
-    if images_stored > 0 {
-        parts.push(format!(
-            "{} {} stored",
-            images_stored,
-            plural(images_stored, "image", "images")
-        ));
-    }
-    if report.attachments_stored > 0 {
-        parts.push(format!(
-            "{} {} stored",
-            report.attachments_stored,
-            plural(report.attachments_stored, "attachment", "attachments")
-        ));
-    }
-    if report.removed > 0 {
-        parts.push(format!("{} removed", report.removed));
-    }
-    let images_not_stored = report.images_not_stored();
-    if images_not_stored > 0 {
-        parts.push(format!(
-            "{} {} not stored",
-            images_not_stored,
-            plural(images_not_stored, "image", "images")
-        ));
-    }
-    let attachments_not_stored = report.attachments_not_stored();
-    if attachments_not_stored > 0 {
-        parts.push(format!(
-            "{} {} not stored",
-            attachments_not_stored,
-            plural(attachments_not_stored, "attachment", "attachments")
-        ));
-    }
-    parts.join("; ")
-}
-
-fn comma_separated_values(values: &[String]) -> Vec<String> {
-    values
-        .iter()
-        .flat_map(|value| value.split(','))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 #[cfg(unix)]
@@ -937,16 +648,5 @@ fn stdin_has_command_input() -> bool {
 #[cfg(not(unix))]
 fn stdin_has_command_input() -> bool {
     use std::io::IsTerminal;
-    !io::stdin().is_terminal()
-}
-
-fn validate_existing_journal(root: &Path, journal: &str) -> AppResult<()> {
-    let journal = JournalStore::validate_journal_name(journal)?;
-    let path = root.join(&journal);
-    if !path.is_dir() {
-        bail!(
-            "journal '{journal}' does not exist; create it or pick another with `notema use <name>`"
-        );
-    }
-    Ok(())
+    !std::io::stdin().is_terminal()
 }

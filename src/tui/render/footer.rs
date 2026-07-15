@@ -7,8 +7,8 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use crate::tui::app::{App, Focus, Mode};
-use crate::tui::theme::theme;
+use crate::tui::app::{AppModel, Focus, Mode};
+use crate::tui::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HintId {
@@ -118,8 +118,8 @@ pub(super) fn key_chip_text(key: &str) -> String {
 /// The style for a hint's key chip. The token's default is the classic
 /// inverted chip, so themes that never touch `key_hint` keep the pre-theme
 /// footer on both chromes.
-pub(super) fn key_chip_style() -> Style {
-    theme().key_hint()
+pub(super) fn key_chip_style(theme: &Theme) -> Style {
+    theme.key_hint()
 }
 
 #[derive(Debug, Clone)]
@@ -148,7 +148,11 @@ fn placement_at(placements: &[(u16, Hint)], origin_x: u16, col: u16) -> Option<H
 /// chip is drawn reversed + bold. Columns match [`RenderedHintLine::text`]
 /// exactly, so the visual output lines up with hit-testing. The hovered hint's
 /// label lifts out of the muted row as the click affordance.
-fn styled_hint_line(rendered: &RenderedHintLine, hovered: Option<HintId>) -> Line<'static> {
+fn styled_hint_line(
+    theme: &Theme,
+    rendered: &RenderedHintLine,
+    hovered: Option<HintId>,
+) -> Line<'static> {
     if rendered.placements.is_empty() {
         return Line::from(rendered.text.clone());
     }
@@ -161,26 +165,27 @@ fn styled_hint_line(rendered: &RenderedHintLine, hovered: Option<HintId>) -> Lin
         }
         let chip = key_chip_text(hint.key_hint);
         col += clamp_u16(UnicodeWidthStr::width(chip.as_str()));
-        spans.push(Span::styled(chip, key_chip_style()));
+        spans.push(Span::styled(chip, key_chip_style(theme)));
         let label = format!(" {}", hint.label);
         col += clamp_u16(UnicodeWidthStr::width(label.as_str()));
         spans.push(if hovered == Some(hint.id) {
-            Span::styled(label, theme().text())
+            Span::styled(label, theme.text())
         } else {
-            Span::styled(label, theme().muted())
+            Span::styled(label, theme.muted())
         });
     }
     Line::from(spans)
 }
 
 pub(crate) fn hint_lines(
+    theme: &Theme,
     hints: &[Hint],
     width: u16,
     hovered: Option<HintId>,
 ) -> Vec<Line<'static>> {
     rendered_hint_lines(hints, width)
         .iter()
-        .map(|line| styled_hint_line(line, hovered))
+        .map(|line| styled_hint_line(theme, line, hovered))
         .collect()
 }
 
@@ -284,7 +289,7 @@ fn build_grid_row(col_x: &[u16], hints: &[Hint]) -> RenderedHintLine {
 
 /// The footer's justified rows joined by newlines, for tests to inspect.
 #[cfg(test)]
-pub(crate) fn footer_text(app: &App, width: u16) -> String {
+pub(crate) fn footer_text(app: &AppModel, width: u16) -> String {
     if app.editor.is_some() {
         return editor_footer_line()
             .rendered_lines(width)
@@ -318,23 +323,23 @@ fn editor_footer_line() -> HintLine {
     }
 }
 
-pub(crate) fn footer_lines(app: &App, width: u16) -> Text<'static> {
+pub(crate) fn footer_lines(theme: &Theme, app: &AppModel, width: u16) -> Text<'static> {
     let hovered = app.hovered_footer_hint();
     if !app.state.ui.show_hints {
         return Text::default();
     }
     if app.editor.is_some() {
-        return Text::from(editor_footer_line().lines(width, hovered));
+        return Text::from(editor_footer_line().lines(theme, width, hovered));
     }
 
     let lines = match app.nav.mode {
-        Mode::Search => search_footer_line(app).lines(width, hovered),
-        Mode::Browse => browse_footer_line(app).lines(width, hovered),
+        Mode::Search => search_footer_line(app).lines(theme, width, hovered),
+        Mode::Browse => browse_footer_line(app).lines(theme, width, hovered),
     };
     Text::from(lines)
 }
 
-pub(crate) fn footer_height(app: &App, width: u16) -> u16 {
+pub(crate) fn footer_height(app: &AppModel, width: u16) -> u16 {
     if !app.state.ui.show_hints {
         return 0;
     }
@@ -349,7 +354,12 @@ pub(crate) fn footer_height(app: &App, width: u16) -> u16 {
 }
 
 #[cfg(test)]
-pub(crate) fn footer_hint_id_at(app: &App, origin_x: u16, width: u16, col: u16) -> Option<HintId> {
+pub(crate) fn footer_hint_id_at(
+    app: &AppModel,
+    origin_x: u16,
+    width: u16,
+    col: u16,
+) -> Option<HintId> {
     if app.editor.is_some() {
         return editor_footer_line()
             .rendered_lines(width)
@@ -366,7 +376,7 @@ pub(crate) fn footer_hint_id_at(app: &App, origin_x: u16, width: u16, col: u16) 
 }
 
 pub(crate) fn footer_hint_id_at_point(
-    app: &App,
+    app: &AppModel,
     origin_x: u16,
     origin_y: u16,
     width: u16,
@@ -390,6 +400,29 @@ pub(crate) fn footer_hint_id_at_point(
     }
 }
 
+pub(crate) fn footer_hint_regions(app: &AppModel, width: u16) -> Vec<(u16, u16, u16, HintId)> {
+    if !app.state.ui.show_hints {
+        return Vec::new();
+    }
+    let line = if app.editor.is_some() {
+        editor_footer_line()
+    } else {
+        match app.nav.mode {
+            Mode::Search => search_footer_line(app),
+            Mode::Browse => browse_footer_line(app),
+        }
+    };
+    line.rendered_lines(width)
+        .into_iter()
+        .enumerate()
+        .flat_map(|(row, line)| {
+            line.placements.into_iter().map(move |(start, hint)| {
+                (row as u16, start, clamp_u16(hint_width(&hint)), hint.id)
+            })
+        })
+        .collect()
+}
+
 /// The expanded footer's justified rows joined by newlines, for tests.
 #[derive(Debug, Clone)]
 struct HintLine {
@@ -401,10 +434,10 @@ impl HintLine {
         rendered_hint_lines(&self.hints, width)
     }
 
-    fn lines(&self, width: u16, hovered: Option<HintId>) -> Vec<Line<'static>> {
+    fn lines(&self, theme: &Theme, width: u16, hovered: Option<HintId>) -> Vec<Line<'static>> {
         self.rendered_lines(width)
             .iter()
-            .map(|line| styled_hint_line(line, hovered))
+            .map(|line| styled_hint_line(theme, line, hovered))
             .collect()
     }
 
@@ -427,8 +460,8 @@ impl HintLine {
     }
 }
 
-fn search_footer_line(app: &App) -> HintLine {
-    // The query now lives on the entry panel's top-right border (see
+fn search_footer_line(app: &AppModel) -> HintLine {
+    // The query lives on the entry panel's top-right border (see
     // `draw_entry_list`), so the footer only carries the action hints.
     let hints = match app.nav.focus {
         Focus::Reader if app.has_selected_entry_target() => {
@@ -448,7 +481,7 @@ fn search_footer_line(app: &App) -> HintLine {
     HintLine { hints }
 }
 
-fn browse_footer_line(app: &App) -> HintLine {
+fn browse_footer_line(app: &AppModel) -> HintLine {
     let hints = match app.nav.focus {
         Focus::Journals => {
             let mut hints = vec![Hint::new("new journal", "n", HintId::NewJournal)];
@@ -483,7 +516,7 @@ fn browse_footer_line(app: &App) -> HintLine {
 }
 
 /// The `images (i)` hint, shown only when the selected entry has images.
-fn image_hint(app: &App) -> Option<Hint> {
+fn image_hint(app: &AppModel) -> Option<Hint> {
     (app.selected_entry_image_count() > 0).then_some(Hint::new(
         "images",
         "i",
@@ -516,7 +549,7 @@ fn help_quit_tail() -> [Hint; 2] {
 
 /// The `archive`/`unarchive (a)` hint, shown only when a journal is selected. The
 /// label reflects the selected journal's current state.
-fn archive_hint(app: &App) -> Option<Hint> {
+fn archive_hint(app: &AppModel) -> Option<Hint> {
     app.selected_journal().map(|journal| {
         let label = if journal.archived {
             "unarchive"
@@ -545,7 +578,7 @@ fn selected_entry_action_hints() -> Vec<Hint> {
 
 /// The footer for a selected entry — new-entry, the entry actions, and the image
 /// chip when the entry has images. Shared by the entries list and the reader.
-fn focused_entry_footer(app: &App) -> Vec<Hint> {
+fn focused_entry_footer(app: &AppModel) -> Vec<Hint> {
     let mut hints = vec![Hint::new("new entry", "n", HintId::NewEntry)];
     hints.extend(selected_entry_action_hints());
     hints.extend(image_hint(app));

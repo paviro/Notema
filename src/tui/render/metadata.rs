@@ -13,7 +13,7 @@ use crate::tui::{
     env_strip::{EnvItem, env_strip_rows, environment_items},
     state::HoverTarget,
     surface::{EntryMetadataLayout, EntryMetadataValues, chip_items, chip_rows},
-    theme::{PillCategory, PillStyle, theme},
+    theme::{PillCategory, PillStyle, Theme},
 };
 
 #[derive(Clone)]
@@ -38,9 +38,9 @@ impl<'a> EntryMetadata<'a> {
     /// other. The bundle carries no environment data (that lives on the entry),
     /// so the strip starts location-only; the viewer layers the rest on with
     /// [`Self::with_environment`].
-    pub(super) fn from_metadata(metadata: &'a Metadata) -> Self {
+    pub(super) fn from_metadata(theme: &Theme, metadata: &'a Metadata) -> Self {
         let location = metadata.location_label();
-        let env = environment_items(location.as_deref(), None, None, None);
+        let env = environment_items(theme, location.as_deref(), None, None, None);
         Self {
             tags: &metadata.tags,
             people: &metadata.people,
@@ -56,11 +56,12 @@ impl<'a> EntryMetadata<'a> {
     /// viewer-only step; editor drafts carry no environment data.
     pub(super) fn with_environment(
         mut self,
+        theme: &Theme,
         weather: Option<&Weather>,
         celestial: Option<&Celestial>,
         air: Option<&AirQuality>,
     ) -> Self {
-        self.env = environment_items(self.location.as_deref(), weather, celestial, air);
+        self.env = environment_items(theme, self.location.as_deref(), weather, celestial, air);
         self
     }
 
@@ -77,6 +78,7 @@ impl<'a> EntryMetadata<'a> {
 }
 
 pub(super) fn draw_metadata_section(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     layout: EntryMetadataLayout,
     metadata: &EntryMetadata<'_>,
@@ -89,13 +91,13 @@ pub(super) fn draw_metadata_section(
         HoverTarget::MetadataChip(index) => Some(index),
         _ => None,
     };
-    let sep = theme()
+    let sep = theme
         .env_glyphs()
         .rule
         .to_string()
         .repeat(area.width.saturating_sub(1) as usize);
     frame.render_widget(
-        Paragraph::new(sep).style(theme().muted()),
+        Paragraph::new(sep).style(theme.muted()),
         Rect { height: 1, ..area },
     );
 
@@ -103,7 +105,7 @@ pub(super) fn draw_metadata_section(
         && let Some(rect) = layout.environment
     {
         frame.render_widget(
-            Paragraph::new(env_strip_lines(rect.width, &metadata.env)),
+            Paragraph::new(env_strip_lines(theme, rect.width, &metadata.env)),
             rect,
         );
     }
@@ -120,19 +122,24 @@ pub(super) fn draw_metadata_section(
             ])
             .split(mood_rect);
         frame.render_widget(
-            Paragraph::new(MOOD_LOW_LABEL).style(theme().muted()),
+            Paragraph::new(MOOD_LOW_LABEL).style(theme.muted()),
             chunks[0],
         );
-        frame.render_widget(MoodBar::new(score), chunks[1]);
+        frame.render_widget(MoodBar::new(theme, score), chunks[1]);
         frame.render_widget(
-            Paragraph::new(MOOD_HIGH_LABEL).style(theme().muted()),
+            Paragraph::new(MOOD_HIGH_LABEL).style(theme.muted()),
             chunks[2],
         );
     }
 
     if let Some(rect) = layout.chips {
         frame.render_widget(
-            Paragraph::new(chip_lines(rect.width, metadata.values(), hovered_chip)),
+            Paragraph::new(chip_lines(
+                theme,
+                rect.width,
+                metadata.values(),
+                hovered_chip,
+            )),
             rect,
         );
     }
@@ -141,15 +148,15 @@ pub(super) fn draw_metadata_section(
 /// The environment strip as display lines, shared by the pinned and scrolling
 /// layouts: glyph-led items with muted separator dots, continuation rows of a
 /// wrapped item indented under its glyph.
-fn env_strip_lines(width: u16, items: &[EnvItem]) -> Vec<Line<'static>> {
-    let separator = format!(" {} ", theme().env_glyphs().separator);
+fn env_strip_lines(theme: &Theme, width: u16, items: &[EnvItem]) -> Vec<Line<'static>> {
+    let separator = format!(" {} ", theme.env_glyphs().separator);
     env_strip_rows(width, items)
         .into_iter()
         .map(|row| {
             let mut spans = Vec::new();
             for (index, item) in row.into_iter().enumerate() {
                 if index > 0 {
-                    spans.push(Span::styled(separator.clone(), theme().muted()));
+                    spans.push(Span::styled(separator.clone(), theme.muted()));
                 }
                 if item.continuation {
                     spans.push(Span::raw("  "));
@@ -168,6 +175,7 @@ fn env_strip_lines(width: u16, items: &[EnvItem]) -> Vec<Line<'static>> {
 }
 
 pub(super) fn metadata_section_lines(
+    theme: &Theme,
     width: u16,
     metadata: &EntryMetadata<'_>,
 ) -> Vec<Line<'static>> {
@@ -182,18 +190,18 @@ pub(super) fn metadata_section_lines(
     }
 
     let mut lines = vec![Line::from(Span::styled(
-        theme()
+        theme
             .env_glyphs()
             .rule
             .to_string()
             .repeat(width.saturating_sub(1) as usize),
-        theme().muted(),
+        theme.muted(),
     ))];
 
     // A blank row sets each present block off from the one above it, matching
     // the pinned layout's gaps so the two modes stay row-for-row identical.
     let mut emitted = false;
-    let env = env_strip_lines(width, &metadata.env);
+    let env = env_strip_lines(theme, width, &metadata.env);
     if !env.is_empty() {
         lines.extend(env);
         emitted = true;
@@ -202,10 +210,10 @@ pub(super) fn metadata_section_lines(
         if emitted {
             lines.push(Line::from(""));
         }
-        lines.push(mood_line(width, score));
+        lines.push(mood_line(theme, width, score));
         emitted = true;
     }
-    let chips = chip_lines(width, metadata.values(), None);
+    let chips = chip_lines(theme, width, metadata.values(), None);
     if !chips.is_empty() {
         if emitted {
             lines.push(Line::from(""));
@@ -220,6 +228,7 @@ pub(super) fn metadata_section_lines(
 /// each pill led by its category glyph and styled by its category. `hovered`
 /// is the flat index of the pill under the cursor, highlighted whole.
 fn chip_lines(
+    theme: &Theme,
     width: u16,
     values: EntryMetadataValues<'_>,
     hovered: Option<usize>,
@@ -237,7 +246,7 @@ fn chip_lines(
                 spans.push(Span::raw(" "));
             }
             let (category, value) = items[index];
-            spans.push(pill_span(value, category, hovered == Some(index)));
+            spans.push(pill_span(theme, value, category, hovered == Some(index)));
         }
         lines.push(Line::from(spans));
     }
@@ -250,37 +259,36 @@ fn chip_lines(
 /// plus two cells wider than the value, so every style shares the row flow and
 /// hit-test math. When `hovered`, the whole chip takes the theme's hover
 /// highlight, matching its click region.
-fn pill_span(value: &str, category: PillCategory, hovered: bool) -> Span<'static> {
-    let glyph = theme().pill_glyph(category);
-    let (content, mut style) = match theme().pill_style() {
+fn pill_span(theme: &Theme, value: &str, category: PillCategory, hovered: bool) -> Span<'static> {
+    let glyph = theme.pill_glyph(category);
+    let (content, mut style) = match theme.pill_style() {
         PillStyle::Bracket => (format!("[{glyph} {value}]"), Style::default()),
-        PillStyle::Reversed | PillStyle::Bg => {
-            (format!(" {glyph} {value} "), theme().pill(category))
-        }
+        PillStyle::Reversed | PillStyle::Bg => (format!(" {glyph} {value} "), theme.pill(category)),
     };
     if hovered {
-        style = style.patch(theme().hover());
+        style = style.patch(theme.hover());
     }
     Span::styled(content, style)
 }
 
-pub(crate) struct MoodBar {
+pub(crate) struct MoodBar<'a> {
+    theme: &'a Theme,
     score: i8,
 }
 
-impl MoodBar {
-    pub(crate) fn new(score: i8) -> Self {
-        Self { score }
+impl<'a> MoodBar<'a> {
+    pub(crate) fn new(theme: &'a Theme, score: i8) -> Self {
+        Self { theme, score }
     }
 }
 
-impl Widget for MoodBar {
+impl Widget for MoodBar<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width < 3 {
             return;
         }
 
-        for (i, (symbol, style)) in mood_bar_cells(area.width, self.score)
+        for (i, (symbol, style)) in mood_bar_cells(self.theme, area.width, self.score)
             .into_iter()
             .enumerate()
         {
@@ -301,33 +309,33 @@ const MOOD_HIGH_LABEL: &str = " Blissful";
 /// The mood row as a full-width bar: the "Miserable"/"Blissful" pole labels
 /// flank the centered, valence-colored bar. Below a floor width the labels drop
 /// and the bar takes the whole line.
-fn mood_line(width: u16, score: i8) -> Line<'static> {
+fn mood_line(theme: &Theme, width: u16, score: i8) -> Line<'static> {
     let labels_width = (MOOD_LOW_LABEL.len() + MOOD_HIGH_LABEL.len()) as u16;
     let mut spans = Vec::new();
     let bar_width = if width > labels_width.saturating_add(3) {
-        spans.push(Span::styled(MOOD_LOW_LABEL, theme().muted()));
+        spans.push(Span::styled(MOOD_LOW_LABEL, theme.muted()));
         width.saturating_sub(labels_width)
     } else {
         width
     };
 
-    spans.extend(mood_bar_spans(bar_width, score));
+    spans.extend(mood_bar_spans(theme, bar_width, score));
 
     if width > labels_width.saturating_add(3) {
-        spans.push(Span::styled(MOOD_HIGH_LABEL, theme().muted()));
+        spans.push(Span::styled(MOOD_HIGH_LABEL, theme.muted()));
     }
 
     Line::from(spans)
 }
 
-fn mood_bar_spans(width: u16, score: i8) -> Vec<Span<'static>> {
-    mood_bar_cells(width, score)
+fn mood_bar_spans(theme: &Theme, width: u16, score: i8) -> Vec<Span<'static>> {
+    mood_bar_cells(theme, width, score)
         .into_iter()
         .map(|(symbol, style)| Span::styled(symbol, style))
         .collect()
 }
 
-fn mood_bar_cells(width: u16, score: i8) -> Vec<(String, Style)> {
+fn mood_bar_cells(theme: &Theme, width: u16, score: i8) -> Vec<(String, Style)> {
     let width = width as usize;
     if width < 3 {
         return Vec::new();
@@ -357,12 +365,12 @@ fn mood_bar_cells(width: u16, score: i8) -> Vec<(String, Style)> {
     // the filled span reads as one textured bar; the empty track stays muted,
     // keeping the row full-height without competing with the fill. The heavy
     // `┃` shown at an exact zero stays fixed: weight is the meaning.
-    let negative = theme().mood_fill(false);
-    let positive = theme().mood_fill(true);
-    let dim = theme().muted();
-    let center_glyph = theme().glyphs().diverge_center.to_string();
-    let fill_glyph = theme().env_glyphs().mood_fill.to_string();
-    let track_glyph = theme().env_glyphs().mood_track.to_string();
+    let negative = theme.mood_fill(false);
+    let positive = theme.mood_fill(true);
+    let dim = theme.muted();
+    let center_glyph = theme.glyphs().diverge_center.to_string();
+    let fill_glyph = theme.env_glyphs().mood_fill.to_string();
+    let track_glyph = theme.env_glyphs().mood_track.to_string();
 
     let mut cells = Vec::with_capacity(width);
     for i in 0..width {

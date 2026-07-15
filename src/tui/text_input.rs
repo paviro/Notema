@@ -17,13 +17,10 @@ use ratatui_textarea::{CursorMove, TextArea};
 use std::ops::{Deref, DerefMut};
 use zeroize::Zeroize;
 
-use super::theme::theme;
+use super::theme::Theme;
 
 pub(crate) struct TextInput {
     textarea: TextArea<'static>,
-    /// Where the field was last drawn, for mouse hit-testing. `Rect::default()`
-    /// (zero-sized) until the first render, which no click can hit.
-    last_area: Rect,
 }
 
 impl TextInput {
@@ -73,7 +70,6 @@ impl TextInput {
     pub(crate) fn set_text(&mut self, text: &str) {
         let mut fresh = Self::from(text);
         fresh.set_placeholder_text(self.textarea.placeholder_text().to_string());
-        fresh.last_area = self.last_area;
         *self = fresh;
     }
 
@@ -129,8 +125,7 @@ impl TextInput {
     /// cursor at the caret. While a selection is active the native cursor is
     /// hidden and the widget draws a reversed-block caret instead, so the
     /// boundary character reads as part of the selection — exactly like the
-    /// editor (a thin bar can't fill that cell). Remembers `rect` for mouse
-    /// hit-testing.
+    /// editor (a thin bar can't fill that cell).
     ///
     /// The field's style (e.g. an underline) is painted across the whole rect
     /// first: the widget styles only the glyphs it draws, so an empty tail —
@@ -139,25 +134,33 @@ impl TextInput {
     /// to full intensity once the user types.
     pub(crate) fn render_in(
         &mut self,
+        theme: &Theme,
         frame: &mut Frame<'_>,
         rect: Rect,
         focused: bool,
         hovered: bool,
     ) {
-        self.last_area = rect;
         if rect.width == 0 || rect.height == 0 {
             return;
         }
 
+        self.textarea.set_selection_style(theme.selection());
+        self.textarea.set_placeholder_style(theme.placeholder());
+        self.textarea
+            .set_style(if crate::tui::render::flat_chrome(theme) {
+                Style::default().bg(theme.raised_bg())
+            } else {
+                Style::default().add_modifier(Modifier::UNDERLINED)
+            });
         let selecting = self.textarea.selection_range().is_some();
         // The reversed-block caret marks the selection boundary, but only while
         // it sits on a real character: past the last char it would paint the
         // phantom end-of-line cell as a selected trailing space.
         self.textarea
             .set_cursor_style(if selecting && !self.cursor_at_end() {
-                theme().selection()
+                theme.selection()
             } else {
-                theme().cursor()
+                theme.cursor()
             });
 
         let mut style = self.textarea.style();
@@ -167,31 +170,13 @@ impl TextInput {
         // A hovered field lifts its surface — the click-to-focus/place-caret
         // affordance.
         if hovered {
-            style = style.patch(theme().hover());
+            style = style.patch(theme.hover());
         }
         frame.buffer_mut().set_style(rect, style);
         frame.render_widget(&self.textarea, rect);
         if focused && !selecting {
             frame.set_cursor_position((rect.x + self.visible_cursor_col(rect.width), rect.y));
         }
-    }
-
-    pub(crate) fn last_area(&self) -> Rect {
-        self.last_area
-    }
-
-    /// Drop the remembered rect. Called at the top of every frame; a field
-    /// that isn't re-drawn (panel hidden by a fullscreen pane) must not keep
-    /// swallowing clicks at its stale coordinates.
-    pub(crate) fn forget_area(&mut self) {
-        self.last_area = Rect::default();
-    }
-
-    /// Column into the field for a click at screen `(col, row)`, if it hits the
-    /// field as last drawn.
-    pub(crate) fn hit_col(&self, col: u16, row: u16) -> Option<u16> {
-        let rect = self.last_area;
-        (rect.width > 0 && crate::tui::surface::point_in_rect(rect, col, row)).then(|| col - rect.x)
     }
 }
 
@@ -210,21 +195,19 @@ impl From<String> for TextInput {
         // block cursor left to the theme — unstyled by default, so the native
         // terminal bar cursor marks the caret instead.
         textarea.set_cursor_line_style(Style::default());
-        textarea.set_selection_style(theme().selection());
-        textarea.set_cursor_style(theme().cursor());
+        let theme = Theme::terminal_default();
+        textarea.set_selection_style(theme.selection());
+        textarea.set_cursor_style(theme.cursor());
         // Every field shares the form look: underlined (or, in flat chrome, an
         // element-colored surface), with a dim placeholder.
-        textarea.set_style(if crate::tui::render::flat_chrome() {
-            Style::default().bg(theme().raised_bg())
+        textarea.set_style(if crate::tui::render::flat_chrome(&theme) {
+            Style::default().bg(theme.raised_bg())
         } else {
             Style::default().add_modifier(Modifier::UNDERLINED)
         });
-        textarea.set_placeholder_style(theme().placeholder());
+        textarea.set_placeholder_style(theme.placeholder());
         textarea.move_cursor(CursorMove::End);
-        Self {
-            textarea,
-            last_area: Rect::default(),
-        }
+        Self { textarea }
     }
 }
 

@@ -1,6 +1,9 @@
 use super::*;
+use crate::tui::features::feelings::FeelingRow;
 use crate::tui::state::ListNav;
+use crate::tui::state::MetadataKind;
 use crate::tui::test_support::{app_with_journals, new_app, new_app_with_state};
+use notema_domain::FEELING_GROUPS;
 
 fn key_char(ch: char) -> crossterm::event::KeyEvent {
     crossterm::event::KeyEvent::new(
@@ -10,6 +13,31 @@ fn key_char(ch: char) -> crossterm::event::KeyEvent {
 }
 use std::fs;
 use tempfile::tempdir;
+
+#[test]
+fn appearance_reports_each_theme_warning_once_until_recovery() {
+    let mut appearance = Appearance {
+        theme: crate::tui::theme::Theme::terminal_default(),
+        color_mode: crate::config::ColorMode::Auto,
+        chrome_override: None,
+        detected_mode: crate::tui::theme::Mode::Dark,
+        warned_themes: BTreeSet::new(),
+    };
+
+    assert_eq!(
+        appearance.warning("broken", Some("invalid theme".to_string())),
+        Some("invalid theme".to_string())
+    );
+    assert_eq!(
+        appearance.warning("broken", Some("invalid theme".to_string())),
+        None
+    );
+    assert_eq!(appearance.warning("broken", None), None);
+    assert_eq!(
+        appearance.warning("broken", Some("invalid again".to_string())),
+        Some("invalid again".to_string())
+    );
+}
 
 #[test]
 fn cache_miss_starts_with_live_journals_while_entries_validate() {
@@ -27,7 +55,8 @@ fn cache_miss_starts_with_live_journals_while_entries_validate() {
         )
         .unwrap();
 
-    let (mut app, cached) = App::new_cached(config_path, config, store).unwrap();
+    let (mut app, cached) =
+        AppModel::new_cached(config_path, config, store, crate::tui::theme::Mode::Dark).unwrap();
 
     assert!(cached.is_none());
     assert_eq!(app.library.journals.len(), 1);
@@ -823,7 +852,10 @@ fn archiving_journal_renames_reorders_and_keeps_entries_resolvable() {
 
     let mut app = new_app(Config::new(dir.path().to_path_buf()));
 
-    app.store.set_journal_archived("personal", true).unwrap();
+    app.services
+        .store
+        .set_journal_archived("personal", true)
+        .unwrap();
     app.refresh().unwrap();
 
     // The directory was renamed and the journal now sorts after active ones.
@@ -874,7 +906,7 @@ fn journal_theme(name: &str) -> notema_storage::JournalTheme {
 #[test]
 fn effective_theme_prefers_journal_then_global_and_respects_ignore() {
     let mut app = app_with_journals(&["work"]);
-    app.config.ui.theme = "globaltheme".to_string();
+    app.services.config.ui.theme = "globaltheme".to_string();
     app.select_journal(0);
 
     // No per-journal theme → the global theme.
@@ -885,7 +917,7 @@ fn effective_theme_prefers_journal_then_global_and_respects_ignore() {
     assert_eq!(app.effective_theme_name(), "journaltheme");
 
     // ignore_journal_themes forces the global theme regardless.
-    app.config.ui.ignore_journal_themes = true;
+    app.services.config.ui.ignore_journal_themes = true;
     assert_eq!(app.effective_theme_name(), "globaltheme");
 }
 
@@ -893,9 +925,9 @@ fn effective_theme_prefers_journal_then_global_and_respects_ignore() {
 fn effective_selection_falls_back_to_config_per_field() {
     use crate::config::{ChromeMode, ColorMode};
     let mut app = app_with_journals(&["work"]);
-    app.config.ui.theme = "globaltheme".to_string();
-    app.config.ui.color_mode = ColorMode::Dark;
-    app.config.ui.chrome = ChromeMode::Bordered;
+    app.services.config.ui.theme = "globaltheme".to_string();
+    app.services.config.ui.color_mode = ColorMode::Dark;
+    app.services.config.ui.chrome = ChromeMode::Bordered;
     app.select_journal(0);
 
     // The journal sets a theme and mode but no chrome; an unknown spelling (from
@@ -914,7 +946,7 @@ fn effective_selection_falls_back_to_config_per_field() {
 #[test]
 fn theme_picker_opens_on_the_active_theme_with_bundled_entries() {
     let mut app = app_with_journals(&["work"]);
-    app.config.ui.theme = "eclipse".to_string();
+    app.services.config.ui.theme = "eclipse".to_string();
 
     app.open_theme_picker();
 
@@ -977,9 +1009,9 @@ fn theme_picker_confirm_saves_the_config_and_closes() {
     app.theme_picker_confirm();
 
     assert!(!app.has_overlay());
-    assert_eq!(app.config.ui.theme, "fjord");
+    assert_eq!(app.services.config.ui.theme, "fjord");
     // The change was persisted, not just held in memory.
-    let saved = crate::config::load_config(&app.config_path).unwrap();
+    let saved = crate::config::load_config(&app.services.config_path).unwrap();
     assert_eq!(saved.ui.theme, "fjord");
     assert!(
         app.toasts
@@ -992,8 +1024,8 @@ fn theme_picker_confirm_saves_the_config_and_closes() {
 #[test]
 fn theme_picker_journal_scope_writes_the_sidecar_not_the_global_theme() {
     let mut app = app_with_journals(&["work"]);
-    app.config.ui.theme = "blossom".to_string();
-    crate::config::save_config(&app.config_path, &app.config).unwrap();
+    app.services.config.ui.theme = "blossom".to_string();
+    crate::config::save_config(&app.services.config_path, &app.services.config).unwrap();
     app.select_journal(0);
     app.open_theme_picker();
     // Switch to this-journal scope, pick a theme, preview a chrome, confirm.
@@ -1019,13 +1051,16 @@ fn theme_picker_journal_scope_writes_the_sidecar_not_the_global_theme() {
     };
     assert_eq!(app.library.journals[0].theme, Some(expected.clone()));
     assert_eq!(app.effective_theme_name(), "gameboy");
-    assert_eq!(app.config.ui.theme, "blossom");
-    assert_eq!(app.config.ui.chrome, crate::config::ChromeMode::Default);
-    let saved = crate::config::load_config(&app.config_path).unwrap();
+    assert_eq!(app.services.config.ui.theme, "blossom");
+    assert_eq!(
+        app.services.config.ui.chrome,
+        crate::config::ChromeMode::Default
+    );
+    let saved = crate::config::load_config(&app.services.config_path).unwrap();
     assert_eq!(saved.ui.theme, "blossom");
     assert_eq!(saved.ui.chrome, crate::config::ChromeMode::Default);
     // Persisted to the sidecar, reloadable.
-    let reloaded = app.store.list_journals().unwrap();
+    let reloaded = app.services.store.list_journals().unwrap();
     let work = reloaded.iter().find(|j| j.name == "work").unwrap();
     assert_eq!(work.theme, Some(expected));
 }
@@ -1034,7 +1069,8 @@ fn theme_picker_journal_scope_writes_the_sidecar_not_the_global_theme() {
 fn theme_picker_global_scope_clears_a_journal_override() {
     let mut app = app_with_journals(&["work"]);
     app.select_journal(0);
-    app.store
+    app.services
+        .store
         .set_journal_theme("work", Some(&journal_theme("gameboy")))
         .unwrap();
     app.library.journals[0].theme = Some(journal_theme("gameboy"));
@@ -1052,10 +1088,10 @@ fn theme_picker_global_scope_clears_a_journal_override() {
     app.theme_picker_select(fjord);
     app.theme_picker_confirm();
 
-    assert_eq!(app.config.ui.theme, "fjord");
+    assert_eq!(app.services.config.ui.theme, "fjord");
     // The journal's override was removed; it now follows global.
     assert_eq!(app.library.journals[0].theme, None);
-    let reloaded = app.store.list_journals().unwrap();
+    let reloaded = app.services.store.list_journals().unwrap();
     let work = reloaded.iter().find(|j| j.name == "work").unwrap();
     assert_eq!(work.theme, None);
     assert_eq!(app.effective_theme_name(), "fjord");
@@ -1064,9 +1100,10 @@ fn theme_picker_global_scope_clears_a_journal_override() {
 #[test]
 fn theme_picker_toggle_scope_moves_the_highlight_to_that_scopes_theme() {
     let mut app = app_with_journals(&["work"]);
-    app.config.ui.theme = "blossom".to_string();
+    app.services.config.ui.theme = "blossom".to_string();
     app.select_journal(0);
-    app.store
+    app.services
+        .store
         .set_journal_theme("work", Some(&journal_theme("gameboy")))
         .unwrap();
     app.library.journals[0].theme = Some(journal_theme("gameboy"));
@@ -1108,9 +1145,9 @@ fn theme_picker_toggle_scope_moves_the_highlight_to_that_scopes_theme() {
 fn theme_picker_toggle_scope_previews_that_scopes_mode_and_chrome() {
     use crate::config::{ChromeMode, ColorMode};
     let mut app = app_with_journals(&["work"]);
-    app.config.ui.theme = "blossom".to_string();
-    app.config.ui.color_mode = ColorMode::Light;
-    app.config.ui.chrome = ChromeMode::Bordered;
+    app.services.config.ui.theme = "blossom".to_string();
+    app.services.config.ui.color_mode = ColorMode::Light;
+    app.services.config.ui.chrome = ChromeMode::Bordered;
     app.select_journal(0);
     app.library.journals[0].theme = Some(notema_storage::JournalTheme {
         name: "gameboy".to_string(),
@@ -1122,15 +1159,15 @@ fn theme_picker_toggle_scope_previews_that_scopes_mode_and_chrome() {
     // chrome to the config values, and back to the journal's own.
     app.open_theme_picker();
     app.theme_picker_toggle_scope();
-    assert_eq!(crate::tui::theme::color_mode(), ColorMode::Light);
+    assert_eq!(app.appearance.color_mode, ColorMode::Light);
     assert_eq!(
-        crate::tui::theme::chrome_override(),
+        app.appearance.chrome_override,
         Some(crate::tui::theme::ChromeStyle::Bordered)
     );
     app.theme_picker_toggle_scope();
-    assert_eq!(crate::tui::theme::color_mode(), ColorMode::Dark);
+    assert_eq!(app.appearance.color_mode, ColorMode::Dark);
     assert_eq!(
-        crate::tui::theme::chrome_override(),
+        app.appearance.chrome_override,
         Some(crate::tui::theme::ChromeStyle::Flat)
     );
 }
@@ -1138,7 +1175,7 @@ fn theme_picker_toggle_scope_previews_that_scopes_mode_and_chrome() {
 #[test]
 fn switching_journals_switches_the_effective_theme() {
     let mut app = app_with_journals(&["personal", "work"]);
-    app.config.ui.theme = "globaltheme".to_string();
+    app.services.config.ui.theme = "globaltheme".to_string();
     let work = app
         .library
         .journals
@@ -1156,7 +1193,7 @@ fn switching_journals_switches_the_effective_theme() {
 #[test]
 fn all_journals_search_uses_the_global_theme_and_exit_restores() {
     let mut app = app_with_journals(&["work"]);
-    app.config.ui.theme = "globaltheme".to_string();
+    app.services.config.ui.theme = "globaltheme".to_string();
     app.select_journal(0);
     app.library.journals[0].theme = Some(journal_theme("journaltheme"));
     assert_eq!(app.effective_theme_name(), "journaltheme");
@@ -1173,7 +1210,7 @@ fn all_journals_search_uses_the_global_theme_and_exit_restores() {
 #[test]
 fn journal_scoped_search_keeps_that_journals_theme() {
     let mut app = app_with_journals(&["work"]);
-    app.config.ui.theme = "globaltheme".to_string();
+    app.services.config.ui.theme = "globaltheme".to_string();
     app.select_journal(0);
     app.library.journals[0].theme = Some(journal_theme("journaltheme"));
 
@@ -1186,7 +1223,7 @@ fn journal_scoped_search_keeps_that_journals_theme() {
 #[test]
 fn compose_uses_the_target_journals_theme() {
     let mut app = app_with_journals(&["personal", "work"]);
-    app.config.ui.theme = "globaltheme".to_string();
+    app.services.config.ui.theme = "globaltheme".to_string();
     let work = app
         .library
         .journals
@@ -1206,7 +1243,7 @@ fn compose_uses_the_target_journals_theme() {
 fn theme_picker_cancel_reverts_the_preview_and_leaves_config_untouched() {
     let mut app = app_with_journals(&["work"]);
     app.open_theme_picker();
-    let previous = app.theme_picker_state().unwrap().previous;
+    let previous = app.theme_picker_state().unwrap().previous.clone();
     let eclipse = app
         .theme_picker_state()
         .unwrap()
@@ -1217,16 +1254,19 @@ fn theme_picker_cancel_reverts_the_preview_and_leaves_config_untouched() {
 
     // Moving the selection shows the entry immediately…
     app.theme_picker_select(eclipse);
-    assert_ne!(crate::tui::theme::theme(), previous);
+    assert_ne!(app.appearance.theme, previous);
 
     // …and Esc restores the open-time theme without touching the config.
     app.theme_picker_cancel();
 
     assert!(!app.has_overlay());
-    assert_eq!(crate::tui::theme::theme(), previous);
-    assert_eq!(app.config.ui.theme, crate::tui::theme::DEFAULT_THEME);
+    assert_eq!(app.appearance.theme, previous);
+    assert_eq!(
+        app.services.config.ui.theme,
+        crate::tui::theme::DEFAULT_THEME
+    );
     assert!(
-        !app.config_path.exists(),
+        !app.services.config_path.exists(),
         "cancel must not write the config"
     );
 }
@@ -1234,7 +1274,7 @@ fn theme_picker_cancel_reverts_the_preview_and_leaves_config_untouched() {
 #[test]
 fn theme_picker_confirm_on_a_broken_theme_toasts_and_stays_open() {
     let mut app = app_with_journals(&["work"]);
-    let themes = crate::tui::theme::themes_dir(&app.config_path);
+    let themes = crate::tui::theme::themes_dir(&app.services.config_path);
     fs::create_dir_all(&themes).unwrap();
     fs::write(themes.join("busted.toml"), "surfaces = 12\n").unwrap();
     app.open_theme_picker();
@@ -1252,15 +1292,18 @@ fn theme_picker_confirm_on_a_broken_theme_toasts_and_stays_open() {
         "broken file should fail to parse"
     );
 
-    let before = crate::tui::theme::theme();
+    let before = app.appearance.theme.clone();
     app.theme_picker_select(busted);
     // A broken row never shows an entry.
-    assert_eq!(crate::tui::theme::theme(), before);
+    assert_eq!(app.appearance.theme, before);
 
     app.theme_picker_confirm();
 
     assert!(app.theme_picker_state().is_some(), "picker stays open");
-    assert_eq!(app.config.ui.theme, crate::tui::theme::DEFAULT_THEME);
+    assert_eq!(
+        app.services.config.ui.theme,
+        crate::tui::theme::DEFAULT_THEME
+    );
     assert!(
         app.toasts
             .items()

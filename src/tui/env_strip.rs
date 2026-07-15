@@ -10,7 +10,7 @@ use unicode_width::UnicodeWidthStr;
 
 use notema_domain::{AirQuality, Celestial, Weather};
 
-use crate::tui::{entry_rows::wrap_text_hanging, theme::theme};
+use crate::tui::{entry_rows::wrap_text_hanging, theme::Theme};
 
 /// The cells `" · "` occupies between two items on a row.
 const SEPARATOR_WIDTH: u16 = 3;
@@ -79,17 +79,18 @@ impl EnvItem {
 }
 
 /// Build the strip's items from an entry's context data, in display order:
-/// weather, air quality, moon, sun, location. Absent data simply yields no
+/// weather, air quality, moon, sun, location. Absent data yields no
 /// item, so a location-only entry gets a location-only strip.
 pub(crate) fn environment_items(
+    theme: &Theme,
     location: Option<&str>,
     weather: Option<&Weather>,
     celestial: Option<&Celestial>,
     air: Option<&AirQuality>,
 ) -> Vec<EnvItem> {
-    let glyphs = theme().env_glyphs();
-    let accent = theme().secondary();
-    let ink = theme().muted();
+    let glyphs = theme.env_glyphs();
+    let accent = theme.secondary();
+    let ink = theme.muted();
     let mut items = Vec::new();
 
     if let Some(weather) = weather {
@@ -117,7 +118,7 @@ pub(crate) fn environment_items(
     }
 
     if let Some(aqi) = air.and_then(|air| air.european_aqi)
-        && let Some(band) = theme().aqi_band(aqi)
+        && let Some(band) = theme.aqi_band(aqi)
     {
         items.push(EnvItem::new(
             Some(glyphs.aqi),
@@ -132,7 +133,7 @@ pub(crate) fn environment_items(
     if let Some(air) = air
         && let Some(text) = high_pollen_text(air)
     {
-        let style = theme().pollen_high();
+        let style = theme.pollen_high();
         items.push(EnvItem::new(Some(glyphs.pollen), style, text, style));
     }
 
@@ -311,7 +312,6 @@ fn local_time(rfc3339: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     fn weather(condition: Option<&str>, temperature: Option<f64>, feels: Option<f64>) -> Weather {
         Weather {
             condition: condition.map(str::to_string),
@@ -328,16 +328,24 @@ mod tests {
         }
     }
 
-    // Glyph expectations pin the fallback theme's set — classic's all-ASCII
-    // overrides, since no theme is installed under test.
+    // Glyph expectations pin the terminal-default theme's classic ASCII set.
     fn texts(items: &[EnvItem]) -> Vec<String> {
         items.iter().map(EnvItem::text).collect()
     }
 
     #[test]
     fn empty_inputs_yield_no_items() {
-        assert!(environment_items(None, None, None, None).is_empty());
-        assert!(environment_items(None, Some(&Weather::default()), None, None).is_empty());
+        assert!(environment_items(&Theme::terminal_default(), None, None, None, None).is_empty());
+        assert!(
+            environment_items(
+                &Theme::terminal_default(),
+                None,
+                Some(&Weather::default()),
+                None,
+                None
+            )
+            .is_empty()
+        );
         assert!(env_strip_rows(40, &[]).is_empty());
         assert_eq!(env_strip_height(40, &[]), 0);
     }
@@ -345,6 +353,7 @@ mod tests {
     #[test]
     fn weather_item_combines_glyph_temperature_and_condition() {
         let items = environment_items(
+            &Theme::terminal_default(),
             None,
             Some(&weather(Some("partly-cloudy"), Some(18.4), None)),
             None,
@@ -354,15 +363,27 @@ mod tests {
         assert_eq!(items[0].glyph, Some('~'));
 
         // Temperature-only and condition-only halves still render.
-        let temp_only = environment_items(None, Some(&weather(None, Some(-3.6), None)), None, None);
+        let temp_only = environment_items(
+            &Theme::terminal_default(),
+            None,
+            Some(&weather(None, Some(-3.6), None)),
+            None,
+            None,
+        );
         assert_eq!(texts(&temp_only), ["-4°C"]);
         assert_eq!(temp_only[0].glyph, None);
-        let condition_only =
-            environment_items(None, Some(&weather(Some("fog"), None, None)), None, None);
+        let condition_only = environment_items(
+            &Theme::terminal_default(),
+            None,
+            Some(&weather(Some("fog"), None, None)),
+            None,
+            None,
+        );
         assert_eq!(texts(&condition_only), ["fog"]);
 
         // Unknown future slugs render their text without a glyph.
         let unknown = environment_items(
+            &Theme::terminal_default(),
             None,
             Some(&weather(Some("hail"), Some(1.0), None)),
             None,
@@ -375,6 +396,7 @@ mod tests {
     #[test]
     fn feels_like_folds_in_only_past_three_degrees() {
         let close = environment_items(
+            &Theme::terminal_default(),
             None,
             Some(&weather(None, Some(18.0), Some(15.0))),
             None,
@@ -382,6 +404,7 @@ mod tests {
         );
         assert_eq!(texts(&close), ["18°C"], "a 3.0°C gap must stay quiet");
         let far = environment_items(
+            &Theme::terminal_default(),
             None,
             Some(&weather(None, Some(18.0), Some(14.9))),
             None,
@@ -392,13 +415,37 @@ mod tests {
 
     #[test]
     fn aqi_gates_below_sixty_and_carries_its_band_style() {
-        let clean = environment_items(None, None, None, Some(&air(Some(59))));
+        let clean = environment_items(
+            &Theme::terminal_default(),
+            None,
+            None,
+            None,
+            Some(&air(Some(59))),
+        );
         assert!(clean.is_empty(), "clean air must never render");
-        assert!(environment_items(None, None, None, Some(&air(None))).is_empty());
+        assert!(
+            environment_items(
+                &Theme::terminal_default(),
+                None,
+                None,
+                None,
+                Some(&air(None))
+            )
+            .is_empty()
+        );
 
-        let poor = environment_items(None, None, None, Some(&air(Some(72))));
+        let poor = environment_items(
+            &Theme::terminal_default(),
+            None,
+            None,
+            None,
+            Some(&air(Some(72))),
+        );
         assert_eq!(texts(&poor), ["AQI 72"]);
-        assert_eq!(poor[0].segments[0].1, theme().aqi_band(72).unwrap());
+        assert_eq!(
+            poor[0].segments[0].1,
+            Theme::terminal_default().aqi_band(72).unwrap()
+        );
         assert_eq!(poor[0].glyph, Some('!'));
     }
 
@@ -413,21 +460,41 @@ mod tests {
 
         // Below every "high" band (or absent, as outside Europe) — no item.
         let calm = environment_items(
+            &Theme::terminal_default(),
             None,
             None,
             None,
             Some(&pollen(Some(99.0), Some(29.0), None)),
         );
         assert!(calm.is_empty(), "unremarkable pollen must never render");
-        assert!(environment_items(None, None, None, Some(&pollen(None, None, None))).is_empty());
+        assert!(
+            environment_items(
+                &Theme::terminal_default(),
+                None,
+                None,
+                None,
+                Some(&pollen(None, None, None))
+            )
+            .is_empty()
+        );
 
-        let birch = environment_items(None, None, None, Some(&pollen(Some(100.0), None, None)));
+        let birch = environment_items(
+            &Theme::terminal_default(),
+            None,
+            None,
+            None,
+            Some(&pollen(Some(100.0), None, None)),
+        );
         assert_eq!(texts(&birch), ["high birch pollen"]);
         assert_eq!(birch[0].glyph, Some('%'));
-        assert_eq!(birch[0].glyph_style, theme().pollen_high());
+        assert_eq!(
+            birch[0].glyph_style,
+            Theme::terminal_default().pollen_high()
+        );
 
         // Several high species fold into one unnamed badge.
         let several = environment_items(
+            &Theme::terminal_default(),
             None,
             None,
             None,
@@ -437,6 +504,7 @@ mod tests {
 
         // Pollen rides behind the AQI badge when both warrant an item.
         let with_aqi = environment_items(
+            &Theme::terminal_default(),
             None,
             None,
             None,
@@ -452,6 +520,7 @@ mod tests {
     #[test]
     fn moon_uses_the_stored_name_or_derives_it_from_the_fraction() {
         let named = environment_items(
+            &Theme::terminal_default(),
             None,
             None,
             Some(&Celestial {
@@ -463,6 +532,7 @@ mod tests {
         assert_eq!(texts(&named), ["waxing gibbous moon"]);
 
         let derived = environment_items(
+            &Theme::terminal_default(),
             None,
             None,
             Some(&Celestial {
@@ -485,6 +555,7 @@ mod tests {
     #[test]
     fn sun_times_render_local_wall_clock_as_one_item() {
         let both = environment_items(
+            &Theme::terminal_default(),
             None,
             None,
             Some(&Celestial {
@@ -498,10 +569,14 @@ mod tests {
         assert_eq!(both[0].glyph, Some('^'));
         // The inner sunset marker rides its own accent segment, matching the
         // leading sunrise glyph's styling.
-        assert_eq!(both[0].segments[1], ("v ".to_string(), theme().secondary()));
-        assert_eq!(both[0].segments[0].1, theme().muted());
+        assert_eq!(
+            both[0].segments[1],
+            ("v ".to_string(), Theme::terminal_default().secondary())
+        );
+        assert_eq!(both[0].segments[0].1, Theme::terminal_default().muted());
 
         let sunset_only = environment_items(
+            &Theme::terminal_default(),
             None,
             None,
             Some(&Celestial {
@@ -515,6 +590,7 @@ mod tests {
 
         // An unparsable timestamp drops its half instead of rendering garbage.
         let broken = environment_items(
+            &Theme::terminal_default(),
             None,
             None,
             Some(&Celestial {
@@ -529,6 +605,7 @@ mod tests {
     #[test]
     fn location_is_the_final_item() {
         let items = environment_items(
+            &Theme::terminal_default(),
             Some("Berlin, Germany"),
             Some(&weather(Some("clear"), Some(21.0), None)),
             None,
@@ -539,13 +616,14 @@ mod tests {
         assert_eq!(location.glyph, Some('@'));
         // Every leading glyph shares the one accent — no item's marker may
         // read darker or brighter than its neighbours'.
-        assert_eq!(location.glyph_style, theme().secondary());
-        assert_eq!(items[0].glyph_style, theme().secondary());
+        assert_eq!(location.glyph_style, Theme::terminal_default().secondary());
+        assert_eq!(items[0].glyph_style, Theme::terminal_default().secondary());
     }
 
     #[test]
     fn rows_flow_greedily_and_never_break_mid_item() {
         let items = environment_items(
+            &Theme::terminal_default(),
             Some("Berlin"),
             Some(&weather(Some("clear"), Some(21.0), None)),
             None,
@@ -569,6 +647,7 @@ mod tests {
     #[test]
     fn an_oversize_item_wraps_hanging_under_its_glyph() {
         let items = environment_items(
+            &Theme::terminal_default(),
             Some("Mountain trail near Boulder, Colorado, two hours north of the city"),
             None,
             None,

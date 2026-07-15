@@ -15,7 +15,7 @@ use notema_analytics::{Analytics, MoodAnalytics};
 
 use super::widgets::{Stat, columns_for, draw_stat_card};
 use crate::tui::render::{count_label, flat_chrome, render_centered_notice};
-use crate::tui::theme::theme;
+use crate::tui::theme::Theme;
 
 /// Weekday labels indexed Monday (`0`) through Sunday (`6`), matching
 /// `MoodAnalytics::by_weekday`.
@@ -37,10 +37,16 @@ const CARD_HEIGHT: u16 = 6;
 /// text centred on the middle one.
 const TITLE_HEIGHT: u16 = 5;
 
-pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics, title: &str) {
+pub(super) fn draw(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    analytics: &Analytics,
+    title: &str,
+) {
     let cadence = &analytics.cadence;
     if cadence.total_entries == 0 {
-        render_centered_notice(frame, area, "No entries yet");
+        render_centered_notice(theme, frame, area, "No entries");
         return;
     }
 
@@ -49,12 +55,12 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics, tit
     // between columns to stay balanced; bordered cards keep the tighter spacing.
     // Flat cards are also trimmed a column: filled solid, the full-width tile reads
     // heavier than the hollow bordered box, so shrink it to compensate.
-    let flat = flat_chrome();
+    let flat = flat_chrome(theme);
     let (gap_x, gap_y) = if flat { (2, 1) } else { (1, 0) };
     let card_w_max = if flat { CARD_WIDTH - 1 } else { CARD_WIDTH };
     let card_h_max = CARD_HEIGHT;
 
-    let stats = metrics(analytics);
+    let stats = metrics(theme, analytics);
     // Prefer the widest column count that divides the cards evenly, so the grid
     // stays balanced (6 → 2×3 rather than 3×2). Capped at two so the paired cards
     // read as rows and the block keeps its familiar width rather than spreading.
@@ -79,6 +85,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics, tit
     let origin_y = area.y + (area.height.saturating_sub(block_h)) / 2;
 
     draw_title_box(
+        theme,
         frame,
         Rect {
             x: origin_x,
@@ -95,6 +102,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics, tit
         let col = index as u16 % cols;
         let row = index as u16 / cols;
         draw_stat_card(
+            theme,
             frame,
             Rect {
                 x: origin_x + col * (card_w + gap_x),
@@ -110,14 +118,15 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, analytics: &Analytics, tit
 /// A full-width bordered box holding the journal name, its date span, and the
 /// headline totals, centred over the cards below.
 fn draw_title_box(
+    theme: &Theme,
     frame: &mut Frame<'_>,
     area: Rect,
     title: &str,
     cadence: &notema_analytics::Cadence,
 ) {
-    let mut spans = vec![Span::styled(title.to_string(), theme().heading())];
+    let mut spans = vec![Span::styled(title.to_string(), theme.heading())];
     if let Some(span) = date_span(cadence.date_span) {
-        spans.push(Span::styled(format!(" · {span}"), theme().muted()));
+        spans.push(Span::styled(format!(" · {span}"), theme.muted()));
     }
     spans.push(Span::styled(
         format!(
@@ -125,7 +134,7 @@ fn draw_title_box(
             count_label(cadence.total_entries, "entry", "entries"),
             count_label(cadence.total_words, "word", "words"),
         ),
-        theme().muted(),
+        theme.muted(),
     ));
     // Flat mode fills the tile with the card surface colour and drops the border so
     // it matches the flat cards below; bordered mode keeps the drawn box. The text
@@ -133,13 +142,13 @@ fn draw_title_box(
     // blank line centre it; without one, pad up to the vertical centre directly.
     let block;
     let pad_top;
-    if flat_chrome() {
-        block = Block::new().style(Style::default().bg(theme().raised_bg()));
+    if flat_chrome(theme) {
+        block = Block::new().style(Style::default().bg(theme.raised_bg()));
         pad_top = area.height.saturating_sub(1) as usize / 2;
     } else {
         block = Block::default()
             .borders(Borders::ALL)
-            .border_style(theme().card_border());
+            .border_style(theme.card_border());
         pad_top = 1;
     }
     let lines = std::iter::repeat_n(Line::default(), pad_top)
@@ -157,71 +166,75 @@ fn draw_title_box(
 /// day, and recent feeling / how many days you showed up. Chosen to point at what
 /// moves your mood rather than to judge — the "drains" and "toughest" cards name
 /// what to watch, not to blame.
-fn metrics(analytics: &Analytics) -> Vec<Stat> {
+fn metrics(theme: &Theme, analytics: &Analytics) -> Vec<Stat> {
     vec![
-        lifts_stat(analytics),
-        drains_stat(analytics),
-        happiest_day_stat(&analytics.mood),
-        toughest_day_stat(&analytics.mood),
-        top_feeling_stat(analytics),
-        Stat::new("Active days", analytics.cadence.active_days.to_string()),
+        lifts_stat(theme, analytics),
+        drains_stat(theme, analytics),
+        happiest_day_stat(theme, &analytics.mood),
+        toughest_day_stat(theme, &analytics.mood),
+        top_feeling_stat(theme, analytics),
+        Stat::new(
+            theme,
+            "Active days",
+            analytics.cadence.active_days.to_string(),
+        ),
     ]
 }
 
 /// The people and things linked to your better moods (rotated daily): a person on
 /// the value line, an activity or tag beneath it. Falls back to whichever exists.
-fn lifts_stat(analytics: &Analytics) -> Stat {
+fn lifts_stat(theme: &Theme, analytics: &Analytics) -> Stat {
     match (
         &analytics.highlights.lifts_person,
         &analytics.highlights.lifts_thing,
     ) {
-        (Some(person), Some(thing)) => {
-            Stat::new("Lifts you", person.clone()).sub(Span::styled(thing.clone(), theme().muted()))
-        }
-        (Some(name), None) | (None, Some(name)) => Stat::new("Lifts you", name.clone()),
-        (None, None) => Stat::new("Lifts you", "—"),
+        (Some(person), Some(thing)) => Stat::new(theme, "Lifts you", person.clone())
+            .sub(Span::styled(thing.clone(), theme.muted())),
+        (Some(name), None) | (None, Some(name)) => Stat::new(theme, "Lifts you", name.clone()),
+        (None, None) => Stat::new(theme, "Lifts you", "—"),
     }
 }
 
 /// The mirror of [`lifts_stat`]: the people and things linked to your worse moods.
-fn drains_stat(analytics: &Analytics) -> Stat {
+fn drains_stat(theme: &Theme, analytics: &Analytics) -> Stat {
     match (
         &analytics.highlights.drains_person,
         &analytics.highlights.drains_thing,
     ) {
-        (Some(person), Some(thing)) => Stat::new("Drains you", person.clone())
-            .sub(Span::styled(thing.clone(), theme().muted())),
-        (Some(name), None) | (None, Some(name)) => Stat::new("Drains you", name.clone()),
-        (None, None) => Stat::new("Drains you", "—"),
+        (Some(person), Some(thing)) => Stat::new(theme, "Drains you", person.clone())
+            .sub(Span::styled(thing.clone(), theme.muted())),
+        (Some(name), None) | (None, Some(name)) => Stat::new(theme, "Drains you", name.clone()),
+        (None, None) => Stat::new(theme, "Drains you", "—"),
     }
 }
 
 /// This year's most-logged feeling, noted as such; falls back to the all-time top
 /// feeling (noted) when this year has none yet.
-fn top_feeling_stat(analytics: &Analytics) -> Stat {
+fn top_feeling_stat(theme: &Theme, analytics: &Analytics) -> Stat {
     if let Some(name) = &analytics.highlights.top_feeling_this_year {
-        Stat::new("Top feeling", name.clone()).sub(Span::styled("this year", theme().muted()))
+        Stat::new(theme, "Top feeling", name.clone()).sub(Span::styled("this year", theme.muted()))
     } else if let Some(tally) = analytics.mood.feelings.first() {
-        Stat::new("Top feeling", tally.name.clone()).sub(Span::styled("all time", theme().muted()))
+        Stat::new(theme, "Top feeling", tally.name.clone())
+            .sub(Span::styled("all time", theme.muted()))
     } else {
-        Stat::new("Top feeling", "—")
+        Stat::new(theme, "Top feeling", "—")
     }
 }
 
 /// The weekday whose entries average the highest mood.
-fn happiest_day_stat(mood: &MoodAnalytics) -> Stat {
+fn happiest_day_stat(theme: &Theme, mood: &MoodAnalytics) -> Stat {
     match extreme_weekday(mood, true) {
-        Some(day) => Stat::new("Happiest day", WEEKDAYS[day].to_string()),
-        None => Stat::new("Happiest day", "—"),
+        Some(day) => Stat::new(theme, "Happiest day", WEEKDAYS[day].to_string()),
+        None => Stat::new(theme, "Happiest day", "—"),
     }
 }
 
 /// The mirror of [`happiest_day_stat`]: the weekday whose entries average the
 /// lowest mood — the day worth a little extra care.
-fn toughest_day_stat(mood: &MoodAnalytics) -> Stat {
+fn toughest_day_stat(theme: &Theme, mood: &MoodAnalytics) -> Stat {
     match extreme_weekday(mood, false) {
-        Some(day) => Stat::new("Toughest day", WEEKDAYS[day].to_string()),
-        None => Stat::new("Toughest day", "—"),
+        Some(day) => Stat::new(theme, "Toughest day", WEEKDAYS[day].to_string()),
+        None => Stat::new(theme, "Toughest day", "—"),
     }
 }
 

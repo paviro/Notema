@@ -8,9 +8,9 @@ use ratatui::{
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::{
-    app::{App, Mode},
+    app::{AppModel, Mode},
     scroll::clamp_scroll,
-    theme::theme,
+    theme::Theme,
 };
 
 /// Display width of `s` in terminal cells (wide/CJK characters count as 2).
@@ -72,9 +72,9 @@ pub(crate) fn rows_meta(rows: &[BoxRow]) -> Vec<RowMeta> {
 }
 
 /// The fully-built entry list for one `(data version, mode, journal, text_width)`
-/// combination. [`App`](super::app::App) memoizes this so a frame that only
+/// combination. [`AppModel`](super::app::AppModel) memoizes this so a frame that only
 /// scrolled or moved the selection reuses it instead of rebuilding every row
-/// (see `App::entry_rows`). Rows are independent of the scroll offset and the
+/// (see `AppModel::entry_rows`). Rows are independent of the scroll offset and the
 /// selected index — both are applied downstream in [`visible_box_items`].
 pub(crate) struct EntryRowCache {
     pub(crate) rows: Vec<BoxRow>,
@@ -88,7 +88,7 @@ pub(crate) struct EntryRowCache {
 /// Build the entry list once. Runs only on a cache miss (data/journal/width
 /// change), so its O(entries) cost is paid at most once per such change rather
 /// than several times per frame.
-pub(crate) fn build_entry_row_cache(app: &App, text_width: u16) -> EntryRowCache {
+pub(crate) fn build_entry_row_cache(app: &AppModel, text_width: u16) -> EntryRowCache {
     let rows = entry_list_rows(app, text_width);
     let meta: Vec<RowMeta> = rows
         .iter()
@@ -107,7 +107,8 @@ pub(crate) fn build_entry_row_cache(app: &App, text_width: u16) -> EntryRowCache
     }
 }
 
-pub(crate) fn entry_list_rows(app: &App, text_width: u16) -> Vec<BoxRow> {
+pub(crate) fn entry_list_rows(app: &AppModel, text_width: u16) -> Vec<BoxRow> {
+    let theme = &app.appearance.theme;
     match app.nav.mode {
         Mode::Search => {
             let mut rows = Vec::new();
@@ -117,12 +118,12 @@ pub(crate) fn entry_list_rows(app: &App, text_width: u16) -> Vec<BoxRow> {
                 }
                 rows.push(BoxRow {
                     item_index: Some(index),
-                    lines: search_hit_lines(hit, text_width),
+                    lines: search_hit_lines(theme, hit, text_width),
                 });
             }
             rows
         }
-        Mode::Browse => browse_entry_rows(app, text_width),
+        Mode::Browse => browse_entry_rows(theme, app, text_width),
     }
 }
 
@@ -136,7 +137,7 @@ fn spacer_row() -> BoxRow {
 
 /// Search hits reuse the browse box design. Without month/day headers they carry
 /// the full date (including year) on the top border and the journal on the bottom.
-fn search_hit_lines(hit: &SearchHit, text_width: u16) -> Vec<Line<'static>> {
+fn search_hit_lines(theme: &Theme, hit: &SearchHit, text_width: u16) -> Vec<Line<'static>> {
     let (date, time) = match hit.created_at.as_deref().and_then(parse_entry_timestamp) {
         Some(timestamp) => (
             Some(timestamp.format("%a %d %b %Y").to_string()),
@@ -148,10 +149,12 @@ fn search_hit_lines(hit: &SearchHit, text_width: u16) -> Vec<Line<'static>> {
     // show the plain (un-suffixed) journal name on the bottom-left.
     let archived = notema_storage::is_archived_name(&hit.journal);
     entry_box_lines(
+        theme,
         date.as_deref(),
         &time,
         &hit.preview,
         Some(&footer_left_label(
+            theme,
             notema_storage::journal_display_name(&hit.journal).to_string(),
             hit.starred,
         )),
@@ -160,7 +163,7 @@ fn search_hit_lines(hit: &SearchHit, text_width: u16) -> Vec<Line<'static>> {
     )
 }
 
-fn browse_entry_rows(app: &App, text_width: u16) -> Vec<BoxRow> {
+fn browse_entry_rows(theme: &Theme, app: &AppModel, text_width: u16) -> Vec<BoxRow> {
     let box_width = text_width as usize + 4;
     let mut rows = Vec::new();
     let mut current_month = None;
@@ -185,7 +188,12 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<BoxRow> {
                     rows.push(spacer_row());
                     rows.push(BoxRow {
                         item_index: None,
-                        lines: vec![section_divider(box_width, &month, DividerAlign::Right)],
+                        lines: vec![section_divider(
+                            theme,
+                            box_width,
+                            &month,
+                            DividerAlign::Right,
+                        )],
                     });
                     rows.push(spacer_row());
                 }
@@ -210,7 +218,7 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<BoxRow> {
 
         rows.push(BoxRow {
             item_index: Some(index),
-            lines: entry_list_lines(entry, day_label.as_deref(), text_width),
+            lines: entry_list_lines(theme, entry, day_label.as_deref(), text_width),
         });
         prev_was_entry = true;
     }
@@ -223,7 +231,7 @@ fn browse_entry_rows(app: &App, text_width: u16) -> Vec<BoxRow> {
 /// with its label. Mirrors the row sequencing in [`browse_entry_rows`] so the
 /// sticky border label switches over in step with the scrolled list. Empty
 /// outside browse mode.
-pub(crate) fn entry_month_sections(app: &App, text_width: u16) -> Vec<(usize, String)> {
+pub(crate) fn entry_month_sections(app: &AppModel, text_width: u16) -> Vec<(usize, String)> {
     if app.nav.mode != Mode::Browse {
         return Vec::new();
     }
@@ -266,7 +274,13 @@ pub(crate) fn entry_month_sections(app: &App, text_width: u16) -> Vec<(usize, St
             None
         };
 
-        y += entry_list_lines(entry, day_label.as_deref(), text_width).len();
+        y += entry_list_lines(
+            &app.appearance.theme,
+            entry,
+            day_label.as_deref(),
+            text_width,
+        )
+        .len();
         prev_was_entry = true;
     }
 
@@ -283,14 +297,19 @@ pub(crate) enum DividerAlign {
     Right,
 }
 
-pub(crate) fn section_divider(box_width: usize, label: &str, align: DividerAlign) -> Line<'static> {
-    let fill = theme()
+pub(crate) fn section_divider(
+    theme: &Theme,
+    box_width: usize,
+    label: &str,
+    align: DividerAlign,
+) -> Line<'static> {
+    let fill = theme
         .glyphs()
         .divider
         .to_string()
         .repeat(box_width.saturating_sub(text_width(label) + 1));
-    let label = Span::styled(label.to_string(), theme().heading());
-    let rule = theme().divider();
+    let label = Span::styled(label.to_string(), theme.heading());
+    let rule = theme.divider();
     let spans = match align {
         DividerAlign::Left => vec![label, Span::styled(format!(" {fill}"), rule)],
         DividerAlign::Right => vec![Span::styled(format!("{fill} "), rule), label],
@@ -300,12 +319,16 @@ pub(crate) fn section_divider(box_width: usize, label: &str, align: DividerAlign
 
 /// One journal rendered as a bordered box with its name inside, mirroring the
 /// entry list. Journals carry no border labels; the name is truncated to fit.
-pub(crate) fn journal_box_lines(name: &str, inner_width: usize) -> Vec<Line<'static>> {
+pub(crate) fn journal_box_lines(
+    theme: &Theme,
+    name: &str,
+    inner_width: usize,
+) -> Vec<Line<'static>> {
     let box_width = inner_width + 4;
     vec![
-        border_line(BoxEdge::Top, box_width, None, None),
-        box_inner_line(name.to_string(), inner_width),
-        border_line(BoxEdge::Bottom, box_width, None, None),
+        border_line(theme, BoxEdge::Top, box_width, None, None),
+        box_inner_line(theme, name.to_string(), inner_width),
+        border_line(theme, BoxEdge::Bottom, box_width, None, None),
     ]
 }
 
@@ -337,13 +360,14 @@ pub(crate) fn journal_card_lines(
 /// `app.library.journals` (the selection index); the divider row carries `None`
 /// so it is never selectable. The divider appears only when there are both active
 /// and archived journals.
-pub(crate) fn journal_list_rows(app: &App, inner_width: usize) -> Vec<BoxRow> {
+pub(crate) fn journal_list_rows(app: &AppModel, inner_width: usize) -> Vec<BoxRow> {
+    let theme = &app.appearance.theme;
     let box_width = inner_width + 4;
     let active = app.active_journal_count();
     let show_divider = active > 0 && active < app.library.journals.len();
     // Flat chrome bakes selection into the chips (the List highlight would
     // also paint the blank padding rows); bordered keeps the List highlight.
-    let flat = crate::tui::render::flat_chrome();
+    let flat = crate::tui::render::flat_chrome(theme);
     let selected = app.nav.journal_list.selected();
     let select_all = app.nav.mode == Mode::Search
         && app.search.scope == crate::tui::app::SearchScope::AllJournals;
@@ -353,7 +377,7 @@ pub(crate) fn journal_list_rows(app: &App, inner_width: usize) -> Vec<BoxRow> {
         if show_divider && index == active {
             let mut lines = vec![
                 Line::from(String::new()),
-                section_divider(box_width, "Archived", DividerAlign::Left),
+                section_divider(theme, box_width, "Archived", DividerAlign::Left),
                 Line::from(String::new()),
             ];
             if flat {
@@ -370,15 +394,15 @@ pub(crate) fn journal_list_rows(app: &App, inner_width: usize) -> Vec<BoxRow> {
                 crate::tui::state::HoverTarget::Journal(i) if i == index
             );
             let style = if select_all || selected == Some(index) {
-                theme().selection()
+                theme.selection()
             } else if hovered {
-                theme().text().patch(theme().hover())
+                theme.text().patch(theme.hover())
             } else {
-                theme().text().bg(theme().raised_bg())
+                theme.text().bg(theme.raised_bg())
             };
             journal_card_lines(journal.display_name(), inner_width, style)
         } else {
-            journal_box_lines(journal.display_name(), inner_width)
+            journal_box_lines(theme, journal.display_name(), inner_width)
         };
         rows.push(BoxRow::new(Some(index), lines));
     }
@@ -386,7 +410,7 @@ pub(crate) fn journal_list_rows(app: &App, inner_width: usize) -> Vec<BoxRow> {
 }
 
 #[cfg(test)]
-pub(crate) fn entry_row_metadata(app: &App, text_width: u16) -> Vec<RowMeta> {
+pub(crate) fn entry_row_metadata(app: &AppModel, text_width: u16) -> Vec<RowMeta> {
     entry_list_rows(app, text_width)
         .into_iter()
         .map(|row| RowMeta {
@@ -457,6 +481,7 @@ const ENTRY_BOX_PREVIEW_LINES: usize = 3;
 /// day) and time sit on the top border, the word count on the bottom border, and
 /// the preview flows inside.
 pub(crate) fn entry_list_lines(
+    theme: &Theme,
     entry: &Entry,
     day: Option<&str>,
     text_width: u16,
@@ -467,10 +492,12 @@ pub(crate) fn entry_list_lines(
         .unwrap_or_default();
 
     entry_box_lines(
+        theme,
         day,
         &time,
         &entry.preview,
         Some(&footer_left_label(
+            theme,
             word_count_label(entry.word_count),
             entry.starred,
         )),
@@ -482,10 +509,10 @@ pub(crate) fn entry_list_lines(
 /// The bottom-left label with a trailing `★` when starred. Keeping the star on
 /// the left leaves the bottom-right slot free for the search-result "Archived"
 /// flag, and reads consistently across the browse and search box views.
-fn footer_left_label(mut label: String, starred: bool) -> String {
+fn footer_left_label(theme: &Theme, mut label: String, starred: bool) -> String {
     if starred {
         label.push(' ');
-        label.push(theme().glyphs().starred);
+        label.push(theme.glyphs().starred);
     }
     label
 }
@@ -502,6 +529,7 @@ fn word_count_label(count: usize) -> String {
 /// on its left (the journal for search hits, or the word count) and one on its
 /// right (the `archived` flag for search hits).
 pub(crate) fn entry_box_lines(
+    theme: &Theme,
     date_label: Option<&str>,
     time: &str,
     preview: &str,
@@ -516,7 +544,7 @@ pub(crate) fn entry_box_lines(
     let box_width = inner_width + 4;
 
     let time = (!time.is_empty()).then_some(time);
-    if crate::tui::render::flat_chrome() {
+    if crate::tui::render::flat_chrome(theme) {
         // Flat card: the border rows become text rows carrying the same
         // labels — day and time in the header, word count / journal flags in
         // the footer, all muted so the metadata frames the preview without
@@ -527,8 +555,8 @@ pub(crate) fn entry_box_lines(
             Line::from(String::new()),
             card_edge_line(
                 box_width,
-                date_label.map(|label| (label, theme().muted())),
-                time.map(|label| (label, theme().muted())),
+                date_label.map(|label| (label, theme.muted())),
+                time.map(|label| (label, theme.muted())),
             ),
         ];
         for text in wrap_text(preview, inner_width, ENTRY_BOX_PREVIEW_LINES) {
@@ -536,18 +564,25 @@ pub(crate) fn entry_box_lines(
         }
         lines.push(card_edge_line(
             box_width,
-            footer_left.map(|label| (label, theme().muted())),
-            footer_right.map(|label| (label, theme().muted())),
+            footer_left.map(|label| (label, theme.muted())),
+            footer_right.map(|label| (label, theme.muted())),
         ));
         lines.push(Line::from(String::new()));
         return lines;
     }
 
-    let mut lines = vec![border_line(BoxEdge::Top, box_width, date_label, time)];
+    let mut lines = vec![border_line(
+        theme,
+        BoxEdge::Top,
+        box_width,
+        date_label,
+        time,
+    )];
     for text in wrap_text(preview, inner_width, ENTRY_BOX_PREVIEW_LINES) {
-        lines.push(box_inner_line(text, inner_width));
+        lines.push(box_inner_line(theme, text, inner_width));
     }
     lines.push(border_line(
+        theme,
         BoxEdge::Bottom,
         box_width,
         footer_left,
@@ -597,8 +632,8 @@ fn card_inner_line(text: String, inner_width: usize) -> Line<'static> {
     ])
 }
 
-fn border_style() -> Style {
-    theme().muted()
+fn border_style(theme: &Theme) -> Style {
+    theme.muted()
 }
 
 /// Which edge of a hand-drawn box a [`border_line`] draws, deciding its corner
@@ -612,18 +647,19 @@ pub(crate) enum BoxEdge {
 /// A box border with optional bold labels on the left and right, separated by a
 /// dim rule: `┌ Sunday 05 ──────── 14:30 ┐`, in the theme's line set.
 pub(crate) fn border_line(
+    theme: &Theme,
     edge: BoxEdge,
     box_width: usize,
     left: Option<&str>,
     right: Option<&str>,
 ) -> Line<'static> {
-    let set = theme().glyphs().borders.line_set();
+    let set = theme.glyphs().borders.line_set();
     let (open, close) = match edge {
         BoxEdge::Top => (set.top_left, set.top_right),
         BoxEdge::Bottom => (set.bottom_left, set.bottom_right),
     };
-    let border = border_style();
-    let bold = theme().heading();
+    let border = border_style(theme);
+    let bold = theme.heading();
     let left = left.filter(|label| !label.is_empty());
     let right = right.filter(|label| !label.is_empty());
     let left_width = left.map_or(0, |label| text_width(label) + 2);
@@ -640,7 +676,7 @@ pub(crate) fn border_line(
     }
 
     let dashes = box_width - 2 - left_width - right_width;
-    let mut spans = vec![Span::styled(open, border)];
+    let mut spans = vec![Span::styled(open.to_string(), border)];
     if let Some(left) = left {
         spans.push(Span::styled(" ".to_string(), border));
         spans.push(Span::styled(left.to_string(), bold));
@@ -652,18 +688,21 @@ pub(crate) fn border_line(
         spans.push(Span::styled(right.to_string(), bold));
         spans.push(Span::styled(" ".to_string(), border));
     }
-    spans.push(Span::styled(close, border));
+    spans.push(Span::styled(close.to_string(), border));
     Line::from(spans)
 }
 
-pub(crate) fn box_inner_line(text: String, inner_width: usize) -> Line<'static> {
-    let vertical = theme().glyphs().borders.line_set().vertical;
+pub(crate) fn box_inner_line(theme: &Theme, text: String, inner_width: usize) -> Line<'static> {
+    let vertical = theme.glyphs().borders.line_set().vertical.to_string();
     let (content, used) = take_width(&text, inner_width);
     let pad = inner_width - used;
     Line::from(vec![
-        Span::styled(format!("{vertical} "), border_style()),
+        Span::styled(format!("{vertical} "), border_style(theme)),
         Span::raw(content),
-        Span::styled(format!("{} {vertical}", " ".repeat(pad)), border_style()),
+        Span::styled(
+            format!("{} {vertical}", " ".repeat(pad)),
+            border_style(theme),
+        ),
     ])
 }
 
@@ -880,16 +919,25 @@ mod tests {
     fn starred_glyph_follows_bottom_left_label() {
         // The star rides the bottom-left label (just after the word count), so it
         // never collides with a bottom-right label like the search "Archived" flag.
-        let starred = footer_left_label("2 words".to_string(), true);
-        let lines = entry_box_lines(None, "14:30", "hi", Some(&starred), Some("Archived"), 30);
+        let theme = crate::tui::theme::Theme::terminal_default();
+        let starred = footer_left_label(&theme, "2 words".to_string(), true);
+        let lines = entry_box_lines(
+            &theme,
+            None,
+            "14:30",
+            "hi",
+            Some(&starred),
+            Some("Archived"),
+            30,
+        );
         let bottom = line_text(lines.last().unwrap());
         assert!(bottom.starts_with("└ 2 words ★ "));
         assert!(bottom.ends_with(" Archived ┘"));
 
         // Unstarred: the label is untouched and no star appears.
-        let plain = footer_left_label("2 words".to_string(), false);
+        let plain = footer_left_label(&theme, "2 words".to_string(), false);
         assert_eq!(plain, "2 words");
-        let plain_lines = entry_box_lines(None, "14:30", "hi", Some(&plain), None, 30);
+        let plain_lines = entry_box_lines(&theme, None, "14:30", "hi", Some(&plain), None, 30);
         assert!(!line_text(plain_lines.last().unwrap()).contains('★'));
     }
 
@@ -903,7 +951,11 @@ mod tests {
 
         // The padded inner content must span exactly `inner_width` cells: two
         // wide characters (4 cells) leave a single trailing space to reach 5.
-        let line = box_inner_line("日本".to_string(), 5);
+        let line = box_inner_line(
+            &crate::tui::theme::Theme::terminal_default(),
+            "日本".to_string(),
+            5,
+        );
         assert_eq!(line.spans[1].content.as_ref(), "日本");
         assert_eq!(line.spans[2].content.as_ref(), "  │");
     }

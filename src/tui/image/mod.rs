@@ -54,10 +54,16 @@ pub(crate) enum ImageStatus {
     Unavailable,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ImageAsset {
     pub(crate) entry_path: PathBuf,
     pub(crate) file_name: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct WarmRequest {
+    pub(crate) assets: Vec<ImageAsset>,
+    pub(crate) size: Size,
 }
 
 pub(crate) struct ImageRuntime {
@@ -195,13 +201,32 @@ impl ImageRuntime {
     /// viewer finds them ready. Run when the viewer is opened (and on resize).
     pub(crate) fn warm(&self, assets: &[ImageAsset], size: Size) {
         for asset in assets {
-            let _ = self.reserve(asset, size);
+            self.start(asset, size);
         }
     }
 
-    /// Report the build state of `asset` at `area`, kicking off a background
-    /// build the first time it's seen. Never blocks on decode/encode.
-    pub(crate) fn reserve(&self, asset: &ImageAsset, area: Size) -> ImageStatus {
+    fn start(&self, asset: &ImageAsset, area: Size) {
+        if !self.enabled() {
+            return;
+        }
+        let key = self.key(asset, area);
+        if self.cache.borrow().contains_key(&key) {
+            return;
+        }
+        let Some(worker) = self.worker.as_ref() else {
+            return;
+        };
+        let request = BuildRequest {
+            generation: *self.generation.borrow(),
+            key: key.clone(),
+        };
+        if worker.requests.send(request).is_ok() {
+            self.cache.borrow_mut().insert(key, CacheState::Loading);
+        }
+    }
+
+    /// Report the build state of `asset` at `area` without changing the cache.
+    pub(crate) fn status(&self, asset: &ImageAsset, area: Size) -> ImageStatus {
         if !self.enabled() {
             return ImageStatus::Unavailable;
         }
@@ -215,19 +240,7 @@ impl ImageRuntime {
             };
         }
 
-        // First sighting at this size: reserve a slot, enqueue the build.
-        let Some(worker) = self.worker.as_ref() else {
-            return ImageStatus::Unavailable;
-        };
-        let request = BuildRequest {
-            generation: *self.generation.borrow(),
-            key: key.clone(),
-        };
-        if worker.requests.send(request).is_err() {
-            return ImageStatus::Unavailable;
-        }
-        self.cache.borrow_mut().insert(key, CacheState::Loading);
-        ImageStatus::Loading
+        ImageStatus::Unavailable
     }
 
     /// Paint a previously reserved image centered within `area`. A no-op unless

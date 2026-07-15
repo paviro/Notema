@@ -9,7 +9,7 @@ use chrono::{DateTime, FixedOffset};
 use notema_context::{EnvironmentReport, fetch_environment};
 use notema_domain::{Coordinates, MetadataField};
 
-use crate::tui::worker::Worker;
+use crate::tui::runtime::worker::Worker;
 
 /// The background environment worker, spawned on first use.
 pub(crate) type EnvironmentWorker = Worker<EnvironmentRequest, EnvironmentResult>;
@@ -20,7 +20,7 @@ pub(crate) type EnvironmentWorker = Worker<EnvironmentRequest, EnvironmentResult
 pub(crate) type Environment = EnvironmentReport;
 
 /// Where a finished lookup's data belongs, so the drain step can route it.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EnvironmentTarget {
     /// Attach to the open editor's draft, matched by the request id.
     Editor,
@@ -29,6 +29,7 @@ pub(crate) enum EnvironmentTarget {
 }
 
 /// A environment lookup handed to the worker, tagged with an id and its destination.
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct EnvironmentRequest {
     pub(crate) id: u64,
     pub(crate) coordinates: Coordinates,
