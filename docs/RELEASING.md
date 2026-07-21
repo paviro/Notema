@@ -27,20 +27,22 @@ To rehearse without publishing, run the workflow manually
 artifact as a workflow artifact but skips the publish step (guarded on a tag
 push).
 
-## What gets built, and on which runner
+## What gets built, and where
 
-| Runner | Artifacts |
+| Runner / container | Artifacts |
 | --- | --- |
-| `ubuntu-latest` | all glibc Linux targets (x86_64/aarch64/i686/armv7), x86_64/i686/armv7 musl, i586, Android/Termux, `linux-gnu-x86_64-fuse` |
-| `ubuntu-24.04-arm` | aarch64 musl Linux and `linux-gnu-aarch64-fuse`, built natively |
+| `ubuntu-latest` | all standard glibc Linux targets (x86_64/aarch64/i686/armv7), x86_64/i686/armv7 musl, i586, and Android/Termux |
+| `ubuntu-24.04-arm` | aarch64 musl Linux, built natively |
+| `almalinux:8.10` on matching x86_64/ARM64 runners | `linux-gnu-{x86_64,aarch64}-fuse`, built natively |
 | `windows-latest` | `windows-msvc-x86_64`, built natively |
 | `windows-11-arm` | `windows-msvc-aarch64`, built natively |
 | `macos-latest` | Intel and Apple Silicon macOS, standard and FUSE, one job per artifact (signed + notarized) |
 
-The glibc targets are cross-compiled with [`cargo-zigbuild`], which links with
-zig and pins the glibc floor at **2.17** regardless of the runner's own glibc,
-so the binaries run on old distros (RHEL 7 / Ubuntu 14.04 era and later). The
-musl targets are statically linked and cross-compiled via
+The standard glibc targets are cross-compiled with [`cargo-zigbuild`], which
+links with zig and pins the glibc floor at **2.17** regardless of the runner's
+own glibc. The FUSE variants are built in AlmaLinux 8 and require **glibc 2.28**
+plus `libfuse3.so.3`; older systems can use the standard artifacts without the
+`mount` command. The musl targets are statically linked and cross-compiled via
 [`taiki-e/setup-cross-toolchain-action`]. i586 (SSE-free, static OpenSSL) and
 macOS reuse the `Makefile.toml` tasks, which can also be run locally (see
 [`docs/BUILDING.md`](BUILDING.md)).
@@ -102,9 +104,11 @@ notarized twice (helper, then outer zip). The four jobs run in parallel.
 - On macOS, `codesign --verify --strict` and `spctl -a -vv` pass for a downloaded
   binary; the notarized zips staple/validate.
 - `file notema` inside each Linux/Android zip reports the expected architecture.
-- The glibc floor held: for each `linux-gnu-*` binary,
+- The standard glibc floor held: for each non-FUSE `linux-gnu-*` binary,
   `strings notema | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1` prints
   `GLIBC_2.17` or lower.
+- The two `linux-gnu-*-fuse` binaries require `libfuse3.so.3`, and the same
+  command prints `GLIBC_2.28` or lower.
 - Each published zip carries a build-provenance attestation:
   `gh attestation verify <zip> --repo <owner>/<repo>` confirms it was produced by
   this workflow.

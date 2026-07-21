@@ -45,16 +45,8 @@ jobs:
             echo "Tag $GITHUB_REF_NAME does not match workspace.package.version $version" >&2
             exit 1
           fi
-  # Every Linux target. The gnu rows cross-compile with zig as the linker
-  # (cargo-zigbuild) so the glibc floor stays at 2.17 — matching the previous
-  # Homebrew cross-toolchain releases — instead of inheriting the runner's
-  # glibc. The musl rows are statically linked (no glibc concern) and use
-  # taiki-e/setup-cross-toolchain-action, which installs each target's linker +
-  # C toolchain and sets CARGO_BUILD_TARGET; aarch64-musl builds natively on
-  # ubuntu-24.04-arm. The `-fuse` rows rebuild the two 64-bit gnu targets with
-  # `--features fuse`; armv7/i686 (would need cross libfuse3 sysroots) and musl
-  # (static artifacts shouldn't gain a dynamic libfuse3 link) stay fuse-less.
-  # i586 and Android are handled separately (bespoke OpenSSL / NDK).
+  # Standard GNU artifacts retain a glibc 2.17 floor. FUSE, i586, and Android
+  # are handled separately.
   linux:
     name: Linux ${{ matrix.platform }}
     needs: preflight
@@ -91,31 +83,10 @@ jobs:
           - target: armv7-unknown-linux-musleabihf
             platform: linux-musl-armv7
             runner: ubuntu-latest
-          # FUSE variants of the two 64-bit gnu targets (`--features fuse`
-          # dynamically links the system libfuse3, so these zips need the fuse3
-          # runtime package installed). Each builds on a runner whose native arch
-          # matches the target so apt's libfuse3-dev provides the right-arch
-          # library and fuse3.pc; zig still pins the glibc floor at 2.17 —
-          # linking the runner's .so only records DT_NEEDED, and libfuse3's
-          # symbols are versioned FUSE_3.x, not GLIBC_x, so the floor holds
-          # (verified by a readelf step below).
-          - target: x86_64-unknown-linux-gnu
-            platform: linux-gnu-x86_64-fuse
-            runner: ubuntu-latest
-            zigbuild: true
-            fuse: true
-          - target: aarch64-unknown-linux-gnu
-            platform: linux-gnu-aarch64-fuse
-            runner: ubuntu-24.04-arm
-            zigbuild: true
-            fuse: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # libfuse3 headers + fuse3.pc for the fuse rows' C bridge (notema-fuse/build.rs).
-      - if: ${{ matrix.fuse }}
-        run: sudo apt-get update && sudo apt-get install --yes libfuse3-dev pkg-config
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: 1.96.0
@@ -135,20 +106,61 @@ jobs:
       # The `.2.17` suffix pins the glibc floor; the binary still lands in
       # target/<target>/release like a plain cargo build.
       - if: ${{ matrix.zigbuild }}
-        run: cargo zigbuild --release -p notema --locked --target ${{ matrix.target }}.2.17 ${{ matrix.fuse && '--features fuse' || '' }}
+        run: cargo zigbuild --release -p notema --locked --target ${{ matrix.target }}.2.17
       # CARGO_BUILD_TARGET is set by setup-cross-toolchain-action, so no --target.
       - if: ${{ !matrix.zigbuild }}
         run: cargo build --release -p notema --locked
-      # A fuse binary must carry DT_NEEDED libfuse3.so.3, and linking the
-      # runner's .so must not have raised the glibc floor above 2.17.
-      - if: ${{ matrix.fuse }}
-        name: Verify libfuse3 linkage and glibc floor
+      - name: Package
+        run: |
+          install -d dist
+          (cd "target/${{ matrix.target }}/release" && zip - notema) > "dist/${{ matrix.platform }}.zip"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # AlmaLinux 8 keeps the FUSE executable and libfuse3 at a glibc 2.28 floor.
+  linux-fuse:
+    name: Linux ${{ matrix.platform }}
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    container: almalinux:8.10
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            platform: linux-gnu-x86_64-fuse
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            platform: linux-gnu-aarch64-fuse
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Install build dependencies
+        run: dnf install --assumeyes binutils ca-certificates curl fuse3-devel gcc git gzip make pkgconf-pkg-config tar zip
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.96.0
+          targets: ${{ matrix.target }}
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cargo-about@0.9.1
+      - run: cargo build --release -p notema --locked --target ${{ matrix.target }} --features fuse
+      - name: Verify libfuse3 linkage and glibc floor
         run: |
           bin="target/${{ matrix.target }}/release/notema"
           readelf -d "$bin" | grep -q 'libfuse3\.so\.3' || { echo "missing libfuse3 DT_NEEDED" >&2; exit 1; }
           bad="$(readelf --dyn-syms -W "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV \
-              | awk -F_ '{ split($2, v, "."); if (v[1] > 2 || (v[1] == 2 && v[2] > 17)) print }')"
-          if [ -n "$bad" ]; then echo "glibc symbols above 2.17: $bad" >&2; exit 1; fi
+              | awk -F_ '{ split($2, v, "."); if (v[1] > 2 || (v[1] == 2 && v[2] > 28)) print }')"
+          if [ -n "$bad" ]; then echo "glibc symbols above 2.28: $bad" >&2; exit 1; fi
+          LD_BIND_NOW=1 "$bin" --version
       - name: Package
         run: |
           install -d dist
@@ -365,7 +377,7 @@ jobs:
   # Gather every artifact, checksum them, and publish to the tag's release.
   publish:
     name: Publish release
-    needs: [linux, i586, android, windows, macos]
+    needs: [linux, linux-fuse, i586, android, windows, macos]
     runs-on: ubuntu-latest
     environment: release
     permissions:

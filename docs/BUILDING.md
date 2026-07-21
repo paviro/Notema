@@ -125,8 +125,9 @@ stays a separate download instead of being folded into the standard builds.
   provider first — [fuse-t](https://www.fuse-t.org) is kext-free (nothing to
   approve) and is what this is tested with; [macFUSE](https://macfuse.io)
   probably also works. The mounted volume shows up in Finder as **Journals**.
-- Linux glibc x86_64 and ARM64. Install the libfuse3 runtime first (`fuse3` on
-  Debian/Ubuntu/Fedora/Arch, usually preinstalled on desktop distros).
+- Linux glibc x86_64 and ARM64, requiring glibc 2.28 or newer. Install the
+  libfuse3 runtime first (`fuse3` on Debian/Ubuntu/Arch, `fuse3-libs` on
+  Fedora/RHEL, usually preinstalled on desktop distros).
 
 The macOS FUSE binaries are signed with library validation disabled
 (`crates/notema-fuse/fuse.entitlements`) so hardened runtime can load libfuse3,
