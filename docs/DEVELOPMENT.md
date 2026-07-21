@@ -13,7 +13,7 @@ These mirror the CI jobs; run them before pushing.
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --all-features
+cargo test --workspace --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
@@ -21,16 +21,17 @@ CI runs `cargo audit --deny warnings` as well; local runs need
 `cargo install cargo-audit`. Acknowledged advisories are listed in
 [AUDIT.md](AUDIT.md).
 
-The `fuse` feature isn't in `--all-features` reach on every platform. To check
-the mount wiring compiles:
+The `fuse` feature is off by default. To check the mount wiring compiles:
 
 ```bash
 cargo check -p notema --features fuse --locked   # needs libfuse3 headers
 ```
 
-## Cross-compiled release builds
+## Cross-compiled builds
 
-`Makefile.toml` drives the release matrix through
+Official releases are built by CI on version tags (see
+[RELEASING.md](RELEASING.md)). For local cross-builds, `Makefile.toml` provides
+per-target tasks through
 [`cargo-make`](https://github.com/sagiegurari/cargo-make):
 
 ```bash

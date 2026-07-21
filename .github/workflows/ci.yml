@@ -120,8 +120,8 @@ jobs:
   # checked natively by the windows job above. `cargo check` still runs ring's
   # build script, so each target needs its cross C compiler (CC_<target>).
   # notema-fuse needs libfuse and is excluded, matching the release build. i586
-  # is omitted on purpose: it needs a bespoke SSE-free OpenSSL build too heavy
-  # for CI.
+  # is omitted on purpose: its bespoke SSE-free OpenSSL build is too heavy for
+  # per-PR CI; the release workflow builds it.
   cross-check:
     name: Cross-check (${{ matrix.target }})
     runs-on: ubuntu-latest

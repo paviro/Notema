@@ -803,8 +803,3 @@ dependencies = [
     "notarize-fuse-macos-silicon",
     "notarize-fuse-macos-universal"
 ]
-
-# Prebuilt FUSE artifacts are the three macOS zips above plus the two 64-bit
-# linux-gnu zips the release workflow builds. Every other platform builds FUSE
-# natively with `cargo build --release --features fuse` (needs
-# libfuse3/macFUSE/fuse-t installed).

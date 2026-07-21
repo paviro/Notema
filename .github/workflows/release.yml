@@ -24,7 +24,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Fail a mistagged release in seconds, before five runners spin up. The job
+  # Fail a mistagged release in seconds, before the build runners spin up. The job
   # itself always runs (a skipped job would cascade-skip everything that
   # `needs` it on workflow_dispatch); the check only applies to tag pushes.
   preflight:
@@ -347,7 +347,6 @@ jobs:
       - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
         with:
           tool: cargo-make,cargo-about@0.9.1
-      # Each task runs its build → sign → package → notarize dependency chain.
       - name: Build, sign, package, notarize
         run: |
           cargo make notarize-macos-intel

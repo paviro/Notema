@@ -9,8 +9,8 @@ Grab a binary for your platform from the [releases page](https://github.com/pavi
 - Android/Termux (ARM64)
 - Linux (x86_64, ARM64, 32-bit x86/i686, and ARMv7, glibc and musl)
 - iOS/iSH (32-bit x86 i586 musl — an SSE-less baseline that runs under iSH)
-- Windows (x86_64)
-- macOS (universal — Intel + Apple Silicon)
+- Windows (x86_64 and ARM64)
+- macOS (Intel, Apple Silicon, and universal)
 
 These have no FUSE dependency and run everywhere. The `mount` command needs a
 `-fuse` build; prebuilt ones exist for macOS (Intel, Apple Silicon, universal)
