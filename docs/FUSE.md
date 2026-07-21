@@ -10,10 +10,10 @@ notema mount ~/journal-mnt        # blocks until unmounted
 umount ~/journal-mnt              # macOS: diskutil unmount ~/journal-mnt
 ```
 
-This needs a **FUSE-enabled build** and a FUSE provider installed — Apple Silicon
-macOS has a prebuilt `-fuse` download, every other platform builds natively. See
-[BUILDING.md](BUILDING.md#fuse-builds). The standard builds omit the `mount`
-command.
+This needs a **FUSE-enabled build** and a FUSE provider installed — macOS and
+64-bit Linux glibc have prebuilt `-fuse` downloads, every other platform builds
+natively. See [BUILDING.md](BUILDING.md#fuse-builds). The standard builds omit
+the `mount` command.
 
 - Fully read-write: editing, creating, deleting, and renaming files and folders
   (including moving entries between folders and renaming journals) are re-encrypted

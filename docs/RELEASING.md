@@ -31,11 +31,11 @@ push).
 
 | Runner | Artifacts |
 | --- | --- |
-| `ubuntu-latest` | all glibc Linux targets (x86_64/aarch64/i686/armv7), x86_64/i686/armv7 musl, i586, Android/Termux |
-| `ubuntu-24.04-arm` | aarch64 musl Linux, built natively |
+| `ubuntu-latest` | all glibc Linux targets (x86_64/aarch64/i686/armv7), x86_64/i686/armv7 musl, i586, Android/Termux, `linux-gnu-x86_64-fuse` |
+| `ubuntu-24.04-arm` | aarch64 musl Linux and `linux-gnu-aarch64-fuse`, built natively |
 | `windows-latest` | `windows-msvc-x86_64`, built natively |
 | `windows-11-arm` | `windows-msvc-aarch64`, built natively |
-| `macos-latest` | `apple-darwin-{x86_64,aarch64,universal}` and `apple-darwin-aarch64-fuse` (signed + notarized) |
+| `macos-latest` | `apple-darwin-{x86_64,aarch64,universal}` and their `-fuse` variants (signed + notarized) |
 
 The glibc targets are cross-compiled with [`cargo-zigbuild`], which links with
 zig and pins the glibc floor at **2.17** regardless of the runner's own glibc,
@@ -84,7 +84,8 @@ notarized twice (helper, then outer zip) — expect the macOS job to take a whil
 ## Verifying a release
 
 - Every expected zip plus `SHA256SUMS` is attached to the release
-  (16 zips: 8 Linux + i586 + Android + 2 Windows + 3 macOS + macOS FUSE).
+  (20 zips: 8 Linux + 2 Linux FUSE + i586 + Android + 2 Windows + 3 macOS +
+  3 macOS FUSE).
 - On macOS, `codesign --verify --strict` and `spctl -a -vv` pass for a downloaded
   binary; the notarized zips staple/validate.
 - `file notema` inside each Linux/Android zip reports the expected architecture.

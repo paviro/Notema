@@ -13,12 +13,19 @@ Grab a binary for your platform from the [releases page](https://github.com/pavi
 - macOS (universal — Intel + Apple Silicon)
 
 These have no FUSE dependency and run everywhere. The `mount` command needs a
-`-fuse` build; the only prebuilt one is for Apple Silicon macOS, and other
-platforms build it from source (both below).
+`-fuse` build; prebuilt ones exist for macOS (Intel, Apple Silicon, universal)
+and 64-bit Linux glibc (x86_64, ARM64), and other platforms build it from
+source (both below).
 
 The prebuilt binaries are produced by CI on every version tag — see
 [`docs/RELEASING.md`](RELEASING.md). The cross-compilation setup below is for
 local builds and development.
+
+There are no BSD artifacts, but CI keeps the workspace compiling for
+x86_64 FreeBSD (GitHub Actions has no BSD runners to build or test on), so
+building from source there should work. The `fuse` feature is untested on
+FreeBSD — the base system has fusefs and the `fusefs-libs3` package provides
+the libfuse3 API, so it may build, but no promises.
 
 ## Build from source
 
@@ -108,21 +115,26 @@ fast.
 ## FUSE builds
 
 The `mount` command needs a build with the `fuse` feature. It links the system
-libfuse3 (C), so each FUSE binary is currently built natively on its own
-platform, and a FUSE provider must be installed to build and run.
+libfuse3 (C) dynamically, so a FUSE provider must be installed to build **and**
+to run — a `-fuse` binary won't start at all without it, which is why FUSE
+stays a separate download instead of being folded into the standard builds.
 
-**Apple Silicon macOS** is the only prebuilt FUSE artifact (signed and notarized):
-download the `apple-darwin-aarch64-fuse` zip from releases. Install a FUSE
-provider first — [fuse-t](https://www.fuse-t.org) is kext-free (nothing to
-approve) and is what this is tested with; [macFUSE](https://macfuse.io) probably also works.
-The mounted volume shows up in Finder as **Journals**.
+**Prebuilt FUSE artifacts** (`<platform>-fuse` zips on the releases page):
 
-The FUSE binary is signed with library validation disabled
+- macOS (Intel, Apple Silicon, universal), signed and notarized. Install a FUSE
+  provider first — [fuse-t](https://www.fuse-t.org) is kext-free (nothing to
+  approve) and is what this is tested with; [macFUSE](https://macfuse.io)
+  probably also works. The mounted volume shows up in Finder as **Journals**.
+- Linux glibc x86_64 and ARM64. Install the libfuse3 runtime first (`fuse3` on
+  Debian/Ubuntu/Fedora/Arch, usually preinstalled on desktop distros).
+
+The macOS FUSE binaries are signed with library validation disabled
 (`crates/notema-fuse/fuse.entitlements`) so hardened runtime can load libfuse3,
 which the FUSE provider ships signed under its own vendor's Team ID.
 
-Everywhere else, build it natively. Install a FUSE provider first — `libfuse3-dev`
-on Linux, fuse-t or macFUSE on macOS — then:
+Everywhere else (32-bit Linux, musl/static builds, …), build it natively.
+Install a FUSE provider first — `libfuse3-dev` on Linux, fuse-t or macFUSE on
+macOS — then:
 
 ```bash
 cargo build --release --features fuse
