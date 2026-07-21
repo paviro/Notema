@@ -24,6 +24,41 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
+  commit-messages:
+    name: Commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check commit messages
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" = pull_request ]; then
+            base="$PR_BASE_SHA"
+            head="$PR_HEAD_SHA"
+          else
+            base="$PUSH_BASE_SHA"
+            head="$GITHUB_SHA"
+          fi
+
+          message_file="$(mktemp)"
+          trap 'rm -f "$message_file"' EXIT
+
+          while read -r commit; do
+            git show --no-patch --format=%B "$commit" > "$message_file"
+            if ! .githooks/commit-msg "$message_file"; then
+              echo "Invalid subject in commit $commit:" >&2
+              git show --no-patch --format='%s' "$commit" >&2
+              exit 1
+            fi
+          done < <(git rev-list --reverse "$base..$head")
+
   # Repo-wide gates, run once on Linux.
   format:
     name: Format

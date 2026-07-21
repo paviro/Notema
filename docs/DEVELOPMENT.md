@@ -6,6 +6,15 @@ Needs the toolchain pinned in `rust-toolchain.toml` (Rust 1.96, with `clippy`
 and `rustfmt`). `rustup` installs it automatically on first `cargo` invocation
 in the repo.
 
+Enable the versioned Git hooks once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The commit-message hook requires `type(scope): description`. CI checks the same
+format for every commit pushed to `main` or included in a pull request.
+
 ## Checks
 
 These mirror the CI jobs; run them before pushing.
