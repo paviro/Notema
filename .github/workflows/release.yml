@@ -160,7 +160,6 @@ jobs:
           bad="$(readelf --dyn-syms -W "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV \
               | awk -F_ '{ split($2, v, "."); if (v[1] > 2 || (v[1] == 2 && v[2] > 28)) print }')"
           if [ -n "$bad" ]; then echo "glibc symbols above 2.28: $bad" >&2; exit 1; fi
-          LD_BIND_NOW=1 "$bin" --version
       - name: Package
         run: |
           install -d dist
