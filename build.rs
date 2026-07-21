@@ -73,8 +73,21 @@ fn main() {
     }
 
     let target = env::var("TARGET").expect("TARGET not set");
+    // Write to a file instead of capturing stdout: cargo-about 0.9+ refuses to
+    // print to a redirected stdout when it detects PowerShell (encoding issues),
+    // which is exactly how the Windows release build invokes it.
+    let about_json_path = Path::new(&out_dir).join("cargo-about.json");
     let output = Command::new("cargo")
-        .args(["about", "generate", "--format", "json", "--target", &target])
+        .args([
+            "about",
+            "generate",
+            "--format",
+            "json",
+            "--target",
+            &target,
+            "--output-file",
+        ])
+        .arg(&about_json_path)
         .output();
 
     // cargo-about is only needed to populate `notema licenses`. A fresh clone
@@ -85,7 +98,9 @@ fn main() {
     // NOTEMA_SKIP_LICENSE_GENERATION=1).
     let release = env::var("PROFILE").as_deref() == Ok("release");
     let json = match output {
-        Ok(result) if result.status.success() => result.stdout,
+        Ok(result) if result.status.success() => {
+            fs::read(&about_json_path).expect("failed to read cargo-about output file")
+        }
         Ok(result) => {
             let details = String::from_utf8_lossy(&result.stderr);
             let details = details.trim();
