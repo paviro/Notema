@@ -35,7 +35,7 @@ push).
 | `ubuntu-24.04-arm` | aarch64 musl Linux and `linux-gnu-aarch64-fuse`, built natively |
 | `windows-latest` | `windows-msvc-x86_64`, built natively |
 | `windows-11-arm` | `windows-msvc-aarch64`, built natively |
-| `macos-latest` | `apple-darwin-{x86_64,aarch64,universal}` and their `-fuse` variants (signed + notarized) |
+| `macos-latest` | Intel and Apple Silicon macOS, standard and FUSE, one job per artifact (signed + notarized) |
 
 The glibc targets are cross-compiled with [`cargo-zigbuild`], which links with
 zig and pins the glibc floor at **2.17** regardless of the runner's own glibc,
@@ -50,15 +50,15 @@ macOS reuse the `Makefile.toml` tasks, which can also be run locally (see
 
 ## Required secrets and the `release` environment
 
-The macOS job signs with a Developer ID certificate and notarizes with an Apple
-ID. To keep those credentials off arbitrary `workflow_dispatch` runs, the `macos`
-and `publish` jobs are bound to a protected **`release` environment** (Settings
-→ Environments → `release`) with a required reviewer, and the five secrets below
-are stored **on that environment** rather than repo-wide. Every release — and
-any rehearsal that reaches the macOS or publish job — therefore waits for
-manual approval. The environment has no deployment-branch/tag policy, so
-rehearsal runs from branches can still reach it; the reviewer sees the ref
-before approving.
+The four macOS jobs sign with a Developer ID certificate and notarize with an
+Apple ID. To keep those credentials off arbitrary `workflow_dispatch` runs, the
+`macos` matrix and `publish` jobs are bound to a protected **`release`
+environment** (Settings → Environments → `release`) with a required reviewer,
+and the five secrets below are stored **on that environment** rather than
+repo-wide. Every release — and any rehearsal that reaches the macOS or publish
+jobs — therefore waits for manual approval. The environment has no
+deployment-branch/tag policy, so rehearsal runs from branches can still reach
+it; the reviewer sees the ref before approving.
 
 A tag **ruleset** additionally restricts creating, moving, or deleting version
 tags (`*.*.*`) to repository admins, so only a maintainer can trigger a
@@ -90,15 +90,15 @@ xcrun notarytool store-credentials <name> --apple-id <apple-id> --team-id <team-
 The last two secrets import the certificate into a throwaway keychain on the
 runner so `codesign` can find the identity.
 
-The macOS build also signs and notarizes the embedded location helper *during*
+The macOS builds also sign and notarize the embedded location helper *during*
 `cargo build` (see `crates/notema-context/build.rs`), so each macOS artifact is
-notarized twice (helper, then outer zip) — expect the macOS job to take a while.
+notarized twice (helper, then outer zip). The four jobs run in parallel.
 
 ## Verifying a release
 
 - Every expected zip plus `SHA256SUMS` is attached to the release
-  (20 zips: 8 Linux + 2 Linux FUSE + i586 + Android + 2 Windows + 3 macOS +
-  3 macOS FUSE).
+  (18 zips: 8 Linux + 2 Linux FUSE + i586 + Android + 2 Windows + 2 macOS +
+  2 macOS FUSE).
 - On macOS, `codesign --verify --strict` and `spctl -a -vv` pass for a downloaded
   binary; the notarized zips staple/validate.
 - `file notema` inside each Linux/Android zip reports the expected architecture.

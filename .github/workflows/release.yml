@@ -290,19 +290,31 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
-  # All four macOS artifacts on one Apple Silicon runner (the Xcode SDK builds
-  # both arch slices — not a cross-compile). Reuses the Makefile's sign + package
-  # + notarize chain unchanged: writing ./.env makes its file-gated tasks run,
-  # and the imported Developer ID cert lets codesign find the identity. Each
-  # `notarize-*` task pulls in its build/sign/package deps, and the macOS build
-  # itself signs + notarizes the embedded location helper (notema-context/build.rs).
   macos:
-    name: macOS (universal + fuse, signed + notarized)
+    name: macOS ${{ matrix.platform }}
     needs: preflight
     runs-on: macos-latest
-    # The signing cert + notarization credentials live on this protected
-    # Environment (required reviewers / tag restriction), so a workflow_dispatch
-    # on an arbitrary branch can't reach them without approval.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            platform: apple-darwin-x86_64
+            fuse: false
+            task: notarize-macos-intel
+          - target: aarch64-apple-darwin
+            platform: apple-darwin-aarch64
+            fuse: false
+            task: notarize-macos-silicon
+          - target: x86_64-apple-darwin
+            platform: apple-darwin-x86_64-fuse
+            fuse: true
+            task: notarize-fuse-macos-intel
+          - target: aarch64-apple-darwin
+            platform: apple-darwin-aarch64-fuse
+            fuse: true
+            task: notarize-fuse-macos-silicon
+    # Gates signing secrets behind release-environment approval.
     environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -311,29 +323,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: 1.96.0
-          # Host is aarch64; add the Intel slice for lipo.
-          targets: aarch64-apple-darwin, x86_64-apple-darwin
-      # fuse-t + pkg-config for the --features fuse artifact.
-      - run: brew install pkg-config
-      - run: brew install --cask fuse-t
+          targets: ${{ matrix.target }}
+      - if: ${{ matrix.fuse }}
+        run: brew install pkg-config
+      - if: ${{ matrix.fuse }}
+        run: brew install --cask fuse-t
       - name: Import Developer ID certificate
         uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
         with:
           p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
           p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
       - name: Set up signing identity and notarization keychain profile
-        # Pass secrets through `env:` (the runner puts them in the process
-        # environment) rather than `${{ }}` interpolation, which would splice the
-        # literal values into the generated script — a value containing an `EOF`
-        # line or shell metacharacters could break out. `printf` from the env
-        # vars keeps them opaque. Values are quoted (the Developer ID has spaces).
-        #
-        # Only non-secret values go into ./.env (the signing identity and the
-        # profile name); the notarization credentials go straight into a
-        # notarytool keychain profile, which every notarytool submit (Makefile
-        # tasks and notema-context's build.rs) then runs off. Locally the
-        # store-credentials call is a one-time setup instead — see
-        # docs/RELEASING.md.
+        # Do not interpolate secrets into the generated shell. Notarization
+        # credentials go into the runner's keychain, not .env.
         env:
           APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
           APPLE_USERNAME: ${{ secrets.APPLE_USERNAME }}
@@ -350,27 +352,14 @@ jobs:
       - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
         with:
           tool: cargo-make,cargo-about@0.9.1
-      - name: Build, sign, package, notarize
-        run: |
-          cargo make notarize-macos-intel
-          cargo make notarize-macos-silicon
-          cargo make notarize-macos-universal
-          cargo make notarize-fuse-macos-intel
-          cargo make notarize-fuse-macos-silicon
-          cargo make notarize-fuse-macos-universal
+      - run: cargo make ${{ matrix.task }}
       - name: Remove credentials
         if: always()
         run: rm -f ./.env
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: macos
-          path: |
-            release/apple-darwin-x86_64.zip
-            release/apple-darwin-aarch64.zip
-            release/apple-darwin-universal.zip
-            release/apple-darwin-x86_64-fuse.zip
-            release/apple-darwin-aarch64-fuse.zip
-            release/apple-darwin-universal-fuse.zip
+          name: ${{ matrix.platform }}
+          path: release/${{ matrix.platform }}.zip
           if-no-files-found: error
 
   # Gather every artifact, checksum them, and publish to the tag's release.

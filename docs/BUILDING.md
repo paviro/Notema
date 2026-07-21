@@ -10,10 +10,10 @@ Grab a binary for your platform from the [releases page](https://github.com/pavi
 - Linux (x86_64, ARM64, 32-bit x86/i686, and ARMv7, glibc and musl)
 - iOS/iSH (32-bit x86 i586 musl — an SSE-less baseline that runs under iSH)
 - Windows (x86_64 and ARM64)
-- macOS (Intel, Apple Silicon, and universal)
+- macOS (Intel and Apple Silicon)
 
 These have no FUSE dependency and run everywhere. The `mount` command needs a
-`-fuse` build; prebuilt ones exist for macOS (Intel, Apple Silicon, universal)
+`-fuse` build; prebuilt ones exist for macOS (Intel and Apple Silicon)
 and 64-bit Linux glibc (x86_64, ARM64), and other platforms build it from
 source (both below).
 
@@ -121,7 +121,7 @@ stays a separate download instead of being folded into the standard builds.
 
 **Prebuilt FUSE artifacts** (`<platform>-fuse` zips on the releases page):
 
-- macOS (Intel, Apple Silicon, universal), signed and notarized. Install a FUSE
+- macOS (Intel and Apple Silicon), signed and notarized. Install a FUSE
   provider first — [fuse-t](https://www.fuse-t.org) is kext-free (nothing to
   approve) and is what this is tested with; [macFUSE](https://macfuse.io)
   probably also works. The mounted volume shows up in Finder as **Journals**.
