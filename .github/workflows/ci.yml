@@ -27,6 +27,7 @@ jobs:
   commit-messages:
     name: Commit messages
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,6 +64,7 @@ jobs:
   format:
     name: Format
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,14 +78,14 @@ jobs:
   audit:
     name: Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
         with:
-          toolchain: 1.96.0
-      - run: cargo install cargo-audit --version 0.22.1 --locked
+          tool: cargo-audit@0.22.1
       # Acknowledged advisories live in .cargo/audit.toml (see docs/AUDIT.md), so
       # the same `cargo audit` a developer runs locally reproduces this result.
       - run: cargo audit --deny warnings
@@ -93,6 +95,7 @@ jobs:
   linux:
     name: Linux (lint · test · docs)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -103,21 +106,19 @@ jobs:
           components: clippy
       - run: sudo apt-get update && sudo apt-get install --yes libfuse3-dev pkg-config
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      - run: cargo check --workspace --all-targets --locked
-      - if: ${{ !cancelled() }}
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       # The fuse feature is cfg-gated out of the default build; check it compiles
       # so the mount wiring can't rot unnoticed.
-      - if: ${{ !cancelled() }}
-        run: cargo clippy -p notema --features fuse --locked -- -D warnings
-      - if: ${{ !cancelled() }}
-        run: cargo test --workspace --locked
-      - if: ${{ !cancelled() }}
-        run: cargo doc --workspace --no-deps --locked
+      - run: cargo clippy -p notema --features fuse --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo doc --workspace --no-deps --locked
 
   macos:
     name: macOS (check)
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -128,6 +129,8 @@ jobs:
       - run: brew install pkg-config
       - run: brew install --cask fuse-t
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check --workspace --all-targets --locked
 
   # Both shipped Windows targets (x86_64 and aarch64 MSVC) check natively on
@@ -135,8 +138,9 @@ jobs:
   windows:
     name: Windows (check, ${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         runner: [windows-latest, windows-11-arm]
     steps:
@@ -147,6 +151,8 @@ jobs:
         with:
           toolchain: 1.96.0
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # FUSE doesn't exist on Windows (notema-fuse needs libfuse) and the Windows
       # release build excludes it; check the rest of the standard build compiles.
       - run: cargo check --workspace --exclude notema-fuse --all-targets --locked
@@ -163,8 +169,9 @@ jobs:
   cross-check:
     name: Cross-check (${{ matrix.target }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
@@ -207,6 +214,7 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # The FreeBSD headers change rarely and the base set is a ~160 MB
       # download, so cache the extracted include dir keyed on the release.
       - if: ${{ matrix.freebsd_sysroot }}
@@ -233,6 +241,7 @@ jobs:
   android:
     name: Android (check)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -244,8 +253,12 @@ jobs:
       - name: Configure Android NDK compiler
         run: |
           TOOLCHAIN="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
-          echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
-          echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar" >> "$GITHUB_ENV"
+          {
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android24-clang"
+            echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android24-clang"
+            echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar"
+          } >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check -p notema --target aarch64-linux-android --locked

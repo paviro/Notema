@@ -23,9 +23,10 @@ generates checksums, and attaches everything to the GitHub Release for that tag.
    plus `SHA256SUMS`.
 
 To rehearse without publishing, run the workflow manually
-(`Actions → Release → Run workflow`) on a branch: it builds and uploads every
-artifact as a workflow artifact but skips the publish step (guarded on a tag
-push).
+(`Actions → Release → Run workflow`) and choose a target group. `all` builds
+the complete release; the other choices build only Linux, Linux FUSE, i586,
+Android, Windows, macOS, or macOS FUSE. Manual runs never publish, even when run
+against a tag. Their workflow artifacts expire after one day.
 
 ## What gets built, and where
 
@@ -54,11 +55,11 @@ macOS reuse the `Makefile.toml` tasks, which can also be run locally (see
 
 The four macOS jobs sign with a Developer ID certificate and notarize with an
 Apple ID. To keep those credentials off arbitrary `workflow_dispatch` runs, the
-`macos` matrix and `publish` jobs are bound to a protected **`release`
+`macos`, `macos-fuse`, and `publish` jobs are bound to a protected **`release`
 environment** (Settings → Environments → `release`) with a required reviewer,
 and the five secrets below are stored **on that environment** rather than
-repo-wide. Every release — and any rehearsal that reaches the macOS or publish
-jobs — therefore waits for manual approval. The environment has no
+repo-wide. Every release and any rehearsal that includes macOS therefore waits
+for manual approval. The environment has no
 deployment-branch/tag policy, so rehearsal runs from branches can still reach
 it; the reviewer sees the ref before approving.
 

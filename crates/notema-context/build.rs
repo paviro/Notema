@@ -60,7 +60,14 @@ fn build_helper(target: &str, out_dir: &Path) -> PathBuf {
     let target_dir = out_dir.join("helper-target");
     run(
         Command::new(cargo)
-            .args(["build", "--release", "-p", "notema-locate", "--target"])
+            .args([
+                "build",
+                "--release",
+                "--locked",
+                "-p",
+                "notema-locate",
+                "--target",
+            ])
             .arg(target)
             .arg("--target-dir")
             .arg(&target_dir),

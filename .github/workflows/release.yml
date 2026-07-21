@@ -7,18 +7,34 @@ on:
     # Glob (not regex): matches date-based versions like 2026.7.4 — a digit-led
     # number in each of three dot-separated segments.
     tags: ['[0-9]*.[0-9]*.[0-9]*']
-  # Manual runs build and upload artifacts but skip publishing (see the publish
-  # job's `if`).
+  # Manual runs can build one target group or the complete artifact set, but
+  # always skip publishing (see the publish job's `if`).
   workflow_dispatch:
+    inputs:
+      target_group:
+        description: Target group to build
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - linux
+          - linux-fuse
+          - i586
+          - android
+          - windows
+          - macos
+          - macos-fuse
 
 # Least privilege by default: only the publish job opts up to contents: write.
 permissions:
   contents: read
 
-# Serialize runs per ref (e.g. a deleted-and-repushed tag) without cancelling:
-# a run that is mid-publish must never be killed.
+# Cancel superseded manual rehearsals on the same ref, but isolate them from tag
+# pushes and never cancel a run that may be publishing.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,13 +49,19 @@ jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: github.event_name == 'push'
         with:
           persist-credentials: false
-      - name: Check tag matches the workspace version
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Validate release tag
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag $GITHUB_REF_NAME is not a YEAR.MONTH.PATCH version" >&2
+            exit 1
+          fi
           version="$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
           if [ "$version" != "$GITHUB_REF_NAME" ]; then
             echo "Tag $GITHUB_REF_NAME does not match workspace.package.version $version" >&2
@@ -50,9 +72,11 @@ jobs:
   linux:
     name: Linux ${{ matrix.platform }}
     needs: preflight
+    if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'linux'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
@@ -116,21 +140,24 @@ jobs:
           (cd "target/${{ matrix.target }}/release" && zip - notema) > "dist/${{ matrix.platform }}.zip"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.platform }}
-          path: dist/*.zip
+          path: dist/${{ matrix.platform }}.zip
           if-no-files-found: error
+          archive: false
+          retention-days: 1
 
   # AlmaLinux 8 keeps the FUSE executable and libfuse3 at a glibc 2.28 floor.
   linux-fuse:
     name: Linux ${{ matrix.platform }}
     needs: preflight
+    if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'linux-fuse'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     container: almalinux:8.10
     defaults:
       run:
         shell: bash
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
@@ -166,9 +193,10 @@ jobs:
           (cd "target/${{ matrix.target }}/release" && zip - notema) > "dist/${{ matrix.platform }}.zip"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.platform }}
-          path: dist/*.zip
+          path: dist/${{ matrix.platform }}.zip
           if-no-files-found: error
+          archive: false
+          retention-days: 1
 
   # The i586 baseline for iSH: an SSE-free build linked against a pinned,
   # checksum-verified static OpenSSL. The bespoke logic already lives in
@@ -177,7 +205,9 @@ jobs:
   i586:
     name: Linux linux-musl-i586
     needs: preflight
+    if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'i586'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -221,16 +251,19 @@ jobs:
       - run: cargo make package-i586-musl
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linux-musl-i586
           path: release/linux-musl-i586.zip
           if-no-files-found: error
+          archive: false
+          retention-days: 1
 
   # Android/Termux ARM64, cross-compiled with the NDK that ships on the runner
   # (same wiring as ci.yml's android job, extended from check to a real build).
   android:
     name: Android android-aarch64-termux
     needs: preflight
+    if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'android'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -242,9 +275,11 @@ jobs:
       - name: Configure Android NDK compiler
         run: |
           TOOLCHAIN="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
-          echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
-          echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar" >> "$GITHUB_ENV"
+          {
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android24-clang"
+            echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android24-clang"
+            echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar"
+          } >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
         with:
           tool: cargo-about@0.9.1
@@ -255,9 +290,10 @@ jobs:
           (cd target/aarch64-linux-android/release && zip - notema) > dist/android-aarch64-termux.zip
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: android-aarch64-termux
-          path: dist/*.zip
+          path: dist/android-aarch64-termux.zip
           if-no-files-found: error
+          archive: false
+          retention-days: 1
 
   # Windows, built natively with the MSVC toolchain on each architecture's own
   # hosted runner (windows-11-arm is free for public repos). Each runner's host
@@ -267,9 +303,11 @@ jobs:
   windows:
     name: Windows ${{ matrix.platform }}
     needs: preflight
+    if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'windows'
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - target: x86_64-pc-windows-msvc
@@ -297,34 +335,27 @@ jobs:
           Compress-Archive -Path target/${{ matrix.target }}/release/notema.exe -DestinationPath dist/${{ matrix.platform }}.zip
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.platform }}
-          path: dist/*.zip
+          path: dist/${{ matrix.platform }}.zip
           if-no-files-found: error
+          archive: false
+          retention-days: 1
 
   macos:
     name: macOS ${{ matrix.platform }}
     needs: preflight
+    if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'macos'
     runs-on: macos-latest
+    timeout-minutes: 90
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - target: x86_64-apple-darwin
             platform: apple-darwin-x86_64
-            fuse: false
             task: notarize-macos-intel
           - target: aarch64-apple-darwin
             platform: apple-darwin-aarch64
-            fuse: false
             task: notarize-macos-silicon
-          - target: x86_64-apple-darwin
-            platform: apple-darwin-x86_64-fuse
-            fuse: true
-            task: notarize-fuse-macos-intel
-          - target: aarch64-apple-darwin
-            platform: apple-darwin-aarch64-fuse
-            fuse: true
-            task: notarize-fuse-macos-silicon
     # Gates signing secrets behind release-environment approval.
     environment: release
     steps:
@@ -335,10 +366,6 @@ jobs:
         with:
           toolchain: 1.96.0
           targets: ${{ matrix.target }}
-      - if: ${{ matrix.fuse }}
-        run: brew install pkg-config
-      - if: ${{ matrix.fuse }}
-        run: brew install --cask fuse-t
       - name: Import Developer ID certificate
         uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
         with:
@@ -369,30 +396,123 @@ jobs:
         run: rm -f ./.env
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.platform }}
           path: release/${{ matrix.platform }}.zip
           if-no-files-found: error
+          archive: false
+          retention-days: 1
+
+  macos-fuse:
+    name: macOS ${{ matrix.platform }}
+    needs: preflight
+    if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'macos-fuse'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            platform: apple-darwin-x86_64-fuse
+            task: notarize-fuse-macos-intel
+          - target: aarch64-apple-darwin
+            platform: apple-darwin-aarch64-fuse
+            task: notarize-fuse-macos-silicon
+    # Gates signing secrets behind release-environment approval.
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.96.0
+          targets: ${{ matrix.target }}
+      - run: brew install pkg-config
+      - run: brew install --cask fuse-t
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+      - name: Set up signing identity and notarization keychain profile
+        # Do not interpolate secrets into the generated shell. Notarization
+        # credentials go into the runner's keychain, not .env.
+        env:
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+          APPLE_USERNAME: ${{ secrets.APPLE_USERNAME }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: |
+          umask 077
+          {
+            printf 'APPLE_DEVELOPER_ID="%s"\n' "$APPLE_DEVELOPER_ID"
+            printf 'APPLE_NOTARY_PROFILE="notema-notary"\n'
+          } > ./.env
+          TEAM_ID="$(printf '%s' "$APPLE_DEVELOPER_ID" | sed -n 's/.*(\(.*\)).*/\1/p')"
+          xcrun notarytool store-credentials notema-notary \
+              --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" >/dev/null
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cargo-make,cargo-about@0.9.1
+      - run: cargo make ${{ matrix.task }}
+      - name: Remove credentials
+        if: always()
+        run: rm -f ./.env
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: release/${{ matrix.platform }}.zip
+          if-no-files-found: error
+          archive: false
+          retention-days: 1
 
   # Gather every artifact, checksum them, and publish to the tag's release.
   publish:
     name: Publish release
-    needs: [linux, linux-fuse, i586, android, windows, macos]
+    needs: [linux, linux-fuse, i586, android, windows, macos, macos-fuse]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: release
     permissions:
       contents: write # create the release and upload assets
       id-token: write # mint the OIDC token for provenance attestation
       attestations: write # record the build-provenance attestation
     # Only real tag pushes publish; workflow_dispatch stops after building.
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: assets
           merge-multiple: true
+      - name: Validate artifact set
+        working-directory: assets
+        run: |
+          expected="$(printf '%s\n' \
+            apple-darwin-aarch64-fuse.zip \
+            apple-darwin-aarch64.zip \
+            apple-darwin-x86_64-fuse.zip \
+            apple-darwin-x86_64.zip \
+            android-aarch64-termux.zip \
+            linux-gnu-aarch64-fuse.zip \
+            linux-gnu-aarch64.zip \
+            linux-gnu-armv7.zip \
+            linux-gnu-i686.zip \
+            linux-gnu-x86_64-fuse.zip \
+            linux-gnu-x86_64.zip \
+            linux-musl-aarch64.zip \
+            linux-musl-armv7.zip \
+            linux-musl-i586.zip \
+            linux-musl-i686.zip \
+            linux-musl-x86_64.zip \
+            windows-msvc-aarch64.zip \
+            windows-msvc-x86_64.zip | sort)"
+          actual="$(find . -maxdepth 1 -type f -name '*.zip' -print | sed 's#^\./##' | sort)"
+          if [ "$actual" != "$expected" ]; then
+            echo "Release artifact set does not match the expected files" >&2
+            diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") || true
+            exit 1
+          fi
       - name: Generate checksums
         working-directory: assets
-        run: sha256sum *.zip > SHA256SUMS
+        run: sha256sum -- *.zip > SHA256SUMS
       # Provenance links each zip to this workflow run; verify with
       # `gh attestation verify <zip> --repo <owner>/<repo>`.
       - name: Attest build provenance
