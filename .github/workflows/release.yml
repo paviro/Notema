@@ -48,8 +48,10 @@ jobs:
   # glibc. The musl rows are statically linked (no glibc concern) and use
   # taiki-e/setup-cross-toolchain-action, which installs each target's linker +
   # C toolchain and sets CARGO_BUILD_TARGET; aarch64-musl builds natively on
-  # ubuntu-24.04-arm. i586 and Android are handled separately (bespoke
-  # OpenSSL / NDK).
+  # ubuntu-24.04-arm. The `-fuse` rows rebuild the two 64-bit gnu targets with
+  # `--features fuse`; armv7/i686 (would need cross libfuse3 sysroots) and musl
+  # (static artifacts shouldn't gain a dynamic libfuse3 link) stay fuse-less.
+  # i586 and Android are handled separately (bespoke OpenSSL / NDK).
   linux:
     name: Linux ${{ matrix.platform }}
     needs: preflight
@@ -86,10 +88,31 @@ jobs:
           - target: armv7-unknown-linux-musleabihf
             platform: linux-musl-armv7
             runner: ubuntu-latest
+          # FUSE variants of the two 64-bit gnu targets (`--features fuse`
+          # dynamically links the system libfuse3, so these zips need the fuse3
+          # runtime package installed). Each builds on a runner whose native arch
+          # matches the target so apt's libfuse3-dev provides the right-arch
+          # library and fuse3.pc; zig still pins the glibc floor at 2.17 —
+          # linking the runner's .so only records DT_NEEDED, and libfuse3's
+          # symbols are versioned FUSE_3.x, not GLIBC_x, so the floor holds
+          # (verified by a readelf step below).
+          - target: x86_64-unknown-linux-gnu
+            platform: linux-gnu-x86_64-fuse
+            runner: ubuntu-latest
+            zigbuild: true
+            fuse: true
+          - target: aarch64-unknown-linux-gnu
+            platform: linux-gnu-aarch64-fuse
+            runner: ubuntu-24.04-arm
+            zigbuild: true
+            fuse: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # libfuse3 headers + fuse3.pc for the fuse rows' C bridge (notema-fuse/build.rs).
+      - if: ${{ matrix.fuse }}
+        run: sudo apt-get update && sudo apt-get install --yes libfuse3-dev pkg-config
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: 1.96.0
@@ -109,10 +132,20 @@ jobs:
       # The `.2.17` suffix pins the glibc floor; the binary still lands in
       # target/<target>/release like a plain cargo build.
       - if: ${{ matrix.zigbuild }}
-        run: cargo zigbuild --release -p notema --locked --target ${{ matrix.target }}.2.17
+        run: cargo zigbuild --release -p notema --locked --target ${{ matrix.target }}.2.17 ${{ matrix.fuse && '--features fuse' || '' }}
       # CARGO_BUILD_TARGET is set by setup-cross-toolchain-action, so no --target.
       - if: ${{ !matrix.zigbuild }}
         run: cargo build --release -p notema --locked
+      # A fuse binary must carry DT_NEEDED libfuse3.so.3, and linking the
+      # runner's .so must not have raised the glibc floor above 2.17.
+      - if: ${{ matrix.fuse }}
+        name: Verify libfuse3 linkage and glibc floor
+        run: |
+          bin="target/${{ matrix.target }}/release/notema"
+          readelf -d "$bin" | grep -q 'libfuse3\.so\.3' || { echo "missing libfuse3 DT_NEEDED" >&2; exit 1; }
+          bad="$(readelf --dyn-syms -W "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV \
+              | awk -F_ '{ split($2, v, "."); if (v[1] > 2 || (v[1] == 2 && v[2] > 17)) print }')"
+          if [ -n "$bad" ]; then echo "glibc symbols above 2.17: $bad" >&2; exit 1; fi
       - name: Package
         run: |
           install -d dist
@@ -311,7 +344,9 @@ jobs:
           cargo make notarize-macos-intel
           cargo make notarize-macos-silicon
           cargo make notarize-macos-universal
+          cargo make notarize-fuse-macos-intel
           cargo make notarize-fuse-macos-silicon
+          cargo make notarize-fuse-macos-universal
       - name: Remove credentials
         if: always()
         run: rm -f ./.env
@@ -322,7 +357,9 @@ jobs:
             release/apple-darwin-x86_64.zip
             release/apple-darwin-aarch64.zip
             release/apple-darwin-universal.zip
+            release/apple-darwin-x86_64-fuse.zip
             release/apple-darwin-aarch64-fuse.zip
+            release/apple-darwin-universal-fuse.zip
           if-no-files-found: error
 
   # Gather every artifact, checksum them, and publish to the tag's release.

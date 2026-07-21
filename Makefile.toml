@@ -488,8 +488,9 @@ dependencies = [
 ]
 
 # The release command: every artifact buildable on a Mac — all standard platform
-# binaries plus the signed+notarized Apple Silicon FUSE build. Every other
-# platform builds FUSE natively (see the FUSE section).
+# binaries plus the signed+notarized macOS FUSE builds. The Linux FUSE artifacts
+# are built by the release workflow; every other platform builds FUSE natively
+# (see the FUSE section).
 [tasks.release]
 description = "Build, sign, package and notarize every release artifact buildable on a Mac"
 dependencies = [
@@ -500,7 +501,9 @@ dependencies = [
     "notarize-macos-intel",
     "notarize-macos-silicon",
     "notarize-macos-universal",
-    "notarize-fuse-macos-silicon"
+    "notarize-fuse-macos-intel",
+    "notarize-fuse-macos-silicon",
+    "notarize-fuse-macos-universal"
 ]
 
 # A release is signed and notarized, so refuse to start one without the Apple
@@ -639,9 +642,20 @@ xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$PROFILE" --wait
 # fuse-t installed to build and run. Zips are `<platform>-fuse.zip`; builds go to
 # `target/fuse/` so they don't clobber the standard artifacts.
 #
-# `release` builds only the Apple Silicon FUSE artifact. Every other platform
-# builds FUSE natively with `cargo build --release --features fuse`.
+# `release` builds all three macOS FUSE artifacts (Intel, Apple Silicon,
+# universal); the release workflow adds the two 64-bit linux-gnu ones. Every
+# other platform builds FUSE natively with `cargo build --release --features fuse`.
 # ------------------------------------------------------------------------------
+
+[tasks.build-fuse-macos-intel]
+description = "Build Intel macOS with FUSE"
+command = "cargo"
+args = ["build", "--release", "--features", "fuse", "--target", "x86_64-apple-darwin"]
+# Cross-compiling the Intel slice on an Apple Silicon host: the pkg-config crate
+# refuses cross builds unless PKG_CONFIG_ALLOW_CROSS is set. The host's fuse3.pc
+# is valid for the x86_64 slice too, since fuse-t ships universal dylibs.
+env = { CARGO_TARGET_DIR = "target/fuse", PKG_CONFIG_ALLOW_CROSS = "1" }
+env_files = ["./.env"]
 
 [tasks.build-fuse-macos-silicon]
 description = "Build Apple Silicon macOS with FUSE"
@@ -650,7 +664,36 @@ args = ["build", "--release", "--features", "fuse", "--target", "aarch64-apple-d
 env = { CARGO_TARGET_DIR = "target/fuse" }
 env_files = ["./.env"]
 
+[tasks.build-fuse-macos-universal]
+description = "Build universal macOS FUSE binary (Intel + Apple Silicon)"
+dependencies = ["build-fuse-macos-intel", "build-fuse-macos-silicon"]
+script = '''
+mkdir -p target/fuse/universal-apple-darwin/release
+lipo -create \
+    target/fuse/x86_64-apple-darwin/release/notema \
+    target/fuse/aarch64-apple-darwin/release/notema \
+    -output target/fuse/universal-apple-darwin/release/notema
+'''
+
 # Signing (macOS FUSE binaries)
+[tasks.sign-fuse-macos-intel]
+description = "Sign Intel macOS FUSE binary if APPLE_DEVELOPER_ID is set"
+dependencies = ["build-fuse-macos-intel"]
+env_files = ["./.env"]
+condition = { files_exist = ["./.env"] }
+script = '''
+BINARY_PATH="target/fuse/x86_64-apple-darwin/release/notema"
+if [ -z "$APPLE_DEVELOPER_ID" ]; then
+    echo "APPLE_DEVELOPER_ID not set, cannot sign Intel macOS FUSE binary." >&2
+    exit 1
+fi
+# Disable library validation so hardened runtime allows loading fuse-t/macFUSE's
+# libfuse3, which is signed by a different vendor's Team ID. Notarization still
+# passes; the entitlement is on Apple's allowed list.
+codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime \
+    --entitlements crates/notema-fuse/fuse.entitlements "$BINARY_PATH"
+'''
+
 [tasks.sign-fuse-macos-silicon]
 description = "Sign Apple Silicon macOS FUSE binary if APPLE_DEVELOPER_ID is set"
 dependencies = ["build-fuse-macos-silicon"]
@@ -669,7 +712,37 @@ codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime \
     --entitlements crates/notema-fuse/fuse.entitlements "$BINARY_PATH"
 '''
 
+[tasks.sign-fuse-macos-universal]
+description = "Sign Universal macOS FUSE binary if APPLE_DEVELOPER_ID is set"
+dependencies = ["build-fuse-macos-universal"]
+env_files = ["./.env"]
+condition = { files_exist = ["./.env"] }
+script = '''
+BINARY_PATH="target/fuse/universal-apple-darwin/release/notema"
+if [ -z "$APPLE_DEVELOPER_ID" ]; then
+    echo "APPLE_DEVELOPER_ID not set, cannot sign Universal macOS FUSE binary." >&2
+    exit 1
+fi
+# Disable library validation so hardened runtime allows loading fuse-t/macFUSE's
+# libfuse3, which is signed by a different vendor's Team ID. Notarization still
+# passes; the entitlement is on Apple's allowed list.
+codesign --sign "$APPLE_DEVELOPER_ID" --timestamp --options runtime \
+    --entitlements crates/notema-fuse/fuse.entitlements "$BINARY_PATH"
+'''
+
 # Packaging (FUSE): same `notema` binary, `<platform>-fuse.zip` name.
+[tasks.package-fuse-macos-intel]
+description = "Package Intel macOS FUSE binary"
+dependencies = ["create-release-dir", "sign-fuse-macos-intel"]
+script = '''
+BINARY_NAME="notema"
+PLATFORM="apple-darwin-x86_64-fuse"
+cp "target/fuse/x86_64-apple-darwin/release/${BINARY_NAME}" "release/"
+cd release
+zip "${PLATFORM}.zip" "${BINARY_NAME}"
+rm "${BINARY_NAME}"
+'''
+
 [tasks.package-fuse-macos-silicon]
 description = "Package Apple Silicon macOS FUSE binary"
 dependencies = ["create-release-dir", "sign-fuse-macos-silicon"]
@@ -682,7 +755,40 @@ zip "${PLATFORM}.zip" "${BINARY_NAME}"
 rm "${BINARY_NAME}"
 '''
 
+[tasks.package-fuse-macos-universal]
+description = "Package Universal macOS FUSE binary"
+dependencies = ["create-release-dir", "sign-fuse-macos-universal"]
+script = '''
+BINARY_NAME="notema"
+PLATFORM="apple-darwin-universal-fuse"
+cp "target/fuse/universal-apple-darwin/release/${BINARY_NAME}" "release/"
+cd release
+zip "${PLATFORM}.zip" "${BINARY_NAME}"
+rm "${BINARY_NAME}"
+'''
+
 # Notarization (macOS FUSE zips)
+[tasks.notarize-fuse-macos-intel]
+description = "Notarize Intel macOS FUSE zip"
+dependencies = ["package-fuse-macos-intel"]
+env_files = ["./.env"]
+condition = { files_exist = ["./.env"] }
+script = '''
+ZIP_PATH="release/apple-darwin-x86_64-fuse.zip"
+TEAM_ID=$(echo "$APPLE_DEVELOPER_ID" | sed -n 's/.*(\(.*\)).*/\1/p')
+if [ -z "$APPLE_USERNAME" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$TEAM_ID" ]; then
+    echo "APPLE_USERNAME, APPLE_PASSWORD, or APPLE_DEVELOPER_ID team id not set, cannot notarize Intel macOS FUSE zip." >&2
+    exit 1
+fi
+PROFILE="notema-notary-$$"
+# Stash the app-specific password in a keychain profile first, so the long
+# `submit --wait` poll runs off --keychain-profile and never carries the
+# password on argv (where any local process could read it from `ps`).
+xcrun notarytool store-credentials "$PROFILE" \
+    --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" >/dev/null
+xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$PROFILE" --wait
+'''
+
 [tasks.notarize-fuse-macos-silicon]
 description = "Notarize Apple Silicon macOS FUSE zip"
 dependencies = ["package-fuse-macos-silicon"]
@@ -704,17 +810,42 @@ xcrun notarytool store-credentials "$PROFILE" \
 xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$PROFILE" --wait
 '''
 
+[tasks.notarize-fuse-macos-universal]
+description = "Notarize Universal macOS FUSE zip"
+dependencies = ["package-fuse-macos-universal"]
+env_files = ["./.env"]
+condition = { files_exist = ["./.env"] }
+script = '''
+ZIP_PATH="release/apple-darwin-universal-fuse.zip"
+TEAM_ID=$(echo "$APPLE_DEVELOPER_ID" | sed -n 's/.*(\(.*\)).*/\1/p')
+if [ -z "$APPLE_USERNAME" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$TEAM_ID" ]; then
+    echo "APPLE_USERNAME, APPLE_PASSWORD, or APPLE_DEVELOPER_ID team id not set, cannot notarize Universal macOS FUSE zip." >&2
+    exit 1
+fi
+PROFILE="notema-notary-$$"
+# Stash the app-specific password in a keychain profile first, so the long
+# `submit --wait` poll runs off --keychain-profile and never carries the
+# password on argv (where any local process could read it from `ps`).
+xcrun notarytool store-credentials "$PROFILE" \
+    --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" >/dev/null
+xcrun notarytool submit "$ZIP_PATH" --keychain-profile "$PROFILE" --wait
+'''
+
 # Combined FUSE build/package/release
 [tasks.build-fuse-macos-all]
 description = "Build all macOS FUSE targets"
 dependencies = [
-    "build-fuse-macos-silicon"
+    "build-fuse-macos-intel",
+    "build-fuse-macos-silicon",
+    "build-fuse-macos-universal"
 ]
 
 [tasks.package-fuse-macos-all]
 description = "Package all macOS FUSE binaries"
 dependencies = [
-    "package-fuse-macos-silicon"
+    "package-fuse-macos-intel",
+    "package-fuse-macos-silicon",
+    "package-fuse-macos-universal"
 ]
 
 # Build and package the macOS FUSE release: signed + notarized `-fuse` zips.
@@ -725,10 +856,12 @@ dependencies = [
     "run-tests",
     "build-fuse-macos-all",
     "package-fuse-macos-all",
-    "notarize-fuse-macos-silicon"
+    "notarize-fuse-macos-intel",
+    "notarize-fuse-macos-silicon",
+    "notarize-fuse-macos-universal"
 ]
 
-# Every other platform builds FUSE natively with `cargo build --release
-# --features fuse` (needs libfuse3/macFUSE/fuse-t installed). Only the Apple
-# Silicon artifact is prebuilt, since it's the one that gets signed and
-# notarized for release.
+# Prebuilt FUSE artifacts are the three macOS zips above plus the two 64-bit
+# linux-gnu zips the release workflow builds. Every other platform builds FUSE
+# natively with `cargo build --release --features fuse` (needs
+# libfuse3/macFUSE/fuse-t installed).
