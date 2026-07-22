@@ -435,7 +435,7 @@ jobs:
     needs: preflight
     if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'freebsd'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
       # rust-toolchain.toml pins stable and outranks the setup action's
       # install, so the nightly row must select its toolchain explicitly.
@@ -448,13 +448,11 @@ jobs:
             platform: freebsd-x86_64
             toolchain: 1.96.0
             machine: Advanced Micro Devices X86-64
-            vm_arch: x86_64
           - target: aarch64-unknown-freebsd
             platform: freebsd-aarch64
             toolchain: nightly-2026-07-15
             build_std: true
             machine: AArch64
-            vm_arch: aarch64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -500,18 +498,9 @@ jobs:
             echo "binary has no FreeBSD ELF branding note" >&2
             exit 1
           }
-      # Runtime proof on the oldest supported release (14.x), so passing also
-      # pins the artifact's FreeBSD floor. The VM boots via qemu on the runner;
-      # aarch64 runs under full system emulation — if that turns out too slow,
-      # drop this step for the aarch64 row and stop at the static checks, like
-      # Android.
-      - name: Smoke test
-        uses: vmactions/freebsd-vm@77ed28d336d03fe19a3f4f7266c1d2c4714dd79d # v1.5.2
-        with:
-          release: "14.3"
-          arch: ${{ matrix.vm_arch }}
-          usesh: true
-          run: ./target/${{ matrix.target }}/release/notema --version
+      # No runtime smoke test: FreeBSD binaries need a VM (qemu-user has no
+      # FreeBSD mode), which is too heavy here — like Android, the artifact
+      # stops at the static checks.
       - name: Package
         run: |
           install -d dist

@@ -32,7 +32,7 @@ when run against a tag. Their workflow artifacts expire after one day.
 
 | Runner / container | Artifacts |
 | --- | --- |
-| `ubuntu-latest` | x86_64/i686/armv6/armv7/riscv64 glibc Linux, x86_64/i686/armv6/armv7/riscv64 musl, i586, Android/Termux, and both FreeBSD slices (zigbuild; smoke-tested in a FreeBSD 14.3 VM on the runner) |
+| `ubuntu-latest` | x86_64/i686/armv6/armv7/riscv64 glibc Linux, x86_64/i686/armv6/armv7/riscv64 musl, i586, Android/Termux, and both FreeBSD slices (zigbuild) |
 | `ubuntu-24.04-arm` | aarch64 glibc (zigbuild, for the 2.17 floor) and aarch64 musl Linux |
 | `almalinux:8.10` on matching x86_64/ARM64 runners | `linux-gnu-{x86_64,aarch64}-fuse`, built natively |
 | `windows-latest` | `windows-msvc-x86_64`, built natively |
@@ -67,17 +67,16 @@ FreeBSD binaries without FreeBSD ELF branding (dynamic-linker path and
 `.note.tag` note) on the expected architecture. The
 macOS builds — standard and FUSE — pin and verify 10.12 for Intel and 11 for
 Apple Silicon on both `notema` and the embedded location helper. Every artifact
-except Android also gets a `--version` smoke test (with `LD_BIND_NOW=1` on
-dynamically linked Linux builds, so the whole symbol chain must resolve):
-natively where the runner can load the binary — including the Intel macOS
-slices under Rosetta and 32-bit x86 on the x86_64 runners — under qemu-user for
-armv6, armv7, and riscv64, which no hosted runner can run natively, and inside
-a FreeBSD **14.3** VM booted on the runner for the FreeBSD slices, so a passing
-run also proves their release floor. The static armv6 musl slice runs with
-`-cpu arm1176` (the Pi Zero core), so ARMv7 instruction leakage fails the
-test; the dynamically linked slices use qemu's default CPU because the Debian
-armhf cross sysroot's loader is ARMv7. Android needs an emulator, so it stops
-at the static checks.
+except Android and FreeBSD also gets a `--version` smoke test (with
+`LD_BIND_NOW=1` on dynamically linked Linux builds, so the whole symbol chain
+must resolve): natively where the runner can load the binary — including the
+Intel macOS slices under Rosetta and 32-bit x86 on the x86_64 runners — and
+under qemu-user for armv6, armv7, and riscv64, which no hosted runner can run
+natively. The static armv6 musl slice runs with `-cpu arm1176` (the Pi Zero
+core), so ARMv7 instruction leakage fails the test; the dynamically linked
+slices use qemu's default CPU because the Debian armhf cross sysroot's loader
+is ARMv7. Android needs an emulator and FreeBSD a full VM (qemu-user has no
+FreeBSD mode), so both stop at the static checks.
 
 [`cargo-zigbuild`]: https://github.com/rust-cross/cargo-zigbuild
 [`taiki-e/setup-cross-toolchain-action`]: https://github.com/taiki-e/setup-cross-toolchain-action
