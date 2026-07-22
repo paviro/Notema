@@ -21,9 +21,13 @@ use std::os::unix::fs::FileTypeExt;
 
 #[derive(Debug, Parser)]
 #[command(name = "notema")]
-#[command(version)]
+#[command(version, disable_version_flag = true)]
 #[command(about = "Markdown terminal journal")]
 struct Cli {
+    /// Print version
+    #[arg(short = 'v', short_alias = 'V', long, action = clap::ArgAction::Version)]
+    version: (),
+
     /// Config directory holding config.toml and this device's encryption key;
     /// defaults to $XDG_CONFIG_HOME/notema, else ~/.config/notema (macOS:
     /// ~/Library/Application Support/de.paviro.notema). Global, so it works
