@@ -32,8 +32,8 @@ against a tag. Their workflow artifacts expire after one day.
 
 | Runner / container | Artifacts |
 | --- | --- |
-| `ubuntu-latest` | all standard glibc Linux targets (x86_64/aarch64/i686/armv7), x86_64/i686/armv7 musl, i586, and Android/Termux |
-| `ubuntu-24.04-arm` | aarch64 musl Linux, built natively |
+| `ubuntu-latest` | x86_64/i686/armv7 glibc Linux, x86_64/i686/armv7 musl, i586, and Android/Termux |
+| `ubuntu-24.04-arm` | aarch64 glibc (zigbuild, for the 2.17 floor) and aarch64 musl Linux |
 | `almalinux:8.10` on matching x86_64/ARM64 runners | `linux-gnu-{x86_64,aarch64}-fuse`, built natively |
 | `windows-latest` | `windows-msvc-x86_64`, built natively |
 | `windows-11-arm` | `windows-msvc-aarch64`, built natively |
@@ -50,9 +50,14 @@ macOS reuse the `Makefile.toml` tasks, which can also be run locally (see
 
 The workflow rejects standard GNU binaries with symbols newer than glibc 2.17,
 musl binaries with a dynamic interpreter or shared-library dependency, and an
-Android artifact that is not ARM64 API 24. Standard macOS builds pin and verify
-10.12 for Intel and 11 for Apple Silicon on both `notema` and the embedded
-location helper.
+Android artifact that is not ARM64 API 24. The macOS builds — standard and FUSE
+— pin and verify 10.12 for Intel and 11 for Apple Silicon on both `notema` and
+the embedded location helper. Every artifact except Android also gets a
+`--version` smoke test (with `LD_BIND_NOW=1` on dynamically linked Linux builds,
+so the whole symbol chain must resolve): natively where the runner can load the
+binary — including the Intel macOS slices under Rosetta and 32-bit x86 on the
+x86_64 runners — and under qemu-user for armv7, which no hosted runner can run
+natively. Android needs an emulator, so it stops at the static checks.
 
 [`cargo-zigbuild`]: https://github.com/rust-cross/cargo-zigbuild
 [`taiki-e/setup-cross-toolchain-action`]: https://github.com/taiki-e/setup-cross-toolchain-action
@@ -116,8 +121,8 @@ notarized twice (helper, then outer zip). The four jobs run in parallel.
   `GLIBC_2.17` or lower.
 - Every non-FUSE musl binary has no ELF interpreter or `DT_NEEDED` entry.
 - `android-aarch64-termux.zip` is an AArch64 ELF declaring Android API 24.
-- The standard macOS binaries and embedded location helpers declare macOS 10.12
-  for Intel and macOS 11 for Apple Silicon.
+- The macOS binaries (standard and FUSE) and embedded location helpers declare
+  macOS 10.12 for Intel and macOS 11 for Apple Silicon.
 - The two `linux-gnu-*-fuse` binaries require `libfuse3.so.3`, and the same
   command prints `GLIBC_2.28` or lower.
 - Each published zip carries a build-provenance attestation:

@@ -87,9 +87,11 @@ jobs:
           - target: x86_64-unknown-linux-musl
             platform: linux-musl-x86_64
             runner: ubuntu-latest
+          # Built on the arm runner (zigbuild pins the glibc floor either way)
+          # so the smoke test runs on real hardware instead of under emulation.
           - target: aarch64-unknown-linux-gnu
             platform: linux-gnu-aarch64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04-arm
             zigbuild: true
           - target: aarch64-unknown-linux-musl
             platform: linux-musl-aarch64
@@ -101,13 +103,18 @@ jobs:
           - target: i686-unknown-linux-musl
             platform: linux-musl-i686
             runner: ubuntu-latest
+          # armv7 cannot run natively anywhere in CI (the hosted arm runners'
+          # Ampere CPUs dropped 32-bit support), so its smoke tests run under
+          # qemu-user; the glibc slice also needs the armhf cross sysroot.
           - target: armv7-unknown-linux-gnueabihf
             platform: linux-gnu-armv7
             runner: ubuntu-latest
             zigbuild: true
+            smoke_prefix: qemu-arm -L /usr/arm-linux-gnueabihf
           - target: armv7-unknown-linux-musleabihf
             platform: linux-musl-armv7
             runner: ubuntu-latest
+            smoke_prefix: qemu-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -135,25 +142,47 @@ jobs:
       # CARGO_BUILD_TARGET is set by setup-cross-toolchain-action, so no --target.
       - if: ${{ !matrix.zigbuild }}
         run: cargo build --release -p notema --locked
+      # Capture readelf output first so a readelf failure fails the step; piped
+      # into grep, only grep's exit status would count under the default shell.
       - name: Verify glibc floor
         if: ${{ matrix.zigbuild }}
         run: |
           bin="target/${{ matrix.target }}/release/notema"
-          bad="$(readelf --dyn-syms -W "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV \
+          syms="$(readelf --dyn-syms -W "$bin")"
+          bad="$(grep -o 'GLIBC_[0-9.]*' <<< "$syms" | sort -uV \
               | awk -F_ '{ split($2, v, "."); if (v[1] > 2 || (v[1] == 2 && v[2] > 17)) print }')"
           if [ -n "$bad" ]; then echo "glibc symbols above 2.17: $bad" >&2; exit 1; fi
       - name: Verify static musl linkage
         if: ${{ !matrix.zigbuild }}
         run: |
           bin="target/${{ matrix.target }}/release/notema"
-          if readelf -lW "$bin" | grep -q ' INTERP '; then
+          headers="$(readelf -lW "$bin")"
+          dynamic="$(readelf -dW "$bin")"
+          if grep -q ' INTERP ' <<< "$headers"; then
             echo "musl binary has a dynamic interpreter" >&2
             exit 1
           fi
-          if readelf -dW "$bin" | grep -q '(NEEDED)'; then
+          if grep -q '(NEEDED)' <<< "$dynamic"; then
             echo "musl binary has a shared-library dependency" >&2
             exit 1
           fi
+      # The i686 glibc slice runs natively once the runner has a 32-bit glibc.
+      - name: Install 32-bit glibc runtime
+        if: matrix.target == 'i686-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install --yes libc6:i386
+      - name: Install qemu-user and armhf sysroot
+        if: startsWith(matrix.target, 'armv7')
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes qemu-user libc6-armhf-cross
+      # Every slice gets a runtime check — natively where the runner can load
+      # it, under qemu-user for armv7. LD_BIND_NOW forces every dynamic symbol
+      # to resolve now (qemu passes it through to the guest loader).
+      - name: Smoke test
+        run: LD_BIND_NOW=1 ${{ matrix.smoke_prefix }} "target/${{ matrix.target }}/release/notema" --version
       - name: Package
         run: |
           install -d dist
@@ -200,13 +229,21 @@ jobs:
         with:
           tool: cargo-about@0.9.1
       - run: cargo build --release -p notema --locked --target ${{ matrix.target }} --features fuse
+      # Capture readelf output first so a readelf failure fails the step; piped
+      # into grep, only grep's exit status would count.
       - name: Verify libfuse3 linkage and glibc floor
         run: |
           bin="target/${{ matrix.target }}/release/notema"
-          readelf -d "$bin" | grep -q 'libfuse3\.so\.3' || { echo "missing libfuse3 DT_NEEDED" >&2; exit 1; }
-          bad="$(readelf --dyn-syms -W "$bin" | grep -o 'GLIBC_[0-9.]*' | sort -uV \
+          dynamic="$(readelf -d "$bin")"
+          grep -q 'libfuse3\.so\.3' <<< "$dynamic" || { echo "missing libfuse3 DT_NEEDED" >&2; exit 1; }
+          syms="$(readelf --dyn-syms -W "$bin")"
+          bad="$(grep -o 'GLIBC_[0-9.]*' <<< "$syms" | sort -uV \
               | awk -F_ '{ split($2, v, "."); if (v[1] > 2 || (v[1] == 2 && v[2] > 28)) print }')"
           if [ -n "$bad" ]; then echo "glibc symbols above 2.28: $bad" >&2; exit 1; fi
+      # The container ships libfuse3, so eager binding proves the whole dynamic
+      # link chain resolves, not just that the DT_NEEDED entry exists.
+      - name: Smoke test
+        run: LD_BIND_NOW=1 "target/${{ matrix.target }}/release/notema" --version
       - name: Package
         run: |
           install -d dist
@@ -268,17 +305,24 @@ jobs:
         run: |
           unset CARGO_BUILD_TARGET
           cargo make build-i586-musl
+      # Capture readelf output first so a readelf failure fails the step; piped
+      # into grep, only grep's exit status would count under the default shell.
       - name: Verify static musl linkage
         run: |
           bin="target/i586-unknown-linux-musl/release/notema"
-          if readelf -lW "$bin" | grep -q ' INTERP '; then
+          headers="$(readelf -lW "$bin")"
+          dynamic="$(readelf -dW "$bin")"
+          if grep -q ' INTERP ' <<< "$headers"; then
             echo "i586 musl binary has a dynamic interpreter" >&2
             exit 1
           fi
-          if readelf -dW "$bin" | grep -q '(NEEDED)'; then
+          if grep -q '(NEEDED)' <<< "$dynamic"; then
             echo "i586 musl binary has a shared-library dependency" >&2
             exit 1
           fi
+      # Static 32-bit x86 runs directly on the x86_64 runner kernel.
+      - name: Smoke test
+        run: target/i586-unknown-linux-musl/release/notema --version
       - run: cargo make package-i586-musl
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -328,6 +372,8 @@ jobs:
             echo "Android binary does not declare API 24" >&2
             exit 1
           }
+      # No runtime smoke test: the ARM64 Android binary needs an emulator or
+      # device, neither of which this runner has.
       - name: Package
         run: |
           install -d dist
@@ -372,6 +418,9 @@ jobs:
         with:
           tool: cargo-about@0.9.1
       - run: cargo build --release -p notema --target ${{ matrix.target }} --locked
+      # Each slice is built natively on its own architecture's runner.
+      - name: Smoke test
+        run: target/${{ matrix.target }}/release/notema.exe --version
       - name: Package
         shell: pwsh
         run: |
@@ -458,6 +507,10 @@ jobs:
               exit 1
             fi
           done
+      # The arm64 runner executes the aarch64 slice natively and the x86_64
+      # slice under Rosetta.
+      - name: Smoke test
+        run: target/${{ matrix.target }}/release/notema --version
       - name: Remove credentials
         if: always()
         run: rm -f ./.env
@@ -481,9 +534,11 @@ jobs:
           - target: x86_64-apple-darwin
             platform: apple-darwin-x86_64-fuse
             task: notarize-fuse-macos-intel
+            min_macos: "10.12"
           - target: aarch64-apple-darwin
             platform: apple-darwin-aarch64-fuse
             task: notarize-fuse-macos-silicon
+            min_macos: "11.0"
     # Gates signing secrets behind release-environment approval.
     environment: release
     steps:
@@ -521,6 +576,32 @@ jobs:
         with:
           tool: cargo-make,cargo-about@0.9.1
       - run: cargo make ${{ matrix.task }}
+      # FUSE builds land in target/fuse (CARGO_TARGET_DIR in Makefile.toml).
+      - name: Verify minimum macOS version
+        env:
+          TARGET: ${{ matrix.target }}
+          MIN_MACOS: ${{ matrix.min_macos }}
+        run: |
+          helper="$(find "target/fuse/$TARGET/release/build" \
+              -path '*/out/NotemaLocate.app/Contents/MacOS/notema-locate' -type f | head -n 1)"
+          if [ -z "$helper" ]; then
+            echo "embedded location helper was not built" >&2
+            exit 1
+          fi
+          for bin in "target/fuse/$TARGET/release/notema" "$helper"; do
+            build="$(xcrun vtool -show-build "$bin")"
+            if ! awk -v minimum="$MIN_MACOS" \
+                '($1 == "minos" || $1 == "version") && $2 == minimum { found = 1 } END { exit !found }' \
+                <<< "$build"; then
+              echo "$bin does not declare macOS $MIN_MACOS" >&2
+              printf '%s\n' "$build" >&2
+              exit 1
+            fi
+          done
+      # The arm64 runner executes the aarch64 slice natively and the x86_64
+      # slice under Rosetta; fuse-t is installed, so libfuse3 resolves.
+      - name: Smoke test
+        run: target/fuse/${{ matrix.target }}/release/notema --version
       - name: Remove credentials
         if: always()
         run: rm -f ./.env

@@ -24,7 +24,13 @@ OS does not mean that OS still receives security updates.
 
 The `mount` command needs a `-fuse` build; prebuilt ones exist for macOS (Intel
 and Apple Silicon) and 64-bit Linux glibc (x86_64, ARM64), and other platforms
-build it from source (both below).
+build it from source (both below). The Linux FUSE builds need glibc 2.28 and
+`libfuse3.so.3`. The macOS FUSE builds link with the same 10.12/11 floors as the
+standard ones, but they also need a libfuse3 provider at runtime — current
+macFUSE 5.x requires macOS 12, and [fuse-t] documents no minimum — so in
+practice the provider sets the floor.
+
+[fuse-t]: https://www.fuse-t.org/
 
 The prebuilt binaries are produced by CI on every version tag — see
 [`docs/RELEASING.md`](RELEASING.md). The cross-compilation setup below is for

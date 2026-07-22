@@ -628,20 +628,20 @@ xcrun notarytool submit "release/apple-darwin-universal.zip" --keychain-profile 
 # ------------------------------------------------------------------------------
 
 [tasks.build-fuse-macos-intel]
-description = "Build Intel macOS with FUSE"
+description = "Build Intel macOS 10.12 and newer with FUSE"
 command = "cargo"
 args = ["build", "--release", "--locked", "--features", "fuse", "--target", "x86_64-apple-darwin"]
 # Cross-compiling the Intel slice on an Apple Silicon host: the pkg-config crate
 # refuses cross builds unless PKG_CONFIG_ALLOW_CROSS is set. The host's fuse3.pc
 # is valid for the x86_64 slice too, since fuse-t ships universal dylibs.
-env = { CARGO_TARGET_DIR = "target/fuse", PKG_CONFIG_ALLOW_CROSS = "1" }
+env = { CARGO_TARGET_DIR = "target/fuse", PKG_CONFIG_ALLOW_CROSS = "1", MACOSX_DEPLOYMENT_TARGET = "10.12" }
 env_files = ["./.env"]
 
 [tasks.build-fuse-macos-silicon]
-description = "Build Apple Silicon macOS with FUSE"
+description = "Build Apple Silicon macOS 11 and newer with FUSE"
 command = "cargo"
 args = ["build", "--release", "--locked", "--features", "fuse", "--target", "aarch64-apple-darwin"]
-env = { CARGO_TARGET_DIR = "target/fuse" }
+env = { CARGO_TARGET_DIR = "target/fuse", MACOSX_DEPLOYMENT_TARGET = "11.0" }
 env_files = ["./.env"]
 
 [tasks.build-fuse-macos-universal]
