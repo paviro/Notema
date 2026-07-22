@@ -21,6 +21,7 @@ use std::os::unix::fs::FileTypeExt;
 
 #[derive(Debug, Parser)]
 #[command(name = "notema")]
+#[command(version)]
 #[command(about = "Markdown terminal journal")]
 struct Cli {
     /// Config directory holding config.toml and this device's encryption key;
