@@ -436,6 +436,10 @@ jobs:
     if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'freebsd'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      # rust-toolchain.toml pins stable and outranks the setup action's
+      # install, so the nightly row must select its toolchain explicitly.
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
     strategy:
       fail-fast: true
       matrix:
