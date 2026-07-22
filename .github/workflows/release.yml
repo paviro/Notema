@@ -309,7 +309,7 @@ jobs:
       # into grep, only grep's exit status would count under the default shell.
       - name: Verify static musl linkage
         run: |
-          bin="target/i586-unknown-linux-musl/release/notema"
+          bin="target/i586-musl/i586-unknown-linux-musl/release/notema"
           headers="$(readelf -lW "$bin")"
           dynamic="$(readelf -dW "$bin")"
           if grep -q ' INTERP ' <<< "$headers"; then
@@ -322,7 +322,7 @@ jobs:
           fi
       # Static 32-bit x86 runs directly on the x86_64 runner kernel.
       - name: Smoke test
-        run: target/i586-unknown-linux-musl/release/notema --version
+        run: target/i586-musl/i586-unknown-linux-musl/release/notema --version
       - run: cargo make package-i586-musl
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
