@@ -84,9 +84,8 @@ pub(crate) enum InteractionKind {
         destructive: bool,
     },
     MoodBar(Rect),
-    Image(usize),
     Link {
-        target: String,
+        target: crate::tui::app::ReaderLinkTarget,
         heading_line: Option<usize>,
     },
     Scrollbar(ScrollbarMetrics),
@@ -165,7 +164,7 @@ impl InteractionMap {
 pub(crate) struct ViewState {
     pub(crate) interactions: InteractionMap,
     pub(crate) layout: Option<crate::tui::render::TuiLayout>,
-    pub(crate) reader: crate::tui::app::ReaderImageHits,
+    pub(crate) reader: crate::tui::app::ReaderHits,
     pub(crate) insights: crate::tui::app::InsightsScrollGeometry,
     pub(crate) journal_offset: Option<usize>,
     pub(crate) entry_offset: Option<usize>,
@@ -175,19 +174,10 @@ impl ViewState {
     pub(crate) fn begin_frame(&mut self) {
         self.interactions.clear();
         self.layout = None;
-        self.reader = crate::tui::app::ReaderImageHits::default();
+        self.reader = crate::tui::app::ReaderHits::default();
         self.insights = crate::tui::app::InsightsScrollGeometry::default();
         self.journal_offset = None;
         self.entry_offset = None;
-    }
-
-    pub(crate) fn reader_image_line_at(&self, col: u16, row: u16) -> Option<usize> {
-        let line = self.reader_body_line_at(col, row)?;
-        self.reader
-            .labels
-            .iter()
-            .find(|(label_row, _)| *label_row == line)
-            .map(|(label_row, _)| *label_row)
     }
 
     pub(crate) fn reader_link_hit_at(&self, col: u16, row: u16) -> Option<(usize, usize, usize)> {
@@ -237,5 +227,39 @@ mod tests {
         view.begin_frame();
 
         assert_eq!(view.interactions.hit(1, 1), None);
+    }
+
+    /// A link hit answers only inside its column span — hovering the rest of
+    /// the row must not light it up (regression: image labels used to hit the
+    /// whole row).
+    #[test]
+    fn link_hits_are_bounded_by_their_column_span() {
+        let view = ViewState {
+            reader: crate::tui::app::ReaderHits {
+                content_rect: Rect::new(10, 5, 40, 10),
+                scroll: 0,
+                line_count: 3,
+                links: vec![crate::tui::app::ReaderLinkHit {
+                    line: 2,
+                    start: 0,
+                    end: 8,
+                    target: crate::tui::app::ReaderLinkTarget::Image(0),
+                    group: 0,
+                }],
+                headings: Vec::new(),
+            },
+            ..ViewState::default()
+        };
+
+        let row = 5 + 2;
+        assert_eq!(view.reader_link_hit_at(10, row), Some((2, 0, 8)));
+        assert_eq!(view.reader_link_hit_at(17, row), Some((2, 0, 8)));
+        assert_eq!(view.reader_link_hit_at(18, row), None, "past the label");
+        assert_eq!(
+            view.reader_link_hit_at(30, row),
+            None,
+            "same row, far right"
+        );
+        assert_eq!(view.reader_link_hit_at(10, row + 1), None, "other row");
     }
 }

@@ -10,7 +10,7 @@ use ratatui::{
 use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
 
-use crate::tui::app::{ReaderHeading, ReaderLinkHit};
+use crate::tui::app::{ReaderHeading, ReaderLinkHit, ReaderLinkTarget};
 use crate::tui::theme::Theme;
 
 mod table;
@@ -651,7 +651,7 @@ impl<'a> MarkdownTerminalRenderer<'a> {
                         line: self.lines.len(),
                         start: prefix_width.saturating_add(start),
                         end: prefix_width.saturating_add(end),
-                        target: link.target.clone(),
+                        target: ReaderLinkTarget::Uri(link.target.clone()),
                         group: id,
                     });
                 }
@@ -1097,7 +1097,10 @@ mod wrap_tests {
 
         // The name — not the trailer — is the recorded clickable region.
         assert_eq!(chunk.links.len(), 1);
-        assert_eq!(chunk.links[0].target, "https://example.com");
+        assert_eq!(
+            chunk.links[0].target,
+            ReaderLinkTarget::Uri("https://example.com".into())
+        );
         assert_eq!((chunk.links[0].start, chunk.links[0].end), (4, 12));
     }
 
@@ -1120,7 +1123,10 @@ mod wrap_tests {
         assert_eq!(rendered, "https://example.com");
         // The bare URL name is itself the clickable region.
         assert_eq!(chunk.links.len(), 1);
-        assert_eq!(chunk.links[0].target, "https://example.com");
+        assert_eq!(
+            chunk.links[0].target,
+            ReaderLinkTarget::Uri("https://example.com".into())
+        );
     }
 
     #[test]

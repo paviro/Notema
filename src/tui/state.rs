@@ -76,14 +76,13 @@ pub(crate) enum HoverTarget {
     DialogRow(usize),
     /// A confirm dialog's yes (`true`) / no (`false`) button.
     ConfirmButton(bool),
-    /// A clickable link name in the reader, by its body line and column span.
+    /// A clickable link name or `[Image N …]` label in the reader, by its body
+    /// line and column span.
     ReaderLink {
         line: usize,
         start: usize,
         end: usize,
     },
-    /// A clickable `[Image N …]` label in the reader, by its body line.
-    ReaderImage(usize),
     /// A clickable metadata chip in the pinned reader footer, by its flat index
     /// in the pill flow (feelings, people, activities, tags).
     MetadataChip(usize),

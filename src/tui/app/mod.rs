@@ -79,9 +79,18 @@ pub(crate) struct EntryTarget {
 #[derive(Default)]
 pub(crate) struct RenderedEntryBody {
     pub(crate) lines: Vec<Line<'static>>,
-    pub(crate) images: Vec<(usize, usize)>,
     pub(crate) links: Vec<ReaderLinkHit>,
     pub(crate) headings: Vec<ReaderHeading>,
+}
+
+/// What a clickable region in the reader body opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ReaderLinkTarget {
+    /// URL, `#anchor`, or attachment path, routed by string inspection when
+    /// opened.
+    Uri(String),
+    /// An in-entry image label; opens the viewer at this image index.
+    Image(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,7 +98,7 @@ pub(crate) struct ReaderLinkHit {
     pub(crate) line: usize,
     pub(crate) start: usize,
     pub(crate) end: usize,
-    pub(crate) target: String,
+    pub(crate) target: ReaderLinkTarget,
     /// Document-unique id shared by every segment of one link. A link name that
     /// wraps across display lines yields several hits with the same `group`, so
     /// hovering any segment can highlight the whole name as one link.
@@ -354,16 +363,14 @@ pub(crate) struct AppModel {
     pub(crate) caches: RenderCaches,
 }
 
-/// Clickable image label positions in the entry view, captured at render time so
-/// the mouse handler can map a click back to an image index.
+/// Clickable link positions in the entry view, captured at render time so the
+/// mouse handler can map a click back to a target.
 #[derive(Default)]
-pub(crate) struct ReaderImageHits {
+pub(crate) struct ReaderHits {
     pub(crate) content_rect: Rect,
     pub(crate) scroll: u16,
     /// Total rendered body line count, for mapping a scrollbar drag to a scroll offset.
     pub(crate) line_count: usize,
-    /// `(body line index, image index)` per label line.
-    pub(crate) labels: Vec<(usize, usize)>,
     pub(crate) links: Vec<ReaderLinkHit>,
     pub(crate) headings: Vec<ReaderHeading>,
 }

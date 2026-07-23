@@ -45,11 +45,16 @@ pub(super) fn browser<B: Backend>(
         BrowserAction::OpenReaderLink {
             target,
             heading_line,
-        } => {
-            if let Some(effect) = open_reader_link(app, &target, heading_line)? {
-                return Ok(Some(DispatchOutcome::Continue.with_effect(effect)));
+        } => match target {
+            ReaderLinkTarget::Image(index) => {
+                return images(terminal, app, ImageAction::OpenViewer(index));
             }
-        }
+            ReaderLinkTarget::Uri(target) => {
+                if let Some(effect) = open_reader_link(app, &target, heading_line)? {
+                    return Ok(Some(DispatchOutcome::Continue.with_effect(effect)));
+                }
+            }
+        },
         BrowserAction::BeginDelete => app.begin_confirm_delete(),
         BrowserAction::ConfirmDelete => confirm_delete(app)?,
         BrowserAction::ToggleStarred => {

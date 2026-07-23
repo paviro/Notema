@@ -10,7 +10,10 @@ use notema_domain::{Entry, EntryEncryptionState};
 use std::path::Path;
 
 use crate::tui::{
-    app::{AppModel, Focus, ReaderHeading, ReaderImageHits, ReaderLinkHit, RenderedEntryBody},
+    app::{
+        AppModel, Focus, ReaderHeading, ReaderHits, ReaderLinkHit, ReaderLinkTarget,
+        RenderedEntryBody,
+    },
     image::{digit_for_image, sole_image_ref},
     render::{
         count_label, entry_metadata_layout, panel_block, render_centered_notice,
@@ -34,7 +37,7 @@ pub(crate) fn draw_selected_reader(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &mut AppModel,
-    reader_view: &mut ReaderImageHits,
+    reader_view: &mut ReaderHits,
 ) {
     if let Some((title, content)) = app.selected_reader() {
         let metadata = app
@@ -78,11 +81,10 @@ pub(crate) fn draw_selected_reader(
                 entry_path: entry_path.as_deref(),
             },
         );
-        *reader_view = ReaderImageHits {
+        *reader_view = ReaderHits {
             content_rect,
             scroll,
             line_count,
-            labels: hits.images,
             links: hits.links,
             headings: hits.headings,
         };
@@ -115,8 +117,8 @@ struct PanelPlacement<'a> {
 }
 
 /// Draw the entry body and metadata, returning the applied scroll, the clickable
-/// image-label positions (`(body line index, image index)`), the body rect (for
-/// mapping clicks back to labels), and the total rendered line count (for scrollbar
+/// link hits, the body rect (for mapping clicks back to hits), and the total
+/// rendered line count (for scrollbar
 /// drag mapping).
 fn draw_markdown_panel(
     active_theme: &crate::tui::theme::Theme,
@@ -191,34 +193,25 @@ fn draw_markdown_panel(
     // the cursor on every theme and chrome, using each theme's link color with
     // no per-theme tuning.
     let hovered_link = Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD);
-    match app.hover {
-        HoverTarget::ReaderImage(line) => {
-            if let Some(line) = lines.get_mut(line) {
-                *line = line.clone().patch_style(hovered_link);
-            }
-        }
-        HoverTarget::ReaderLink { line, start, end } => {
-            // A wrapped link name is several hit segments sharing one group;
-            // highlight every segment so the whole name inverts as one link
-            // rather than only the row under the cursor.
-            let group = body
-                .links
-                .iter()
-                .find(|hit| hit.line == line && hit.start == start && hit.end == end)
-                .map(|hit| hit.group);
-            if let Some(group) = group {
-                for hit in body.links.iter().filter(|hit| hit.group == group) {
-                    if let Some(line) = lines.get_mut(hit.line) {
-                        patch_line_range(line, hit.start, hit.end, hovered_link);
-                    }
+    if let HoverTarget::ReaderLink { line, start, end } = app.hover {
+        // A wrapped link name is several hit segments sharing one group;
+        // highlight every segment so the whole name inverts as one link
+        // rather than only the row under the cursor.
+        let group = body
+            .links
+            .iter()
+            .find(|hit| hit.line == line && hit.start == start && hit.end == end)
+            .map(|hit| hit.group);
+        if let Some(group) = group {
+            for hit in body.links.iter().filter(|hit| hit.group == group) {
+                if let Some(line) = lines.get_mut(hit.line) {
+                    patch_line_range(line, hit.start, hit.end, hovered_link);
                 }
             }
         }
-        _ => {}
     }
     let hits = RenderedEntryBody {
         lines: Vec::new(),
-        images: body.images.clone(),
         links: body.links.clone(),
         headings: body.headings.clone(),
     };
@@ -350,14 +343,12 @@ fn build_body_lines(
             lines,
             links,
             headings,
-            ..RenderedEntryBody::default()
         };
     };
 
     // A leading blank row so the body starts one line below the border, matching
     // the blank that leads the journal and entry columns.
     lines.push(Line::from(""));
-    let mut labels = Vec::new();
     let mut buffer = String::new();
     let mut image_index = 0usize;
     // True while the last emitted row was an image label with nothing buffered
@@ -405,9 +396,16 @@ fn build_body_lines(
         }
         after_image = true;
 
-        let start_row = lines.len();
-        lines.push(image_label_line(theme, image_index, &alt));
-        labels.push((start_row, image_index));
+        let label = image_label_line(theme, image_index, &alt);
+        links.push(ReaderLinkHit {
+            line: lines.len(),
+            start: 0,
+            end: label.width(),
+            target: ReaderLinkTarget::Image(image_index),
+            group: group_base,
+        });
+        group_base += 1;
+        lines.push(label);
         image_index += 1;
     }
 
@@ -431,7 +429,6 @@ fn build_body_lines(
     dedupe_heading_anchors(&mut headings);
     RenderedEntryBody {
         lines,
-        images: labels,
         links,
         headings,
     }
@@ -529,6 +526,13 @@ mod image_tests {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
+    fn target_uri(hit: &ReaderLinkHit) -> &str {
+        match &hit.target {
+            ReaderLinkTarget::Uri(uri) => uri,
+            ReaderLinkTarget::Image(index) => panic!("expected a uri target, got image {index}"),
+        }
+    }
+
     #[test]
     fn image_label_includes_alt_and_press_hint_and_is_one_based() {
         assert_eq!(
@@ -595,7 +599,19 @@ mod image_tests {
                 "Text below".to_string(),
             ],
         );
-        assert_eq!(body.images, vec![(3, 0), (5, 1)]);
+        // Each label records a link hit covering exactly its own text, in its
+        // own group so hovering one never highlights the other.
+        assert_eq!(
+            body.links
+                .iter()
+                .map(|hit| (hit.line, hit.start, hit.end, hit.target.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (3, 0, rendered[3].len(), ReaderLinkTarget::Image(0)),
+                (5, 0, rendered[5].len(), ReaderLinkTarget::Image(1)),
+            ],
+        );
+        assert_ne!(body.links[0].group, body.links[1].group);
     }
 
     /// A lone `==` in prose must not turn the highlight on for the rest of the
@@ -636,7 +652,7 @@ mod image_tests {
             true,
             false,
         );
-        assert!(body.images.is_empty());
+        assert!(body.links.is_empty());
     }
 
     #[test]
@@ -658,7 +674,10 @@ mod image_tests {
             }]
         );
         assert_eq!(body.links.len(), 1);
-        assert_eq!(body.links[0].target, "#my-heading");
+        assert_eq!(
+            body.links[0].target,
+            ReaderLinkTarget::Uri("#my-heading".into())
+        );
         // The clickable region is the name; the target trails it in the faint
         // secondary style.
         let link_line = &body.lines[body.links[0].line];
@@ -689,7 +708,10 @@ mod image_tests {
         );
 
         assert_eq!(body.links.len(), 1);
-        assert_eq!(body.links[0].target, "https://example.com");
+        assert_eq!(
+            body.links[0].target,
+            ReaderLinkTarget::Uri("https://example.com".into())
+        );
         let link_line = &body.lines[body.links[0].line];
         assert_eq!(line_text(link_line), "https://example.com");
     }
@@ -710,7 +732,10 @@ mod image_tests {
         let link_line = &body.lines[body.links[0].line];
         assert_eq!(line_text(link_line), "See the docs now.");
         assert_eq!(body.links.len(), 1);
-        assert_eq!(body.links[0].target, "https://example.com");
+        assert_eq!(
+            body.links[0].target,
+            ReaderLinkTarget::Uri("https://example.com".into())
+        );
         // "See " is 4 cells, "the docs" is 8 — the hit still covers the name.
         assert_eq!((body.links[0].start, body.links[0].end), (4, 12));
 
@@ -746,7 +771,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
         ];
 
         let shown = build_body_lines(&Theme::terminal_default(), source, 80, None, true, false);
-        let targets: Vec<&str> = shown.links.iter().map(|hit| hit.target.as_str()).collect();
+        let targets: Vec<&str> = shown.links.iter().map(target_uri).collect();
         assert_eq!(targets, expected);
         for hit in &shown.links {
             assert!(hit.end > hit.start);
@@ -756,8 +781,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
         // Hidden URLs: still all six, wrap now computed against the shorter text,
         // and no URL leaks into any rendered line.
         let hidden = build_body_lines(&Theme::terminal_default(), source, 80, None, false, false);
-        let hidden_targets: Vec<&str> =
-            hidden.links.iter().map(|hit| hit.target.as_str()).collect();
+        let hidden_targets: Vec<&str> = hidden.links.iter().map(target_uri).collect();
         assert_eq!(hidden_targets, expected);
         assert!(
             !hidden
@@ -785,7 +809,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
         // the whole name rather than making it look like several links.
         let group = body.links[0].group;
         for hit in &body.links {
-            assert_eq!(hit.target, "https://example.com");
+            assert_eq!(target_uri(hit), "https://example.com");
             assert_eq!(hit.group, group);
             assert!(hit.end > hit.start);
         }
@@ -867,7 +891,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
         );
         assert_eq!(openable.links.len(), 1);
         assert_eq!(
-            openable.links[0].target,
+            target_uri(&openable.links[0]),
             "2026-07-05T14-30-00-abc123.assets/x9k2.png"
         );
 

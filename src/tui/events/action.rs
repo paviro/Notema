@@ -147,7 +147,7 @@ pub(crate) enum BrowserAction {
     EditSelected,
     ViewSelected,
     OpenReaderLink {
-        target: String,
+        target: crate::tui::app::ReaderLinkTarget,
         heading_line: Option<usize>,
     },
     BeginDelete,

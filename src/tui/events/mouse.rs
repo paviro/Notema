@@ -104,9 +104,6 @@ pub(super) fn mouse_to_action(
     if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
         match view.interactions.hit(mouse.column, mouse.row) {
             Some(InteractionKind::Hint(id)) => return hint_id_to_action(app, *id),
-            Some(InteractionKind::Image(index)) => {
-                return Some(Action::Images(ImageAction::OpenViewer(*index)));
-            }
             Some(InteractionKind::Link {
                 target,
                 heading_line,
@@ -775,11 +772,8 @@ fn hover_target_at(
         return target;
     }
 
-    // Reader links and image labels, matching the click path's priority
-    // (labels before links). Both self-bound-check the reader's content rect.
-    if let Some(line) = view.reader_image_line_at(col, row) {
-        return HoverTarget::ReaderImage(line);
-    }
+    // Reader link hits (markdown links and image labels alike); the lookup
+    // self-bound-checks the reader's content rect.
     if let Some((line, start, end)) = view.reader_link_hit_at(col, row) {
         return HoverTarget::ReaderLink { line, start, end };
     }

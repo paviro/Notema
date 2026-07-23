@@ -9,7 +9,7 @@ use ratatui::{Terminal, backend::Backend, layout::Rect};
 use crate::{
     AppResult,
     tui::{
-        app::{AppModel, Focus, reader_is_available},
+        app::{AppModel, Focus, ReaderLinkTarget, reader_is_available},
         editor_state::{EditorPrompt, EditorTarget},
         render,
         state::{ListNav, Overlay, ToastVariant},

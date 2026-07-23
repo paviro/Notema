@@ -293,8 +293,8 @@ fn register_view_interactions(
 
     // Scrollbars first: rows and panels are registered earlier in `draw`, so
     // these later pushes win the bar-adjacent columns (matching the old
-    // probe-scrollbar-before-panels click order), while the reader links and
-    // image labels pushed below keep beating the widened grab column.
+    // probe-scrollbar-before-panels click order), while the reader link hits
+    // pushed below keep beating the widened grab column.
     let layout = context.view.layout;
     if let Some(panel) = layout.and_then(|layout| layout.reader) {
         let (line_count, viewport, scroll) = {
@@ -371,13 +371,18 @@ fn register_view_interactions(
         if hit.line < visible_start || hit.line >= visible_end {
             continue;
         }
-        let heading_line = hit.target.strip_prefix('#').and_then(|anchor| {
-            reader
-                .headings
-                .iter()
-                .find(|heading| heading.anchor == anchor)
-                .map(|heading| heading.line)
-        });
+        let heading_line = match &hit.target {
+            crate::tui::app::ReaderLinkTarget::Uri(uri) => {
+                uri.strip_prefix('#').and_then(|anchor| {
+                    reader
+                        .headings
+                        .iter()
+                        .find(|heading| heading.anchor == anchor)
+                        .map(|heading| heading.line)
+                })
+            }
+            crate::tui::app::ReaderLinkTarget::Image(_) => None,
+        };
         context.view.interactions.push(
             ratatui::layout::Rect::new(
                 reader.content_rect.x.saturating_add(hit.start as u16),
@@ -393,22 +398,6 @@ fn register_view_interactions(
                 heading_line,
             },
         );
-    }
-    for (line, index) in &reader.labels {
-        if *line >= visible_start && *line < visible_end {
-            context.view.interactions.push(
-                ratatui::layout::Rect::new(
-                    reader.content_rect.x,
-                    reader
-                        .content_rect
-                        .y
-                        .saturating_add((*line - visible_start) as u16),
-                    reader.content_rect.width,
-                    1,
-                ),
-                InteractionKind::Image(*index),
-            );
-        }
     }
 
     for (row, start, width, id) in footer::footer_hint_regions(app, footer.width) {
