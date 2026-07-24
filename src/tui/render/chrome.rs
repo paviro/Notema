@@ -263,7 +263,13 @@ pub(crate) fn render_vertical_scrollbar(
     state: &mut ScrollbarState,
     focused: bool,
 ) {
-    render_vertical_scrollbar_in(theme, frame, scrollbar_bar_rect(theme, area), state, focused);
+    render_vertical_scrollbar_in(
+        theme,
+        frame,
+        scrollbar_bar_rect(theme, area),
+        state,
+        focused,
+    );
 }
 
 /// Render a vertical scrollbar into an explicit track rect, bypassing the

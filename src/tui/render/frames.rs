@@ -70,7 +70,12 @@ pub(crate) fn dialog_content_full(theme: &Theme, area: Rect) -> Rect {
 /// `total` rows in a `viewport`-row window reserves the scrollbar gutter only
 /// when it overflows and a bar is drawn; otherwise it fills the full width flush
 /// with the other rows. Mirrors `render_dialog_list_scrollbar`'s overflow guard.
-pub(crate) fn dialog_list_width(theme: &Theme, inner_width: u16, total: usize, viewport: u16) -> u16 {
+pub(crate) fn dialog_list_width(
+    theme: &Theme,
+    inner_width: u16,
+    total: usize,
+    viewport: u16,
+) -> u16 {
     if total > viewport as usize {
         inner_width.saturating_sub(dialog_list_gutter(theme))
     } else {
@@ -89,7 +94,14 @@ pub(crate) fn draw_dialog_frame(
     title: &str,
     esc_hint: bool,
 ) -> Rect {
-    draw_dialog_frame_with_title_row(theme, frame, area, dialog_inner(theme, area), title, esc_hint)
+    draw_dialog_frame_with_title_row(
+        theme,
+        frame,
+        area,
+        dialog_inner(theme, area),
+        title,
+        esc_hint,
+    )
 }
 
 /// Like [`draw_dialog_frame`], but the flat title row runs flush with the
