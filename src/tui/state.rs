@@ -8,7 +8,8 @@ use ratatui::widgets::ListState;
 
 use super::app::SearchScope;
 use super::features::{
-    feelings::EditFeelingState, location::EditLocationState, metadata::EditMetadataState,
+    feelings::EditFeelingState, filter::FilterState, location::EditLocationState,
+    metadata::EditMetadataState,
 };
 use super::image::ImageAsset;
 use super::text_input::TextInput;
@@ -69,6 +70,8 @@ pub(crate) enum HoverTarget {
     Journal(usize),
     Entry(usize),
     InsightsTab(crate::tui::features::insights::InsightsTab),
+    /// A tab header in the filter dialog.
+    FilterTab(FilterTab),
     FooterHint(crate::tui::render::HintId),
     /// A row in whichever list/menu dialog is open (settings menu, metadata
     /// menu, edit-metadata/feelings/location lists, theme picker) — only one is
@@ -388,6 +391,88 @@ impl MetadataKind {
     }
 }
 
+/// One facet of the filter dialog. Each tab lists that facet's distinct
+/// values with post counts and, when a value is chosen, launches the matching
+/// search (its [`search_prefix`](Self::search_prefix) + the row's value).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FilterTab {
+    #[default]
+    Tags,
+    People,
+    Activities,
+    Feelings,
+    Locations,
+}
+
+impl FilterTab {
+    pub(crate) const ALL: [FilterTab; 5] = [
+        Self::Tags,
+        Self::People,
+        Self::Activities,
+        Self::Feelings,
+        Self::Locations,
+    ];
+
+    /// Number of tabs.
+    pub(crate) const COUNT: usize = Self::ALL.len();
+
+    pub(crate) fn index(self) -> usize {
+        Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0)
+    }
+
+    pub(crate) fn next(self) -> Self {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+
+    pub(crate) fn prev(self) -> Self {
+        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            Self::Tags => "Tags",
+            Self::People => "People",
+            Self::Activities => "Activities",
+            Self::Feelings => "Feelings",
+            Self::Locations => "Locations",
+        }
+    }
+
+    /// A shorter label used when the full titles won't fit the tab strip.
+    pub(crate) fn short_title(self) -> &'static str {
+        match self {
+            Self::Tags => "Tags",
+            Self::People => "Ppl",
+            Self::Activities => "Acts",
+            Self::Feelings => "Feel",
+            Self::Locations => "Locs",
+        }
+    }
+
+    /// A single-letter label — the narrowest tab strip rung. Each is unique, so
+    /// every tab stays visible and clickable on the tightest layout.
+    pub(crate) fn initial(self) -> &'static str {
+        match self {
+            Self::Tags => "T",
+            Self::People => "P",
+            Self::Activities => "A",
+            Self::Feelings => "F",
+            Self::Locations => "L",
+        }
+    }
+
+    /// The search prefix a chosen row launches (`tags:`, `location:`, …).
+    pub(crate) fn search_prefix(self) -> &'static str {
+        match self {
+            Self::Tags => "tags",
+            Self::People => "people",
+            Self::Activities => "activities",
+            Self::Feelings => "feelings",
+            Self::Locations => "location",
+        }
+    }
+}
+
 pub(crate) fn normalize_list_state(state: &mut ListState, len: usize) {
     if len == 0 {
         state.select(None);
@@ -610,6 +695,10 @@ pub(crate) enum Overlay {
     EditMetadata(Box<EditMetadataState>),
     EditFeelings(Box<EditFeelingState>),
     EditMood(EditMoodState),
+    /// The filter browser: a tabbed list of every tag/person/activity/feeling/
+    /// place value with post counts, launching a search on the chosen
+    /// row. Boxed — it caches all five tabs' value lists.
+    Filter(Box<FilterState>),
     // Boxed: this state is much larger than the other variants (candidate/preset
     // lists), so keeping it behind a pointer keeps `Overlay` small.
     EditLocation(Box<EditLocationState>),

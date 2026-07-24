@@ -67,6 +67,9 @@ pub(crate) enum HintId {
     EditorFullscreen,
     EditorMetadata,
     EditorHelp,
+    OpenFilter,
+    FilterNextTab,
+    FilterLaunch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -502,7 +505,13 @@ fn browse_footer_line(app: &AppModel) -> HintLine {
             hints.extend(help_quit_tail());
             hints
         }
-        Focus::Entries if app.has_selected_entry_target() => focused_entry_footer(app),
+        Focus::Entries if app.has_selected_entry_target() => {
+            // `b` opens the index from the entries column but is inert in the reader,
+            // so the shared reader footer below omits it.
+            let mut hints = focused_entry_footer(app);
+            hints.push(FILTER_HINT);
+            hints
+        }
         Focus::Entries => {
             let mut hints = vec![Hint::new("new entry", "n", HintId::NewEntry)];
             hints.extend(browse_footer_tail());
@@ -531,11 +540,17 @@ const HELP_HINT: Hint = Hint::new("help", "?", HintId::Help);
 /// The quit chip, shared by the footer tails.
 const QUIT_HINT: Hint = Hint::new("quit", "q", HintId::Quit);
 
+/// The filter chip (`b`), shown in the columns where `b` opens it — the
+/// journals and entries columns.
+const FILTER_HINT: Hint = Hint::new("filter", "b", HintId::OpenFilter);
+
 /// Trailing hints for the columns where search has a clear scope — journals (all)
-/// and entries (this journal): search, the `?` cheatsheet, and quit.
-fn browse_footer_tail() -> [Hint; 3] {
+/// and entries (this journal): search, the filter browser, the `?` cheatsheet, and
+/// quit.
+fn browse_footer_tail() -> [Hint; 4] {
     [
         Hint::new("search", "/", HintId::BeginSearch),
+        FILTER_HINT,
         HELP_HINT,
         QUIT_HINT,
     ]

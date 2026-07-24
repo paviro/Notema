@@ -426,6 +426,7 @@ const HELP_SECTIONS: [(&str, &[(&str, &str)]); 6] = [
         "General",
         &[
             ("/", "Search"),
+            ("b", "Filter"),
             ("j", "Journals"),
             (",", "Settings"),
             ("h", "Toggle hints"),

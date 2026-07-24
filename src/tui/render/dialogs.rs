@@ -26,8 +26,8 @@ use super::{
     },
     footer::{Hint, HintId, hint_height, hint_lines},
     frames::{
-        dialog_content_full, dialog_frame_rows, dialog_inner, dialog_list_width,
-        draw_dialog_frame, draw_dialog_frame_wide, render_confirm_buttons,
+        dialog_content_full, dialog_frame_rows, dialog_inner, dialog_list_width, draw_dialog_frame,
+        draw_dialog_frame_wide, render_confirm_buttons,
     },
     list_state_for_render,
     metadata::MoodBar,
@@ -37,6 +37,9 @@ use std::time::Instant;
 mod theme_picker;
 pub(super) use theme_picker::draw_theme_picker;
 pub(crate) use theme_picker::{theme_picker_hints, theme_picker_layout};
+mod filter;
+pub(super) use filter::draw_filter_dialog;
+pub(crate) use filter::{filter_dialog_hints, filter_dialog_layout, filter_tab_segments};
 mod overlays;
 pub(crate) use overlays::{confirm_delete_inner, new_journal_field_rect};
 pub(super) use overlays::{

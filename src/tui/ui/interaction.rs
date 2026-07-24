@@ -44,6 +44,7 @@ pub(crate) enum DialogId {
     Metadata,
     Feelings,
     Location,
+    Filter,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -77,6 +78,8 @@ pub(crate) enum InteractionKind {
         dialog: DialogId,
         index: usize,
     },
+    /// A tab header in the filter dialog.
+    FilterTab(crate::tui::state::FilterTab),
     DialogInput(DialogInputId),
     DialogClose(DialogId),
     ConfirmButton {

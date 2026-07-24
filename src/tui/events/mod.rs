@@ -18,8 +18,9 @@ use crate::{
 use ratatui_textarea::CursorMove;
 
 pub(crate) use action::{
-    Action, BackgroundAction, BrowserAction, EditorAction, ImageAction, InsightsAction,
-    LocationAction, MetadataAction, OverlayAction, ReaderAction, SearchAction, SettingsAction,
+    Action, BackgroundAction, BrowserAction, EditorAction, FilterAction, ImageAction,
+    InsightsAction, LocationAction, MetadataAction, OverlayAction, ReaderAction, SearchAction,
+    SettingsAction,
 };
 use actions::{
     delete_selected, delete_selected_journal, open_reader_link, save_internal_editor,
@@ -265,6 +266,7 @@ fn apply_action<B: Backend>(
         Action::Overlay(action) => handlers::overlay(app, action)?,
         Action::Reader(action) => handlers::reader(app, action),
         Action::Insights(action) => handlers::insights(app, action),
+        Action::Filter(action) => handlers::filter(terminal, app, action)?,
     }
 
     // One-shot compose (`notema log` with no body) quits as soon as its editor
@@ -636,6 +638,10 @@ fn open_dialog_list_height<B: Backend>(
         )
         .list
         .height
+    } else if let Some(state) = app.filter_state() {
+        render::filter_dialog_layout(&app.appearance.theme, area, state)
+            .list
+            .height
     } else {
         0
     };
@@ -655,6 +661,9 @@ fn open_dialog_list_mut(app: &mut AppModel) -> Option<&mut dyn ListNav> {
     }
     if app.theme_picker_state().is_some() {
         return app.theme_picker_state_mut().map(|s| s as &mut dyn ListNav);
+    }
+    if app.filter_state().is_some() {
+        return app.filter_state_mut().map(|s| s as &mut dyn ListNav);
     }
     None
 }

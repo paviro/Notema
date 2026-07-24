@@ -13,6 +13,7 @@ mod menus;
 mod metadata;
 mod pending;
 mod reader;
+mod tab_strip;
 mod table;
 mod toasts;
 mod unlock;
@@ -64,10 +65,11 @@ pub(crate) use dialogs::{
 use dialogs::{
     draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_location_dialog,
     draw_edit_metadata_dialog, draw_edit_mood_dialog, draw_fetching_environment,
-    draw_new_journal_input, draw_theme_picker,
+    draw_filter_dialog, draw_new_journal_input, draw_theme_picker,
 };
 pub(crate) use dialogs::{
-    feelings_dialog_layout, location_dialog_layout, metadata_dialog_layout, theme_picker_layout,
+    feelings_dialog_layout, filter_dialog_layout, location_dialog_layout, metadata_dialog_layout,
+    theme_picker_layout,
 };
 use editor::draw_entry_editor;
 use entries::draw_entry_list;
@@ -558,6 +560,23 @@ fn register_overlay_interactions(
                 ),
             );
         }
+        Overlay::Filter(state) => {
+            let layout = dialogs::filter_dialog_layout(context.theme, frame_area, state);
+            for (tab, rect) in dialogs::filter_tab_segments(layout.tabs) {
+                context
+                    .view
+                    .interactions
+                    .push(rect, InteractionKind::FilterTab(tab));
+            }
+            register_dialog_list(
+                context,
+                layout.list,
+                state.offset(),
+                state.current_rows().len(),
+                DialogId::Filter,
+            );
+            register_hint_regions(context, layout.hints, dialogs::filter_dialog_hints());
+        }
         _ => {}
     }
 
@@ -840,6 +859,10 @@ fn draw_overlays(theme: &crate::tui::theme::Theme, frame: &mut Frame<'_>, app: &
 
     if let Some(state) = app.edit_mood_state() {
         draw_edit_mood_dialog(theme, frame, state, hover);
+    }
+
+    if let Some(state) = app.filter_state_mut() {
+        draw_filter_dialog(theme, frame, state, hover);
     }
 
     if let Some(state) = app.edit_location_state_mut() {

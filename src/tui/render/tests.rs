@@ -1595,6 +1595,53 @@ fn app_with_metadata_entry() -> AppModel {
     app
 }
 
+/// An app whose `work` journal holds `count` entries, each with a distinct tag, so
+/// the filter browser's Tags tab overflows its visible window and shows a scrollbar.
+fn app_with_many_tags(count: usize) -> AppModel {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    for index in 0..count {
+        fs::write(
+            entry_dir.join(format!("{index}.md")),
+            format!(
+                "+++\nschema_version = 1\n\n[entry]\ntags = [\"tag-{index:02}\"]\n\n[time]\ncreated_at = \"2026-07-01T10:{index:02}:00+02:00\"\n+++\n\n# Entry {index}\nBody\n"
+            ),
+        )
+        .unwrap();
+    }
+    let config = Config::new(dir.path().to_path_buf());
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    std::mem::forget(dir);
+    app
+}
+
+#[test]
+fn filter_dialog_renders_across_sizes() {
+    // A comfortable size shows the framed title and the populated tabs.
+    let mut app = app_with_metadata_entry();
+    app.nav.focus = Focus::Journals;
+    app.begin_filter();
+    let text = render_text(app, 90, 24);
+    assert!(text.contains("Filter —"), "missing title: {text}");
+    // The dialog is sized to the full tab strip, so every full label fits — even
+    // the longest ("Locations") — without collapsing to shorter labels.
+    assert!(text.contains("Tags"), "missing a tab label: {text}");
+    assert!(
+        text.contains("Locations"),
+        "full tab labels should fit: {text}"
+    );
+
+    // Tiny terminals must still render without panicking on the layout math.
+    for (w, h) in [(40u16, 12u16), (20, 8), (12, 6)] {
+        let mut app = app_with_metadata_entry();
+        app.nav.focus = Focus::Journals;
+        app.begin_filter();
+        let _ = render_text(app, w, h);
+    }
+}
+
 /// Put `app` into the state where the insights panel is the visible, focused
 /// right pane: browsing with the panel focused and no entry selected.
 fn focus_insights(app: &mut AppModel, tab: InsightsTab) {
@@ -1961,7 +2008,7 @@ fn entries_footer_includes_entry_actions_when_an_entry_is_selected() {
 }
 
 #[test]
-fn entries_and_reader_share_one_footer_for_a_selected_entry() {
+fn entries_and_reader_share_the_entry_actions_but_only_entries_shows_the_index() {
     let mut app = app_with_entry();
 
     app.nav.focus = Focus::Entries;
@@ -1969,9 +2016,18 @@ fn entries_and_reader_share_one_footer_for_a_selected_entry() {
     app.nav.focus = Focus::Reader;
     let reader = footer_text(&app, 200);
 
-    // Both render `focused_entry_footer`, so the text is byte-for-byte identical
-    // (image chip included) — the two footers cannot drift.
-    assert_eq!(entries, reader);
+    // Both render `focused_entry_footer`, so the shared entry actions cannot drift.
+    for label in ["e  edit", "t  tags", "s  star", "d  del"] {
+        assert!(entries.contains(label), "entries missing {label}");
+        assert!(reader.contains(label), "reader missing {label}");
+    }
+    // `b` opens the filter browser from the entries column but is inert in the
+    // reader, so only the entries footer advertises it.
+    assert!(entries.contains("b  filter"), "entries missing filter chip");
+    assert!(
+        !reader.contains("filter"),
+        "reader should not show the filter chip"
+    );
 }
 
 #[test]
@@ -3029,6 +3085,53 @@ mod flat_chrome_tests {
         // Bordered chrome reserves nothing beside the list, so every row shares
         // one width and the bar rides the frame border.
         assert_eq!(layout.inner.width, layout.list.width);
+    }
+
+    #[test]
+    fn flat_filter_dialog_scrollbar_scopes_to_the_list_rows() {
+        let frame_area = Rect::new(0, 0, 90, 24);
+        let mut app = flat_app(app_with_many_tags(20));
+        app.nav.focus = Focus::Journals;
+        app.begin_filter();
+        let theme = app.appearance.theme.clone();
+
+        let layout = filter_dialog_layout(&theme, frame_area, app.filter_state().unwrap());
+        // The Tags tab overflows its window, so the list narrows by the scrollbar
+        // gutter while the tab strip and hint rows run flush with the bar's edge —
+        // the same list-scoped treatment as every other dialog.
+        assert!(layout.list.height < 20);
+        assert_eq!(layout.hints.width, layout.list.width + 2);
+        assert_eq!(layout.tabs.width, layout.hints.width);
+
+        let bar_x = layout.list.x + layout.list.width + 1;
+        assert_eq!(layout.hints.x + layout.hints.width, bar_x + 1);
+
+        let backend = render_backend(frame_area.width, frame_area.height, |frame| {
+            dialogs::draw_filter_dialog(
+                &theme,
+                frame,
+                app.filter_state_mut().unwrap(),
+                HoverTarget::None,
+            )
+        });
+        let glyphs = theme.glyphs();
+        let scrollbar_glyphs = [
+            glyphs.scrollbar_thumb,
+            glyphs.scrollbar_track,
+            glyphs.scrollbar_up,
+            glyphs.scrollbar_down,
+        ];
+        let is_scrollbar = |x: u16, y: u16| {
+            backend.buffer()[(x, y)]
+                .symbol()
+                .chars()
+                .next()
+                .is_some_and(|c| scrollbar_glyphs.contains(&c))
+        };
+        // The bar paints on the list rows but not on the tab strip or hint row.
+        assert!(is_scrollbar(bar_x, layout.list.y));
+        assert!(!is_scrollbar(bar_x, layout.tabs.y));
+        assert!(!is_scrollbar(bar_x, layout.hints.y));
     }
 
     #[test]

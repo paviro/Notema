@@ -13,8 +13,6 @@ mod feelings;
 mod overview;
 mod widgets;
 
-use std::ops::Range;
-
 use ratatui::{
     Frame,
     layout::Rect,
@@ -26,8 +24,8 @@ use ratatui::{
 use notema_storage::journal_display_name;
 
 use crate::tui::app::{AppModel, InsightsScrollGeometry};
-use crate::tui::entry_rows::text_width;
 use crate::tui::features::insights::{InsightsScope, InsightsTab};
+use crate::tui::render::tab_strip::{StripTab, tab_segments, tab_strip_line};
 use crate::tui::render::{render_centered_notice, render_scrollbar_if_needed};
 use crate::tui::state::HoverTarget;
 use crate::tui::surface::surface_content_inner;
@@ -57,20 +55,22 @@ pub(crate) fn draw_journal_insights(
         Block::new()
             .style(Style::default().bg(active_theme.content_bg()))
             .padding(Padding::uniform(1))
-            .title(tabs_title_line(
+            .title(tab_strip_line(
                 active_theme,
                 tab,
                 focused,
                 hovered_tab,
+                strip_leading(active_theme),
                 inner_width,
             ))
     } else {
         let mut block = Block::default()
-            .title(tabs_title_line(
+            .title(tab_strip_line(
                 active_theme,
                 tab,
                 focused,
                 hovered_tab,
+                strip_leading(active_theme),
                 inner_width,
             ))
             .borders(Borders::ALL)
@@ -214,14 +214,6 @@ fn draw_scrollable(
     };
 }
 
-/// Which set of labels the tab strip is using at a given width.
-#[derive(Clone, Copy)]
-enum StripLevel {
-    Full,
-    Short,
-    Initial,
-}
-
 /// Cells of leading space before the first tab label. Flat chrome indents by two
 /// to line the strip up with the other columns' padded titles (which gained an
 /// extra leading space); bordered chrome keeps the single space off the corner.
@@ -233,93 +225,19 @@ fn strip_leading(theme: &Theme) -> u16 {
     }
 }
 
-/// Total strip width for a label function: the leading space(s), every label, and
-/// a 3-cell ` · ` between each.
-fn strip_width(theme: &Theme, label: impl Fn(InsightsTab) -> &'static str) -> usize {
-    let labels: usize = InsightsTab::ALL
-        .iter()
-        .map(|tab| text_width(label(*tab)))
-        .sum();
-    strip_leading(theme) as usize + labels + 3 * (InsightsTab::ALL.len() - 1)
-}
-
-/// Pick the widest label set that fits `width`: full titles, then short titles,
-/// then single-letter initials (which always fit).
-fn strip_level(theme: &Theme, width: u16) -> StripLevel {
-    let width = width as usize;
-    if strip_width(theme, InsightsTab::title) <= width {
-        StripLevel::Full
-    } else if strip_width(theme, InsightsTab::short_title) <= width {
-        StripLevel::Short
-    } else {
-        StripLevel::Initial
+impl StripTab for InsightsTab {
+    fn all() -> &'static [Self] {
+        &Self::ALL
     }
-}
-
-/// The label for `tab` at the strip's current fit level.
-fn tab_label(theme: &Theme, tab: InsightsTab, width: u16) -> &'static str {
-    match strip_level(theme, width) {
-        StripLevel::Full => tab.title(),
-        StripLevel::Short => tab.short_title(),
-        StripLevel::Initial => tab.initial(),
+    fn title(self) -> &'static str {
+        self.title()
     }
-}
-
-/// The column range each tab label occupies within a border title of `width`,
-/// measured from the title's start (a leading space, then labels with a 3-cell
-/// ` · ` between). The one source of truth shared by [`tabs_title_line`] and
-/// [`insights_tab_at`] so drawing and hit-testing never drift.
-fn tab_strip_segments(theme: &Theme, width: u16) -> Vec<(InsightsTab, Range<u16>)> {
-    let mut segments = Vec::with_capacity(InsightsTab::ALL.len());
-    let mut x: u16 = strip_leading(theme); // leading space(s)
-    for (index, tab) in InsightsTab::ALL.iter().enumerate() {
-        if index > 0 {
-            x += 3; // " · "
-        }
-        let w = text_width(tab_label(theme, *tab, width)) as u16;
-        segments.push((*tab, x..x + w));
-        x += w;
+    fn short_title(self) -> &'static str {
+        self.short_title()
     }
-    segments
-}
-
-/// The tab bar as a border title: `Overview · Writing · Mood / Feelings · Drivers`
-/// (short labels when they won't fit). The active tab carries the focused-tab
-/// style while focused (accent on flat chrome, inverted on bordered),
-/// otherwise just bold; the rest stay dim.
-fn tabs_title_line(
-    theme: &Theme,
-    active: InsightsTab,
-    focused: bool,
-    hovered: Option<InsightsTab>,
-    width: u16,
-) -> Line<'static> {
-    let mut spans = vec![Span::raw(" ".repeat(strip_leading(theme) as usize))];
-    for (index, tab) in InsightsTab::ALL.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled(
-                format!(" {} ", theme.glyphs().tab_separator),
-                theme.tab_separator(),
-            ));
-        }
-        let mut style = if *tab == active {
-            theme.active_tab(focused)
-        } else {
-            theme.inactive_tab()
-        };
-        if hovered == Some(*tab) && *tab != active {
-            style = tab_hover_style(theme);
-        }
-        spans.push(Span::styled(
-            tab_label(theme, *tab, width).to_string(),
-            style,
-        ));
+    fn initial(self) -> &'static str {
+        self.initial()
     }
-    Line::from(spans)
-}
-
-fn tab_hover_style(theme: &Theme) -> Style {
-    theme.text()
 }
 
 /// The tab whose border-title label covers `(column, row)`, or `None`. The strip
@@ -335,7 +253,7 @@ pub(crate) fn insights_tab_at(
     }
     let title_x = area.x + 1;
     let inner_width = area.width.saturating_sub(2);
-    for (tab, range) in tab_strip_segments(theme, inner_width) {
+    for (tab, range) in tab_segments::<InsightsTab>(strip_leading(theme), inner_width) {
         if column >= title_x + range.start && column < title_x + range.end {
             return Some(tab);
         }

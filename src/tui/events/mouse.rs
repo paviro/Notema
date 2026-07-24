@@ -18,8 +18,8 @@ use crate::tui::{
 
 use super::DispatchOutcome;
 use super::action::{
-    Action, BrowserAction, DialogListTarget, EditMetadataFocusTarget, EditorAction, ImageAction,
-    InsightsAction, LocationAction, MetadataAction, MetadataSearchTarget, MouseAction,
+    Action, BrowserAction, DialogListTarget, EditMetadataFocusTarget, EditorAction, FilterAction,
+    ImageAction, InsightsAction, LocationAction, MetadataAction, MetadataSearchTarget, MouseAction,
     OverlayAction, ScrollbarMetrics, SearchAction, SettingsAction, TextFieldTarget,
 };
 
@@ -571,6 +571,12 @@ pub(super) fn apply_mouse_action(
                     index,
                 ))));
             }
+            DialogListTarget::Filter => {
+                if let Some(state) = app.filter_state_mut() {
+                    state.select_index(index);
+                    return Ok(Some(Action::Filter(FilterAction::Launch)));
+                }
+            }
         },
         MouseAction::DialogFocusMetadata(focus) => {
             let focus = match focus {
@@ -610,6 +616,11 @@ pub(super) fn apply_mouse_action(
             }
             DialogListTarget::ThemePicker => {
                 if let Some(state) = app.theme_picker_state_mut() {
+                    state.scroll_by(delta, viewport);
+                }
+            }
+            DialogListTarget::Filter => {
+                if let Some(state) = app.filter_state_mut() {
                     state.scroll_by(delta, viewport);
                 }
             }
@@ -950,6 +961,15 @@ pub(super) fn hint_id_to_action(app: &AppModel, id: render::HintId) -> Option<Ac
         render::HintId::EditorFullscreen => Some(Action::Editor(EditorAction::ToggleFullscreen)),
         render::HintId::EditorMetadata => Some(Action::Editor(EditorAction::OpenMetadataMenu)),
         render::HintId::EditorHelp => Some(Action::Editor(EditorAction::OpenHelp)),
+        render::HintId::OpenFilter if matches!(app.nav.focus, Focus::Journals | Focus::Entries) => {
+            Some(Action::Filter(FilterAction::Open))
+        }
+        render::HintId::FilterNextTab if app.filter_state().is_some() => {
+            Some(Action::Filter(FilterAction::NextTab))
+        }
+        render::HintId::FilterLaunch if app.filter_state().is_some() => {
+            Some(Action::Filter(FilterAction::Launch))
+        }
         _ => None,
     }
 }

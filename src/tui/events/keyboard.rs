@@ -31,7 +31,7 @@ use crate::tui::{
 
 use super::DispatchOutcome;
 use super::action::{
-    Action, BrowserAction, EditorAction, ImageAction, InsightsAction, LocationAction,
+    Action, BrowserAction, EditorAction, FilterAction, ImageAction, InsightsAction, LocationAction,
     MetadataAction, OverlayAction, ReaderAction, SearchAction, SettingsAction,
 };
 
@@ -288,6 +288,7 @@ pub(super) fn key_to_action(
         Overlay::EditMetadata(_) => tags_key_to_action(app, key),
         Overlay::EditFeelings(_) => feelings_key_to_action(app, key),
         Overlay::EditMood(_) => mood_key_to_action(key),
+        Overlay::Filter(_) => filter_key_to_action(key),
         Overlay::EditLocation(_) => location_key_to_action(app, key),
         Overlay::ImageViewer(_) => image_viewer_key_to_action(key),
         // Blocks input; it auto-resolves when the fetch lands or times out.
@@ -412,6 +413,11 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
         // entries column (this journal).
         KeyCode::Char('/') if matches!(app.nav.focus, Focus::Journals | Focus::Entries) => {
             Some(Action::Search(SearchAction::Begin))
+        }
+        // Open the filter browser (tags/people/…/mood) — scoped to all journals
+        // from the journals column, the selected journal from the entries column.
+        KeyCode::Char('b') if matches!(app.nav.focus, Focus::Journals | Focus::Entries) => {
+            Some(Action::Filter(FilterAction::Open))
         }
         // Left backs out one level, but does nothing in multi-column full screen —
         // there, Esc collapses back to the focused reader pane instead.
@@ -737,6 +743,21 @@ fn feelings_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
     }
 }
 
+/// Keys while the filter browser is open. It takes no free text, so bare arrows
+/// drive it: Left/Right (or Tab/BackTab) switch tabs, Up/Down move the selection,
+/// Enter launches the highlighted row's search, Esc closes.
+fn filter_key_to_action(key: KeyEvent) -> Option<Action> {
+    Some(match key.code {
+        KeyCode::Esc => Action::Overlay(OverlayAction::Cancel),
+        KeyCode::Tab | KeyCode::Right => Action::Filter(FilterAction::NextTab),
+        KeyCode::BackTab | KeyCode::Left => Action::Filter(FilterAction::PrevTab),
+        KeyCode::Up => Action::Filter(FilterAction::MoveSelection(-1)),
+        KeyCode::Down => Action::Filter(FilterAction::MoveSelection(1)),
+        KeyCode::Enter => Action::Filter(FilterAction::Launch),
+        _ => return None,
+    })
+}
+
 fn mood_key_to_action(key: KeyEvent) -> Option<Action> {
     match key.code {
         KeyCode::Esc => Some(Action::Overlay(OverlayAction::Cancel)),
@@ -809,6 +830,48 @@ mod tests {
 
     fn ev(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, mods)
+    }
+
+    #[test]
+    fn index_opens_only_from_the_journals_and_entries_columns() {
+        let mut app = crate::tui::test_support::app_with_entry();
+        let key = ev(KeyCode::Char('b'), KeyModifiers::NONE);
+
+        for focus in [Focus::Journals, Focus::Entries] {
+            app.nav.focus = focus;
+            assert_eq!(
+                key_to_action(&app, key, true),
+                Some(Action::Filter(FilterAction::Open)),
+                "b should open the index from {focus:?}"
+            );
+        }
+
+        // Elsewhere (e.g. the reader) `b` is not the index shortcut.
+        app.nav.focus = Focus::Reader;
+        assert_ne!(
+            key_to_action(&app, key, true),
+            Some(Action::Filter(FilterAction::Open))
+        );
+    }
+
+    #[test]
+    fn filter_dialog_keys_map_to_their_actions() {
+        assert_eq!(
+            filter_key_to_action(ev(KeyCode::Tab, KeyModifiers::NONE)),
+            Some(Action::Filter(FilterAction::NextTab))
+        );
+        assert_eq!(
+            filter_key_to_action(ev(KeyCode::Left, KeyModifiers::NONE)),
+            Some(Action::Filter(FilterAction::PrevTab))
+        );
+        assert_eq!(
+            filter_key_to_action(ev(KeyCode::Enter, KeyModifiers::NONE)),
+            Some(Action::Filter(FilterAction::Launch))
+        );
+        assert_eq!(
+            filter_key_to_action(ev(KeyCode::Esc, KeyModifiers::NONE)),
+            Some(Action::Overlay(OverlayAction::Cancel))
+        );
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub(super) fn mapped_hover_target(col: u16, row: u16, view: &ViewState) -> Hover
             text_field_hover_at(col, row, view).unwrap_or_default()
         }
         Some(InteractionKind::Hint(id)) => HoverTarget::FooterHint(*id),
+        Some(InteractionKind::FilterTab(tab)) => HoverTarget::FilterTab(*tab),
         Some(InteractionKind::DialogRow { index, .. }) => HoverTarget::DialogRow(*index),
         Some(InteractionKind::ConfirmButton { destructive, .. }) => {
             HoverTarget::ConfirmButton(*destructive)
@@ -115,6 +116,7 @@ fn mapped_overlay_click(app: &AppModel, col: u16, row: u16, view: &ViewState) ->
             Some(Action::Editor(EditorAction::ClosePrompt))
         }
         InteractionKind::DialogClose(_) => Some(Action::Overlay(OverlayAction::Cancel)),
+        InteractionKind::FilterTab(tab) => Some(Action::Filter(FilterAction::SelectTab(*tab))),
         InteractionKind::DialogRow { dialog, index } => dialog_row_action(*dialog, *index),
         InteractionKind::DialogList { dialog, .. } => dialog_list_focus_action(*dialog),
         InteractionKind::DialogInput(input) => dialog_input_focus_action(*input),
@@ -177,6 +179,10 @@ fn dialog_row_action(dialog: DialogId, index: usize) -> Option<Action> {
             target: DialogListTarget::Location,
             index,
         })),
+        DialogId::Filter => Some(Action::Mouse(MouseAction::DialogRow {
+            target: DialogListTarget::Filter,
+            index,
+        })),
     }
 }
 
@@ -237,6 +243,7 @@ fn mapped_overlay_wheel(
         DialogId::Feelings => DialogListTarget::Feelings,
         DialogId::Location => DialogListTarget::Location,
         DialogId::ThemePicker => DialogListTarget::ThemePicker,
+        DialogId::Filter => DialogListTarget::Filter,
         _ => return None,
     };
     Some(Action::Mouse(MouseAction::DialogScroll {

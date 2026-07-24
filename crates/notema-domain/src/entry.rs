@@ -129,6 +129,35 @@ pub struct ImportSource {
     pub id: String,
 }
 
+/// A coarse settlement/country bucket the library index groups entries by. Formats
+/// two ways: [`display_label`](Self::display_label) for the row (`"Berlin - Germany"`)
+/// and [`search_query`](Self::search_query) the row launches (`"Berlin, Germany"`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PlaceGroup {
+    settlement: Option<String>,
+    country: Option<String>,
+}
+
+impl PlaceGroup {
+    /// The row label: settlement and country set off with `" - "`.
+    pub fn display_label(&self) -> String {
+        self.join(" - ")
+    }
+
+    /// The `location:` query the row launches: settlement and country joined by `", "`.
+    pub fn search_query(&self) -> String {
+        self.join(", ")
+    }
+
+    fn join(&self, separator: &str) -> String {
+        match (self.settlement.as_deref(), self.country.as_deref()) {
+            (Some(settlement), Some(country)) => format!("{settlement}{separator}{country}"),
+            (Some(part), None) | (None, Some(part)) => part.to_string(),
+            (None, None) => String::new(),
+        }
+    }
+}
+
 impl Location {
     pub fn coordinates(&self) -> Option<Coordinates> {
         Coordinates::try_new(self.latitude?, self.longitude?).ok()
@@ -177,6 +206,51 @@ impl Location {
             .or(self.village.as_deref())
             .or(self.municipality.as_deref())
             .or(self.hamlet.as_deref())
+    }
+
+    /// Bucket this location into a [`PlaceGroup`], taking the settlement via the
+    /// city→hamlet fallback and the country as-is. `None` when neither is known, so
+    /// entries with only coordinates don't group.
+    pub fn place_group(&self) -> Option<PlaceGroup> {
+        let settlement = self.settlement().map(str::to_string);
+        let country = self.country.clone();
+        (settlement.is_some() || country.is_some()).then_some(PlaceGroup {
+            settlement,
+            country,
+        })
+    }
+
+    /// Every named part lowercased and space-joined in address order — the substring
+    /// haystack a `location:` search matches against (any part: street, number,
+    /// postcode, suburb, …). Coordinates are excluded; they carry no place name.
+    pub fn search_haystack(&self) -> String {
+        [
+            self.name.as_deref(),
+            self.road.as_deref(),
+            self.house_number.as_deref(),
+            self.neighbourhood.as_deref(),
+            self.quarter.as_deref(),
+            self.suburb.as_deref(),
+            self.borough.as_deref(),
+            self.city_district.as_deref(),
+            self.city.as_deref(),
+            self.town.as_deref(),
+            self.village.as_deref(),
+            self.municipality.as_deref(),
+            self.hamlet.as_deref(),
+            self.postcode.as_deref(),
+            self.county.as_deref(),
+            self.state_district.as_deref(),
+            self.province.as_deref(),
+            self.region.as_deref(),
+            self.state.as_deref(),
+            self.country.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
     }
 
     /// A one-line label for display. The `name` is set off with `" - "`; the
@@ -622,27 +696,25 @@ mod tests {
     #[test]
     fn location_display_label_sets_off_name_and_omits_coarse_fields() {
         let location = Location {
-            name: Some("Zuhause".to_string()),
-            road: Some("Gürtelstraße".to_string()),
-            house_number: Some("13".to_string()),
-            neighbourhood: Some("Komponistenviertel".to_string()),
-            suburb: Some("Weißensee".to_string()),
-            city_district: Some("Pankow".to_string()),
-            postcode: Some("13088".to_string()),
+            name: Some("Musterhaus".to_string()),
+            road: Some("Musterstraße".to_string()),
+            house_number: Some("12".to_string()),
+            neighbourhood: Some("Musterkiez".to_string()),
+            suburb: Some("Musterort".to_string()),
+            city_district: Some("Musterbezirk".to_string()),
+            postcode: Some("12345".to_string()),
             city: Some("Berlin".to_string()),
             state: Some("Berlin".to_string()),
             country: Some("Deutschland".to_string()),
-            latitude: Some(52.5449),
-            longitude: Some(13.4532),
+            latitude: Some(52.5),
+            longitude: Some(13.4),
             ..Location::default()
         };
-        // `name` is set off with " - "; `city_district` (Pankow) and `state` are
-        // stored but not shown.
+        // `name` is set off with " - "; `city_district` and `state` are stored but
+        // not shown.
         assert_eq!(
             location.display_label().as_deref(),
-            Some(
-                "Zuhause - Gürtelstraße 13, Komponistenviertel, Weißensee, 13088 Berlin, Deutschland"
-            )
+            Some("Musterhaus - Musterstraße 12, Musterkiez, Musterort, 12345 Berlin, Deutschland")
         );
     }
 
@@ -658,5 +730,70 @@ mod tests {
             Some("10.0000, 20.0000")
         );
         assert_eq!(Location::default().display_label(), None);
+    }
+
+    #[test]
+    fn location_place_group_joins_settlement_and_country() {
+        let both = Location {
+            city: Some("Berlin".to_string()),
+            country: Some("Deutschland".to_string()),
+            ..Location::default()
+        };
+        let group = both.place_group().expect("bucket");
+        assert_eq!(group.display_label(), "Berlin - Deutschland");
+        assert_eq!(group.search_query(), "Berlin, Deutschland");
+
+        // A town (no city) is still the settlement, via the fallback.
+        let town_only = Location {
+            town: Some("Ahrenshoop".to_string()),
+            ..Location::default()
+        };
+        let group = town_only.place_group().expect("bucket");
+        assert_eq!(group.display_label(), "Ahrenshoop");
+        assert_eq!(group.search_query(), "Ahrenshoop");
+
+        let country_only = Location {
+            country: Some("Deutschland".to_string()),
+            ..Location::default()
+        };
+        assert_eq!(
+            country_only.place_group().expect("bucket").display_label(),
+            "Deutschland"
+        );
+
+        // Coordinates alone carry no place name.
+        let coords_only = Location {
+            latitude: Some(10.0),
+            longitude: Some(20.0),
+            ..Location::default()
+        };
+        assert_eq!(coords_only.place_group(), None);
+        assert_eq!(Location::default().place_group(), None);
+    }
+
+    #[test]
+    fn location_search_haystack_covers_every_named_part() {
+        let location = Location {
+            road: Some("Musterstraße".to_string()),
+            house_number: Some("12".to_string()),
+            suburb: Some("Musterort".to_string()),
+            city: Some("Berlin".to_string()),
+            postcode: Some("12345".to_string()),
+            country: Some("Deutschland".to_string()),
+            ..Location::default()
+        };
+        let haystack = location.search_haystack();
+        assert!(haystack.contains("musterstraße")); // lowercased
+        // Road and house number are adjacent, so "musterstraße 12" matches.
+        assert!(haystack.contains("musterstraße 12"));
+        assert!(haystack.contains("12345"));
+        assert!(haystack.contains("musterort"));
+
+        let coords_only = Location {
+            latitude: Some(10.0),
+            longitude: Some(20.0),
+            ..Location::default()
+        };
+        assert!(coords_only.search_haystack().is_empty());
     }
 }

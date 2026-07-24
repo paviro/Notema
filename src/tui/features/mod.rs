@@ -5,6 +5,7 @@ pub(crate) mod browser;
 pub(crate) mod editor;
 pub(crate) mod environment;
 pub(crate) mod feelings;
+pub(crate) mod filter;
 pub(crate) mod images;
 pub(crate) mod insights;
 pub(crate) mod location;

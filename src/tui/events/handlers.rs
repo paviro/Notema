@@ -446,6 +446,44 @@ pub(super) fn insights(app: &mut AppModel, action: InsightsAction) {
     }
 }
 
+pub(super) fn filter<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppModel,
+    action: FilterAction,
+) -> AppResult<()> {
+    match action {
+        FilterAction::Open => app.begin_filter(),
+        FilterAction::NextTab => {
+            if let Some(state) = app.filter_state_mut() {
+                let next = state.tab.next();
+                state.set_tab(next);
+            }
+        }
+        FilterAction::PrevTab => {
+            if let Some(state) = app.filter_state_mut() {
+                let prev = state.tab.prev();
+                state.set_tab(prev);
+            }
+        }
+        FilterAction::SelectTab(tab) => {
+            if let Some(state) = app.filter_state_mut() {
+                state.set_tab(tab);
+            }
+        }
+        FilterAction::MoveSelection(delta) => {
+            navigate_open_dialog(terminal, app, |list| {
+                if delta < 0 {
+                    list.move_up();
+                } else if delta > 0 {
+                    list.move_down();
+                }
+            })?;
+        }
+        FilterAction::Launch => app.launch_filter_search(),
+    }
+    Ok(())
+}
+
 pub(super) fn overlay(app: &mut AppModel, action: OverlayAction) -> AppResult<()> {
     match action {
         OverlayAction::ConfirmSelect(yes) => set_confirm_selection(app, yes),

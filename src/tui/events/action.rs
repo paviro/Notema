@@ -2,7 +2,7 @@ use crossterm::event::KeyEvent;
 
 use crate::tui::{
     features::{insights::InsightsTab, location::EditLocationFocus},
-    state::{HoverTarget, MetadataKind},
+    state::{FilterTab, HoverTarget, MetadataKind},
     ui::interaction::{PanelId, TextFieldId},
 };
 
@@ -50,6 +50,7 @@ pub(crate) enum DialogListTarget {
     Feelings,
     Location,
     ThemePicker,
+    Filter,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -272,6 +273,18 @@ pub(crate) enum InsightsAction {
 }
 
 #[derive(Debug, PartialEq)]
+pub(crate) enum FilterAction {
+    Open,
+    NextTab,
+    PrevTab,
+    SelectTab(FilterTab),
+    MoveSelection(isize),
+    /// Launch the search for the highlighted row. A mouse click on a row selects
+    /// it first (via [`MouseAction::DialogRow`]) and then fires this.
+    Launch,
+}
+
+#[derive(Debug, PartialEq)]
 pub(crate) enum OverlayAction {
     ConfirmSelect(bool),
     Cancel,
@@ -308,4 +321,5 @@ pub(crate) enum Action {
     Overlay(OverlayAction),
     Reader(ReaderAction),
     Insights(InsightsAction),
+    Filter(FilterAction),
 }

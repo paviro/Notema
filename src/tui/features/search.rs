@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use notema_domain::{Entry, EntryEncryptionState, SearchHit, feeling_matches_search};
+use notema_domain::{Entry, EntryEncryptionState, MOOD_RANGE, SearchHit, feeling_matches_search};
 
 use crate::tui::{
     app::{AppModel, Focus, Mode, SearchScope},
@@ -110,6 +110,14 @@ impl AppModel {
                 // mirroring how an unknown `feelings:` value yields no hits.
                 None => Vec::new(),
             }
+        } else if let Some(place) = query.strip_prefix("location:") {
+            self.search_results_by_location(place.trim())
+        } else if let Some(mood) = query.strip_prefix("mood:") {
+            match mood.trim().parse::<i8>() {
+                Ok(score) if MOOD_RANGE.contains(&score) => self.search_results_by_mood(score),
+                // Unparseable or out-of-range matches nothing, like an unknown `star:`.
+                _ => Vec::new(),
+            }
         } else {
             search_loaded_entries(&self.library.entries, query, &self.search.scope)
         }
@@ -120,16 +128,7 @@ impl AppModel {
         self.library
             .entries
             .iter()
-            .filter(|entry| {
-                !matches!(
-                    entry.encryption_state,
-                    EntryEncryptionState::EncryptedLocked
-                        | EntryEncryptionState::EncryptedUnreadable
-                ) && match self.search.scope {
-                    SearchScope::AllJournals => true,
-                    SearchScope::Journal(ref journal) => entry.journal == *journal,
-                } && predicate(entry)
-            })
+            .filter(|entry| entry_in_search_scope(entry, &self.search.scope) && predicate(entry))
             .map(SearchHit::from_entry)
             .collect()
     }
@@ -139,25 +138,84 @@ impl AppModel {
         kind: MetadataKind,
         query: &str,
     ) -> Vec<SearchHit> {
-        let query_lower = query.to_lowercase();
-        self.search_results_matching(|entry| {
-            metadata_values(entry, kind)
-                .iter()
-                .any(|value| value.to_lowercase().contains(&query_lower))
-        })
+        self.search_results_matching(metadata_predicate(kind, query))
     }
 
     pub(crate) fn search_results_by_feeling(&self, feeling: &str) -> Vec<SearchHit> {
-        self.search_results_matching(|entry| {
-            entry
-                .feelings
-                .iter()
-                .any(|entry_feeling| feeling_matches_search(entry_feeling, feeling))
-        })
+        self.search_results_matching(feeling_predicate(feeling))
     }
 
     pub(crate) fn search_results_by_starred(&self, want: bool) -> Vec<SearchHit> {
         self.search_results_matching(|entry| entry.starred == want)
+    }
+
+    /// Entries whose location matches `query` (see [`location_predicate`]).
+    pub(crate) fn search_results_by_location(&self, query: &str) -> Vec<SearchHit> {
+        self.search_results_matching(location_predicate(query))
+    }
+
+    pub(crate) fn search_results_by_mood(&self, score: i8) -> Vec<SearchHit> {
+        self.search_results_matching(|entry| entry.mood == Some(score))
+    }
+}
+
+/// Whether an entry matches a `tags:`/`people:`/`activities:` search: any of its
+/// `kind` values contains `query`, case-insensitively. The filter browser's row
+/// counter and the launched search share this predicate (and the location/feeling
+/// ones below), so a row's count always equals the hits its search returns.
+pub(crate) fn metadata_predicate(
+    kind: MetadataKind,
+    query: &str,
+) -> impl Fn(&Entry) -> bool + use<> {
+    let needle = query.to_lowercase();
+    move |entry| {
+        metadata_values(entry, kind)
+            .iter()
+            .any(|value| value.to_lowercase().contains(&needle))
+    }
+}
+
+/// Whether an entry matches a `location:` search: every word in `query` appears
+/// (case-insensitively, any order) somewhere in the location's
+/// [`search_haystack`](notema_domain::Location::search_haystack). Words split on any
+/// non-alphanumeric character, so `"Berlin, Germany"` and `"Berlin - Germany"`
+/// tokenize alike.
+pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<> {
+    let needles: Vec<String> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    move |entry| {
+        // An empty or punctuation-only query matches nothing.
+        !needles.is_empty()
+            && entry.location.as_ref().is_some_and(|location| {
+                let haystack = location.search_haystack();
+                needles.iter().all(|needle| haystack.contains(needle))
+            })
+    }
+}
+
+/// Whether an entry matches a `feelings:` search for `feeling`.
+pub(crate) fn feeling_predicate(feeling: &str) -> impl Fn(&Entry) -> bool + use<> {
+    let feeling = feeling.to_string();
+    move |entry| {
+        entry
+            .feelings
+            .iter()
+            .any(|entry_feeling| feeling_matches_search(entry_feeling, &feeling))
+    }
+}
+
+/// Whether `entry` is visible to a search under `scope`: unlocked (locked and
+/// unreadable encrypted entries never match) and inside the scope.
+pub(crate) fn entry_in_search_scope(entry: &Entry, scope: &SearchScope) -> bool {
+    !matches!(
+        entry.encryption_state,
+        EntryEncryptionState::EncryptedLocked | EntryEncryptionState::EncryptedUnreadable
+    ) && match scope {
+        SearchScope::AllJournals => true,
+        SearchScope::Journal(journal) => entry.journal == *journal,
     }
 }
 
@@ -170,5 +228,108 @@ fn parse_starred_value(value: &str) -> Option<bool> {
         "" | "true" | "1" => Some(true),
         "false" | "0" => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notema_domain::Location;
+
+    fn located_entry(city: &str, country: &str, mood: Option<i8>) -> Entry {
+        let mut entry = notema_domain::Entry {
+            id: "id".to_string(),
+            journal: "work".to_string(),
+            path: std::path::PathBuf::from("work/e.md"),
+            encryption_state: EntryEncryptionState::Plain,
+            created_at: None,
+            edited_at: None,
+            preview: String::new(),
+            activities: Vec::new(),
+            feelings: Vec::new(),
+            people: Vec::new(),
+            tags: Vec::new(),
+            mood,
+            starred: false,
+            location: Some(Location {
+                city: Some(city.to_string()),
+                country: Some(country.to_string()),
+                ..Location::default()
+            }),
+            weather: None,
+            celestial: None,
+            air_quality: None,
+            import: None,
+            body: String::new(),
+            word_count: 0,
+            search_haystack: String::new(),
+            warning: None,
+        };
+        entry.location.as_mut().unwrap().name = None;
+        entry
+    }
+
+    fn app_with(entries: Vec<Entry>) -> AppModel {
+        let mut app = crate::tui::test_support::app_with_journals(&[]);
+        app.library.entries = entries;
+        app
+    }
+
+    fn run(app: &mut AppModel, query: &str) -> usize {
+        app.search.scope = SearchScope::AllJournals;
+        app.search.query.set_text(query);
+        app.search_results().len()
+    }
+
+    #[test]
+    fn location_filter_matches_place_group_and_any_named_part() {
+        let mut detailed = located_entry("Berlin", "Germany", None);
+        {
+            let loc = detailed.location.as_mut().unwrap();
+            loc.road = Some("Musterstraße".to_string());
+            loc.house_number = Some("12".to_string());
+            loc.suburb = Some("Musterort".to_string());
+            loc.postcode = Some("12345".to_string());
+        }
+        let mut app = app_with(vec![
+            detailed,
+            located_entry("Berlin", "Germany", None),
+            located_entry("Paris", "France", None),
+        ]);
+
+        // The index's "City, Country" query and a typed "City - Country" tokenize
+        // the same (the separator is dropped), so both words must appear.
+        assert_eq!(run(&mut app, "location:Berlin, Germany"), 2);
+        assert_eq!(run(&mut app, "location:Berlin - Germany"), 2);
+        assert_eq!(run(&mut app, "location:Paris, France"), 1);
+
+        // Any named part matches, case-insensitively.
+        assert_eq!(run(&mut app, "location:berlin"), 2);
+        assert_eq!(run(&mut app, "location:Musterstraße"), 1);
+        assert_eq!(run(&mut app, "location:Musterstraße 12"), 1);
+        assert_eq!(run(&mut app, "location:12345"), 1);
+        assert_eq!(run(&mut app, "location:Musterort"), 1);
+
+        // Order-independent, and words may come from different address parts.
+        assert_eq!(run(&mut app, "location:Germany Berlin"), 2);
+        assert_eq!(run(&mut app, "location:12 Musterstraße"), 1);
+        assert_eq!(run(&mut app, "location:Musterort Berlin"), 1);
+
+        // Every word must match, so a bogus or absent part finds nothing.
+        assert_eq!(run(&mut app, "location:Berlin Tokyo"), 0);
+        assert_eq!(run(&mut app, "location:Tokyo"), 0);
+    }
+
+    #[test]
+    fn mood_filter_parses_clamps_and_rejects_junk() {
+        let mut app = app_with(vec![
+            located_entry("Berlin", "Germany", Some(3)),
+            located_entry("Berlin", "Germany", Some(-2)),
+        ]);
+        assert_eq!(run(&mut app, "mood:3"), 1);
+        assert_eq!(run(&mut app, "mood:-2"), 1);
+        // Unparseable or out-of-range values match nothing.
+        assert_eq!(run(&mut app, "mood:x"), 0);
+        assert_eq!(run(&mut app, "mood:9"), 0);
     }
 }
