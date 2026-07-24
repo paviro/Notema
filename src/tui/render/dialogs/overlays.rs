@@ -188,7 +188,7 @@ pub(in crate::tui::render) fn draw_edit_metadata_dialog(
             .collect()
     };
 
-    draw_dialog_frame(theme, frame, layout.area, &format!("Edit {title}"), true);
+    draw_dialog_frame_wide(theme, frame, layout.area, &format!("Edit {title}"), true);
     render_lines_in_area(
         frame,
         [Line::from(Span::styled(
@@ -223,15 +223,7 @@ pub(in crate::tui::render) fn draw_edit_metadata_dialog(
         layout.hints,
         hover,
     );
-    render_scrollbar_if_needed(
-        theme,
-        frame,
-        layout.area,
-        list_lines,
-        max_visible,
-        scroll,
-        true,
-    );
+    render_dialog_list_scrollbar(theme, frame, layout.list, list_lines, scroll, true);
 }
 
 pub(in crate::tui::render) fn draw_edit_mood_dialog(
@@ -319,7 +311,7 @@ pub(in crate::tui::render) fn draw_edit_location_dialog(
     let dim = theme.muted();
     let bold = theme.heading();
 
-    draw_dialog_frame(theme, frame, layout.area, "Edit Location", true);
+    draw_dialog_frame_wide(theme, frame, layout.area, "Edit Location", true);
 
     render_lines_in_area(
         frame,
@@ -433,15 +425,7 @@ pub(in crate::tui::render) fn draw_edit_location_dialog(
         layout.hints,
         hover,
     );
-    render_scrollbar_if_needed(
-        theme,
-        frame,
-        layout.area,
-        item_count,
-        max_visible,
-        scroll,
-        true,
-    );
+    render_dialog_list_scrollbar(theme, frame, layout.list, item_count, scroll, true);
 }
 
 pub(in crate::tui::render) fn draw_edit_feelings_dialog(
@@ -528,7 +512,7 @@ pub(in crate::tui::render) fn draw_edit_feelings_dialog(
             .collect()
     };
 
-    draw_dialog_frame(theme, frame, layout.area, "Edit Feelings", true);
+    draw_dialog_frame_wide(theme, frame, layout.area, "Edit Feelings", true);
     render_lines_in_area(
         frame,
         [Line::from(Span::styled(" Feelings ", theme.heading()))],
@@ -591,13 +575,5 @@ pub(in crate::tui::render) fn draw_edit_feelings_dialog(
         layout.hints,
         hover,
     );
-    render_scrollbar_if_needed(
-        theme,
-        frame,
-        layout.area,
-        list_lines,
-        max_visible,
-        scroll,
-        true,
-    );
+    render_dialog_list_scrollbar(theme, frame, layout.list, list_lines, scroll, true);
 }

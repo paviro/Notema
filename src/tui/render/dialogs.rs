@@ -21,11 +21,14 @@ use crate::tui::theme::Theme;
 
 use super::{
     chrome::{
-        centered_rect_fixed_size, dot_leader_line, flat_chrome, render_scrollbar_if_needed,
+        centered_rect_fixed_size, dot_leader_line, flat_chrome, render_dialog_list_scrollbar,
         separator_style,
     },
     footer::{Hint, HintId, hint_height, hint_lines},
-    frames::{dialog_frame_rows, dialog_inner, draw_dialog_frame, render_confirm_buttons},
+    frames::{
+        dialog_content_full, dialog_frame_rows, dialog_inner, dialog_list_width,
+        draw_dialog_frame, draw_dialog_frame_wide, render_confirm_buttons,
+    },
     list_state_for_render,
     metadata::MoodBar,
 };
@@ -352,7 +355,7 @@ pub(crate) fn location_dialog_layout(
 ) -> LocationDialogLayout {
     let list_rows = location_list_rows(theme, frame_area, labels);
     let area = location_dialog_area(theme, frame_area, list_rows);
-    let inner = dialog_inner(theme, area);
+    let inner = dialog_content_full(theme, area);
     let hint_height = location_dialog_hint_height(theme, frame_area);
     let row = |offset: u16| Rect {
         x: inner.x,
@@ -368,7 +371,7 @@ pub(crate) fn location_dialog_layout(
     let list = Rect {
         x: inner.x,
         y: inner.y + LOCATION_DIALOG_CHROME,
-        width: inner.width,
+        width: dialog_list_width(theme, inner.width, labels.len(), list_height),
         height: list_height,
     };
     let hints = Rect {
@@ -410,13 +413,13 @@ pub(crate) fn metadata_dialog_layout(
     filtered_len: usize,
 ) -> MetadataDialogLayout {
     let area = metadata_dialog_area(theme, frame_area, filtered_len);
-    let inner = dialog_inner(theme, area);
+    let inner = dialog_content_full(theme, area);
     let hint_height = tag_dialog_hint_height(theme, frame_area);
     let list_height = inner.height.saturating_sub(5 + hint_height);
     let list = Rect {
         x: inner.x,
         y: inner.y + 2,
-        width: inner.width,
+        width: dialog_list_width(theme, inner.width, filtered_len, list_height),
         height: list_height,
     };
     let list_top_separator = Rect {
@@ -475,15 +478,16 @@ pub(crate) fn feelings_dialog_layout(
 ) -> FeelingsDialogLayout {
     let selected_lines = feelings_selected_line_count(theme, frame_area, selected);
     let area = feelings_dialog_area(theme, frame_area, all_len, selected_lines);
-    let inner = dialog_inner(theme, area);
+    let inner = dialog_content_full(theme, area);
     let hint_height = feelings_dialog_hint_height(theme, frame_area);
     let selected_h = selected_lines as u16;
     let chrome = feelings_dialog_chrome_height(theme, frame_area, selected_lines);
+    let list_height = inner.height.saturating_sub(chrome);
     let list = Rect {
         x: inner.x,
         y: inner.y + 2,
-        width: inner.width,
-        height: inner.height.saturating_sub(chrome),
+        width: dialog_list_width(theme, inner.width, all_len, list_height),
+        height: list_height,
     };
     let list_top_separator = Rect {
         x: inner.x,

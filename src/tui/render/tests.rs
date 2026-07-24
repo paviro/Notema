@@ -2970,6 +2970,106 @@ mod flat_chrome_tests {
     }
 
     #[test]
+    fn flat_dialog_widens_non_list_rows_flush_with_the_scrollbar() {
+        let theme = flat_theme();
+        let frame_area = Rect::new(0, 0, 60, 20);
+        let layout = metadata_dialog_layout(&theme, frame_area, 20);
+        let backend = render_backend(frame_area.width, frame_area.height, |frame| {
+            dialogs::draw_edit_metadata_dialog(
+                &theme,
+                frame,
+                &mut many_tags_state(),
+                HoverTarget::None,
+            )
+        });
+        // The bar sits one padding column past the list; non-list rows run flush
+        // with its right edge, and the list stays two columns narrower.
+        let bar_x = layout.list.x + layout.list.width + 1;
+        assert_eq!(layout.inner.width, layout.list.width + 2);
+        assert_eq!(layout.inner.x + layout.inner.width, bar_x + 1);
+
+        // The surface margin is symmetric: the content's left inset equals the
+        // blank margin to the right of the bar.
+        let left_margin = layout.inner.x - layout.area.x;
+        let right_margin = (layout.area.x + layout.area.width) - (bar_x + 1);
+        assert_eq!(left_margin, right_margin);
+
+        // The separator paints up to the bar column; the list row leaves its
+        // padding column blank, and the right margin columns stay blank.
+        assert_ne!(
+            backend.buffer()[(bar_x, layout.list_top_separator.y)].symbol(),
+            " "
+        );
+        assert_eq!(backend.buffer()[(bar_x - 1, layout.list.y)].symbol(), " ");
+        assert_eq!(backend.buffer()[(bar_x + 1, layout.list.y)].symbol(), " ");
+    }
+
+    #[test]
+    fn flat_dialog_list_fills_full_width_when_it_does_not_overflow() {
+        let theme = flat_theme();
+        let frame_area = Rect::new(0, 0, 60, 20);
+        // Two tags in a 20-row dialog never overflow, so no bar is drawn and the
+        // list reclaims the gutter to run flush with the other rows.
+        let layout = metadata_dialog_layout(&theme, frame_area, 2);
+        assert!(layout.list.height as usize >= 2);
+        assert_eq!(layout.list.width, layout.inner.width);
+
+        let bar_x = layout.list.x + layout.list.width + 1;
+        let backend = render_backend(frame_area.width, frame_area.height, |frame| {
+            dialogs::draw_edit_metadata_dialog(&theme, frame, &mut tags_state(), HoverTarget::None)
+        });
+        // No scrollbar column past the flush list.
+        assert_eq!(backend.buffer()[(bar_x, layout.list.y)].symbol(), " ");
+    }
+
+    #[test]
+    fn bordered_dialog_keeps_non_list_rows_at_the_list_width() {
+        let theme = flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered));
+        let layout = metadata_dialog_layout(&theme, Rect::new(0, 0, 60, 20), 20);
+        // Bordered chrome reserves nothing beside the list, so every row shares
+        // one width and the bar rides the frame border.
+        assert_eq!(layout.inner.width, layout.list.width);
+    }
+
+    #[test]
+    fn dialog_scrollbar_spans_only_the_list_rows() {
+        let theme = flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered));
+        let frame_area = Rect::new(0, 0, 80, 20);
+        let layout = metadata_dialog_layout(&theme, frame_area, 20);
+        let backend = render_backend(frame_area.width, frame_area.height, |frame| {
+            dialogs::draw_edit_metadata_dialog(
+                &theme,
+                frame,
+                &mut many_tags_state(),
+                HoverTarget::None,
+            )
+        });
+        let bar = scrollbar_bar_rect(&theme, layout.area);
+        let glyphs = theme.glyphs();
+        let scrollbar_glyphs = [
+            glyphs.scrollbar_thumb,
+            glyphs.scrollbar_track,
+            glyphs.scrollbar_up,
+            glyphs.scrollbar_down,
+        ];
+        let is_scrollbar = |x: u16, y: u16| {
+            backend.buffer()[(x, y)]
+                .symbol()
+                .chars()
+                .next()
+                .is_some_and(|c| scrollbar_glyphs.contains(&c))
+        };
+
+        // The list rows carry the scrollbar; the chrome above and below it does
+        // not — the bordered frame stays a plain border there.
+        assert!(is_scrollbar(bar.x, layout.list.y));
+        assert!(is_scrollbar(bar.x, layout.list.y + layout.list.height - 1));
+        assert!(!is_scrollbar(bar.x, layout.list.y.saturating_sub(1)));
+        assert!(!is_scrollbar(bar.x, layout.list.y + layout.list.height));
+        assert!(!is_scrollbar(bar.x, layout.hints.y));
+    }
+
+    #[test]
     fn selection_is_a_bg_fill_not_reversed() {
         let theme = flat_theme();
         let selection = theme.selection();

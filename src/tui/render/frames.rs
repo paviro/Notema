@@ -42,6 +42,42 @@ pub(crate) fn dialog_inner(theme: &Theme, area: Rect) -> Rect {
     surface_content_inner(theme, frame_inner)
 }
 
+/// Columns between a dialog list's right edge and the non-list rows' right
+/// edge: a padding column and the scrollbar. The list holds them back; other
+/// rows reclaim them via [`dialog_content_full`]. Bordered chrome reserves
+/// nothing here — its bar rides the frame border.
+pub(crate) fn dialog_list_gutter(theme: &Theme) -> u16 {
+    2 * u16::from(flat_chrome(theme))
+}
+
+/// A dialog's content rect for rows that sit beside no scrollbar. In flat
+/// chrome it runs flush with the scrollbar's right edge so titles/inputs/hints
+/// don't shrink to leave the bar room, while keeping the surface margin
+/// symmetric with the left; a list narrows to [`dialog_list_width`] only when it
+/// overflows and shows a bar. Bordered chrome equals [`dialog_inner`].
+pub(crate) fn dialog_content_full(theme: &Theme, area: Rect) -> Rect {
+    let inner = dialog_inner(theme, area);
+    // Flat reclaims one of the two columns the narrow inner held off the edge,
+    // leaving the other as a right margin that matches the left.
+    let reclaim = u16::from(flat_chrome(theme));
+    Rect {
+        width: inner.width.saturating_add(reclaim),
+        ..inner
+    }
+}
+
+/// A dialog list's width within a [`dialog_content_full`] rect. A list of
+/// `total` rows in a `viewport`-row window reserves the scrollbar gutter only
+/// when it overflows and a bar is drawn; otherwise it fills the full width flush
+/// with the other rows. Mirrors `render_dialog_list_scrollbar`'s overflow guard.
+pub(crate) fn dialog_list_width(theme: &Theme, inner_width: u16, total: usize, viewport: u16) -> u16 {
+    if total > viewport as usize {
+        inner_width.saturating_sub(dialog_list_gutter(theme))
+    } else {
+        inner_width
+    }
+}
+
 /// Clear and frame a dialog, returning its content rect (always
 /// [`dialog_inner`] of `area`). Bordered chrome draws the classic titled box;
 /// flat chrome paints a dialog-colored surface with a bold title row and, when
@@ -53,15 +89,39 @@ pub(crate) fn draw_dialog_frame(
     title: &str,
     esc_hint: bool,
 ) -> Rect {
+    draw_dialog_frame_with_title_row(theme, frame, area, dialog_inner(theme, area), title, esc_hint)
+}
+
+/// Like [`draw_dialog_frame`], but the flat title row runs flush with the
+/// scrollbar's right edge ([`dialog_content_full`]) — for list dialogs whose
+/// body reclaims the scrollbar gutter, so the `esc` hint aligns with them.
+pub(crate) fn draw_dialog_frame_wide(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    esc_hint: bool,
+) -> Rect {
+    let title_row = dialog_content_full(theme, area);
+    draw_dialog_frame_with_title_row(theme, frame, area, title_row, title, esc_hint)
+}
+
+fn draw_dialog_frame_with_title_row(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title_row: Rect,
+    title: &str,
+    esc_hint: bool,
+) -> Rect {
     clear_surface(theme, frame, area, theme.dialog_bg());
     let title = title.trim();
     if flat_chrome(theme) {
         // The title sits below a blank padding row, off the card's edge.
-        let content = dialog_inner(theme, area);
         let top = Rect {
-            x: content.x,
+            x: title_row.x,
             y: area.y + 1.min(area.height.saturating_sub(1)),
-            width: content.width,
+            width: title_row.width,
             height: 1.min(area.height),
         };
         if !title.is_empty() {

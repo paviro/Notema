@@ -89,14 +89,15 @@ pub(crate) fn theme_picker_layout(
     inputs: crate::tui::state::PickerHints,
 ) -> ThemePickerLayout {
     let area = theme_picker_area(theme, frame_area, len, inputs);
-    let inner = dialog_inner(theme, area);
+    let inner = dialog_content_full(theme, area);
     let hint_height = theme_picker_hint_height(theme, frame_area, inputs);
+    // A blank spacer row separates the list from the hint block.
+    let list_height = inner.height.saturating_sub(1 + hint_height);
     let list = Rect {
         x: inner.x,
         y: inner.y,
-        width: inner.width,
-        // A blank spacer row separates the list from the hint block.
-        height: inner.height.saturating_sub(1 + hint_height),
+        width: dialog_list_width(theme, inner.width, len, list_height),
+        height: list_height,
     };
     let hints = Rect {
         x: inner.x,
@@ -172,7 +173,7 @@ pub(crate) fn draw_theme_picker(
             .collect()
     };
 
-    draw_dialog_frame(theme, frame, layout.area, &theme_picker_title(state), true);
+    draw_dialog_frame_wide(theme, frame, layout.area, &theme_picker_title(state), true);
     let list = List::new(items).highlight_style(theme.selection());
     let mut render_state =
         list_state_for_render(state.selected_index(), scroll, layout.list.height, len > 0);
@@ -184,5 +185,5 @@ pub(crate) fn draw_theme_picker(
         layout.hints,
         hover,
     );
-    render_scrollbar_if_needed(theme, frame, layout.area, len, max_visible, scroll, true);
+    render_dialog_list_scrollbar(theme, frame, layout.list, len, scroll, true);
 }

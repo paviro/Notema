@@ -263,6 +263,19 @@ pub(crate) fn render_vertical_scrollbar(
     state: &mut ScrollbarState,
     focused: bool,
 ) {
+    render_vertical_scrollbar_in(theme, frame, scrollbar_bar_rect(theme, area), state, focused);
+}
+
+/// Render a vertical scrollbar into an explicit track rect, bypassing the
+/// `scrollbar_bar_rect` inset — callers that already know the exact column and
+/// row span pass it directly.
+fn render_vertical_scrollbar_in(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    bar: Rect,
+    state: &mut ScrollbarState,
+    focused: bool,
+) {
     let glyphs = theme.glyphs();
     let thumb = glyphs.scrollbar_thumb.to_string();
     let track = glyphs.scrollbar_track.to_string();
@@ -277,7 +290,7 @@ pub(crate) fn render_vertical_scrollbar(
         .begin_style(theme.scrollbar_arrow(focused))
         .end_symbol(Some(&down))
         .end_style(theme.scrollbar_arrow(focused));
-    frame.render_stateful_widget(scrollbar, scrollbar_bar_rect(theme, area), state);
+    frame.render_stateful_widget(scrollbar, bar, state);
 }
 
 pub(crate) fn render_scrollbar_if_needed(
@@ -299,6 +312,45 @@ pub(crate) fn render_scrollbar_if_needed(
                 viewport_height,
             ));
         render_vertical_scrollbar(theme, frame, area, &mut state, focused);
+    }
+}
+
+/// The column a dialog list's scrollbar occupies: one padding column past the
+/// list's right edge. In flat chrome that seats it inside the surface with a
+/// symmetric margin; in bordered chrome it lands on the frame's right border.
+fn dialog_list_scrollbar_x(list: Rect) -> u16 {
+    list.x.saturating_add(list.width).saturating_add(1)
+}
+
+/// Draw a dialog list's scrollbar one padding column past the list, spanning
+/// only the list rows so it reads as part of the list rather than dialog
+/// chrome. Bordered chrome keeps the bar on the frame border, just not full
+/// height.
+pub(crate) fn render_dialog_list_scrollbar(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    list: Rect,
+    total_height: usize,
+    scroll: usize,
+    focused: bool,
+) {
+    let viewport = list.height;
+    if total_height > viewport as usize {
+        let mut state = ScrollbarState::default()
+            .content_length(total_height)
+            .viewport_content_length(viewport as usize)
+            .position(crate::tui::scroll::scrollbar_position(
+                scroll,
+                total_height,
+                viewport,
+            ));
+        let bar = Rect {
+            x: dialog_list_scrollbar_x(list),
+            y: list.y,
+            width: 1,
+            height: list.height,
+        };
+        render_vertical_scrollbar_in(theme, frame, bar, &mut state, focused);
     }
 }
 
