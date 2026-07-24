@@ -20,7 +20,10 @@ use crate::tui::text_input::TextInput;
 use crate::tui::theme::Theme;
 
 use super::{
-    chrome::{centered_rect_fixed_size, flat_chrome, render_scrollbar_if_needed, separator_style},
+    chrome::{
+        centered_rect_fixed_size, dot_leader_line, flat_chrome, render_scrollbar_if_needed,
+        separator_style,
+    },
     footer::{Hint, HintId, hint_height, hint_lines},
     frames::{dialog_frame_rows, dialog_inner, draw_dialog_frame, render_confirm_buttons},
     list_state_for_render,

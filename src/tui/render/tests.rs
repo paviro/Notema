@@ -1120,9 +1120,13 @@ fn feelings_dialog_folds_groups_and_marks_disclosure() {
         "header must not render a checkbox"
     );
     assert!(collapsed.contains('▸'), "collapsed header shows ▸");
+    // The disclosure now trails the name; the selected count is pinned to the
+    // right edge, past the arrow.
+    let arrow = collapsed.find('▸').unwrap();
+    let count = collapsed.rfind('1').unwrap();
     assert!(
-        collapsed.contains("(1)"),
-        "collapsed header shows selected count"
+        count > arrow,
+        "collapsed header shows the selected count after the disclosure"
     );
     // "calm" appears in the selected summary; it must NOT appear as a list row.
     assert!(!rows.iter().any(|row| row.contains("[x] calm")));
@@ -1207,7 +1211,10 @@ fn edit_tags_dialog_keeps_help_visible_below_spacer() {
         20,
     );
 
-    assert!(rendered.contains("[ ] tag-00 (0)"));
+    // The count is pinned to the right edge on a dot leader, not inline. (The
+    // selected row blanks its leader, so assert against a non-selected row.)
+    assert!(rendered.contains("[ ] tag-00"));
+    assert!(rendered.contains(". 1"));
     assert!(rendered.contains("space  toggle"));
     assert!(rendered.contains("tab  input"));
     assert!(rendered.contains("enter  save"));
@@ -1232,7 +1239,10 @@ fn edit_tags_dialog_keeps_list_gutter_when_selection_is_scrolled_out() {
 
     let rendered = render_edit_tags_dialog_text(state, 200, 20);
 
-    assert!(rendered.contains(" [ ] tag-05 (5)"));
+    // The list gutter (leading space) is preserved; the count moves to the
+    // right edge on a dot leader.
+    assert!(rendered.contains(" [ ] tag-05"));
+    assert!(rendered.contains(". 5"));
 }
 
 #[test]

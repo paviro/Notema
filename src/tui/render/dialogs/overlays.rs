@@ -172,7 +172,13 @@ pub(in crate::tui::render) fn draw_edit_metadata_dialog(
                 let (tag, freq) = &state.all_values[*idx];
                 let checked = state.selected.iter().any(|t| t.eq_ignore_ascii_case(tag));
                 let marker = if checked { "[x]" } else { "[ ]" };
-                let item = ListItem::new(Line::from(format!("{marker} {tag} ({freq})")));
+                let item = ListItem::new(dot_leader_line(
+                    theme,
+                    Span::raw(format!("{marker} {tag}")),
+                    Span::styled(freq.to_string(), theme.muted()),
+                    layout.list.width,
+                    Some(index) == shown_selection,
+                ));
                 if Some(index) == hovered_row && Some(index) != shown_selection {
                     item.style(theme.hover())
                 } else {
@@ -467,39 +473,50 @@ pub(in crate::tui::render) fn draw_edit_feelings_dialog(
         rows.iter()
             .enumerate()
             .map(|(index, row)| {
+                let selected_row = Some(index) == shown_selection;
                 let item = match *row {
                     FeelingRow::Header { group } => {
                         let g = &state.groups[group];
                         let bold = theme.heading();
-                        // Disclosure marker trails the name so it never collides with the
-                        // list's leading `>` selection cursor. ▾ open, ▸ collapsed.
+                        // ▾ open, ▸ collapsed. The disclosure trails the name so the
+                        // selected-count can sit at the right edge on a dot leader.
                         let disclosure = if state.expanded[group] {
                             theme.glyphs().expanded
                         } else {
                             theme.glyphs().collapsed
                         };
-                        let mut spans = vec![Span::styled(g.name, bold)];
-                        // The selected-count badge is lighter than the category name.
+                        let label = Span::styled(format!("{} {disclosure}", g.name), bold);
                         let selected = state.group_selected_count(group);
                         if selected > 0 {
-                            spans.push(Span::raw(format!(" ({selected})")));
+                            ListItem::new(dot_leader_line(
+                                theme,
+                                label,
+                                Span::styled(selected.to_string(), theme.muted()),
+                                layout.list.width,
+                                selected_row,
+                            ))
+                        } else {
+                            ListItem::new(Line::from(label))
                         }
-                        spans.push(Span::styled(format!(" {disclosure}"), bold));
-                        ListItem::new(Line::from(spans))
                     }
                     FeelingRow::Feeling { group, feeling } => {
                         let g = &state.groups[group];
                         let name = g.feelings[feeling].name;
                         let checked = state.selected.iter().any(|value| value == name);
                         let marker = if checked { "[x]" } else { "[ ]" };
-                        // While filtering the headers are hidden, so tag each match with
-                        // its group for context.
-                        let text = if filtering {
-                            format!("{marker} {name}  ({})", g.name)
+                        if filtering {
+                            // Headers are hidden while filtering, so pin each match's
+                            // group to the right edge for context.
+                            ListItem::new(dot_leader_line(
+                                theme,
+                                Span::raw(format!("{marker} {name}")),
+                                Span::styled(g.name.to_string(), theme.muted()),
+                                layout.list.width,
+                                selected_row,
+                            ))
                         } else {
-                            format!("   {marker} {name}")
-                        };
-                        ListItem::new(Line::from(text))
+                            ListItem::new(Line::from(format!("   {marker} {name}")))
+                        }
                     }
                 };
                 if Some(index) == hovered_row && Some(index) != shown_selection {

@@ -9,6 +9,7 @@ use ratatui::{
     },
 };
 
+use crate::tui::entry_rows::{text_width, truncate_ellipsis};
 use crate::tui::surface::scrollbar_bar_rect;
 use crate::tui::theme::{ChromeStyle, Theme};
 
@@ -89,6 +90,33 @@ pub(crate) fn separator_style(theme: &Theme) -> Style {
     } else {
         theme.muted()
     }
+}
+
+/// A `label ···· value` row: `label` on the left, `value` pinned to the right
+/// edge, tied by a dot leader. Each side keeps its own span style. On the
+/// highlighted row the leader is blanked so the selection bar carries the eye
+/// instead of competing with the dots. Truncates the label with `…` when it
+/// would otherwise collide with `value`.
+pub(crate) fn dot_leader_line(
+    theme: &Theme,
+    label: Span<'static>,
+    value: Span<'static>,
+    width: u16,
+    selected: bool,
+) -> Line<'static> {
+    let total = width as usize;
+    let value_w = text_width(&value.content);
+    // label + " " + leader(≥1) + " " + value == total.
+    let max_label = total.saturating_sub(value_w + 3);
+    let label_text = truncate_ellipsis(&label.content, max_label);
+    let label_w = text_width(&label_text);
+    let fill = total.saturating_sub(label_w + value_w + 2).max(1);
+    let leader = if selected {
+        Span::raw(" ".repeat(fill + 2))
+    } else {
+        Span::styled(format!(" {} ", ".".repeat(fill)), separator_style(theme))
+    };
+    Line::from(vec![Span::styled(label_text, label.style), leader, value])
 }
 
 /// A titled content container inside a full-screen modal (unlock, pending
