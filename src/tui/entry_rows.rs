@@ -112,6 +112,9 @@ pub(crate) fn entry_list_rows(app: &AppModel, text_width: u16) -> Vec<BoxRow> {
     match app.nav.mode {
         Mode::Search => {
             let mut rows = Vec::new();
+            if !app.search.hits.is_empty() {
+                rows.push(spacer_row());
+            }
             for (index, hit) in app.search.hits.iter().enumerate() {
                 if index > 0 {
                     rows.push(spacer_row());

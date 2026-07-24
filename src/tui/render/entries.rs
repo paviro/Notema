@@ -13,6 +13,7 @@ use crate::tui::{
         EntryListGeometry, clamp_scroll, count_label, list_state_for_render, panel_block,
         render_centered_notice, render_scrollbar_if_needed,
     },
+    surface::{panel_inner, surface_content_inner},
     theme::Theme,
 };
 
@@ -136,7 +137,7 @@ pub(crate) fn draw_entry_list(
 /// textarea (with the native bar cursor while typing in it), padded one cell on
 /// each side so it doesn't run into the border line.
 fn draw_search_field(active_theme: &Theme, frame: &mut Frame<'_>, area: Rect, app: &mut AppModel) {
-    let Some(rect) = search_field_rect(area) else {
+    let Some(rect) = search_field_rect(active_theme, area) else {
         return;
     };
     let field_w = rect.width;
@@ -159,15 +160,17 @@ fn draw_search_field(active_theme: &Theme, frame: &mut Frame<'_>, area: Rect, ap
         .render_in(active_theme, frame, rect, focused, hovered);
 }
 
-pub(super) fn search_field_rect(area: Rect) -> Option<Rect> {
-    let field_w = (area.width / 2)
-        .clamp(12, 30)
-        .min(area.width.saturating_sub(6));
+pub(super) fn search_field_rect(theme: &Theme, area: Rect) -> Option<Rect> {
+    // Right-align to the entry-box column (flat chrome insets further than
+    // bordered), less one cell for the trailing accent pad in `draw_search_field`.
+    let content = surface_content_inner(theme, panel_inner(area));
+    let right_edge = (content.x + content.width).saturating_sub(1);
+    let field_w = (content.width * 2 / 3).clamp(16, 40).min(content.width);
     if field_w < 4 || area.height == 0 {
         return None;
     }
     Some(Rect {
-        x: area.x + area.width - field_w - 2,
+        x: right_edge - field_w,
         y: area.y,
         width: field_w,
         height: 1,

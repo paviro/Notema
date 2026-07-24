@@ -641,7 +641,7 @@ fn register_overlay_interactions(
         }
         crate::tui::state::Overlay::None if app.nav.mode == crate::tui::app::Mode::Search => {
             entries_area
-                .and_then(entries::search_field_rect)
+                .and_then(|area| entries::search_field_rect(context.theme, area))
                 .map(|area| (area, TextFieldId::Search))
         }
         _ => None,
