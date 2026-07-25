@@ -17,21 +17,16 @@ use crate::tui::{
     env_strip::EnvironmentRef,
     image::{digit_for_image, sole_image_ref},
     render::{
-        count_label, entry_metadata_layout, panel_block, render_centered_notice,
+        count_label, layout::EntryBodyFrame, panel_block, render_centered_notice,
         render_scrollbar_if_needed, viewer_scroll,
     },
     state::HoverTarget,
-    surface::{EntryMetadataValues, PanelGeometry, metadata_section_height},
+    surface::PanelGeometry,
     theme::Theme,
 };
 
 use super::markdown::render_text_chunk;
 use super::metadata::{EntryMetadata, draw_metadata_section, metadata_section_lines};
-
-/// The body (writing/reading area) is kept at least this tall; the metadata block
-/// only pins below the body when the pane can still afford these lines, otherwise it
-/// folds into the scroll.
-const MIN_ENTRY_BODY_LINES: u16 = 20;
 
 pub(crate) fn draw_selected_reader(
     active_theme: &crate::tui::theme::Theme,
@@ -143,25 +138,15 @@ fn draw_markdown_panel(
         focused,
         Some(count_label(word_count, "word", "words")),
     );
-    let layout = entry_metadata_layout(active_theme, area, metadata.values());
-    let metadata_scrolls = metadata_scrolls_with_body(active_theme, area, metadata.values());
-    let content_rect = if metadata_scrolls {
-        PanelGeometry::new(active_theme, area).content
-    } else {
-        layout.content
-    };
-    // The metadata (when it scrolls with the body) shares the paragraph, so keep
-    // the full width there; otherwise gutter the body to a readable max width.
-    let body_rect = if metadata_scrolls {
-        content_rect
-    } else {
-        centered_body_rect(
-            content_rect,
-            app.services.config.ui.layout.reader.body_max_width,
-        )
-    };
+    let frame_layout = EntryBodyFrame::new(
+        active_theme,
+        area,
+        metadata.values(),
+        app.services.config.ui.layout.reader_body(),
+    );
+    let body_rect = frame_layout.body;
 
-    let width = body_rect.width.saturating_sub(1).max(1) as usize;
+    let width = body_rect.width as usize;
     // Memoized on (entry path, width, data version): the markdown parse + syntax
     // highlight + render is the reader's dominant per-frame cost, so a frame that
     // only scrolled, blinked, or ticked images reuses the rendered lines.
@@ -177,22 +162,7 @@ fn draw_markdown_panel(
         )
     });
     let mut lines = body.lines.clone();
-    // Frame a scrolling entry with top padding on wide panes; skipped while
-    // centered or while the metadata scrolls, so short entries and short panes
-    // stay flush to the top.
-    let reader_cfg = &app.services.config.ui.layout.reader;
-    let will_center = reader_cfg.body_center_vertically
-        && !metadata_scrolls
-        && lines.len() < body_rect.height as usize;
-    let pad = if metadata_scrolls || will_center {
-        0
-    } else {
-        body_top_pad_lines(
-            content_rect.width,
-            reader_cfg.body_max_width,
-            reader_cfg.body_max_top_padding,
-        )
-    };
+    let pad = frame_layout.top_pad(lines.len());
     if pad > 0 {
         let mut padded = Vec::with_capacity(pad as usize + lines.len());
         padded.extend(std::iter::repeat_with(|| Line::from("")).take(pad as usize));
@@ -252,7 +222,7 @@ fn draw_markdown_panel(
         links,
         headings,
     };
-    if metadata_scrolls {
+    if frame_layout.metadata_scrolls() {
         let meta_lines = metadata_section_lines(active_theme, body_rect.width, &metadata);
         if !meta_lines.is_empty() {
             let height = body_rect.height as usize;
@@ -270,15 +240,7 @@ fn draw_markdown_panel(
     }
     let line_count = lines.len();
     let scroll = viewer_scroll(requested_scroll, line_count, body_rect.height);
-    // Float a short entry in the vertical middle — but only when the metadata is
-    // pinned (taller panes). On short panes the body flows from the top with the
-    // metadata bottom-attached, so centering would fight that.
-    let body_rect =
-        if app.services.config.ui.layout.reader.body_center_vertically && !metadata_scrolls {
-            center_body_vertically(body_rect, line_count, scroll)
-        } else {
-            body_rect
-        };
+    let body_rect = frame_layout.centered(line_count);
 
     frame.render_widget(block, area);
     super::panel_focus_stripe(active_theme, frame, area, focused);
@@ -289,7 +251,7 @@ fn draw_markdown_panel(
         body_rect,
     );
 
-    if !metadata_scrolls && layout.metadata.is_some() {
+    if let Some(layout) = frame_layout.metadata {
         draw_metadata_section(active_theme, frame, layout, &metadata, app.hover);
     }
 
@@ -304,59 +266,6 @@ fn draw_markdown_panel(
     );
 
     (scroll, hits, body_rect, line_count)
-}
-
-/// Pin the metadata below the body only when doing so still leaves the body at least
-/// [`MIN_ENTRY_BODY_LINES`]; otherwise fold it into the scroll. With no metadata the
-/// height is zero and this reduces to a plain minimum-body check.
-pub(crate) fn metadata_scrolls_with_body(
-    theme: &Theme,
-    area: Rect,
-    values: EntryMetadataValues<'_>,
-) -> bool {
-    let inner = PanelGeometry::new(theme, area).content;
-    let metadata_height = metadata_section_height(inner.width, values);
-    inner.height < MIN_ENTRY_BODY_LINES.saturating_add(metadata_height)
-}
-
-/// Blank lines to prepend above the body, ramping in at one line per two gutter
-/// columns (cells run ~2× taller than wide) and staying at 0 when the pane is no
-/// wider than `max_width`.
-fn body_top_pad_lines(content_width: u16, max_width: u16, setting: u16) -> u16 {
-    let gutter = if max_width > 0 && content_width > max_width {
-        (content_width - max_width) / 2
-    } else {
-        0
-    };
-    setting.min(gutter / 2)
-}
-
-/// Cap `rect` at `max_width` and center it horizontally, leaving the height and
-/// narrower panels untouched. A `max_width` of 0 means no cap.
-fn centered_body_rect(rect: Rect, max_width: u16) -> Rect {
-    if max_width == 0 || rect.width <= max_width {
-        return rect;
-    }
-    let x = rect.x + (rect.width - max_width) / 2;
-    Rect {
-        x,
-        width: max_width,
-        ..rect
-    }
-}
-
-/// When the entry fits without scrolling, push it down so it sits in the vertical
-/// middle of `rect`; otherwise render from the top so scrolling covers every line.
-fn center_body_vertically(rect: Rect, line_count: usize, scroll: u16) -> Rect {
-    if scroll > 0 || line_count >= rect.height as usize {
-        return rect;
-    }
-    let pad = (rect.height - line_count as u16) / 2;
-    Rect {
-        y: rect.y + pad,
-        height: rect.height - pad,
-        ..rect
-    }
 }
 
 /// Build the entry-body lines, replacing each lone in-folder image with a
@@ -395,8 +304,7 @@ fn build_body_lines(
         };
     };
 
-    // A leading blank row so the body starts one line below the border, matching
-    // the blank that leads the journal and entry columns.
+    // See BODY_LEADING_BLANK — the editor pads by the same amount.
     lines.push(Line::from(""));
     let mut buffer = String::new();
     let mut image_index = 0usize;

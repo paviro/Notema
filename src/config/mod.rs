@@ -177,13 +177,53 @@ impl ChromeMode {
     }
 }
 
-/// Layout geometry: how the panels and their contents are sized. Reader settings
-/// sit in their own sub-table.
+/// Layout geometry: how the panels and their contents are sized. The reader and
+/// editor settings sit in their own sub-tables.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LayoutSection {
     #[serde(default)]
     pub reader: ReaderSection,
+    /// Left out of the file entirely while every key inherits, so clearing the
+    /// last override doesn't strand an empty table.
+    #[serde(
+        default,
+        skip_serializing_if = "EditorLayoutSection::inherits_everything"
+    )]
+    pub editor: EditorLayoutSection,
+}
+
+impl LayoutSection {
+    pub(crate) fn reader_body(&self) -> BodyLayout {
+        BodyLayout {
+            center_vertically: self.reader.body_center_vertically,
+            max_width: self.reader.body_max_width,
+            max_top_padding: self.reader.body_max_top_padding,
+        }
+    }
+
+    pub(crate) fn editor_body(&self) -> BodyLayout {
+        let reader = self.reader_body();
+        BodyLayout {
+            center_vertically: self
+                .editor
+                .body_center_vertically
+                .unwrap_or(reader.center_vertically),
+            max_width: self.editor.body_max_width.unwrap_or(reader.max_width),
+            max_top_padding: self
+                .editor
+                .body_max_top_padding
+                .unwrap_or(reader.max_top_padding),
+        }
+    }
+}
+
+/// How a pane frames the entry body, resolved for one surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct BodyLayout {
+    pub center_vertically: bool,
+    pub max_width: u16,
+    pub max_top_padding: u16,
 }
 
 /// How the reader pane presents an entry.
@@ -206,6 +246,32 @@ pub(crate) struct ReaderSection {
     /// default — the name is clickable either way, so the URL is just noise.
     #[serde(default)]
     pub show_link_urls: bool,
+}
+
+/// How the editor frames the entry body. Each key mirrors one in
+/// [`ReaderSection`], and an absent key takes the reader's — so writing and
+/// reading an entry look the same unless deliberately split, and turning an
+/// override back to Inherit leaves no trace in the file.
+///
+/// [`Config::new`] seeds `body_center_vertically = false` for a fresh config,
+/// since a baseline that shifts as you type is more disorienting than it is
+/// while reading. An older config without the key still inherits.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EditorLayoutSection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_center_vertically: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_max_width: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_max_top_padding: Option<u16>,
+}
+
+impl EditorLayoutSection {
+    /// True while every key inherits, so the whole table can be left out.
+    pub(crate) fn inherits_everything(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl Default for AttachmentsSection {
@@ -249,6 +315,10 @@ fn default_body_max_top_padding() -> u16 {
 
 impl Config {
     pub(crate) fn new(journal_root: PathBuf) -> Self {
+        let mut ui = UiSection::default();
+        // Only a fresh config starts the editor un-centered; see
+        // [`EditorLayoutSection`].
+        ui.layout.editor.body_center_vertically = Some(false);
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             journal: JournalSection {
@@ -256,7 +326,7 @@ impl Config {
                 default: None,
             },
             attachments: AttachmentsSection::default(),
-            ui: UiSection::default(),
+            ui,
             editor: EditorSection::default(),
             location: LocationSection::default(),
         }
@@ -493,6 +563,7 @@ mod tests {
         config.ui.color_mode = ColorMode::Light;
         config.ui.layout.reader.body_center_vertically = false;
         config.ui.layout.reader.body_max_width = 80;
+        config.ui.layout.editor.body_max_width = Some(120);
 
         save_config(&path, &config).unwrap();
         let loaded = load_config(&path).unwrap();
@@ -517,6 +588,52 @@ mod tests {
         assert_eq!(config.ui.color_mode, ColorMode::Auto);
         assert!(config.ui.layout.reader.body_center_vertically);
         assert_eq!(config.ui.layout.reader.body_max_width, 100);
+        assert_eq!(config.ui.layout.editor, EditorLayoutSection::default());
+    }
+
+    /// An absent editor key takes the reader's; a set one wins.
+    #[test]
+    fn editor_body_layout_falls_back_to_the_reader() {
+        let mut layout = LayoutSection::default();
+        layout.reader.body_max_width = 80;
+        layout.reader.body_max_top_padding = 4;
+        assert_eq!(layout.editor_body(), layout.reader_body());
+
+        layout.editor.body_max_top_padding = Some(0);
+        assert!(!layout.editor.inherits_everything());
+        assert_eq!(layout.editor_body().max_width, 80);
+        assert_eq!(layout.editor_body().max_top_padding, 0);
+
+        layout.editor = EditorLayoutSection::default();
+        assert_eq!(layout.editor_body(), layout.reader_body());
+    }
+
+    /// A fresh config starts the editor un-centered; clearing every override
+    /// takes the whole table back out of the file.
+    #[test]
+    fn editor_layout_table_is_written_only_while_overridden() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::new(dir.path().join("root"));
+        assert!(!config.ui.layout.editor_body().center_vertically);
+
+        save_config(&path, &config).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("body_center_vertically = false"),
+            "{written}"
+        );
+        assert_eq!(load_config(&path).unwrap(), config);
+
+        config.ui.layout.editor.body_center_vertically = None;
+        save_config(&path, &config).unwrap();
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("[ui.layout.editor]"), "{written}");
+        let loaded = load_config(&path).unwrap();
+        assert_eq!(
+            loaded.ui.layout.editor_body(),
+            loaded.ui.layout.reader_body()
+        );
     }
 
     #[test]

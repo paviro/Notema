@@ -2693,6 +2693,51 @@ fn pinned_and_scrolling_mood_rows_agree_on_a_narrow_pane() {
     assert!(!pinned.contains("Blissful"), "pinned row was:\n{pinned}");
 }
 
+/// The viewer and the editor frame the body identically, so toggling between
+/// them can't shift or re-wrap the text.
+#[test]
+fn reader_and_editor_frame_the_body_the_same() {
+    let theme = theme::Theme::terminal_default();
+    let metadata = notema_domain::Metadata {
+        tags: vec!["one".to_string()],
+        mood: Some(2),
+        ..Default::default()
+    };
+    let entry_metadata =
+        super::metadata::EntryMetadata::for_entry(&theme, &metadata, Default::default());
+    for area in [
+        Rect::new(0, 0, 120, 40),
+        Rect::new(0, 0, 60, 30),
+        // Short enough that the metadata gives up its pinned slot.
+        Rect::new(0, 0, 120, 12),
+    ] {
+        let layout = crate::config::LayoutSection::default();
+        let reader = super::layout::EntryBodyFrame::new(
+            &theme,
+            area,
+            entry_metadata.values(),
+            layout.reader_body(),
+        );
+        let editor = super::layout::EntryBodyFrame::new(
+            &theme,
+            area,
+            entry_metadata.values(),
+            layout.editor_body(),
+        );
+        assert_eq!(reader.body, editor.body, "body rect differs at {area:?}");
+        assert_eq!(
+            reader.metadata_scrolls(),
+            editor.metadata_scrolls(),
+            "metadata placement differs at {area:?}"
+        );
+        assert_eq!(
+            reader.top_pad(1),
+            editor.top_pad(1),
+            "top padding differs at {area:?}"
+        );
+    }
+}
+
 /// The shortcut overlay lists every group's bindings as a centered table with
 /// vertical rules between the columns.
 #[test]

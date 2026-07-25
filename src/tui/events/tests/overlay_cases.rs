@@ -241,6 +241,95 @@ fn settings_adjust_top_padding_shows_none_at_zero() {
     assert_eq!(app.services.config.ui.layout.reader.body_max_top_padding, 1);
 }
 
+/// Select the Editor row labelled `label` in the open settings dialog.
+fn select_editor_row(app: &mut crate::tui::app::AppModel, label: &str) {
+    use crate::tui::features::settings::SettingCategory;
+    use crate::tui::state::SettingsItem;
+
+    let index = app
+        .settings_state()
+        .unwrap()
+        .items
+        .iter()
+        .position(|item| {
+            matches!(item, SettingsItem::Row { category: SettingCategory::Editor, index }
+                if SettingCategory::Editor.rows()[*index].label() == label)
+        })
+        .unwrap_or_else(|| panic!("no Editor row labelled {label}"));
+    app.settings_select(index);
+}
+
+fn selected_value(app: &crate::tui::app::AppModel) -> String {
+    app.settings_state()
+        .and_then(|s| s.selected_row())
+        .map(|(_, row)| row.value(&app.services.config))
+        .expect("a selected row")
+}
+
+/// An editor number steps down past its off state into Inherit, and back out.
+#[test]
+fn settings_editor_number_steps_into_inherit() {
+    let mut app = app_with_journals(&["work"]);
+    app.services.config.ui.layout.reader.body_max_width = 80;
+    app.open_settings();
+    select_editor_row(&mut app, "Max body width");
+
+    assert_eq!(selected_value(&app), "Inherit");
+    assert_eq!(app.services.config.ui.layout.editor_body().max_width, 80);
+
+    app.settings_adjust(1);
+    assert_eq!(selected_value(&app), "Unlimited");
+    app.settings_adjust(1);
+    assert_eq!(selected_value(&app), "40");
+    assert_eq!(app.services.config.ui.layout.editor_body().max_width, 40);
+
+    // Stops at Inherit rather than wrapping back to the top.
+    app.settings_adjust(-1);
+    app.settings_adjust(-1);
+    assert_eq!(selected_value(&app), "Inherit");
+    app.settings_adjust(-1);
+    assert_eq!(selected_value(&app), "Inherit");
+    assert_eq!(app.services.config.ui.layout.editor_body().max_width, 80);
+}
+
+/// The editor's centering starts off rather than inherited, and cycles
+/// Inherit → Off → On.
+#[test]
+fn settings_editor_centering_starts_off_and_cycles() {
+    let mut app = app_with_journals(&["work"]);
+    assert!(app.services.config.ui.layout.reader.body_center_vertically);
+    app.open_settings();
+    select_editor_row(&mut app, "Center body vertically");
+
+    assert_eq!(selected_value(&app), "Off");
+    assert!(
+        !app.services
+            .config
+            .ui
+            .layout
+            .editor_body()
+            .center_vertically
+    );
+
+    app.settings_adjust(-1);
+    assert_eq!(selected_value(&app), "Inherit");
+    assert!(
+        app.services
+            .config
+            .ui
+            .layout
+            .editor_body()
+            .center_vertically
+    );
+
+    app.settings_activate();
+    assert_eq!(selected_value(&app), "Off");
+    app.settings_activate();
+    assert_eq!(selected_value(&app), "On");
+    app.settings_activate();
+    assert_eq!(selected_value(&app), "Inherit");
+}
+
 #[test]
 fn theme_picker_keys_route_to_dedicated_actions() {
     let mut app = app_with_journals(&["work"]);

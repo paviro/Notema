@@ -209,7 +209,13 @@ ignore_journal_themes = false   # true: this device ignores per-journal themes, 
 [ui.layout.reader]
 body_center_vertically = true
 body_max_width = 100            # cells; 0 = no cap
+body_max_top_padding = 6        # blank lines above the body on wide panes; 0 = flush to the top
 show_link_urls = false
+
+[ui.layout.editor]              # omitted entirely while every key inherits
+body_center_vertically = false  # seeded off for a new config; drop it to follow the reader
+# body_max_width = 80           # absent = follow [ui.layout.reader]
+# body_max_top_padding = 0
 ```
 
 `state.toml` — machine-written session state, kept out of your settings:

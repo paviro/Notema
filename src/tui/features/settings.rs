@@ -65,6 +65,7 @@ pub(crate) enum SettingRow {
         get: fn(&Config) -> bool,
         set: fn(&mut Config, bool),
         after: AfterChange,
+        inherit: Option<Inherit>,
     },
     Number {
         label: &'static str,
@@ -78,8 +79,20 @@ pub(crate) enum SettingRow {
         /// state, shown with this label; stepping down from `min` snaps to 0,
         /// up snaps back.
         off_label: Option<&'static str>,
+        inherit: Option<Inherit>,
     },
 }
+
+/// A row's third state, below its own values: following another surface's
+/// setting instead of carrying one. Stepping left off the lowest value lands
+/// here, stepping right leaves it.
+#[derive(Clone, Copy)]
+pub(crate) struct Inherit {
+    pub is: fn(&Config) -> bool,
+    pub set: fn(&mut Config),
+}
+
+const INHERIT_LABEL: &str = "Inherit";
 
 impl SettingRow {
     pub(crate) fn label(&self) -> &'static str {
@@ -100,9 +113,23 @@ impl SettingRow {
         }
     }
 
-    /// The value column text for the current config: `On`/`Off`, the number, or
-    /// the current theme name.
+    fn inherit(&self) -> Option<Inherit> {
+        match self {
+            SettingRow::Theme => None,
+            SettingRow::Bool { inherit, .. } | SettingRow::Number { inherit, .. } => *inherit,
+        }
+    }
+
+    fn inheriting(&self, config: &Config) -> bool {
+        self.inherit().is_some_and(|inherit| (inherit.is)(config))
+    }
+
+    /// The value column text for the current config: `Inherit`, `On`/`Off`, the
+    /// number, or the current theme name.
     pub(crate) fn value(&self, config: &Config) -> String {
+        if self.inheriting(config) {
+            return INHERIT_LABEL.to_string();
+        }
         match self {
             SettingRow::Theme => config.ui.theme.clone(),
             SettingRow::Bool { get, .. } => if get(config) { "On" } else { "Off" }.to_string(),
@@ -122,6 +149,7 @@ const APPEARANCE_SETTINGS: &[SettingRow] = &[
         get: |c| c.ui.ignore_journal_themes,
         set: |c, v| c.ui.ignore_journal_themes = v,
         after: AfterChange::ReresolveTheme,
+        inherit: None,
     },
 ];
 
@@ -132,26 +160,29 @@ const READER_SETTINGS: &[SettingRow] = &[
         get: |c| c.ui.layout.reader.body_center_vertically,
         set: |c, v| c.ui.layout.reader.body_center_vertically = v,
         after: AfterChange::None,
+        inherit: None,
     },
     SettingRow::Number {
         label: "Max body width",
-        description: "Maximum entry-body width in columns; wider panes gutter the sides for readability. Step below the minimum for Unlimited (no cap, full width). Use ← / → to change.",
+        description: "Maximum entry-body width in columns; wider panes gutter the sides for readability. Step below the minimum for Unlimited (no cap, full width).",
         get: |c| c.ui.layout.reader.body_max_width,
         set: |c, v| c.ui.layout.reader.body_max_width = v,
         step: 5,
         min: 40,
         max: 240,
         off_label: Some("Unlimited"),
+        inherit: None,
     },
     SettingRow::Number {
         label: "Max body top padding",
-        description: "Extra blank lines above the body on wide panes, ramping in with the side gutters. 0 keeps the body flush to the top. Use ← / → to change.",
+        description: "Extra blank lines above the body on wide panes, ramping in with the side gutters. 0 keeps the body flush to the top.",
         get: |c| c.ui.layout.reader.body_max_top_padding,
         set: |c, v| c.ui.layout.reader.body_max_top_padding = v,
         step: 1,
         min: 0,
         max: 20,
         off_label: Some("None"),
+        inherit: None,
     },
     SettingRow::Bool {
         label: "Show link URLs",
@@ -159,16 +190,57 @@ const READER_SETTINGS: &[SettingRow] = &[
         get: |c| c.ui.layout.reader.show_link_urls,
         set: |c, v| c.ui.layout.reader.show_link_urls = v,
         after: AfterChange::None,
+        inherit: None,
     },
 ];
 
 const EDITOR_SETTINGS: &[SettingRow] = &[
+    SettingRow::Bool {
+        label: "Center body vertically",
+        description: "Vertically center the entry body while it fits without scrolling. Off by default — unlike reading, a baseline that shifts as you type is distracting.",
+        get: |c| c.ui.layout.editor_body().center_vertically,
+        set: |c, v| c.ui.layout.editor.body_center_vertically = Some(v),
+        after: AfterChange::None,
+        inherit: Some(Inherit {
+            is: |c| c.ui.layout.editor.body_center_vertically.is_none(),
+            set: |c| c.ui.layout.editor.body_center_vertically = None,
+        }),
+    },
+    SettingRow::Number {
+        label: "Max body width",
+        description: "Maximum entry-body width in columns; wider panes gutter the sides for readability. Step below the minimum for Unlimited (no cap), then Inherit (follow the reader).",
+        get: |c| c.ui.layout.editor_body().max_width,
+        set: |c, v| c.ui.layout.editor.body_max_width = Some(v),
+        step: 5,
+        min: 40,
+        max: 240,
+        off_label: Some("Unlimited"),
+        inherit: Some(Inherit {
+            is: |c| c.ui.layout.editor.body_max_width.is_none(),
+            set: |c| c.ui.layout.editor.body_max_width = None,
+        }),
+    },
+    SettingRow::Number {
+        label: "Max body top padding",
+        description: "Extra blank lines above the body on wide panes, ramping in with the side gutters. They scroll away with the text. Step below 0 (None) for Inherit (follow the reader).",
+        get: |c| c.ui.layout.editor_body().max_top_padding,
+        set: |c, v| c.ui.layout.editor.body_max_top_padding = Some(v),
+        step: 1,
+        min: 0,
+        max: 20,
+        off_label: Some("None"),
+        inherit: Some(Inherit {
+            is: |c| c.ui.layout.editor.body_max_top_padding.is_none(),
+            set: |c| c.ui.layout.editor.body_max_top_padding = None,
+        }),
+    },
     SettingRow::Bool {
         label: "Start in fullscreen",
         description: "Open the entry editor fullscreen, hiding the other columns.",
         get: |c| c.editor.start_fullscreen,
         set: |c, v| c.editor.start_fullscreen = v,
         after: AfterChange::None,
+        inherit: None,
     },
     SettingRow::Bool {
         label: "Use location's timezone",
@@ -176,6 +248,7 @@ const EDITOR_SETTINGS: &[SettingRow] = &[
         get: |c| c.location.use_location_timezone,
         set: |c, v| c.location.use_location_timezone = v,
         after: AfterChange::None,
+        inherit: None,
     },
     SettingRow::Bool {
         label: "Download remote images",
@@ -183,6 +256,7 @@ const EDITOR_SETTINGS: &[SettingRow] = &[
         get: |c| c.attachments.download_remote_images,
         set: |c, v| c.attachments.download_remote_images = v,
         after: AfterChange::None,
+        inherit: None,
     },
 ];
 
@@ -245,6 +319,8 @@ impl AppModel {
                     state.reopen_settings = true;
                 }
             }
+            // Cycles the ladder, so enter alone still reaches every state.
+            SettingRow::Bool { inherit, .. } if inherit.is_some() => self.settings_adjust(1),
             SettingRow::Bool {
                 get, set, after, ..
             } => {
@@ -256,39 +332,95 @@ impl AppModel {
         }
     }
 
-    /// Adjust the highlighted number setting by one step in `dir` (-1/+1),
-    /// clamped to its range, and persist.
+    /// Step the highlighted setting one state in `dir` (-1/+1) along its ladder
+    /// — `Inherit`, then the off state, then the numbers (or `Off`/`On`) — and
+    /// persist. Every row answers to this, so ← / → alone drives the dialog.
     pub(crate) fn settings_adjust(&mut self, dir: i16) {
         let Some((_, row)) = self.settings_state().and_then(|s| s.selected_row()) else {
             return;
         };
-        if let SettingRow::Number {
-            get,
-            set,
-            step,
-            min,
-            max,
-            off_label,
-            ..
-        } = row
-        {
-            let current = get(&self.services.config);
-            let next = match off_label {
-                // When the off state (0) sits below `min`: from off up lands on
-                // min; from min down turns off; further down from off stays put.
-                // With `min == 0` the off state is just the min, so normal
-                // clamping applies and only the label changes.
-                Some(_) if *min > 0 && current == 0 && dir > 0 => *min,
-                Some(_) if *min > 0 && current == 0 => 0,
-                Some(_) if *min > 0 && current == *min && dir < 0 => 0,
-                _ => {
-                    let delta = i32::from(dir) * i32::from(*step);
-                    (i32::from(current) + delta).clamp(i32::from(*min), i32::from(*max)) as u16
-                }
-            };
-            if next != current {
+        let inheriting = row.inheriting(&self.services.config);
+        match row {
+            SettingRow::Theme if dir > 0 => self.settings_activate(),
+            SettingRow::Theme => {}
+            // A two-state ladder wraps either way, so both arrows just flip it.
+            SettingRow::Bool {
+                get,
+                set,
+                after,
+                inherit: None,
+                ..
+            } => {
+                let next = !get(&self.services.config);
                 set(&mut self.services.config, next);
-                self.apply_setting_change(AfterChange::None);
+                self.apply_setting_change(*after);
+            }
+            // Ladder: Inherit, Off, On — wrapping, so enter cycles too.
+            SettingRow::Bool {
+                get,
+                set,
+                after,
+                inherit: Some(inherit),
+                ..
+            } => {
+                let current = if inheriting {
+                    0
+                } else if get(&self.services.config) {
+                    2
+                } else {
+                    1
+                };
+                match (current + dir).rem_euclid(3) {
+                    0 => (inherit.set)(&mut self.services.config),
+                    1 => set(&mut self.services.config, false),
+                    _ => set(&mut self.services.config, true),
+                }
+                self.apply_setting_change(*after);
+            }
+            SettingRow::Number {
+                get,
+                set,
+                step,
+                min,
+                max,
+                off_label,
+                inherit,
+                ..
+            } => {
+                // The bottom of the ladder, below which only Inherit sits.
+                let bottom = if off_label.is_some() { 0 } else { *min };
+                if inheriting {
+                    if dir > 0 {
+                        set(&mut self.services.config, bottom);
+                        self.apply_setting_change(AfterChange::None);
+                    }
+                    return;
+                }
+                let current = get(&self.services.config);
+                if current == bottom && dir < 0 {
+                    if let Some(inherit) = inherit {
+                        (inherit.set)(&mut self.services.config);
+                        self.apply_setting_change(AfterChange::None);
+                    }
+                    return;
+                }
+                let next = match off_label {
+                    // When the off state (0) sits below `min`: from off up lands
+                    // on min; from min down turns off. (Down from off is the
+                    // ladder bottom, handled above.) With `min == 0` the off
+                    // state is just the min, so normal clamping applies and only
+                    // the label changes.
+                    Some(_) if *min > 0 && current == 0 && dir > 0 => *min,
+                    Some(_) if *min > 0 && current == *min && dir < 0 => 0,
+                    _ => {
+                        let delta = i32::from(dir) * i32::from(*step);
+                        (i32::from(current) + delta).clamp(i32::from(*min), i32::from(*max)) as u16
+                    }
+                };
+                if next != current {
+                    set(&mut self.services.config, next);
+                    self.apply_setting_change(AfterChange::None);
+                }
             }
         }
     }

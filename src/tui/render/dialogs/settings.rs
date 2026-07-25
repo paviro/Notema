@@ -11,7 +11,9 @@ use crate::tui::features::settings::{SettingCategory, SettingRow};
 use crate::tui::state::{SettingsItem, SettingsState};
 
 const SETTINGS_DIALOG_WIDTH: u16 = 52;
-const SETTINGS_MAX_VISIBLE_ROWS: u16 = 16;
+/// Enough for every category and its rows at once on a tall terminal; shorter
+/// ones clamp to the frame and scroll.
+const SETTINGS_MAX_VISIBLE_ROWS: u16 = 18;
 /// A blank row between the list and the description block.
 const SETTINGS_DESC_SPACER: u16 = 1;
 /// A blank row between the description block and the hint bar.
@@ -20,9 +22,8 @@ const SETTINGS_HINTS_SPACER: u16 = 1;
 /// can't dominate the dialog.
 const SETTINGS_DESC_MAX_ROWS: usize = 4;
 
-const SETTINGS_DIALOG_HINTS: [Hint; 3] = [
-    Hint::new("toggle", "enter", HintId::SettingsActivate),
-    Hint::new("adjust", "←→", HintId::SettingsAdjust),
+const SETTINGS_DIALOG_HINTS: [Hint; 2] = [
+    Hint::new("change", "←→", HintId::SettingsAdjust),
     Hint::new("close", "esc", HintId::CancelOverlay),
 ];
 

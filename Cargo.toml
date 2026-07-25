@@ -52,8 +52,9 @@ ratatui-image = { version = "11", default-features = false, features = ["crosste
 # (scroll_offset, horizontal_scroll_offset, screen_line_count, cursor_at_screen)
 # for its scrollbar, scroll-aware mouse mapping, and native-cursor placement in
 # horizontally-scrolling single-line fields, plus set_syntax_spans for the markdown
-# highlighter's base styling layer. Upstream keeps these pub(crate).
-ratatui-textarea = { package = "notema-textarea", git = "https://github.com/paviro/notema-textarea", rev = "b53b993", features = ["crossterm"] }
+# highlighter's base styling layer. Upstream keeps these pub(crate). Also
+# set_top_padding and layout_for, so the editor can frame the body like the viewer.
+ratatui-textarea = { package = "notema-textarea", git = "https://github.com/paviro/notema-textarea", rev = "eb794a2", features = ["crossterm"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
 rayon = "1"
 regex = "1"

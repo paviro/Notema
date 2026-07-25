@@ -24,9 +24,7 @@ pub(crate) enum HintId {
     ToggleStarred,
     ExitSearch,
     CancelOverlay,
-    /// Toggle a bool / open the theme picker on the highlighted setting.
-    SettingsActivate,
-    /// Adjust a number setting (← / →) — keyboard-only, so it has no click action.
+    /// Step the highlighted setting (← / →) — keyboard-only, so no click action.
     SettingsAdjust,
     MetadataToggle,
     MetadataSwitchFocus,

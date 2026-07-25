@@ -24,7 +24,7 @@ use ratatui::{
     widgets::{ListState, Paragraph},
 };
 
-use super::app::{AppModel, single_panel_is_active};
+use super::app::AppModel;
 use super::editor_state::EditorPrompt;
 pub(crate) use super::entry_rows::RowMeta;
 #[cfg(test)]
@@ -46,7 +46,7 @@ use super::state::ListNav;
 #[cfg(test)]
 pub(crate) use super::surface::panel_inner;
 pub(crate) use super::surface::{
-    EntryListGeometry, EntryMetadataValues, PanelGeometry, entry_metadata_layout, point_in_rect,
+    EntryListGeometry, EntryMetadataValues, PanelGeometry, point_in_rect,
 };
 use super::ui::{
     ConfirmId, DialogId, DialogInputId, InteractionKind, RenderContext, TextFieldId,
@@ -86,14 +86,14 @@ pub(crate) use insights::insights_tab_at;
 pub(crate) use journals::JOURNAL_BOX_HEIGHT;
 use journals::draw_journals;
 pub(crate) use journals::{journal_list_rect, journal_row_height};
+#[cfg(test)]
+use layout::metadata_scrolls_with_body;
 pub(crate) use layout::{TuiLayout, tui_layout};
 pub(crate) use menus::{draw_editor_shortcuts, draw_metadata_menu};
 pub(crate) use pending::{
     AccessNotice, draw_disable_notice, draw_pending_notice, draw_pending_request,
 };
 use reader::draw_selected_reader;
-#[cfg(test)]
-use reader::metadata_scrolls_with_body;
 #[cfg(test)]
 pub(crate) use toasts::toast_rects;
 pub(crate) use toasts::{countdown_cols, draw_toasts, toast_at_point};
@@ -136,15 +136,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut AppModel, context: &mut Rend
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(footer_height)])
             .split(area);
+        let body_layout = app.services.config.ui.layout.editor_body();
         if let Some(editor) = app.editor.as_mut() {
-            // Single-column (the one-col viewer breakpoint) gets a tighter margin
-            // than an expanded fullscreen editor on a wide terminal.
-            let (side, top) = if single_panel_is_active(area.width) {
-                (3, 1)
-            } else {
-                (5, 3)
-            };
-            draw_entry_editor(theme, frame, chunks[0], editor, side, top);
+            draw_entry_editor(theme, frame, chunks[0], editor, body_layout);
         } else {
             draw_selected_reader(theme, frame, chunks[0], app, &mut context.view.reader);
         }
@@ -219,8 +213,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut AppModel, context: &mut Rend
     if let Some(area) = layout.insights {
         draw_journal_insights(theme, frame, area.area, app, &mut context.view.insights);
     } else if let Some(area) = layout.reader {
+        let body_layout = app.services.config.ui.layout.editor_body();
         if let Some(editor) = app.editor.as_mut() {
-            draw_entry_editor(theme, frame, area.area, editor, 5, 3);
+            draw_entry_editor(theme, frame, area.area, editor, body_layout);
         } else if app.show_journal_insights() {
             // With no entry selected, the reader pane shows the journal insights.
             draw_journal_insights(theme, frame, area.area, app, &mut context.view.insights);

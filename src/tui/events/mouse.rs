@@ -880,10 +880,7 @@ pub(super) fn hint_id_to_action(app: &AppModel, id: render::HintId) -> Option<Ac
             Some(Action::Editor(EditorAction::ClosePrompt))
         }
         render::HintId::CancelOverlay => Some(Action::Overlay(OverlayAction::Cancel)),
-        render::HintId::SettingsActivate if app.settings_state().is_some() => {
-            Some(Action::Settings(SettingsAction::Activate))
-        }
-        // Adjust is a keyboard-only affordance (← / →); its chip is not clickable.
+        // Keyboard-only affordance; its chip is not clickable.
         render::HintId::SettingsAdjust => None,
         render::HintId::MetadataToggle
             if app
