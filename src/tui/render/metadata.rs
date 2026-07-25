@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     buffer::Buffer,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::Style,
     text::{Line, Span},
     widgets::{Paragraph, Widget},
@@ -113,22 +113,10 @@ pub(super) fn draw_metadata_section(
     if let Some(score) = metadata.mood
         && let Some(mood_rect) = layout.mood
     {
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(MOOD_LOW_LABEL.len() as u16),
-                Constraint::Min(4),
-                Constraint::Length(MOOD_HIGH_LABEL.len() as u16),
-            ])
-            .split(mood_rect);
+        // Shared with the scrolling path so both get its narrow-width fallback.
         frame.render_widget(
-            Paragraph::new(MOOD_LOW_LABEL).style(theme.muted()),
-            chunks[0],
-        );
-        frame.render_widget(MoodBar::new(theme, score), chunks[1]);
-        frame.render_widget(
-            Paragraph::new(MOOD_HIGH_LABEL).style(theme.muted()),
-            chunks[2],
+            Paragraph::new(mood_line(theme, mood_rect.width, score)),
+            mood_rect,
         );
     }
 

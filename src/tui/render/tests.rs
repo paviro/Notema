@@ -2579,6 +2579,34 @@ fn internal_editor_shows_entry_location() {
     assert!(text.contains("Testville Cafe"), "editor pane was:\n{text}");
 }
 
+/// Both metadata paint paths run the mood row through `mood_line`, so a narrow
+/// pane drops the pole labels whether the block is pinned or scrolling — the
+/// pinned path used to keep them and crush the bar instead.
+#[test]
+fn pinned_and_scrolling_mood_rows_agree_on_a_narrow_pane() {
+    let theme = theme::Theme::terminal_default();
+    let metadata = notema_domain::Metadata {
+        mood: Some(2),
+        ..Default::default()
+    };
+    let entry_metadata = super::metadata::EntryMetadata::from_metadata(&theme, &metadata);
+    // Tall enough to pin the block, narrow enough to lose the labels.
+    let area = Rect::new(0, 0, 22, 40);
+    let pinned = render_to_text(area.width, area.height, |frame| {
+        let layout =
+            crate::tui::surface::entry_metadata_layout(&theme, area, entry_metadata.values());
+        super::metadata::draw_metadata_section(
+            &theme,
+            frame,
+            layout,
+            &entry_metadata,
+            crate::tui::state::HoverTarget::None,
+        );
+    });
+    assert!(!pinned.contains("Miserable"), "pinned row was:\n{pinned}");
+    assert!(!pinned.contains("Blissful"), "pinned row was:\n{pinned}");
+}
+
 /// The shortcut overlay lists every group's bindings as a centered table with
 /// vertical rules between the columns.
 #[test]
