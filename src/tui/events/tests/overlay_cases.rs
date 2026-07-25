@@ -10,14 +10,14 @@ fn comma_opens_settings_in_browse_but_not_over_dialogs() {
 
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Char(',')), true),
-        Some(Action::Settings(SettingsAction::OpenMenu))
+        Some(Action::Settings(SettingsAction::OpenSettings))
     );
 
     // With a dialog open the key belongs to that overlay, not settings.
     app.begin_edit_tags();
     assert_ne!(
         keyboard::key_to_action(&app, key(KeyCode::Char(',')), true),
-        Some(Action::Settings(SettingsAction::OpenMenu))
+        Some(Action::Settings(SettingsAction::OpenSettings))
     );
 }
 
@@ -94,22 +94,108 @@ fn wheel_over_help_scrolls_it_without_closing() {
 }
 
 #[test]
-fn settings_menu_routes_enter_and_t_to_the_theme_picker() {
+fn settings_dialog_routes_move_toggle_adjust_and_close() {
     let mut app = app_with_journals(&["work"]);
-    app.open_settings_menu();
+    app.open_settings();
 
     assert_eq!(
-        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
-        Some(Action::Settings(SettingsAction::OpenThemePicker))
+        keyboard::key_to_action(&app, key(KeyCode::Down), true),
+        Some(Action::Metadata(MetadataAction::MoveSelection(1)))
     );
     assert_eq!(
-        keyboard::key_to_action(&app, key(KeyCode::Char('t')), true),
-        Some(Action::Settings(SettingsAction::OpenThemePicker))
+        keyboard::key_to_action(&app, key(KeyCode::Up), true),
+        Some(Action::Metadata(MetadataAction::MoveSelection(-1)))
     );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::Settings(SettingsAction::Activate))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char(' ')), true),
+        Some(Action::Settings(SettingsAction::Activate))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Left), true),
+        Some(Action::Settings(SettingsAction::Adjust(-1)))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Right), true),
+        Some(Action::Settings(SettingsAction::Adjust(1)))
+    );
+    // Esc closes the dialog outright — there's no submenu to step back to.
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Esc), true),
         Some(Action::Overlay(OverlayAction::Cancel))
     );
+}
+
+/// The cursor only ever lands on setting rows, never a category sub-header, and
+/// clamps at both ends of the list.
+#[test]
+fn settings_dialog_navigation_skips_headers_and_clamps() {
+    use crate::tui::state::{ListNav, SettingsItem};
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings();
+    let count = app.settings_state().unwrap().items.len();
+
+    for _ in 0..count + 2 {
+        let state = app.settings_state().unwrap();
+        let index = state.selected_index().unwrap();
+        assert!(matches!(state.items[index], SettingsItem::Row { .. }));
+        app.settings_state_mut().unwrap().move_down();
+    }
+    for _ in 0..count + 2 {
+        let state = app.settings_state().unwrap();
+        let index = state.selected_index().unwrap();
+        assert!(matches!(state.items[index], SettingsItem::Row { .. }));
+        app.settings_state_mut().unwrap().move_up();
+    }
+}
+
+/// Toggling a bool setting flips the config field and persists.
+#[test]
+fn settings_activate_toggles_and_persists_bool() {
+    let mut app = app_with_journals(&["work"]);
+    let before = app.services.config.ui.layout.reader.body_center_vertically;
+
+    app.open_settings();
+    // "Center body vertically" is Reader's first row (item 5: Appearance header,
+    // its two rows, a spacer, the Reader header, then this row).
+    app.settings_select(5);
+    app.settings_activate();
+
+    assert_eq!(
+        app.services.config.ui.layout.reader.body_center_vertically,
+        !before
+    );
+}
+
+/// The dialog opens seeded on the Theme row, so activating it opens the picker
+/// straight away — no submenu to drill into first.
+#[test]
+fn settings_activate_theme_row_opens_the_picker() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings();
+    app.settings_activate();
+    assert!(app.theme_picker_state().is_some());
+    // Closing the picker returns to the settings dialog it was launched from.
+    app.theme_picker_cancel();
+    assert!(app.settings_state().is_some());
+}
+
+/// Adjusting the numeric row steps within its clamp and persists.
+#[test]
+fn settings_adjust_steps_the_number() {
+    let mut app = app_with_journals(&["work"]);
+    app.services.config.ui.layout.reader.body_max_width = 100;
+
+    app.open_settings();
+    // "Max body width" is Reader's second row (item 6).
+    app.settings_select(6);
+    app.settings_adjust(1);
+    assert_eq!(app.services.config.ui.layout.reader.body_max_width, 105);
+    app.settings_adjust(-1);
+    assert_eq!(app.services.config.ui.layout.reader.body_max_width, 100);
 }
 
 #[test]
@@ -304,29 +390,102 @@ fn theme_picker_hover_targets_rows_without_selecting() {
     assert_eq!(app.theme_picker_state().unwrap().selected_index(), initial);
 }
 
+/// The first click on a theme row previews it; a click on the already-selected
+/// row confirms and closes the picker.
 #[test]
-fn settings_menu_hover_targets_its_rows() {
+fn theme_picker_click_previews_then_confirms() {
     use crate::tui::ui::{DialogId, InteractionKind};
 
     let mut app = app_with_journals(&["work"]);
-    app.open_settings_menu();
-    let area = Rect::new(0, 0, 64, 20);
+    app.open_theme_picker();
+    let area = Rect::new(0, 0, 90, 30);
+    let state = app.theme_picker_state().expect("picker open");
+    let initial = state.selected_index();
+    // A visible, valid, non-selected row to preview then confirm.
+    let target = state
+        .entries
+        .iter()
+        .enumerate()
+        .position(|(index, entry)| Some(index) != initial && entry.theme.is_some())
+        .expect("a valid unselected theme");
 
-    // Find the theme row through the regions render registered — the same
-    // ones the click path resolves against.
+    // Re-locate the row each click: previewing a theme can swap the chrome and
+    // shift the dialog, so a cached screen position would go stale.
+    let click_target = |app: &mut AppModel| {
+        let (_, view) = render_view(app, area.width, area.height);
+        let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+            matches!(
+                kind,
+                InteractionKind::DialogRow {
+                    dialog: DialogId::ThemePicker,
+                    index,
+                } if *index == target
+            )
+        })
+        .expect("target theme row registered");
+        mouse_in_area(app, mouse(down(), col, row), area.width, area.height);
+    };
+
+    // First click previews the row without closing the picker.
+    click_target(&mut app);
+    assert_eq!(
+        app.theme_picker_state().unwrap().selected_index(),
+        Some(target),
+        "first click only previews"
+    );
+
+    // A second click on the now-selected row confirms and closes the picker.
+    click_target(&mut app);
+    assert!(app.theme_picker_state().is_none(), "second click confirms");
+}
+
+#[test]
+fn settings_dialog_hover_targets_its_rows() {
+    use crate::tui::ui::{DialogId, InteractionKind};
+
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings();
+    let area = Rect::new(0, 0, 64, 24);
+
+    // Item 1 is the Theme row (item 0 is the Appearance sub-header, which is
+    // inert). Find it through the regions render registered — the same ones the
+    // click path resolves against.
     let (_, view) = render_view(&mut app, area.width, area.height);
     let point = find_interaction(&view, area.width, area.height, |kind| {
         matches!(
             kind,
             InteractionKind::DialogRow {
                 dialog: DialogId::Settings,
-                index: 0,
+                index: 1,
             }
         )
     })
-    .expect("settings menu has a hoverable row");
+    .expect("settings dialog has a hoverable row");
     assert!(apply_hover(&mut app, point.0, point.1, area));
-    assert_eq!(app.hover, HoverTarget::DialogRow(0));
+    assert_eq!(app.hover, HoverTarget::DialogRow(1));
+}
+
+/// A category sub-header registers no clickable row, so it can't be hovered.
+#[test]
+fn settings_dialog_header_is_not_hoverable() {
+    use crate::tui::ui::{DialogId, InteractionKind};
+
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings();
+    let area = Rect::new(0, 0, 64, 24);
+
+    let (_, view) = render_view(&mut app, area.width, area.height);
+    // Item 0 is the Appearance header; no DialogRow is registered for it.
+    assert!(
+        find_interaction(&view, area.width, area.height, |kind| matches!(
+            kind,
+            InteractionKind::DialogRow {
+                dialog: DialogId::Settings,
+                index: 0,
+            }
+        ))
+        .is_none()
+    );
 }
 
 #[test]
@@ -370,46 +529,84 @@ fn menu_click_action(
 }
 
 #[test]
-fn settings_menu_click_maps_rows_and_close_through_the_regions() {
+fn settings_dialog_click_activates_row_and_close_through_the_regions() {
     use crate::tui::ui::{DialogId, InteractionKind};
 
     let mut app = app_with_journals(&["work"]);
-    app.open_settings_menu();
-    let area = Rect::new(0, 0, 64, 20);
+    app.open_settings();
+    let area = Rect::new(0, 0, 64, 24);
 
+    // Item 1 is the Theme row; clicking it selects then activates it.
     let row_action = menu_click_action(&mut app, area, |kind| {
         matches!(
             kind,
             InteractionKind::DialogRow {
                 dialog: DialogId::Settings,
-                index: 0,
+                index: 1,
             }
         )
     });
-    assert_eq!(
-        row_action,
-        Some(Action::Settings(SettingsAction::OpenThemePicker))
-    );
+    assert_eq!(row_action, Some(Action::Settings(SettingsAction::Click(1))));
 
+    // The close affordance is the hint bar's "close esc" chip.
     let close_action = menu_click_action(&mut app, area, |kind| {
-        matches!(kind, InteractionKind::DialogClose(DialogId::Settings))
+        matches!(
+            kind,
+            InteractionKind::Hint(crate::tui::render::HintId::CancelOverlay)
+        )
     });
     assert_eq!(close_action, Some(Action::Overlay(OverlayAction::Cancel)));
 
-    // Dispatching the row click actually lands in the theme picker.
+    // Dispatching the Theme row click opens the picker.
     let (_, view) = render_view(&mut app, area.width, area.height);
     let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
         matches!(
             kind,
             InteractionKind::DialogRow {
                 dialog: DialogId::Settings,
-                index: 0,
+                index: 1,
             }
         )
     })
     .unwrap();
     mouse_in_area(&mut app, mouse(down(), col, row), area.width, area.height);
     assert!(app.theme_picker_state().is_some());
+}
+
+#[test]
+fn settings_dialog_click_toggles_a_bool_row() {
+    use crate::tui::ui::{DialogId, InteractionKind};
+
+    let mut app = app_with_journals(&["work"]);
+    app.open_settings();
+    let area = Rect::new(0, 0, 72, 24);
+    let before = app.services.config.ui.layout.reader.body_center_vertically;
+
+    // Item 5 is "Center body vertically", unselected (the dialog seeds on Theme).
+    let (_, view) = render_view(&mut app, area.width, area.height);
+    let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+        matches!(
+            kind,
+            InteractionKind::DialogRow {
+                dialog: DialogId::Settings,
+                index: 5,
+            }
+        )
+    })
+    .expect("setting row registered");
+    mouse_in_area(&mut app, mouse(down(), col, row), area.width, area.height);
+    assert_eq!(
+        app.services.config.ui.layout.reader.body_center_vertically, before,
+        "first click only selects"
+    );
+
+    // A second click on the now-selected row toggles it.
+    mouse_in_area(&mut app, mouse(down(), col, row), area.width, area.height);
+    assert_eq!(
+        app.services.config.ui.layout.reader.body_center_vertically,
+        !before,
+        "second click toggles"
+    );
 }
 
 #[test]
@@ -444,9 +641,32 @@ fn metadata_menu_click_maps_every_row_to_its_action() {
     }
 
     let close_action = menu_click_action(&mut app, area, |kind| {
-        matches!(kind, InteractionKind::DialogClose(DialogId::MetadataMenu))
+        matches!(
+            kind,
+            InteractionKind::Hint(crate::tui::render::HintId::CancelOverlay)
+        )
     });
     assert_eq!(close_action, Some(Action::Overlay(OverlayAction::Cancel)));
+}
+
+/// The chooser closes on Esc or a valid metadata key, but ignores everything
+/// else rather than dismissing on any keypress.
+#[test]
+fn metadata_menu_closes_on_esc_or_valid_key_only() {
+    let mut app = app_with_entries(1);
+    app.select_entry_index(0);
+    app.open_metadata_menu();
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::Overlay(OverlayAction::Cancel))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('t')), true),
+        Some(Action::Metadata(MetadataAction::BeginEdit(MetadataKind::Tags)))
+    );
+    // An unmapped key is inert — the popup stays open.
+    assert_eq!(keyboard::key_to_action(&app, key(KeyCode::Char('z')), true), None);
 }
 
 #[test]
@@ -497,11 +717,12 @@ fn editor_metadata_menu_click_maps_rows_and_close() {
         )))
     );
 
-    // The editor's menu closes back to the editor, not the overlay layer.
+    // The editor's menu closes back to the editor, not the overlay layer: its
+    // "close esc" chip ends the prompt.
     let close_action = menu_click_action(&mut app, area, |kind| {
         matches!(
             kind,
-            InteractionKind::DialogClose(DialogId::EditorMetadataMenu)
+            InteractionKind::Hint(crate::tui::render::HintId::CancelOverlay)
         )
     });
     assert_eq!(

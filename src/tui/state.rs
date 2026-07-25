@@ -536,6 +536,130 @@ pub(crate) fn ensure_selected_visible(state: &mut ListState, len: usize, viewpor
     *state.offset_mut() = next_offset.min(max_offset);
 }
 
+/// One line of the settings dialog: a blank spacer or a category sub-header
+/// (neither selectable), or one setting row. Rows index back into the static
+/// registry ([`SettingCategory::rows`]).
+#[derive(Clone, Copy)]
+pub(crate) enum SettingsItem {
+    /// A blank separating row above a category (not the first).
+    Spacer,
+    Header(crate::tui::features::settings::SettingCategory),
+    Row {
+        category: crate::tui::features::settings::SettingCategory,
+        index: usize,
+    },
+}
+
+/// State for the settings dialog: the flattened list of category headers and
+/// their rows, plus the cursor over it. Selection only ever lands on a `Row`;
+/// [`move_up`](ListNav::move_up)/[`move_down`](ListNav::move_down) skip headers.
+pub(crate) struct SettingsState {
+    pub(crate) items: Vec<SettingsItem>,
+    pub(crate) list: SelectableList,
+}
+
+impl SettingsState {
+    pub(crate) fn new() -> Self {
+        use crate::tui::features::settings::SettingCategory;
+        let mut items = Vec::new();
+        for (position, category) in SettingCategory::ALL.into_iter().enumerate() {
+            // A blank line separates each category from the one above.
+            if position > 0 {
+                items.push(SettingsItem::Spacer);
+            }
+            items.push(SettingsItem::Header(category));
+            for index in 0..category.rows().len() {
+                items.push(SettingsItem::Row { category, index });
+            }
+        }
+        let mut state = Self {
+            items,
+            list: SelectableList::default(),
+        };
+        // Seed on the first setting row, past the leading header.
+        if let Some(first) = state.next_row(None) {
+            state.select_index(first);
+        }
+        state
+    }
+
+    fn is_row(&self, index: usize) -> bool {
+        matches!(self.items.get(index), Some(SettingsItem::Row { .. }))
+    }
+
+    /// The first setting row at or after `from` (or the very first when `None`).
+    fn next_row(&self, from: Option<usize>) -> Option<usize> {
+        let start = from.map_or(0, |index| index + 1);
+        (start..self.items.len()).find(|&index| self.is_row(index))
+    }
+
+    /// The last setting row before `before`.
+    fn prev_row(&self, before: usize) -> Option<usize> {
+        (0..before).rev().find(|&index| self.is_row(index))
+    }
+
+    /// The highlighted setting's category and row, or `None` on a header.
+    pub(crate) fn selected_row(
+        &self,
+    ) -> Option<(
+        crate::tui::features::settings::SettingCategory,
+        &'static crate::tui::features::settings::SettingRow,
+    )> {
+        match self.items.get(self.selected_index()?)? {
+            SettingsItem::Row { category, index } => Some((*category, &category.rows()[*index])),
+            SettingsItem::Header(_) | SettingsItem::Spacer => None,
+        }
+    }
+}
+
+impl ListNav for SettingsState {
+    fn list(&self) -> &SelectableList {
+        &self.list
+    }
+
+    fn list_mut(&mut self) -> &mut SelectableList {
+        &mut self.list
+    }
+
+    fn item_count(&self) -> usize {
+        self.items.len()
+    }
+
+    fn move_up(&mut self) {
+        if let Some(current) = self.selected_index()
+            && let Some(prev) = self.prev_row(current)
+        {
+            self.select_index(prev);
+        }
+    }
+
+    fn move_down(&mut self) {
+        if let Some(current) = self.selected_index()
+            && let Some(next) = self.next_row(Some(current))
+        {
+            self.select_index(next);
+        }
+    }
+
+    /// Keep the selected row visible, then also reveal the category header (and
+    /// spacer) directly above it when they've scrolled off the top — so returning
+    /// to a category's first row shows its header again.
+    fn ensure_selected_visible(&mut self, viewport_height: u16) {
+        let len = self.item_count();
+        self.list_mut().ensure_visible(len, viewport_height);
+        let Some(selected) = self.selected_index() else {
+            return;
+        };
+        let mut top = selected;
+        while top > 0 && !self.is_row(top - 1) {
+            top -= 1;
+        }
+        if top < self.offset() {
+            self.list_mut().set_offset(top);
+        }
+    }
+}
+
 /// One row of the theme picker: a theme file's stem and its parse result,
 /// cached when the picker opens so selection moves don't re-read the disk.
 pub(crate) struct ThemePickerEntry {
@@ -592,6 +716,9 @@ pub(crate) struct ThemePickerState {
     /// That journal's own theme at open (used to seed the Journal-scope row and
     /// to mark the "this journal" row); `None` when it follows the global theme.
     pub(crate) journal_theme: Option<JournalThemeChoice>,
+    /// Whether closing the picker (apply or revert) reopens the settings dialog
+    /// it was launched from, rather than returning straight to browse.
+    pub(crate) reopen_settings: bool,
 }
 
 impl ThemePickerState {
@@ -675,9 +802,10 @@ pub(crate) enum Overlay {
     /// Reference popup listing the metadata shortcut keys. The keys work whether or
     /// not it is shown, so this only aids discovery.
     MetadataMenu,
-    /// The settings menu: a small chooser whose rows open the settings dialogs
-    /// (currently just the theme picker).
-    SettingsMenu,
+    /// The settings dialog: one scrollable list with the categories as
+    /// sub-headers and their settings toggled/adjusted in place. Boxed to keep
+    /// `Overlay` small, matching the other list-state variants.
+    Settings(Box<SettingsState>),
     /// The global keyboard-shortcut cheatsheet, scrolled to `scroll`. Opened with
     /// `?` from browse or a search result; a reference only, so any key closes it.
     Help {

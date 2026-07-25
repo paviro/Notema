@@ -40,6 +40,9 @@ pub(crate) use theme_picker::{theme_picker_hints, theme_picker_layout};
 mod filter;
 pub(super) use filter::draw_filter_dialog;
 pub(crate) use filter::{filter_dialog_hints, filter_dialog_layout, filter_tab_segments};
+mod settings;
+pub(super) use settings::draw_settings_dialog;
+pub(crate) use settings::{settings_dialog_hints, settings_dialog_layout};
 mod overlays;
 pub(crate) use overlays::{confirm_delete_inner, new_journal_field_rect};
 pub(super) use overlays::{

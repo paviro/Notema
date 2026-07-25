@@ -112,10 +112,6 @@ pub(super) fn prompt_mouse_action(
 fn mapped_overlay_click(app: &AppModel, col: u16, row: u16, view: &ViewState) -> Option<Action> {
     match view.interactions.hit(col, row)? {
         InteractionKind::Hint(id) => hint_id_to_action(app, *id),
-        InteractionKind::DialogClose(DialogId::EditorMetadataMenu) => {
-            Some(Action::Editor(EditorAction::ClosePrompt))
-        }
-        InteractionKind::DialogClose(_) => Some(Action::Overlay(OverlayAction::Cancel)),
         InteractionKind::FilterTab(tab) => Some(Action::Filter(FilterAction::SelectTab(*tab))),
         InteractionKind::DialogRow { dialog, index } => dialog_row_action(*dialog, *index),
         InteractionKind::DialogList { dialog, .. } => dialog_list_focus_action(*dialog),
@@ -148,9 +144,7 @@ fn mapped_overlay_click(app: &AppModel, col: u16, row: u16, view: &ViewState) ->
 
 fn dialog_row_action(dialog: DialogId, index: usize) -> Option<Action> {
     match dialog {
-        DialogId::Settings => {
-            (index == 0).then_some(Action::Settings(SettingsAction::OpenThemePicker))
-        }
+        DialogId::Settings => Some(Action::Settings(SettingsAction::Click(index))),
         DialogId::MetadataMenu | DialogId::EditorMetadataMenu => match index {
             0 => Some(Action::Metadata(MetadataAction::BeginEdit(
                 MetadataKind::Tags,
@@ -166,7 +160,7 @@ fn dialog_row_action(dialog: DialogId, index: usize) -> Option<Action> {
             5 => Some(Action::Location(LocationAction::BeginEdit)),
             _ => None,
         },
-        DialogId::ThemePicker => Some(Action::Settings(SettingsAction::ThemePickerSelect(index))),
+        DialogId::ThemePicker => Some(Action::Settings(SettingsAction::ThemePickerClick(index))),
         DialogId::Metadata => Some(Action::Mouse(MouseAction::DialogRow {
             target: DialogListTarget::Metadata,
             index,

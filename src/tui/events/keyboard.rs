@@ -139,22 +139,15 @@ fn handle_editor_key(
     }
 
     if matches!(editor_prompt(app), Some(EditorPrompt::MetadataMenu)) {
-        let action = match key.code {
-            KeyCode::Char('t') => Action::Metadata(MetadataAction::BeginEdit(
-                crate::tui::state::MetadataKind::Tags,
-            )),
-            KeyCode::Char('p') => Action::Metadata(MetadataAction::BeginEdit(
-                crate::tui::state::MetadataKind::People,
-            )),
-            KeyCode::Char('a') => Action::Metadata(MetadataAction::BeginEdit(
-                crate::tui::state::MetadataKind::Activities,
-            )),
-            KeyCode::Char('f') => Action::Metadata(MetadataAction::BeginFeelings),
-            KeyCode::Char('m') => Action::Metadata(MetadataAction::BeginMood),
-            KeyCode::Char('l') => Action::Location(LocationAction::BeginEdit),
-            _ => Action::Editor(EditorAction::ClosePrompt),
-        };
-        return super::dispatch_action(terminal, app, action);
+        // The editor gates its metadata keys behind this popup; Esc ends the
+        // prompt (not an overlay), and other keys stay inert.
+        let action = metadata_menu_letter_action(key).or_else(|| {
+            matches!(key.code, KeyCode::Esc).then(|| Action::Editor(EditorAction::ClosePrompt))
+        });
+        if let Some(action) = action {
+            return super::dispatch_action(terminal, app, action);
+        }
+        return Ok(DispatchOutcome::Continue);
     }
 
     match key.code {
@@ -280,7 +273,7 @@ pub(super) fn key_to_action(
         }
         Overlay::None => browse_key_to_action(app, key, reader_available),
         Overlay::MetadataMenu => metadata_menu_key_to_action(key),
-        Overlay::SettingsMenu => settings_menu_key_to_action(key),
+        Overlay::Settings(_) => settings_key_to_action(key),
         Overlay::Help { .. } => help_key_to_action(key),
         Overlay::ThemePicker(_) => theme_picker_key_to_action(key),
         Overlay::ConfirmDelete(_, selected) => confirm_delete_key_to_action(key, *selected),
@@ -296,10 +289,9 @@ pub(super) fn key_to_action(
     }
 }
 
-/// Keys while the metadata reference popup is open: the listed letters open their
-/// edit dialog (replacing the popup), anything else dismisses it. The letters also
-/// work directly on the viewer, so this popup is only a discovery aid.
-fn metadata_menu_key_to_action(key: KeyEvent) -> Option<Action> {
+/// The facet a metadata-chooser letter opens, shared by the viewer popup and the
+/// editor's gated variant. `None` for any other key.
+fn metadata_menu_letter_action(key: KeyEvent) -> Option<Action> {
     Some(match key.code {
         KeyCode::Char('t') => Action::Metadata(MetadataAction::BeginEdit(MetadataKind::Tags)),
         KeyCode::Char('p') => Action::Metadata(MetadataAction::BeginEdit(MetadataKind::People)),
@@ -307,17 +299,32 @@ fn metadata_menu_key_to_action(key: KeyEvent) -> Option<Action> {
         KeyCode::Char('f') => Action::Metadata(MetadataAction::BeginFeelings),
         KeyCode::Char('m') => Action::Metadata(MetadataAction::BeginMood),
         KeyCode::Char('l') => Action::Location(LocationAction::BeginEdit),
-        _ => Action::Overlay(OverlayAction::Cancel),
+        _ => return None,
     })
 }
 
-/// Keys while the settings menu is open: `t` (its key hint) or Enter open the
-/// only row — the theme picker — and anything else dismisses the menu, matching
-/// the metadata menu's behavior.
-fn settings_menu_key_to_action(key: KeyEvent) -> Option<Action> {
+/// Keys while the metadata reference popup is open: the listed letters open their
+/// edit dialog (replacing the popup), Esc dismisses it, and other keys are ignored.
+/// The letters also work directly on the viewer, so this popup is only a discovery
+/// aid.
+fn metadata_menu_key_to_action(key: KeyEvent) -> Option<Action> {
+    metadata_menu_letter_action(key).or_else(|| {
+        matches!(key.code, KeyCode::Esc).then(|| Action::Overlay(OverlayAction::Cancel))
+    })
+}
+
+/// Keys while the settings dialog is open: arrows move the cursor (skipping the
+/// category sub-headers), Enter/Space activates the row (toggle or open the theme
+/// picker), ← / → adjust a number, and Esc closes the dialog.
+fn settings_key_to_action(key: KeyEvent) -> Option<Action> {
     Some(match key.code {
-        KeyCode::Char('t') | KeyCode::Enter => Action::Settings(SettingsAction::OpenThemePicker),
-        _ => Action::Overlay(OverlayAction::Cancel),
+        KeyCode::Esc => Action::Overlay(OverlayAction::Cancel),
+        KeyCode::Up => Action::Metadata(MetadataAction::MoveSelection(-1)),
+        KeyCode::Down => Action::Metadata(MetadataAction::MoveSelection(1)),
+        KeyCode::Enter | KeyCode::Char(' ') => Action::Settings(SettingsAction::Activate),
+        KeyCode::Left | KeyCode::Char('-') => Action::Settings(SettingsAction::Adjust(-1)),
+        KeyCode::Right | KeyCode::Char('+') => Action::Settings(SettingsAction::Adjust(1)),
+        _ => return None,
     })
 }
 
@@ -544,7 +551,7 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
         }
         KeyCode::Char('h') => Some(Action::Overlay(OverlayAction::ToggleHints)),
         KeyCode::Char('j') => Some(Action::Overlay(OverlayAction::ToggleJournals)),
-        KeyCode::Char(',') => Some(Action::Settings(SettingsAction::OpenMenu)),
+        KeyCode::Char(',') => Some(Action::Settings(SettingsAction::OpenSettings)),
         KeyCode::Char('?') => Some(Action::Overlay(OverlayAction::OpenHelp)),
         _ => None,
     }

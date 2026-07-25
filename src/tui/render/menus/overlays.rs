@@ -1,5 +1,7 @@
 use super::*;
+use ratatui::widgets::{List, ListItem};
 
+/// The metadata chooser's rows: a mnemonic key and the facet it opens.
 const METADATA_MENU_ITEMS: [(&str, &str); 6] = [
     ("t", "Tags"),
     ("p", "People"),
@@ -9,110 +11,101 @@ const METADATA_MENU_ITEMS: [(&str, &str); 6] = [
     ("l", "Location"),
 ];
 
-fn metadata_menu_rows() -> Vec<Vec<String>> {
-    METADATA_MENU_ITEMS
-        .iter()
-        .map(|(key, label)| vec![key.to_string(), label.to_string()])
-        .collect()
+const METADATA_MENU_WIDTH: u16 = 30;
+
+/// The chooser's lone command — Esc closes it — as the standard hint chip.
+const METADATA_MENU_HINTS: [Hint; 1] = [Hint::new("close", "esc", HintId::CancelOverlay)];
+
+pub(crate) fn metadata_menu_hints() -> &'static [Hint] {
+    &METADATA_MENU_HINTS
 }
 
-fn metadata_menu_dialog<'a>(
-    theme: &'a Theme,
-    rows: &'a [Vec<String>],
-    mode: MetadataMenuMode,
-) -> TableDialog<'a> {
-    TableDialog {
-        theme,
-        title: "Add Metadata",
-        headers: &["Key", "Add"],
-        rows,
-        key_col: 0,
-        footer: mode.footer(),
-    }
+struct MetadataMenuLayout {
+    area: Rect,
+    list: Rect,
+    footer: Rect,
 }
 
-/// Where the metadata chooser is shown. The editor gates its metadata keys behind
-/// this popup ("press key"); the viewer's keys work at any time, so there the popup
-/// is only a reference ("reference").
-#[derive(Clone, Copy)]
-pub(crate) enum MetadataMenuMode {
-    Editor,
-    Viewer,
+/// The chooser's geometry, shared by the draw and the hit-test so the click map
+/// can't drift from the pixels. The menu always fits, so it never scrolls.
+fn metadata_menu_layout(theme: &Theme, frame_area: Rect) -> MetadataMenuLayout {
+    let rows = METADATA_MENU_ITEMS.len() as u16;
+    // The frame, the rows, a blank spacer, and the footer row.
+    let h = (dialog_frame_rows(theme) + rows + 1 + 1).min(frame_area.height.saturating_sub(2));
+    let area = centered_rect_fixed_size(METADATA_MENU_WIDTH, h, frame_area);
+    let inner = dialog_content_full(theme, area);
+    let list = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: rows.min(inner.height),
+    };
+    let footer = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(1),
+        width: inner.width,
+        height: 1,
+    };
+    MetadataMenuLayout { area, list, footer }
 }
 
-impl MetadataMenuMode {
-    fn footer(self) -> &'static str {
-        match self {
-            Self::Editor => "press key · esc",
-            Self::Viewer => "reference · esc",
-        }
-    }
-}
-
-/// Draw the "Add metadata" chooser: a centered popup whose highlighted letters open
-/// the tags/people/activities/feelings/mood dialogs, laid out as a table matching
-/// the insights tabs. Shared by the internal editor and the entry viewer.
+/// Draw the "Add metadata" chooser: a centered popup whose key chips open the
+/// tags/people/activities/feelings/mood/location dialogs. The keys work directly;
+/// the popup is a discovery aid, so a hovered row only lifts, it never "selects".
 pub(crate) fn draw_metadata_menu(
     theme: &Theme,
     frame: &mut Frame<'_>,
-    mode: MetadataMenuMode,
     hovered_row: Option<usize>,
+    hovered_hint: Option<HintId>,
 ) {
-    let rows = metadata_menu_rows();
-    // The chooser always fits, so it never scrolls.
-    let mut scroll = 0;
-    draw_table_dialog(
-        frame,
-        &metadata_menu_dialog(theme, &rows, mode),
-        &mut scroll,
-        hovered_row,
-    );
-}
+    let layout = metadata_menu_layout(theme, frame.area());
+    draw_dialog_frame_wide(theme, frame, layout.area, "Add Metadata", false);
 
-pub(crate) fn metadata_menu_interactions(
-    theme: &Theme,
-    frame_area: Rect,
-    mode: MetadataMenuMode,
-) -> MenuInteractions {
-    let rows = metadata_menu_rows();
-    table_dialog_interactions(frame_area, &metadata_menu_dialog(theme, &rows, mode), 0)
-}
-
-const SETTINGS_MENU_ITEMS: [(&str, &str); 1] = [("t", "Theme…")];
-
-fn settings_menu_rows() -> Vec<Vec<String>> {
-    SETTINGS_MENU_ITEMS
+    let items: Vec<ListItem<'_>> = METADATA_MENU_ITEMS
         .iter()
-        .map(|(key, label)| vec![key.to_string(), label.to_string()])
-        .collect()
-}
+        .enumerate()
+        .map(|(index, (key, label))| {
+            let item = ListItem::new(Line::from(vec![
+                Span::styled(key_chip_text(key), key_chip_style(theme)),
+                Span::raw(format!(" {label}")),
+            ]));
+            if hovered_row == Some(index) {
+                item.style(theme.hover())
+            } else {
+                item
+            }
+        })
+        .collect();
+    frame.render_widget(List::new(items), layout.list);
 
-fn settings_menu_dialog<'a>(theme: &'a Theme, rows: &'a [Vec<String>]) -> TableDialog<'a> {
-    TableDialog {
-        theme,
-        title: "Settings",
-        headers: &["Key", "Setting"],
-        rows,
-        key_col: 0,
-        footer: "enter select · esc close",
-    }
-}
-
-/// Draw the settings menu: a centered chooser whose rows open the settings
-/// dialogs. Same table popup as the metadata menu.
-pub(crate) fn draw_settings_menu(theme: &Theme, frame: &mut Frame<'_>, hovered_row: Option<usize>) {
-    let rows = settings_menu_rows();
-    // The menu always fits, so it never scrolls.
-    let mut scroll = 0;
-    draw_table_dialog(
-        frame,
-        &settings_menu_dialog(theme, &rows),
-        &mut scroll,
-        hovered_row,
+    frame.render_widget(
+        Paragraph::new(hint_lines(
+            theme,
+            &METADATA_MENU_HINTS,
+            layout.footer.width,
+            hovered_hint,
+        )),
+        layout.footer,
     );
 }
 
-pub(crate) fn settings_menu_interactions(theme: &Theme, frame_area: Rect) -> MenuInteractions {
-    let rows = settings_menu_rows();
-    table_dialog_interactions(frame_area, &settings_menu_dialog(theme, &rows), 0)
+pub(crate) fn metadata_menu_interactions(theme: &Theme, frame_area: Rect) -> MenuInteractions {
+    let layout = metadata_menu_layout(theme, frame_area);
+    let rows = (0..METADATA_MENU_ITEMS.len())
+        .map(|index| {
+            (
+                Rect {
+                    x: layout.list.x,
+                    y: layout.list.y + index as u16,
+                    width: layout.list.width,
+                    height: 1,
+                },
+                index,
+            )
+        })
+        .collect();
+    MenuInteractions {
+        rows,
+        footer: layout.footer,
+    }
 }

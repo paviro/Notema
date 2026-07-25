@@ -2626,7 +2626,9 @@ fn editor_metadata_menu_registers_row_and_close_regions() {
                     dialog: DialogId::EditorMetadataMenu,
                     index,
                 }) if *index < 6 => seen[*index] = true,
-                Some(InteractionKind::DialogClose(DialogId::EditorMetadataMenu)) => close = true,
+                Some(InteractionKind::Hint(crate::tui::render::HintId::CancelOverlay)) => {
+                    close = true
+                }
                 _ => {}
             }
         }
@@ -2716,43 +2718,60 @@ fn balanced_splits_minimizes_the_tallest_column() {
     assert_eq!(balanced_splits(&[], 3), vec![0]);
 }
 
-// ── Settings menu / theme picker ─────────────────────────────────────────────
+// ── Settings dialog / theme picker ───────────────────────────────────────────
 
 #[test]
-fn settings_menu_lists_the_theme_row_and_registers_its_regions() {
+fn settings_dialog_lists_categories_rows_and_description() {
     use crate::tui::ui::{DialogId, InteractionKind};
 
-    let text = render_to_text(64, 20, |frame| {
-        menus::draw_settings_menu(&theme::Theme::terminal_default(), frame, None)
-    });
-    assert!(text.contains("Settings"));
-    assert!(text.contains("Theme…"));
-    assert!(text.contains("enter select · esc close"));
-
     let mut app = app_with_journals(&["work"]);
-    app.open_settings_menu();
-    let area = Rect::new(0, 0, 64, 20);
+    app.open_settings();
+    let area = Rect::new(0, 0, 72, 30);
     let mut view = crate::tui::ui::ViewState::default();
-    render_backend(area.width, area.height, |frame| {
+    let text = render_to_text(area.width, area.height, |frame| {
         draw_app(frame, &mut app, &mut view)
     });
 
-    let mut found_theme = false;
+    // One dialog with the three categories as sub-headers, their settings and
+    // values, and the highlighted (Theme) row's description inside the frame.
+    assert!(text.contains("Settings"));
+    assert!(text.contains("Appearance"));
+    assert!(text.contains("Reader"));
+    assert!(text.contains("Editor"));
+    assert!(text.contains("Theme"));
+    assert!(text.contains("Center body vertically"));
+    assert!(text.contains("Show link URLs"));
+    assert!(text.contains("Choose the color theme"));
+
+    // Every setting row registers a clickable region; the three sub-headers do
+    // not, so the count matches the number of settings, not the line count.
+    let setting_rows: usize = crate::tui::features::settings::SettingCategory::ALL
+        .iter()
+        .map(|category| category.rows().len())
+        .sum();
+    let mut rows = std::collections::BTreeSet::new();
     let mut close_found = false;
     for row in 0..area.height {
         for col in 0..area.width {
             match view.interactions.hit(col, row) {
                 Some(InteractionKind::DialogRow {
                     dialog: DialogId::Settings,
-                    index: 0,
-                }) => found_theme = true,
-                Some(InteractionKind::DialogClose(DialogId::Settings)) => close_found = true,
+                    index,
+                }) => {
+                    rows.insert(*index);
+                }
+                // The close affordance is the hint bar's "close esc" chip.
+                Some(InteractionKind::Hint(crate::tui::render::HintId::CancelOverlay)) => {
+                    close_found = true
+                }
                 _ => {}
             }
         }
     }
-    assert!(found_theme, "theme row registered");
-    assert!(close_found, "close footer registered");
+    assert_eq!(rows.len(), setting_rows, "every setting row registered");
+    // The Appearance sub-header (item 0) is never a clickable row.
+    assert!(!rows.contains(&0), "sub-header is inert");
+    assert!(close_found, "close (esc) hint registered");
 }
 
 #[test]
@@ -2864,13 +2883,15 @@ fn rendering_keeps_navigation_state_and_records_effective_scroll_in_the_view() {
 #[test]
 fn overlay_region_wins_over_underlying_rows() {
     let mut app = app_with_journals(&["work"]);
-    app.open_settings_menu();
+    app.open_settings();
     let mut view = crate::tui::ui::ViewState::default();
 
     render_backend(64, 20, |frame| draw_app(frame, &mut app, &mut view));
 
+    // A point in the backdrop margin, left of the centered dialog: the overlay's
+    // full-frame region wins over the journal row registered behind it.
     assert_eq!(
-        view.interactions.hit(32, 10),
+        view.interactions.hit(2, 10),
         Some(&crate::tui::ui::InteractionKind::Overlay)
     );
 }
@@ -3711,29 +3732,6 @@ mod flat_chrome_tests {
             row_text(area.y + area.height - 1).trim(),
             "",
             "bottom padding row not blank"
-        );
-
-        // Table dialog: the footer sits above the bottom padding row.
-        let text_rows = render_to_rows(64, 20, |frame| {
-            menus::draw_settings_menu(&theme, frame, None)
-        });
-        let footer_row = text_rows
-            .iter()
-            .position(|row| row.contains("esc close"))
-            .expect("settings footer");
-        assert_eq!(
-            text_rows[footer_row + 1].trim(),
-            "",
-            "no padding under the footer"
-        );
-        let title_row = text_rows
-            .iter()
-            .position(|row| row.contains("Settings"))
-            .expect("settings title");
-        assert_eq!(
-            text_rows[title_row - 1].trim(),
-            "",
-            "no padding above the title"
         );
     }
 

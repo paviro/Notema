@@ -65,11 +65,11 @@ pub(crate) use dialogs::{
 use dialogs::{
     draw_confirm_delete, draw_edit_feelings_dialog, draw_edit_location_dialog,
     draw_edit_metadata_dialog, draw_edit_mood_dialog, draw_fetching_environment,
-    draw_filter_dialog, draw_new_journal_input, draw_theme_picker,
+    draw_filter_dialog, draw_new_journal_input, draw_settings_dialog, draw_theme_picker,
 };
 pub(crate) use dialogs::{
     feelings_dialog_layout, filter_dialog_layout, location_dialog_layout, metadata_dialog_layout,
-    theme_picker_layout,
+    settings_dialog_layout, theme_picker_layout,
 };
 use editor::draw_entry_editor;
 use entries::draw_entry_list;
@@ -87,7 +87,7 @@ pub(crate) use journals::JOURNAL_BOX_HEIGHT;
 use journals::draw_journals;
 pub(crate) use journals::{journal_list_rect, journal_row_height};
 pub(crate) use layout::{TuiLayout, tui_layout};
-pub(crate) use menus::{MetadataMenuMode, draw_editor_shortcuts, draw_metadata_menu};
+pub(crate) use menus::{draw_editor_shortcuts, draw_metadata_menu};
 pub(crate) use pending::{
     AccessNotice, draw_disable_notice, draw_pending_notice, draw_pending_request,
 };
@@ -419,16 +419,43 @@ fn register_overlay_interactions(
     use crate::tui::state::Overlay;
 
     match &app.overlay {
-        Overlay::SettingsMenu => {
-            let regions = menus::settings_menu_interactions(context.theme, frame_area);
-            register_menu(context, regions, DialogId::Settings);
+        Overlay::Settings(state) => {
+            let layout = dialogs::settings_dialog_layout(context.theme, frame_area, state);
+            // The whole list catches the wheel; only setting rows register a
+            // clickable row, so a click on a sub-header is inert.
+            context.view.interactions.push(
+                layout.list,
+                InteractionKind::DialogList {
+                    dialog: DialogId::Settings,
+                    viewport: layout.list.height,
+                },
+            );
+            let offset = state.offset();
+            for visible in 0..layout.list.height as usize {
+                let index = offset.saturating_add(visible);
+                let Some(item) = state.items.get(index) else {
+                    break;
+                };
+                if !matches!(item, crate::tui::state::SettingsItem::Row { .. }) {
+                    continue;
+                }
+                context.view.interactions.push(
+                    ratatui::layout::Rect::new(
+                        layout.list.x,
+                        layout.list.y + visible as u16,
+                        layout.list.width,
+                        1,
+                    ),
+                    InteractionKind::DialogRow {
+                        dialog: DialogId::Settings,
+                        index,
+                    },
+                );
+            }
+            register_hint_regions(context, layout.hints, dialogs::settings_dialog_hints());
         }
         Overlay::MetadataMenu => {
-            let regions = menus::metadata_menu_interactions(
-                context.theme,
-                frame_area,
-                MetadataMenuMode::Viewer,
-            );
+            let regions = menus::metadata_menu_interactions(context.theme, frame_area);
             register_menu(context, regions, DialogId::MetadataMenu);
         }
         Overlay::ConfirmDelete(ctx, _) => {
@@ -583,11 +610,7 @@ fn register_overlay_interactions(
     if let Some(editor) = app.editor.as_ref() {
         match editor.prompt {
             EditorPrompt::MetadataMenu => {
-                let regions = menus::metadata_menu_interactions(
-                    context.theme,
-                    frame_area,
-                    MetadataMenuMode::Editor,
-                );
+                let regions = menus::metadata_menu_interactions(context.theme, frame_area);
                 register_menu(context, regions, DialogId::EditorMetadataMenu);
             }
             EditorPrompt::ConfirmDiscard { .. } => {
@@ -667,10 +690,7 @@ fn register_menu(
     regions: menus::MenuInteractions,
     dialog: DialogId,
 ) {
-    context
-        .view
-        .interactions
-        .push(regions.footer, InteractionKind::DialogClose(dialog));
+    register_hint_regions(context, regions.footer, menus::metadata_menu_hints());
     for (area, index) in regions.rows {
         context
             .view
@@ -822,17 +842,21 @@ fn draw_overlays(theme: &crate::tui::theme::Theme, frame: &mut Frame<'_>, app: &
         crate::tui::state::HoverTarget::ConfirmButton(yes) => Some(yes),
         _ => None,
     };
+    let hovered_menu_hint = match hover {
+        crate::tui::state::HoverTarget::FooterHint(id) => Some(id),
+        _ => None,
+    };
 
     if let crate::tui::state::Overlay::ConfirmDelete(ctx, selected) = &app.overlay {
         draw_confirm_delete(theme, frame, ctx, *selected, hovered_button);
     }
 
     if matches!(app.overlay, crate::tui::state::Overlay::MetadataMenu) {
-        draw_metadata_menu(theme, frame, MetadataMenuMode::Viewer, hovered_dialog_row);
+        draw_metadata_menu(theme, frame, hovered_dialog_row, hovered_menu_hint);
     }
 
-    if matches!(app.overlay, crate::tui::state::Overlay::SettingsMenu) {
-        menus::draw_settings_menu(theme, frame, hovered_dialog_row);
+    if let crate::tui::state::Overlay::Settings(state) = &mut app.overlay {
+        draw_settings_dialog(theme, frame, state, &app.services.config, hover);
     }
 
     if let crate::tui::state::Overlay::Help { scroll } = &mut app.overlay {
@@ -880,7 +904,7 @@ fn draw_overlays(theme: &crate::tui::theme::Theme, frame: &mut Frame<'_>, app: &
     if let Some(editor) = app.editor.as_mut() {
         match &mut editor.prompt {
             EditorPrompt::MetadataMenu => {
-                draw_metadata_menu(theme, frame, MetadataMenuMode::Editor, hovered_dialog_row)
+                draw_metadata_menu(theme, frame, hovered_dialog_row, hovered_menu_hint)
             }
             EditorPrompt::Help { scroll } => draw_editor_shortcuts(theme, frame, scroll),
             EditorPrompt::ConfirmDiscard { discard_selected } => {

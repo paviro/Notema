@@ -642,6 +642,10 @@ fn open_dialog_list_height<B: Backend>(
         render::filter_dialog_layout(&app.appearance.theme, area, state)
             .list
             .height
+    } else if let Some(state) = app.settings_state() {
+        render::settings_dialog_layout(&app.appearance.theme, area, state)
+            .list
+            .height
     } else {
         0
     };
@@ -661,6 +665,9 @@ fn open_dialog_list_mut(app: &mut AppModel) -> Option<&mut dyn ListNav> {
     }
     if app.theme_picker_state().is_some() {
         return app.theme_picker_state_mut().map(|s| s as &mut dyn ListNav);
+    }
+    if app.settings_state().is_some() {
+        return app.settings_state_mut().map(|s| s as &mut dyn ListNav);
     }
     if app.filter_state().is_some() {
         return app.filter_state_mut().map(|s| s as &mut dyn ListNav);

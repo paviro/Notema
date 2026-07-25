@@ -81,7 +81,6 @@ pub(crate) enum InteractionKind {
     /// A tab header in the filter dialog.
     FilterTab(crate::tui::state::FilterTab),
     DialogInput(DialogInputId),
-    DialogClose(DialogId),
     ConfirmButton {
         confirm: ConfirmId,
         destructive: bool,

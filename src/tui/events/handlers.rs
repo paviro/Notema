@@ -1,5 +1,6 @@
 use super::*;
 use crate::tui::features::metadata::EditMetadataFocus;
+use crate::tui::state::ListNav;
 
 /// Adjust the focused list's scroll offset so a selection moved by a handler
 /// stays on screen, using the live terminal geometry.
@@ -378,12 +379,25 @@ pub(super) fn settings<B: Backend>(
             keep_selection_visible(terminal, app)?;
         }
         SettingsAction::JournalInputSubmit => submit_new_journal(app)?,
-        SettingsAction::OpenMenu => app.open_settings_menu(),
-        SettingsAction::OpenThemePicker => {
-            app.open_theme_picker();
-            reveal_open_dialog_selection(terminal, app)?;
+        SettingsAction::OpenSettings => app.open_settings(),
+        SettingsAction::Activate => activate_highlighted_setting(terminal, app)?,
+        SettingsAction::Adjust(dir) => app.settings_adjust(dir),
+        SettingsAction::Click(index) => {
+            let already = app.settings_state().and_then(|s| s.selected_index()) == Some(index);
+            app.settings_select(index);
+            if already {
+                activate_highlighted_setting(terminal, app)?;
+            }
         }
         SettingsAction::ThemePickerSelect(index) => app.theme_picker_select(index),
+        SettingsAction::ThemePickerClick(index) => {
+            let already = app.theme_picker_state().and_then(|s| s.selected_index()) == Some(index);
+            if already {
+                app.theme_picker_confirm();
+            } else {
+                app.theme_picker_select(index);
+            }
+        }
         SettingsAction::ThemePickerConfirm => app.theme_picker_confirm(),
         SettingsAction::ThemePickerCancel => app.theme_picker_cancel(),
         SettingsAction::ThemePickerCycleChrome => app.theme_picker_cycle_chrome(),
@@ -392,6 +406,19 @@ pub(super) fn settings<B: Backend>(
             app.theme_picker_toggle_scope();
             reveal_open_dialog_selection(terminal, app)?;
         }
+    }
+    Ok(())
+}
+
+/// Activate the highlighted setting, then — if that opened the theme picker —
+/// scroll its selection into view.
+fn activate_highlighted_setting<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppModel,
+) -> AppResult<()> {
+    app.settings_activate();
+    if matches!(app.overlay, Overlay::ThemePicker(_)) {
+        reveal_open_dialog_selection(terminal, app)?;
     }
     Ok(())
 }

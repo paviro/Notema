@@ -1,12 +1,174 @@
-//! Library administration driven by the settings menu and its sub-actions:
+//! Library administration driven by the settings dialog and its sub-actions:
 //! journal creation, and the theme picker with its scoped (journal vs global)
 //! preview/confirm/cancel lifecycle.
 
+use crate::config::Config;
 use crate::tui::{
     app::AppModel,
-    state::{ListNav, Overlay, ThemePickerState, ToastVariant},
+    state::{ListNav, Overlay, SettingsState, ThemePickerState, ToastVariant},
     text_input::TextInput,
 };
+
+/// A group of related settings, shown as one sub-header in the settings dialog.
+/// Grouped by what the user is doing, not by config-file section: e.g. the
+/// location and attachment toggles live under [`Editor`](Self::Editor) because
+/// they take effect while editing/saving an entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingCategory {
+    Appearance,
+    Reader,
+    Editor,
+}
+
+impl SettingCategory {
+    pub(crate) const ALL: [SettingCategory; 3] = [
+        SettingCategory::Appearance,
+        SettingCategory::Reader,
+        SettingCategory::Editor,
+    ];
+
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            SettingCategory::Appearance => "Appearance",
+            SettingCategory::Reader => "Reader",
+            SettingCategory::Editor => "Editor",
+        }
+    }
+
+    pub(crate) fn rows(self) -> &'static [SettingRow] {
+        match self {
+            SettingCategory::Appearance => APPEARANCE_SETTINGS,
+            SettingCategory::Reader => READER_SETTINGS,
+            SettingCategory::Editor => EDITOR_SETTINGS,
+        }
+    }
+}
+
+/// Extra work a setting needs after it changes, beyond writing the config file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AfterChange {
+    None,
+    /// Re-resolve the active theme — the setting feeds theme resolution
+    /// (e.g. `ignore_journal_themes`).
+    ReresolveTheme,
+}
+
+/// One setting under a category. The `get`/`set` function pointers read and
+/// write the real config field, so adding a setting is a single entry here — no
+/// per-setting action or handler plumbing.
+pub(crate) enum SettingRow {
+    /// Opens the theme picker; its value column shows the current theme name.
+    Theme,
+    Bool {
+        label: &'static str,
+        description: &'static str,
+        get: fn(&Config) -> bool,
+        set: fn(&mut Config, bool),
+        after: AfterChange,
+    },
+    Number {
+        label: &'static str,
+        description: &'static str,
+        get: fn(&Config) -> u16,
+        set: fn(&mut Config, u16),
+        step: u16,
+        min: u16,
+        max: u16,
+    },
+}
+
+impl SettingRow {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            // The Theme row opens the picker; the dialog trails it with the
+            // themable disclosure glyph rather than an ellipsis.
+            SettingRow::Theme => "Theme",
+            SettingRow::Bool { label, .. } | SettingRow::Number { label, .. } => label,
+        }
+    }
+
+    pub(crate) fn description(&self) -> &'static str {
+        match self {
+            SettingRow::Theme => "Choose the color theme (also its color mode and chrome).",
+            SettingRow::Bool { description, .. } | SettingRow::Number { description, .. } => {
+                description
+            }
+        }
+    }
+
+    /// The value column text for the current config: `On`/`Off`, the number, or
+    /// the current theme name.
+    pub(crate) fn value(&self, config: &Config) -> String {
+        match self {
+            SettingRow::Theme => config.ui.theme.clone(),
+            SettingRow::Bool { get, .. } => {
+                if get(config) { "On" } else { "Off" }.to_string()
+            }
+            SettingRow::Number { get, .. } => get(config).to_string(),
+        }
+    }
+}
+
+const APPEARANCE_SETTINGS: &[SettingRow] = &[
+    SettingRow::Theme,
+    SettingRow::Bool {
+        label: "Ignore per-journal themes",
+        description: "Always use the global theme, ignoring themes set on individual journals. Useful on low-capability terminals (e-ink).",
+        get: |c| c.ui.ignore_journal_themes,
+        set: |c, v| c.ui.ignore_journal_themes = v,
+        after: AfterChange::ReresolveTheme,
+    },
+];
+
+const READER_SETTINGS: &[SettingRow] = &[
+    SettingRow::Bool {
+        label: "Center body vertically",
+        description: "Vertically center the entry body when it fits without scrolling.",
+        get: |c| c.ui.layout.reader.body_center_vertically,
+        set: |c, v| c.ui.layout.reader.body_center_vertically = v,
+        after: AfterChange::None,
+    },
+    SettingRow::Number {
+        label: "Max body width",
+        description: "Maximum entry-body width in columns; wider panes gutter the sides for readability. Use ← / → to change.",
+        get: |c| c.ui.layout.reader.body_max_width,
+        set: |c, v| c.ui.layout.reader.body_max_width = v,
+        step: 5,
+        min: 40,
+        max: 240,
+    },
+    SettingRow::Bool {
+        label: "Show link URLs",
+        description: "Show each link's target URL in faint text after its name.",
+        get: |c| c.ui.layout.reader.show_link_urls,
+        set: |c, v| c.ui.layout.reader.show_link_urls = v,
+        after: AfterChange::None,
+    },
+];
+
+const EDITOR_SETTINGS: &[SettingRow] = &[
+    SettingRow::Bool {
+        label: "Start in fullscreen",
+        description: "Open the entry editor fullscreen, hiding the other columns.",
+        get: |c| c.editor.start_fullscreen,
+        set: |c, v| c.editor.start_fullscreen = v,
+        after: AfterChange::None,
+    },
+    SettingRow::Bool {
+        label: "Use location's timezone",
+        description: "Stamp a new located entry with its place's timezone instead of the machine's, so travelling doesn't skew its local time.",
+        get: |c| c.location.use_location_timezone,
+        set: |c, v| c.location.use_location_timezone = v,
+        after: AfterChange::None,
+    },
+    SettingRow::Bool {
+        label: "Download remote images",
+        description: "Fetch images referenced by remote URLs into local attachments when the entry is saved.",
+        get: |c| c.attachments.download_remote_images,
+        set: |c, v| c.attachments.download_remote_images = v,
+        after: AfterChange::None,
+    },
+];
 
 impl AppModel {
     pub(crate) fn begin_new_journal_input(&mut self) {
@@ -27,8 +189,97 @@ impl AppModel {
         }
     }
 
-    pub(crate) fn open_settings_menu(&mut self) {
-        self.overlay = Overlay::SettingsMenu;
+    /// Open the settings dialog, seeded on its first setting row (Theme).
+    pub(crate) fn open_settings(&mut self) {
+        self.overlay = Overlay::Settings(Box::new(SettingsState::new()));
+    }
+
+    pub(crate) fn settings_state(&self) -> Option<&SettingsState> {
+        match &self.overlay {
+            Overlay::Settings(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn settings_state_mut(&mut self) -> Option<&mut SettingsState> {
+        match &mut self.overlay {
+            Overlay::Settings(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Select item `index` (a setting row) in the settings dialog.
+    pub(crate) fn settings_select(&mut self, index: usize) {
+        if let Some(state) = self.settings_state_mut() {
+            state.select_index(index);
+        }
+    }
+
+    /// Activate the highlighted setting: toggle a bool, open the theme picker, or
+    /// (for a number, adjusted with ← / →) do nothing.
+    pub(crate) fn settings_activate(&mut self) {
+        let Some((_, row)) = self.settings_state().and_then(|s| s.selected_row()) else {
+            return;
+        };
+        match row {
+            SettingRow::Theme => {
+                self.open_theme_picker();
+                // Returning from the picker reopens this dialog, not browse.
+                if let Overlay::ThemePicker(state) = &mut self.overlay {
+                    state.reopen_settings = true;
+                }
+            }
+            SettingRow::Bool {
+                get, set, after, ..
+            } => {
+                let next = !get(&self.services.config);
+                set(&mut self.services.config, next);
+                self.apply_setting_change(*after);
+            }
+            SettingRow::Number { .. } => {}
+        }
+    }
+
+    /// Adjust the highlighted number setting by one step in `dir` (-1/+1),
+    /// clamped to its range, and persist.
+    pub(crate) fn settings_adjust(&mut self, dir: i16) {
+        let Some((_, row)) = self.settings_state().and_then(|s| s.selected_row()) else {
+            return;
+        };
+        if let SettingRow::Number {
+            get,
+            set,
+            step,
+            min,
+            max,
+            ..
+        } = row
+        {
+            let current = get(&self.services.config);
+            let delta = i32::from(dir) * i32::from(*step);
+            let next = (i32::from(current) + delta).clamp(i32::from(*min), i32::from(*max)) as u16;
+            if next != current {
+                set(&mut self.services.config, next);
+                self.apply_setting_change(AfterChange::None);
+            }
+        }
+    }
+
+    /// Persist the config after a setting change, running any follow-up work; a
+    /// failed save toasts and leaves the (already in-memory) change in place.
+    fn apply_setting_change(&mut self, after: AfterChange) {
+        if let Err(err) =
+            crate::config::save_config(&self.services.config_path, &self.services.config)
+        {
+            self.toast(
+                ToastVariant::Error,
+                format!("Couldn't save config: {}", crate::tui::concise_error(&err)),
+            );
+            return;
+        }
+        if after == AfterChange::ReresolveTheme {
+            self.apply_effective_theme();
+        }
     }
 
     /// Open the theme picker: list the theme files on disk (parse results
@@ -112,6 +363,7 @@ impl AppModel {
             scope,
             journal,
             journal_theme,
+            reopen_settings: false,
         };
         let active = state
             .entries
@@ -357,7 +609,18 @@ impl AppModel {
 
         self.apply_effective_theme();
         self.toast(ToastVariant::Success, toast);
-        self.close_overlay();
+        self.close_theme_picker();
+    }
+
+    /// Close the theme picker: reopen the settings dialog it was launched from,
+    /// or return straight to browse.
+    fn close_theme_picker(&mut self) {
+        let reopen = matches!(&self.overlay, Overlay::ThemePicker(state) if state.reopen_settings);
+        if reopen {
+            self.open_settings();
+        } else {
+            self.close_overlay();
+        }
     }
 
     /// Update the in-memory `Journal.theme` for `name` so the next render and
@@ -388,6 +651,6 @@ impl AppModel {
             self.appearance.chrome_override = chrome;
             self.appearance.theme = theme;
         }
-        self.close_overlay();
+        self.close_theme_picker();
     }
 }

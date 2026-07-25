@@ -236,9 +236,17 @@ pub(crate) enum SettingsAction {
     NewJournal,
     ToggleArchiveJournal,
     JournalInputSubmit,
-    OpenMenu,
-    OpenThemePicker,
+    /// Open the settings dialog.
+    OpenSettings,
+    /// Enter/Space on the highlighted row: toggle a bool or open the theme picker.
+    Activate,
+    /// ← / → on a number row: adjust by one step in the given direction (-1/+1).
+    Adjust(i16),
+    /// Click setting-row `index`: select it, or activate it if already selected.
+    Click(usize),
     ThemePickerSelect(usize),
+    /// Click theme-row `index`: preview it, or confirm it if already selected.
+    ThemePickerClick(usize),
     ThemePickerConfirm,
     ThemePickerCancel,
     ThemePickerCycleChrome,
