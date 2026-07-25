@@ -755,8 +755,15 @@ fn metadata_scroll_lines_match_the_pinned_section_height() {
         ..Default::default()
     };
     let active_theme = theme::Theme::terminal_default();
-    let entry_metadata = super::metadata::EntryMetadata::from_metadata(&active_theme, &metadata)
-        .with_environment(&active_theme, Some(&weather), Some(&celestial), Some(&air));
+    let entry_metadata = super::metadata::EntryMetadata::for_entry(
+        &active_theme,
+        &metadata,
+        crate::tui::env_strip::EnvironmentRef {
+            weather: Some(&weather),
+            celestial: Some(&celestial),
+            air_quality: Some(&air),
+        },
+    );
 
     for width in [20u16, 32, 48, 80] {
         let lines = super::metadata::metadata_section_lines(
@@ -783,7 +790,8 @@ fn pill_styles_share_geometry_across_reversed_bg_and_bracket() {
         ..Default::default()
     };
     let reversed_theme = theme::Theme::terminal_default();
-    let entry_metadata = super::metadata::EntryMetadata::from_metadata(&reversed_theme, &metadata);
+    let entry_metadata =
+        super::metadata::EntryMetadata::for_entry(&reversed_theme, &metadata, Default::default());
     let tags_line =
         |theme| super::metadata::metadata_section_lines(theme, 40, &entry_metadata)[1].clone();
 
@@ -2559,7 +2567,7 @@ fn internal_editor_metadata_menu_renders() {
 }
 
 /// The editor's metadata section renders the entry's location just like the
-/// viewer — both go through `EntryMetadata::from_metadata`, so a front-matter
+/// viewer — both go through `EntryMetadata::for_entry`, so a front-matter
 /// field can't show in one mode and vanish in the other.
 #[test]
 fn internal_editor_shows_entry_location() {
@@ -2579,6 +2587,83 @@ fn internal_editor_shows_entry_location() {
     assert!(text.contains("Testville Cafe"), "editor pane was:\n{text}");
 }
 
+/// An entry with environment tables, as `open_editor_for_selected` loads it.
+fn app_editing_entry_with_environment() -> (tempfile::TempDir, AppModel) {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        "+++\nschema_version = 1\n\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n\n\
+         [location]\nname = \"Testville\"\n\n\
+         [weather]\ncondition = \"clear\"\ntemperature_celsius = 18.4\n\n\
+         [celestial]\nmoon_phase_name = \"full\"\n+++\n\n# A\nBody\n",
+    )
+    .unwrap();
+    let mut app = new_app(Config::new(dir.path().to_path_buf()));
+    app.select_journal_by_name("work");
+    app.open_editor_for_selected().unwrap();
+    (dir, app)
+}
+
+/// The editor's strip shows the entry's saved environment, not just its
+/// location — the gap that had the editor rendering less than the viewer.
+#[test]
+fn internal_editor_shows_the_saved_environment_strip() {
+    let (_dir, app) = app_editing_entry_with_environment();
+    let text = render_text(app, 120, 40);
+    assert!(text.contains("o 18°C clear"), "editor pane was:\n{text}");
+    assert!(text.contains("O full moon"), "editor pane was:\n{text}");
+}
+
+/// A location changed mid-edit refetches the environment; the strip must follow
+/// it rather than keep showing the tables the entry was saved with.
+#[test]
+fn internal_editor_strip_prefers_a_landed_fetch_over_the_saved_tables() {
+    let (_dir, mut app) = app_editing_entry_with_environment();
+    app.editor.as_mut().unwrap().environment = Some(notema_context::EnvironmentReport {
+        weather: Some(notema_domain::Weather {
+            condition: Some("fog".to_string()),
+            temperature_celsius: Some(3.0),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let text = render_text(app, 120, 40);
+    assert!(text.contains("3°C fog"), "editor pane was:\n{text}");
+    assert!(!text.contains("18°C clear"), "editor pane was:\n{text}");
+}
+
+/// A new entry has no saved tables, so its strip comes from the fetch its own
+/// location triggered.
+#[test]
+fn internal_editor_new_entry_shows_its_fetched_environment() {
+    let mut app = app_with_journals(&["work"]);
+    app.select_journal_by_name("work");
+    app.open_editor_for_new();
+    app.editor.as_mut().unwrap().environment = Some(notema_context::EnvironmentReport {
+        weather: Some(notema_domain::Weather {
+            condition: Some("fog".to_string()),
+            temperature_celsius: Some(3.0),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+
+    let text = render_text(app, 120, 40);
+    assert!(text.contains("3°C fog"), "editor pane was:\n{text}");
+}
+
+/// The editor's panel carries the same word-count label the viewer's does.
+#[test]
+fn internal_editor_shows_the_word_count() {
+    let (_dir, app) = app_editing_entry_with_environment();
+    // "# A" + "Body" — the raw source the textarea holds.
+    let text = render_text(app, 120, 40);
+    assert!(text.contains("3 words"), "editor pane was:\n{text}");
+}
+
 /// Both metadata paint paths run the mood row through `mood_line`, so a narrow
 /// pane drops the pole labels whether the block is pinned or scrolling — the
 /// pinned path used to keep them and crush the bar instead.
@@ -2589,7 +2674,8 @@ fn pinned_and_scrolling_mood_rows_agree_on_a_narrow_pane() {
         mood: Some(2),
         ..Default::default()
     };
-    let entry_metadata = super::metadata::EntryMetadata::from_metadata(&theme, &metadata);
+    let entry_metadata =
+        super::metadata::EntryMetadata::for_entry(&theme, &metadata, Default::default());
     // Tall enough to pin the block, narrow enough to lose the labels.
     let area = Rect::new(0, 0, 22, 40);
     let pinned = render_to_text(area.width, area.height, |frame| {

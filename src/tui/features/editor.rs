@@ -51,6 +51,7 @@ impl AppModel {
             revision,
             &entry.body,
             entry.metadata_bundle(),
+            crate::tui::env_strip::EnvironmentOwned::for_entry(&entry),
         ));
         self.nav.focus = Focus::Reader;
         if self.services.config.editor.start_fullscreen {

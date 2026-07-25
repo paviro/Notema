@@ -879,6 +879,7 @@ mod tests {
             revision,
             "# Edited body",
             notema_domain::Metadata::default(),
+            Default::default(),
         );
         editor.original = "# Original".to_string();
         app.editor = Some(editor);
@@ -923,6 +924,7 @@ mod tests {
             revision,
             "# Edited body",
             notema_domain::Metadata::default(),
+            Default::default(),
         );
         editor.original = "# Original".to_string();
         editor.metadata.tags.push("cannot-write".to_string());
@@ -996,6 +998,7 @@ mod tests {
             revision,
             "   \n  ",
             notema_domain::Metadata::default(),
+            Default::default(),
         );
         editor.original = "# A\n".to_string();
         app.editor = Some(editor);

@@ -66,6 +66,10 @@ pub(crate) struct EntryEditor {
     pub(crate) pending_environment: Option<u64>,
     /// The landed environment for the current location, attached to the entry on save.
     pub(crate) environment: Option<crate::tui::environment::Environment>,
+    /// The entry's environment as loaded, so the metadata strip shows it until a
+    /// fetch of this session's own lands. Display-only — never written back, or an
+    /// untouched save would re-stamp it.
+    pub(crate) saved_environment: crate::tui::env_strip::EnvironmentOwned,
     /// The timezone of the current location, when `use_location_timezone` resolved
     /// one (new entries only). Re-zones the environment datetime and, on save,
     /// stamps `created_at`/`edited_at`/`timezone` to the place rather than the system.
@@ -73,6 +77,8 @@ pub(crate) struct EntryEditor {
     /// The body text the syntax highlighting was last computed for, so the map is
     /// only recomputed when the body actually changes rather than every frame.
     last_highlight_src: Option<String>,
+    /// Memoized alongside `last_highlight_src`; see [`Self::refresh_for_body`].
+    word_count: usize,
 }
 
 impl EntryEditor {
@@ -83,6 +89,7 @@ impl EntryEditor {
         revision: EntryRevision,
         body: &str,
         metadata: Metadata,
+        saved_environment: crate::tui::env_strip::EnvironmentOwned,
     ) -> Self {
         Self {
             textarea: new_textarea(body, None),
@@ -101,8 +108,10 @@ impl EntryEditor {
             mouse_selecting: false,
             pending_environment: None,
             environment: None,
+            saved_environment,
             zone: None,
             last_highlight_src: None,
+            word_count: 0,
         }
     }
 
@@ -119,20 +128,41 @@ impl EntryEditor {
             mouse_selecting: false,
             pending_environment: None,
             environment: None,
+            saved_environment: Default::default(),
             zone: None,
             last_highlight_src: None,
+            word_count: 0,
         }
     }
 
-    /// Recompute markdown syntax highlighting and hand it to the textarea, but only
-    /// when the body changed since the last call. Cheap to call every frame.
-    pub(crate) fn refresh_syntax_highlight(&mut self, theme: &Theme) {
+    /// Recompute what the whole body has to be re-scanned for — syntax
+    /// highlighting and the word count — but only when it changed since the last
+    /// call. Cheap to call every frame.
+    pub(crate) fn refresh_for_body(&mut self, theme: &Theme) {
         let body = self.text();
         if self.last_highlight_src.as_deref() != Some(body.as_str()) {
             let spans = super::editor_highlight::highlight_body(theme, &body);
             self.textarea.set_syntax_spans(spans);
+            // Counted like the entry index does it, so the editor's tally and the
+            // viewer's agree once saved.
+            self.word_count = body.split_whitespace().count();
             self.last_highlight_src = Some(body);
         }
+    }
+
+    /// The context tables the metadata strip should show: a fetch of this
+    /// session's own wins over the entry's saved ones, so the strip follows a
+    /// location changed mid-edit.
+    pub(crate) fn environment_ref(&self) -> crate::tui::env_strip::EnvironmentRef<'_> {
+        self.environment
+            .as_ref()
+            .map(crate::tui::env_strip::EnvironmentRef::for_report)
+            .unwrap_or_else(|| self.saved_environment.as_ref())
+    }
+
+    /// The buffer's word count as of the last [`Self::refresh_for_body`].
+    pub(crate) fn word_count(&self) -> usize {
+        self.word_count
     }
 
     /// Map an absolute screen position to a data `(row, col)` cursor position

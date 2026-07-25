@@ -14,6 +14,7 @@ use crate::tui::{
         AppModel, Focus, ReaderHeading, ReaderHits, ReaderLinkHit, ReaderLinkTarget,
         RenderedEntryBody,
     },
+    env_strip::EnvironmentRef,
     image::{digit_for_image, sole_image_ref},
     render::{
         count_label, entry_metadata_layout, panel_block, render_centered_notice,
@@ -51,17 +52,13 @@ pub(crate) fn draw_selected_reader(
             .resolved_selected_entry()
             .is_some_and(|entry| entry.encryption_state == EntryEncryptionState::Plain);
 
-        // The environment tables live on the entry, not the metadata bundle,
-        // so the viewer layers them onto the strip here; the editor renders
-        // the same builder without them.
-        let entry = app.resolved_selected_entry();
-        let entry_metadata = EntryMetadata::from_metadata(active_theme, &metadata)
-            .with_environment(
-                active_theme,
-                entry.and_then(|entry| entry.weather.as_ref()),
-                entry.and_then(|entry| entry.celestial.as_ref()),
-                entry.and_then(|entry| entry.air_quality.as_ref()),
-            );
+        // The environment tables live on the entry, not the metadata bundle, so
+        // they're passed alongside it; the editor resolves its own the same way.
+        let environment = app
+            .resolved_selected_entry()
+            .map(EnvironmentRef::for_entry)
+            .unwrap_or_default();
+        let entry_metadata = EntryMetadata::for_entry(active_theme, &metadata, environment);
 
         let (scroll, hits, content_rect, line_count) = draw_markdown_panel(
             active_theme,

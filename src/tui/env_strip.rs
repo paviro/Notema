@@ -78,6 +78,62 @@ impl EnvItem {
     }
 }
 
+/// An entry's context tables, borrowed. Threaded whole so the viewer and the
+/// editor can't pass a different subset of them to the strip.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct EnvironmentRef<'a> {
+    pub(crate) weather: Option<&'a Weather>,
+    pub(crate) celestial: Option<&'a Celestial>,
+    pub(crate) air_quality: Option<&'a AirQuality>,
+}
+
+impl<'a> EnvironmentRef<'a> {
+    /// The tables an entry carries on disk.
+    pub(crate) fn for_entry(entry: &'a notema_domain::Entry) -> Self {
+        Self {
+            weather: entry.weather.as_ref(),
+            celestial: entry.celestial.as_ref(),
+            air_quality: entry.air_quality.as_ref(),
+        }
+    }
+
+    /// The tables of a landed environment fetch. `celestial` is computed offline
+    /// and always present, unlike the two network readings.
+    pub(crate) fn for_report(report: &'a notema_context::EnvironmentReport) -> Self {
+        Self {
+            weather: report.weather.as_ref(),
+            celestial: Some(&report.celestial),
+            air_quality: report.air_quality.as_ref(),
+        }
+    }
+}
+
+/// Owned context tables, for a holder that outlives the entry it read them from.
+#[derive(Default, Clone)]
+pub(crate) struct EnvironmentOwned {
+    pub(crate) weather: Option<Weather>,
+    pub(crate) celestial: Option<Celestial>,
+    pub(crate) air_quality: Option<AirQuality>,
+}
+
+impl EnvironmentOwned {
+    pub(crate) fn for_entry(entry: &notema_domain::Entry) -> Self {
+        Self {
+            weather: entry.weather.clone(),
+            celestial: entry.celestial.clone(),
+            air_quality: entry.air_quality.clone(),
+        }
+    }
+
+    pub(crate) fn as_ref(&self) -> EnvironmentRef<'_> {
+        EnvironmentRef {
+            weather: self.weather.as_ref(),
+            celestial: self.celestial.as_ref(),
+            air_quality: self.air_quality.as_ref(),
+        }
+    }
+}
+
 /// Build the strip's items from an entry's context data, in display order:
 /// weather, air quality, moon, sun, location. Absent data yields no
 /// item, so a location-only entry gets a location-only strip.

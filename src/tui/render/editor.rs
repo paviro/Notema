@@ -2,7 +2,7 @@ use ratatui::{Frame, layout::Rect};
 
 use crate::tui::{
     editor_state::{EditorPrompt, EntryEditor},
-    render::{entry_metadata_layout, panel_block, render_scrollbar_if_needed},
+    render::{count_label, entry_metadata_layout, panel_block, render_scrollbar_if_needed},
     state::HoverTarget,
     surface::PanelGeometry,
     theme::Theme,
@@ -23,18 +23,25 @@ pub(crate) fn draw_entry_editor(
     side_margin: u16,
     top_margin: u16,
 ) {
-    let block = panel_block(active_theme, editor.title(), true, None);
+    // Before the textarea renders (it reads the spans during render) and before
+    // the title's word count, and ahead of the immutable metadata borrow below.
+    // No-op unless the body changed since the last frame.
+    editor.refresh_for_body(active_theme);
+
+    let block = panel_block(
+        active_theme,
+        editor.title(),
+        true,
+        Some(count_label(editor.word_count(), "word", "words")),
+    );
     frame.render_widget(block, area);
     super::panel_focus_stripe(active_theme, frame, area, true);
 
-    // Refresh markdown syntax styling before the textarea renders (it reads the
-    // spans during render). No-op unless the body changed since the last frame.
-    // Done here, ahead of the immutable metadata borrow taken just below.
-    editor.refresh_syntax_highlight(active_theme);
-
-    // Same builder the viewer uses, from the buffered metadata — so location and
-    // every other front-matter field show in edit mode too.
-    let metadata = EntryMetadata::from_metadata(active_theme, &editor.metadata);
+    // The viewer's builder and environment, over the buffered metadata: the
+    // block has to measure the same in both, or the two disagree about when the
+    // pane is too short to pin it — and to center.
+    let metadata =
+        EntryMetadata::for_entry(active_theme, &editor.metadata, editor.environment_ref());
 
     // The metadata section pins below the body only while the pane can still give the
     // body its minimum height; once the metadata would push it under that, it's

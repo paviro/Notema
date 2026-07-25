@@ -7,10 +7,10 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-use notema_domain::{AirQuality, Celestial, Metadata, Weather};
+use notema_domain::Metadata;
 
 use crate::tui::{
-    env_strip::{EnvItem, env_strip_rows, environment_items},
+    env_strip::{EnvItem, EnvironmentRef, env_strip_rows, environment_items},
     state::HoverTarget,
     surface::{EntryMetadataLayout, EntryMetadataValues, chip_items, chip_rows},
     theme::{PillCategory, PillStyle, Theme},
@@ -23,46 +23,36 @@ pub(super) struct EntryMetadata<'a> {
     activities: &'a [String],
     feelings: &'a [String],
     mood: Option<i8>,
-    /// The formatted location label, kept so [`Self::with_environment`] can
-    /// rebuild the strip around it.
-    location: Option<String>,
-    /// The environment strip's items: location-only from a bare bundle, the
-    /// full weather/air/moon/sun set once the viewer adds the entry's context.
+    /// The environment strip's items: location-only without context tables, the
+    /// full weather/air/moon/sun set with them.
     env: Vec<EnvItem>,
 }
 
 impl<'a> EntryMetadata<'a> {
-    /// Build the entry-view metadata section straight from a [`Metadata`] bundle
-    /// — the single construction path for both the viewer and the internal
-    /// editor, so no front-matter field can render in one mode and vanish in the
-    /// other. The bundle carries no environment data (that lives on the entry),
-    /// so the strip starts location-only; the viewer layers the rest on with
-    /// [`Self::with_environment`].
-    pub(super) fn from_metadata(theme: &Theme, metadata: &'a Metadata) -> Self {
-        let location = metadata.location_label();
-        let env = environment_items(theme, location.as_deref(), None, None, None);
+    /// The single construction path for both the viewer and the internal editor,
+    /// so no field can render in one and vanish or go stale in the other. The
+    /// environment tables are a separate argument because they live on the entry
+    /// (or on an in-flight editor fetch), not in the bundle.
+    pub(super) fn for_entry(
+        theme: &Theme,
+        metadata: &'a Metadata,
+        environment: EnvironmentRef<'_>,
+    ) -> Self {
+        let env = environment_items(
+            theme,
+            metadata.location_label().as_deref(),
+            environment.weather,
+            environment.celestial,
+            environment.air_quality,
+        );
         Self {
             tags: &metadata.tags,
             people: &metadata.people,
             activities: &metadata.activities,
             feelings: &metadata.feelings,
             mood: metadata.mood,
-            location,
             env,
         }
-    }
-
-    /// Rebuild the environment strip with the entry's context tables — the
-    /// viewer-only step; editor drafts carry no environment data.
-    pub(super) fn with_environment(
-        mut self,
-        theme: &Theme,
-        weather: Option<&Weather>,
-        celestial: Option<&Celestial>,
-        air: Option<&AirQuality>,
-    ) -> Self {
-        self.env = environment_items(theme, self.location.as_deref(), weather, celestial, air);
-        self
     }
 
     pub(super) fn values(&self) -> EntryMetadataValues<'_> {
