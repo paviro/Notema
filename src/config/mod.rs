@@ -197,6 +197,11 @@ pub(crate) struct ReaderSection {
     /// long-form text stays readable. Metadata keeps the full width.
     #[serde(default = "default_body_max_width")]
     pub body_max_width: u16,
+    /// Max blank lines above the entry body on wide panes, ramping in with the
+    /// side gutters; 0 (or a pane no wider than `body_max_width`) keeps the body
+    /// flush to the top.
+    #[serde(default = "default_body_max_top_padding")]
+    pub body_max_top_padding: u16,
     /// Show each link's target URL as a faint `(url)` after its name. Off by
     /// default — the name is clickable either way, so the URL is just noise.
     #[serde(default)]
@@ -224,6 +229,7 @@ impl Default for ReaderSection {
         Self {
             body_center_vertically: true,
             body_max_width: default_body_max_width(),
+            body_max_top_padding: default_body_max_top_padding(),
             show_link_urls: false,
         }
     }
@@ -235,6 +241,10 @@ fn default_true() -> bool {
 
 fn default_body_max_width() -> u16 {
     100
+}
+
+fn default_body_max_top_padding() -> u16 {
+    6
 }
 
 impl Config {

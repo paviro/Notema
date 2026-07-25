@@ -180,6 +180,47 @@ fn draw_markdown_panel(
         )
     });
     let mut lines = body.lines.clone();
+    // Frame a scrolling entry with top padding on wide panes; skipped while
+    // centered or while the metadata scrolls, so short entries and short panes
+    // stay flush to the top.
+    let reader_cfg = &app.services.config.ui.layout.reader;
+    let will_center = reader_cfg.body_center_vertically
+        && !metadata_scrolls
+        && lines.len() < body_rect.height as usize;
+    let pad = if metadata_scrolls || will_center {
+        0
+    } else {
+        body_top_pad_lines(
+            content_rect.width,
+            reader_cfg.body_max_width,
+            reader_cfg.body_max_top_padding,
+        )
+    };
+    if pad > 0 {
+        let mut padded = Vec::with_capacity(pad as usize + lines.len());
+        padded.extend(std::iter::repeat_with(|| Line::from("")).take(pad as usize));
+        padded.append(&mut lines);
+        lines = padded;
+    }
+    // Hit indices map to screen rows downstream, so shift them by the prepend.
+    let links: Vec<ReaderLinkHit> = body
+        .links
+        .iter()
+        .cloned()
+        .map(|mut hit| {
+            hit.line += pad as usize;
+            hit
+        })
+        .collect();
+    let headings: Vec<ReaderHeading> = body
+        .headings
+        .iter()
+        .cloned()
+        .map(|mut heading| {
+            heading.line += pad as usize;
+            heading
+        })
+        .collect();
     if let Some(flash) = app.reader_anchor_flash.as_ref()
         && flash.until > std::time::Instant::now()
         && let Some(line) = lines.get_mut(flash.line)
@@ -197,13 +238,12 @@ fn draw_markdown_panel(
         // A wrapped link name is several hit segments sharing one group;
         // highlight every segment so the whole name inverts as one link
         // rather than only the row under the cursor.
-        let group = body
-            .links
+        let group = links
             .iter()
             .find(|hit| hit.line == line && hit.start == start && hit.end == end)
             .map(|hit| hit.group);
         if let Some(group) = group {
-            for hit in body.links.iter().filter(|hit| hit.group == group) {
+            for hit in links.iter().filter(|hit| hit.group == group) {
                 if let Some(line) = lines.get_mut(hit.line) {
                     patch_line_range(line, hit.start, hit.end, hovered_link);
                 }
@@ -212,8 +252,8 @@ fn draw_markdown_panel(
     }
     let hits = RenderedEntryBody {
         lines: Vec::new(),
-        links: body.links.clone(),
-        headings: body.headings.clone(),
+        links,
+        headings,
     };
     if metadata_scrolls {
         let meta_lines = metadata_section_lines(active_theme, body_rect.width, &metadata);
@@ -280,6 +320,18 @@ pub(crate) fn metadata_scrolls_with_body(
     let inner = PanelGeometry::new(theme, area).content;
     let metadata_height = metadata_section_height(inner.width, values);
     inner.height < MIN_ENTRY_BODY_LINES.saturating_add(metadata_height)
+}
+
+/// Blank lines to prepend above the body, ramping in at one line per two gutter
+/// columns (cells run ~2× taller than wide) and staying at 0 when the pane is no
+/// wider than `max_width`.
+fn body_top_pad_lines(content_width: u16, max_width: u16, setting: u16) -> u16 {
+    let gutter = if max_width > 0 && content_width > max_width {
+        (content_width - max_width) / 2
+    } else {
+        0
+    };
+    setting.min(gutter / 2)
 }
 
 /// Cap `rect` at `max_width` and center it horizontally, leaving the height and

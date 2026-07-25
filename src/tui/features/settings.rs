@@ -101,9 +101,7 @@ impl SettingRow {
     pub(crate) fn value(&self, config: &Config) -> String {
         match self {
             SettingRow::Theme => config.ui.theme.clone(),
-            SettingRow::Bool { get, .. } => {
-                if get(config) { "On" } else { "Off" }.to_string()
-            }
+            SettingRow::Bool { get, .. } => if get(config) { "On" } else { "Off" }.to_string(),
             SettingRow::Number { get, .. } => get(config).to_string(),
         }
     }
@@ -136,6 +134,15 @@ const READER_SETTINGS: &[SettingRow] = &[
         step: 5,
         min: 40,
         max: 240,
+    },
+    SettingRow::Number {
+        label: "Max body top padding",
+        description: "Extra blank lines above the body on wide panes, ramping in with the side gutters. 0 keeps the body flush to the top. Use ← / → to change.",
+        get: |c| c.ui.layout.reader.body_max_top_padding,
+        set: |c, v| c.ui.layout.reader.body_max_top_padding = v,
+        step: 1,
+        min: 0,
+        max: 20,
     },
     SettingRow::Bool {
         label: "Show link URLs",
