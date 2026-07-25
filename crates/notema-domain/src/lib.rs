@@ -7,7 +7,9 @@ mod feelings;
 mod markdown;
 
 pub use coordinates::{CoordinateError, Coordinates};
-pub use dates::{entry_date_from_path, entry_group_date};
+pub use dates::{
+    DateBound, DateFilter, DatePattern, DateSpec, DateUnit, entry_date_from_path, entry_group_date,
+};
 pub use entry::{
     AirQuality, Celestial, Entry, EntryEncryptionState, EntryPath, ImportSource, Location,
     MOOD_RANGE, Metadata, MetadataField, PlaceGroup, SearchHit, SearchScope, Timestamp, Weather,

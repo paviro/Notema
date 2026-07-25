@@ -34,6 +34,37 @@ coordinates, otherwise as an address to geocode. Whenever a location resolves, t
 weather, air quality, and celestial data for that place and time are captured with
 it.
 
+## Search filters
+
+`/` searches the whole corpus — body text and metadata — ranked by how well each
+entry matches. A `prefix:` instead filters on one field exactly:
+
+```
+tags:project        people:Alice        activities:coding
+feelings:proud      location:Berlin     mood:3            star:true
+```
+
+Dates are written year-first, so each component you add narrows the range:
+
+```
+date:2026           the whole year
+date:2026-07        that month
+date:2026-07-25     that day
+date:today          date:yesterday
+date:7d             7 days ago — also 2w, 3m, 1y
+before:2026-07      after:2026-07
+```
+
+`*` leaves a component open, which is how you ask for a date across years:
+
+```
+date:*-07-25        every 25 July
+date:2026-*-25      the 25th of every month in 2026
+```
+
+Because an open component recurs, it has no single span for `before:`/`after:` to
+compare against — those two take a fixed date.
+
 ## Location
 
 Open the location dialog on an entry (`l`) to set where it was written: type a

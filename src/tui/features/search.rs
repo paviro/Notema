@@ -1,6 +1,10 @@
 use std::time::Instant;
 
-use notema_domain::{Entry, EntryEncryptionState, MOOD_RANGE, SearchHit, feeling_matches_search};
+use chrono::{Local, NaiveDate};
+use notema_domain::{
+    DateBound, DateFilter, DateSpec, Entry, EntryEncryptionState, MOOD_RANGE, SearchHit,
+    entry_group_date, feeling_matches_search,
+};
 
 use crate::tui::{
     app::{AppModel, Focus, Mode, SearchScope},
@@ -118,6 +122,13 @@ impl AppModel {
                 // Unparseable or out-of-range matches nothing, like an unknown `star:`.
                 _ => Vec::new(),
             }
+        } else if let Some((bound, value)) = strip_date_prefix(query) {
+            match DateSpec::parse(value) {
+                Some(spec) => self.search_results_by_date(DateFilter { bound, spec }),
+                // An unreadable date matches nothing rather than falling through
+                // to a fuzzy search for the literal `date:…` text.
+                None => Vec::new(),
+            }
         } else {
             search_loaded_entries(&self.library.entries, query, &self.search.scope)
         }
@@ -157,6 +168,35 @@ impl AppModel {
     pub(crate) fn search_results_by_mood(&self, score: i8) -> Vec<SearchHit> {
         self.search_results_matching(|entry| entry.mood == Some(score))
     }
+
+    /// Entries whose date satisfies `filter` (see [`date_predicate`]).
+    pub(crate) fn search_results_by_date(&self, filter: DateFilter) -> Vec<SearchHit> {
+        self.search_results_matching(date_predicate(filter, Local::now().date_naive()))
+    }
+}
+
+/// Split a `date:`/`before:`/`after:` query into its bound and value.
+fn strip_date_prefix(query: &str) -> Option<(DateBound, &str)> {
+    [
+        ("date:", DateBound::On),
+        ("before:", DateBound::Before),
+        ("after:", DateBound::After),
+    ]
+    .into_iter()
+    .find_map(|(prefix, bound)| {
+        query
+            .strip_prefix(prefix)
+            .map(|value| (bound, value.trim()))
+    })
+}
+
+/// Whether an entry's date satisfies `filter`. Entries with neither a creation
+/// timestamp nor a dated filename have no date to compare, so they never match.
+pub(crate) fn date_predicate(
+    filter: DateFilter,
+    today: NaiveDate,
+) -> impl Fn(&Entry) -> bool + use<> {
+    move |entry| entry_group_date(entry).is_some_and(|date| filter.matches(date, today))
 }
 
 /// Whether an entry matches a `tags:`/`people:`/`activities:` search: any of its
@@ -318,6 +358,93 @@ mod tests {
         // Every word must match, so a bogus or absent part finds nothing.
         assert_eq!(run(&mut app, "location:Berlin Tokyo"), 0);
         assert_eq!(run(&mut app, "location:Tokyo"), 0);
+    }
+
+    fn dated_entry(created_at: Option<&str>, path: &str) -> Entry {
+        let mut entry = located_entry("Berlin", "Germany", None);
+        entry.created_at = created_at.map(notema_domain::Timestamp::parse);
+        entry.path = std::path::PathBuf::from(path);
+        entry
+    }
+
+    fn app_with_dates(dates: &[&str]) -> AppModel {
+        app_with(
+            dates
+                .iter()
+                .map(|date| dated_entry(Some(&format!("{date}T10:00:00+02:00")), "work/e.md"))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn date_filter_narrows_as_components_are_added() {
+        let mut app = app_with_dates(&["2025-07-25", "2026-07-25", "2026-07-04", "2026-09-01"]);
+
+        assert_eq!(run(&mut app, "date:2026"), 3);
+        assert_eq!(run(&mut app, "date:2026-07"), 2);
+        assert_eq!(run(&mut app, "date:2026-07-25"), 1);
+    }
+
+    /// Results must not blank out between keystrokes while a date is half-typed.
+    #[test]
+    fn half_typed_date_keeps_the_wider_result_set() {
+        let mut app = app_with_dates(&["2026-07-25", "2026-09-01", "2025-07-25"]);
+
+        assert_eq!(run(&mut app, "date:2026"), 2);
+        assert_eq!(run(&mut app, "date:2026-"), 2);
+        assert_eq!(run(&mut app, "date:2026-0"), 2);
+        assert_eq!(run(&mut app, "date:2026-07"), 1);
+        assert_eq!(run(&mut app, "date:2026-07-"), 1);
+    }
+
+    #[test]
+    fn wildcard_opens_a_component() {
+        let mut app = app_with_dates(&["2024-07-25", "2025-07-25", "2026-07-25", "2026-08-25"]);
+
+        assert_eq!(run(&mut app, "date:*-07-25"), 3);
+        assert_eq!(run(&mut app, "date:2026-*-25"), 2);
+    }
+
+    #[test]
+    fn before_and_after_bracket_the_named_span() {
+        let mut app = app_with_dates(&["2025-12-31", "2026-07-25", "2027-01-01"]);
+
+        assert_eq!(run(&mut app, "before:2026"), 1);
+        assert_eq!(run(&mut app, "after:2026"), 1);
+        assert_eq!(run(&mut app, "date:2026"), 1);
+        // An open component recurs, so there is no side to be on.
+        assert_eq!(run(&mut app, "before:*-07-25"), 0);
+    }
+
+    /// An entry with neither a creation timestamp nor a dated filename has no
+    /// date to compare against.
+    #[test]
+    fn undated_entries_never_match() {
+        let mut app = app_with(vec![dated_entry(None, "work/no-date.md")]);
+
+        assert_eq!(run(&mut app, "date:2026"), 0);
+        assert_eq!(run(&mut app, "before:2026"), 0);
+    }
+
+    /// Falls back to the filename date, the same rule the entry list groups by.
+    #[test]
+    fn date_filter_falls_back_to_the_filename_date() {
+        let mut app = app_with(vec![dated_entry(
+            None,
+            "work/2026/07/25/2026-07-25T10-00-00-id.md",
+        )]);
+
+        assert_eq!(run(&mut app, "date:2026-07-25"), 1);
+    }
+
+    #[test]
+    fn unreadable_date_matches_nothing_rather_than_searching_the_text() {
+        let mut app = app_with_dates(&["2026-07-25"]);
+
+        // Without the guard these would fall through to a fuzzy search for the
+        // literal `date:…` text.
+        assert_eq!(run(&mut app, "date:garbage"), 0);
+        assert_eq!(run(&mut app, "date:"), 0);
     }
 
     #[test]

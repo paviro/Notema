@@ -2809,6 +2809,10 @@ fn help_cheatsheet_lists_grouped_bindings() {
     assert!(text.contains("Settings"));
     assert!(text.contains("Quit"));
     assert!(text.contains("This help"));
+    // The search prefixes are documented nowhere else in the app.
+    assert!(text.contains("Search filters"));
+    assert!(text.contains("date:"));
+    assert!(text.contains("mood:"));
 }
 
 /// On a terminal too short to show every row, the cheatsheet scrolls rather than
