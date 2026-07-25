@@ -80,8 +80,6 @@ pub(super) fn overlay_mouse_action(
         MouseEventKind::Drag(MouseButton::Left) => {
             mapped_mood_action(mouse.column, mouse.row, view)
         }
-        MouseEventKind::ScrollUp => mapped_overlay_wheel(app, mouse.column, mouse.row, -1, view),
-        MouseEventKind::ScrollDown => mapped_overlay_wheel(app, mouse.column, mouse.row, 1, view),
         _ => None,
     }
 }
@@ -95,8 +93,6 @@ pub(super) fn prompt_mouse_action(
     match prompt {
         EditorPrompt::None => None,
         EditorPrompt::Help { .. } => match mouse.kind {
-            MouseEventKind::ScrollDown => Some(Action::Editor(EditorAction::ScrollHelp(1))),
-            MouseEventKind::ScrollUp => Some(Action::Editor(EditorAction::ScrollHelp(-1))),
             MouseEventKind::Down(MouseButton::Left) => {
                 Some(Action::Editor(EditorAction::ClosePrompt))
             }
@@ -215,7 +211,7 @@ fn mapped_mood_action(col: u16, row: u16, view: &ViewState) -> Option<Action> {
     ))))
 }
 
-fn mapped_overlay_wheel(
+pub(super) fn mapped_overlay_wheel(
     app: &AppModel,
     col: u16,
     row: u16,

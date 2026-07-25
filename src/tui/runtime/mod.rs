@@ -585,14 +585,13 @@ fn run_loop(
                 }
                 outcome.redraw
             }
-            Some(Event::Mouse(mouse))
-                if events::is_wheel(mouse.kind) && !app.has_overlay() && app.editor.is_none() =>
-            {
+            Some(Event::Mouse(mouse)) if events::is_wheel(mouse.kind) => {
                 // Coalesce a macOS smooth-scroll burst into one applied step and
                 // one repaint: drain everything already queued, sum the net
                 // wheel movement, and apply it once. A reverse flick cancels the
                 // queued momentum instead of the app crawling back through the
-                // whole tail one repaint at a time.
+                // whole tail one repaint at a time. `handle_scroll` routes the net
+                // to the active surface, so this covers overlays and the editor too.
                 let mut batch = vec![Event::Mouse(mouse)];
                 while event::poll(Duration::ZERO)? {
                     batch.push(event::read()?);

@@ -1118,3 +1118,108 @@ fn theme_picker_hides_the_mode_switch_on_mode_agnostic_themes() {
 
     app.theme_picker_cancel();
 }
+
+// ── Unified wheel routing ─────────────────────────────────────────────────────
+
+// Every wheel event — a single notch or a coalesced burst — flows through the one
+// `wheel_to_action` router, so overlays and the editor collapse a reversed momentum
+// burst to a single net step exactly like the main panels do.
+
+#[test]
+fn wheel_over_help_overlay_routes_the_net_delta() {
+    let mut app = app_with_entries(1);
+    app.open_help();
+    let view = crate::tui::ui::ViewState::default();
+    let area = Rect::new(0, 0, 80, 20);
+
+    // A five-up / two-down burst nets -3 and is applied once, not replayed notch
+    // by notch behind its own momentum tail.
+    assert_eq!(
+        mouse::wheel_to_action(&app, mouse(MouseEventKind::ScrollUp, 5, 5), -3, area, &view),
+        Some(Action::Overlay(OverlayAction::HelpScroll(-3)))
+    );
+}
+
+#[test]
+fn wheel_over_dialog_list_routes_the_net_delta_to_the_list() {
+    use crate::tui::ui::{DialogId, InteractionKind};
+
+    let mut app = app_with_journals(&["work"]);
+    app.open_theme_picker();
+    let area = Rect::new(0, 0, 90, 30);
+    let (_, view) = render_view(&mut app, area.width, area.height);
+    let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+        matches!(
+            kind,
+            InteractionKind::DialogRow {
+                dialog: DialogId::ThemePicker,
+                ..
+            }
+        )
+    })
+    .expect("theme picker row registered");
+
+    let action = mouse::wheel_to_action(
+        &app,
+        mouse(MouseEventKind::ScrollDown, col, row),
+        4,
+        area,
+        &view,
+    );
+    assert!(
+        matches!(
+            action,
+            Some(Action::Mouse(action::MouseAction::DialogScroll {
+                target: action::DialogListTarget::ThemePicker,
+                delta: 4,
+                ..
+            }))
+        ),
+        "wheel over the list scrolls it by the net delta: {action:?}"
+    );
+}
+
+#[test]
+fn wheel_routes_by_editor_prompt_state() {
+    use crate::tui::editor_state::EditorPrompt;
+
+    let mut app = app_with_entries(1);
+    app.select_entry_index(0);
+    app.open_editor_for_selected().unwrap();
+    let view = crate::tui::ui::ViewState::default();
+    let area = Rect::new(0, 0, 80, 24);
+    let wheel = mouse(MouseEventKind::ScrollDown, 10, 6);
+
+    // Editor body: the net delta scrolls the text.
+    assert_eq!(
+        mouse::wheel_to_action(&app, wheel, 3, area, &view),
+        Some(Action::Editor(EditorAction::Scroll(3)))
+    );
+
+    // The Help prompt scrolls the cheatsheet, still by the net delta.
+    app.editor.as_mut().unwrap().prompt = EditorPrompt::Help { scroll: 0 };
+    assert_eq!(
+        mouse::wheel_to_action(&app, wheel, 3, area, &view),
+        Some(Action::Editor(EditorAction::ScrollHelp(3)))
+    );
+
+    // Any other modal prompt swallows the wheel rather than scrolling the body
+    // behind it.
+    app.editor.as_mut().unwrap().prompt = EditorPrompt::MetadataMenu;
+    assert_eq!(mouse::wheel_to_action(&app, wheel, 3, area, &view), None);
+}
+
+#[test]
+fn wheel_over_confirm_dialog_is_a_no_op() {
+    let mut app = app_with_entries(1);
+    app.begin_confirm_delete();
+    let view = crate::tui::ui::ViewState::default();
+    let area = Rect::new(0, 0, 80, 20);
+
+    // A confirm dialog has nothing to scroll, so the wheel is dropped on both the
+    // coalesced and per-event paths.
+    assert_eq!(
+        mouse::wheel_to_action(&app, mouse(MouseEventKind::ScrollDown, 5, 5), 2, area, &view),
+        None
+    );
+}

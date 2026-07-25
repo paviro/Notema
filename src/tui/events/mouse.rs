@@ -25,14 +25,12 @@ use super::action::{
 
 mod overlay;
 use overlay::{
-    footer_area, footer_click_to_action, footer_hint_at, mapped_hover_target, overlay_mouse_action,
-    prompt_mouse_action, text_field_hover_at, text_field_mouse_action,
+    footer_area, footer_click_to_action, footer_hint_at, mapped_hover_target, mapped_overlay_wheel,
+    overlay_mouse_action, prompt_mouse_action, text_field_hover_at, text_field_mouse_action,
 };
 
 fn editor_mouse_action(app: &AppModel, mouse: MouseEvent, double_click: bool) -> Option<Action> {
     match mouse.kind {
-        MouseEventKind::ScrollDown => Some(Action::Editor(EditorAction::Scroll(1))),
-        MouseEventKind::ScrollUp => Some(Action::Editor(EditorAction::Scroll(-1))),
         MouseEventKind::Down(MouseButton::Left) if double_click => {
             Some(Action::Editor(EditorAction::SelectWord {
                 col: mouse.column,
@@ -89,6 +87,14 @@ pub(super) fn mouse_to_action(
         && let Some(index) = render::toast_at_point(app, area, mouse.column, mouse.row)
     {
         return Some(Action::Mouse(MouseAction::DismissToast(index)));
+    }
+
+    // The run loop coalesces wheel bursts and dispatches them through `handle_scroll`,
+    // so a wheel rarely reaches here in practice; routing it through the same
+    // `wheel_to_action` keeps this translator complete and stops any surface from
+    // drifting onto a divergent single-event scroll path.
+    if is_wheel(mouse.kind) {
+        return wheel_to_action(app, mouse, wheel_delta(mouse.kind), area, view);
     }
 
     if app.has_overlay() {
@@ -163,8 +169,6 @@ pub(super) fn mouse_to_action(
             })
         }),
         MouseEventKind::Up(MouseButton::Left) => Some(Action::Mouse(MouseAction::ScrollbarRelease)),
-        MouseEventKind::ScrollUp => wheel_action(app, mouse, layout, -1, view),
-        MouseEventKind::ScrollDown => wheel_action(app, mouse, layout, 1, view),
         _ => None,
     }
 }
@@ -203,8 +207,38 @@ pub(crate) fn fold_leading_wheel(events: &[Event]) -> (i16, usize) {
     (net, count)
 }
 
-/// Apply a coalesced wheel delta at `mouse`'s position. Mirrors the non-overlay
-/// wheel path of `apply_pointer_in_area`; the caller guarantees no overlay is open.
+/// The single wheel entry point: route a signed `net_delta` to the active surface
+/// by state precedence — overlay, editor Help prompt, editor body, then the main
+/// panel under the cursor — reusing the delta-parameterized helpers. Both the
+/// run-loop burst path and the per-event path go through here, so wheel semantics
+/// live in exactly one place.
+pub(crate) fn wheel_to_action(
+    app: &AppModel,
+    mouse: MouseEvent,
+    net_delta: i16,
+    area: Rect,
+    view: &ViewState,
+) -> Option<Action> {
+    if app.has_overlay() {
+        return mapped_overlay_wheel(app, mouse.column, mouse.row, net_delta, view);
+    }
+    match app.editor.as_ref().map(|editor| &editor.prompt) {
+        Some(EditorPrompt::Help { .. }) => {
+            return Some(Action::Editor(EditorAction::ScrollHelp(net_delta)));
+        }
+        // Any other open prompt (discard confirm, metadata menu) swallows the wheel
+        // rather than scrolling the editor body behind it.
+        Some(prompt) if !matches!(prompt, EditorPrompt::None) => return None,
+        _ => {}
+    }
+    if app.editor.is_some() {
+        return Some(Action::Editor(EditorAction::Scroll(net_delta)));
+    }
+    let layout = view.layout.unwrap_or_else(|| render::tui_layout(area, app));
+    wheel_action(app, mouse, layout, net_delta, view)
+}
+
+/// Apply a coalesced wheel delta at `mouse`'s position via the shared wheel router.
 pub(crate) fn handle_scroll(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut AppModel,
@@ -213,8 +247,7 @@ pub(crate) fn handle_scroll(
     net_delta: i16,
     view: &ViewState,
 ) -> AppResult<()> {
-    let layout = view.layout.unwrap_or_else(|| render::tui_layout(area, app));
-    if let Some(action) = wheel_action(app, mouse, layout, net_delta, view) {
+    if let Some(action) = wheel_to_action(app, mouse, net_delta, area, view) {
         super::dispatch_action(terminal, app, action)?;
     }
     Ok(())
