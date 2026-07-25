@@ -74,6 +74,10 @@ pub(crate) enum SettingRow {
         step: u16,
         min: u16,
         max: u16,
+        /// When set, a value of 0 sits just below `min` as a special "off"
+        /// state, shown with this label; stepping down from `min` snaps to 0,
+        /// up snaps back.
+        off_label: Option<&'static str>,
     },
 }
 
@@ -102,7 +106,10 @@ impl SettingRow {
         match self {
             SettingRow::Theme => config.ui.theme.clone(),
             SettingRow::Bool { get, .. } => if get(config) { "On" } else { "Off" }.to_string(),
-            SettingRow::Number { get, .. } => get(config).to_string(),
+            SettingRow::Number { get, off_label, .. } => match off_label {
+                Some(label) if get(config) == 0 => label.to_string(),
+                _ => get(config).to_string(),
+            },
         }
     }
 }
@@ -128,12 +135,13 @@ const READER_SETTINGS: &[SettingRow] = &[
     },
     SettingRow::Number {
         label: "Max body width",
-        description: "Maximum entry-body width in columns; wider panes gutter the sides for readability. Use ← / → to change.",
+        description: "Maximum entry-body width in columns; wider panes gutter the sides for readability. Step below the minimum for Unlimited (no cap, full width). Use ← / → to change.",
         get: |c| c.ui.layout.reader.body_max_width,
         set: |c, v| c.ui.layout.reader.body_max_width = v,
         step: 5,
         min: 40,
         max: 240,
+        off_label: Some("Unlimited"),
     },
     SettingRow::Number {
         label: "Max body top padding",
@@ -143,6 +151,7 @@ const READER_SETTINGS: &[SettingRow] = &[
         step: 1,
         min: 0,
         max: 20,
+        off_label: Some("None"),
     },
     SettingRow::Bool {
         label: "Show link URLs",
@@ -259,12 +268,24 @@ impl AppModel {
             step,
             min,
             max,
+            off_label,
             ..
         } = row
         {
             let current = get(&self.services.config);
-            let delta = i32::from(dir) * i32::from(*step);
-            let next = (i32::from(current) + delta).clamp(i32::from(*min), i32::from(*max)) as u16;
+            let next = match off_label {
+                // When the off state (0) sits below `min`: from off up lands on
+                // min; from min down turns off; further down from off stays put.
+                // With `min == 0` the off state is just the min, so normal
+                // clamping applies and only the label changes.
+                Some(_) if *min > 0 && current == 0 && dir > 0 => *min,
+                Some(_) if *min > 0 && current == 0 => 0,
+                Some(_) if *min > 0 && current == *min && dir < 0 => 0,
+                _ => {
+                    let delta = i32::from(dir) * i32::from(*step);
+                    (i32::from(current) + delta).clamp(i32::from(*min), i32::from(*max)) as u16
+                }
+            };
             if next != current {
                 set(&mut self.services.config, next);
                 self.apply_setting_change(AfterChange::None);

@@ -198,6 +198,49 @@ fn settings_adjust_steps_the_number() {
     assert_eq!(app.services.config.ui.layout.reader.body_max_width, 100);
 }
 
+/// Stepping down from the minimum snaps to 0 ("Off"), and back up returns to it.
+#[test]
+fn settings_adjust_snaps_max_body_width_off() {
+    let mut app = app_with_journals(&["work"]);
+    app.services.config.ui.layout.reader.body_max_width = 40;
+
+    app.open_settings();
+    // "Max body width" is Reader's second row (item 6).
+    app.settings_select(6);
+    app.settings_adjust(-1);
+    assert_eq!(app.services.config.ui.layout.reader.body_max_width, 0);
+    // Further left stays at Off rather than jumping back up.
+    app.settings_adjust(-1);
+    assert_eq!(app.services.config.ui.layout.reader.body_max_width, 0);
+    assert_eq!(
+        app.settings_state()
+            .and_then(|s| s.selected_row())
+            .map(|(_, row)| row.value(&app.services.config)),
+        Some("Unlimited".to_string())
+    );
+    app.settings_adjust(1);
+    assert_eq!(app.services.config.ui.layout.reader.body_max_width, 40);
+}
+
+/// Top padding labels 0 as "None" but still increments normally from it.
+#[test]
+fn settings_adjust_top_padding_shows_none_at_zero() {
+    let mut app = app_with_journals(&["work"]);
+    app.services.config.ui.layout.reader.body_max_top_padding = 0;
+
+    app.open_settings();
+    // "Max body top padding" is Reader's third row (item 7).
+    app.settings_select(7);
+    assert_eq!(
+        app.settings_state()
+            .and_then(|s| s.selected_row())
+            .map(|(_, row)| row.value(&app.services.config)),
+        Some("None".to_string())
+    );
+    app.settings_adjust(1);
+    assert_eq!(app.services.config.ui.layout.reader.body_max_top_padding, 1);
+}
+
 #[test]
 fn theme_picker_keys_route_to_dedicated_actions() {
     let mut app = app_with_journals(&["work"]);
@@ -603,8 +646,7 @@ fn settings_dialog_click_toggles_a_bool_row() {
     // A second click on the now-selected row toggles it.
     mouse_in_area(&mut app, mouse(down(), col, row), area.width, area.height);
     assert_eq!(
-        app.services.config.ui.layout.reader.body_center_vertically,
-        !before,
+        app.services.config.ui.layout.reader.body_center_vertically, !before,
         "second click toggles"
     );
 }
@@ -663,10 +705,15 @@ fn metadata_menu_closes_on_esc_or_valid_key_only() {
     );
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Char('t')), true),
-        Some(Action::Metadata(MetadataAction::BeginEdit(MetadataKind::Tags)))
+        Some(Action::Metadata(MetadataAction::BeginEdit(
+            MetadataKind::Tags
+        )))
     );
     // An unmapped key is inert — the popup stays open.
-    assert_eq!(keyboard::key_to_action(&app, key(KeyCode::Char('z')), true), None);
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('z')), true),
+        None
+    );
 }
 
 #[test]

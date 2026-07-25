@@ -445,4 +445,3 @@ fn draw_section_table(
         true,
     );
 }
-

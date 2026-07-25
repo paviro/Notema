@@ -190,11 +190,14 @@ pub(in crate::tui::render) fn draw_settings_dialog(
         .selected_row()
         .map(|(_, row)| row.description())
         .unwrap_or_default();
-    let desc_lines: Vec<Line<'_>> =
-        wrap_text(description, layout.description.width as usize, layout.description.height as usize)
-            .into_iter()
-            .map(|line| Line::from(Span::styled(line, theme.muted())))
-            .collect();
+    let desc_lines: Vec<Line<'_>> = wrap_text(
+        description,
+        layout.description.width as usize,
+        layout.description.height as usize,
+    )
+    .into_iter()
+    .map(|line| Line::from(Span::styled(line, theme.muted())))
+    .collect();
     frame.render_widget(Paragraph::new(desc_lines), layout.description);
 
     render_hint_line(theme, frame, &SETTINGS_DIALOG_HINTS, layout.hints, hover);
