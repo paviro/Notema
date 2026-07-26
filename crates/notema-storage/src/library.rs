@@ -211,7 +211,7 @@ impl MissCause {
 /// This is a digest of the exact bytes the file holds — ciphertext for an
 /// encrypted entry — not a summary of its metadata, so two different contents
 /// can never share a revision whatever the filesystem reports about length or
-/// timestamps. [`FileStamp`] answers a different, weaker question for the entry
+/// timestamps. `FileStamp` answers a different, weaker question for the entry
 /// cache; the two must not be conflated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntryRevision([u8; 32]);
