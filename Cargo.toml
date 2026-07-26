@@ -98,6 +98,14 @@ notema-fuse = { path = "crates/notema-fuse" }
 notema-import = { path = "crates/notema-import" }
 notema-storage = { path = "crates/notema-storage" }
 
+# Thin LTO and one codegen unit reduce release binary and startup overhead.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# Unwinding preserves FUSE error containment and terminal restoration.
+panic = "unwind"
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 unreachable_pub = "warn"

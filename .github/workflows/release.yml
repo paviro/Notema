@@ -76,7 +76,7 @@ jobs:
     needs: preflight
     if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'linux'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # riscv64 musl is a newer target that defaults to dynamic linking,
       # unlike the older musl targets; force the static binary the musl
@@ -246,7 +246,7 @@ jobs:
     needs: preflight
     if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'linux-fuse'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     container: almalinux:8.10
     defaults:
       run:
@@ -384,7 +384,7 @@ jobs:
     needs: preflight
     if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'android'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -440,7 +440,7 @@ jobs:
     needs: preflight
     if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'freebsd'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # rust-toolchain.toml pins stable and outranks the setup action's
       # install, so the nightly row must select its toolchain explicitly.
@@ -527,7 +527,7 @@ jobs:
     needs: preflight
     if: github.event_name == 'push' || inputs.target_group == 'all' || inputs.target_group == 'windows'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: true
       matrix:
