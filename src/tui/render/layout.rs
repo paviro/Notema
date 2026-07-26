@@ -144,13 +144,24 @@ impl EntryBodyFrame {
         self.metadata.is_none()
     }
 
-    /// Whether `line_count` rendered rows fit and should float in the middle.
+    /// Blank rows centering asks for above `line_count` rendered rows: half the
+    /// slack, and 0 once the body no longer fits.
+    fn center_pad(&self, line_count: usize) -> u16 {
+        if !self.center_vertically {
+            return 0;
+        }
+        ((self.body.height as usize).saturating_sub(line_count) / 2) as u16
+    }
+
+    /// Whether `line_count` rendered rows float in the middle: only once that
+    /// sits lower than the ramp, which is a floor the body never rises above.
     pub(crate) fn centers(&self, line_count: usize) -> bool {
-        self.center_vertically && line_count < self.body.height as usize
+        self.center_pad(line_count) > self.ramp
     }
 
     /// Blank rows above the body, on top of [`BODY_LEADING_BLANK`]. Takes the
-    /// count because a centered body drops the ramp rather than stacking both.
+    /// count because the larger of the ramp and the centering offset wins —
+    /// they never stack.
     pub(crate) fn top_pad(&self, line_count: usize) -> u16 {
         if self.centers(line_count) {
             return 0;
@@ -162,11 +173,15 @@ impl EntryBodyFrame {
     /// vertical middle when it floats, otherwise unchanged so scrolling covers
     /// every line. Gated on [`Self::centers`] alone, so it can't disagree with
     /// the [`Self::top_pad`] that was chosen for the same count.
+    ///
+    /// The viewer measures the two at counts a ramp apart (it prepends between
+    /// the calls); they still agree because `center_pad` only shrinks as the
+    /// count grows, so a ramp that won at the smaller count wins at the larger.
     pub(crate) fn centered(&self, line_count: usize) -> Rect {
         if !self.centers(line_count) {
             return self.body;
         }
-        let pad = (self.body.height - line_count as u16) / 2;
+        let pad = self.center_pad(line_count);
         Rect {
             y: self.body.y + pad,
             height: self.body.height - pad,

@@ -230,7 +230,8 @@ pub(crate) struct BodyLayout {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReaderSection {
-    /// Vertically center the body in the reader when it fits without scrolling.
+    /// Vertically center the body in the reader when it fits without scrolling
+    /// and centering sits it lower than `body_max_top_padding`.
     #[serde(default = "default_true")]
     pub body_center_vertically: bool,
     /// Max width, in cells, of the entry body; wider panels gutter the sides so
@@ -239,7 +240,8 @@ pub(crate) struct ReaderSection {
     pub body_max_width: u16,
     /// Max blank lines above the entry body on wide panes, ramping in with the
     /// side gutters; 0 (or a pane no wider than `body_max_width`) keeps the body
-    /// flush to the top.
+    /// flush to the top. A floor the body never rises above: centering applies
+    /// only where it sits the body lower still.
     #[serde(default = "default_body_max_top_padding")]
     pub body_max_top_padding: u16,
     /// Show each link's target URL as a faint `(url)` after its name. Off by

@@ -230,7 +230,7 @@ chrome = "default"              # default | flat | bordered
 ignore_journal_themes = false   # true: this device ignores per-journal themes, uses `theme`
 
 [ui.layout.reader]
-body_center_vertically = true
+body_center_vertically = true   # only where it sits the body lower than body_max_top_padding
 body_max_width = 100            # cells; 0 = no cap
 body_max_top_padding = 6        # blank lines above the body on wide panes; 0 = flush to the top
 show_link_urls = false

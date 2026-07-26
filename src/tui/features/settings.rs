@@ -156,7 +156,7 @@ const APPEARANCE_SETTINGS: &[SettingRow] = &[
 const READER_SETTINGS: &[SettingRow] = &[
     SettingRow::Bool {
         label: "Center body vertically",
-        description: "Vertically center the entry body when it fits without scrolling.",
+        description: "Vertically center the entry body when it fits without scrolling. Only moves it further down than the top padding, never above it.",
         get: |c| c.ui.layout.reader.body_center_vertically,
         set: |c, v| c.ui.layout.reader.body_center_vertically = v,
         after: AfterChange::None,
@@ -175,7 +175,7 @@ const READER_SETTINGS: &[SettingRow] = &[
     },
     SettingRow::Number {
         label: "Max body top padding",
-        description: "Extra blank lines above the body on wide panes, ramping in with the side gutters. 0 keeps the body flush to the top.",
+        description: "Extra blank lines above the body on wide panes, ramping in with the side gutters. A floor centering never rises above. 0 keeps the body flush to the top.",
         get: |c| c.ui.layout.reader.body_max_top_padding,
         set: |c, v| c.ui.layout.reader.body_max_top_padding = v,
         step: 1,
@@ -197,7 +197,7 @@ const READER_SETTINGS: &[SettingRow] = &[
 const EDITOR_SETTINGS: &[SettingRow] = &[
     SettingRow::Bool {
         label: "Center body vertically",
-        description: "Vertically center the entry body while it fits without scrolling. Off by default — unlike reading, a baseline that shifts as you type is distracting.",
+        description: "Vertically center the entry body while it fits without scrolling, never above the top padding. Off by default — unlike reading, a baseline that shifts as you type is distracting.",
         get: |c| c.ui.layout.editor_body().center_vertically,
         set: |c, v| c.ui.layout.editor.body_center_vertically = Some(v),
         after: AfterChange::None,

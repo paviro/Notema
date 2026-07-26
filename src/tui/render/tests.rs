@@ -2787,6 +2787,49 @@ fn reader_and_editor_frame_the_body_the_same() {
     }
 }
 
+/// The top padding is a floor: a body long enough that centering would sit it
+/// higher than the ramp keeps the ramp, and scrolls if it must.
+#[test]
+fn top_padding_outranks_centering_on_a_long_body() {
+    let theme = theme::Theme::terminal_default();
+    let metadata = notema_domain::Metadata {
+        tags: vec!["one".to_string()],
+        mood: Some(2),
+        ..Default::default()
+    };
+    let entry_metadata =
+        super::metadata::EntryMetadata::for_entry(&theme, &metadata, Default::default());
+    // Wide enough for a ramp — it needs two gutter columns per blank line — and
+    // tall enough for centering to beat it on a short body.
+    let area = Rect::new(0, 0, 160, 40);
+    let mut layout = crate::config::LayoutSection::default();
+    // The reader centers by default; match it so both surfaces are exercised.
+    layout.editor.body_center_vertically = Some(true);
+    for body_layout in [layout.reader_body(), layout.editor_body()] {
+        let frame =
+            super::layout::EntryBodyFrame::new(&theme, area, entry_metadata.values(), body_layout);
+        let height = frame.body.height as usize;
+        // A body filling the pane never centers, so this is the ramp itself.
+        let ramp = frame.top_pad(height);
+        assert!(ramp > 0, "no ramp to measure against at {area:?}");
+
+        // Short body: centering sits it below the ramp, so it wins.
+        assert!(frame.centers(1));
+        assert_eq!(frame.top_pad(1), 0);
+        assert!(frame.centered(1).y > frame.body.y + ramp);
+
+        // Near-full body: centering would sit it above the ramp, so the ramp holds.
+        let long = height - 2;
+        assert!(!frame.centers(long));
+        assert_eq!(frame.top_pad(long), ramp);
+        assert_eq!(frame.centered(long), frame.body);
+
+        // The viewer measures `centered` a ramp later than `top_pad`, so the
+        // two must still agree there.
+        assert!(!frame.centers(long + ramp as usize));
+    }
+}
+
 /// The shortcut overlay lists every group's bindings as a centered table with
 /// vertical rules between the columns.
 #[test]
