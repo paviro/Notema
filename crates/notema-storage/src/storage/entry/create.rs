@@ -1,5 +1,5 @@
 use super::Metadata;
-use super::assets::{AssetReport, ingest_and_cleanup_opts};
+use super::assets::{AssetReport, StagedAssets};
 use super::codec::EntryCodec;
 use super::paths::{
     ENTRY_ID_LEN, encrypted_entry_path_with_id, entry_assets_dir, entry_path_with_id, random_id,
@@ -115,14 +115,11 @@ fn create_entry_inner(
             fs::create_dir_all(parent)?;
         }
 
+        // Armed before the clone, so a failure anywhere below removes only the
+        // files this attempt created and leaves the source entry's assets alone.
+        let mut staged = StagedAssets::for_entry(&path);
         let source_body = if let Some(source_path) = source_path {
-            match clone_entry_assets(source_path, &path, draft.body) {
-                Ok(body) => body,
-                Err(error) => {
-                    remove_assets_dir(&path);
-                    return Err(error);
-                }
-            }
+            clone_entry_assets(source_path, &path, draft.body, &mut staged)?
         } else {
             draft.body.to_string()
         };
@@ -130,13 +127,7 @@ fn create_entry_inner(
         let encryption = codec
             .encrypts_new_entries()
             .then(|| codec.encryption_paths());
-        let (rewritten_body, report) = ingest_and_cleanup_opts(
-            &path,
-            &source_body,
-            encryption,
-            assets.download_remote,
-            assets.replace_offline,
-        )?;
+        let rewritten_body = staged.ingest(&source_body, encryption, assets)?;
         let body = rewritten_body.as_deref().unwrap_or(&source_body);
         let content = entry_content(
             created_at,
@@ -151,29 +142,19 @@ fn create_entry_inner(
             draft.writing_seconds,
             draft.import,
         );
-        let bytes = match codec.encode_new(&content) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                remove_assets_dir(&path);
-                return Err(error);
-            }
-        };
+        let bytes = codec.encode_new(&content)?;
 
         match write_new_file(&path, &bytes) {
             Ok(()) => {
                 return Ok(EntryCreateOutcome {
                     path,
-                    assets: report,
+                    assets: staged.commit()?,
                 });
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                remove_assets_dir(&path);
-                continue;
-            }
-            Err(error) => {
-                remove_assets_dir(&path);
-                return Err(error.into());
-            }
+            // The next attempt picks a fresh id, so this attempt's asset folder
+            // has to go: `staged` drops here and rolls it back.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
         }
     }
 
@@ -183,7 +164,12 @@ fn create_entry_inner(
 /// Copy raw stored assets (ciphertext stays ciphertext) and retarget canonical
 /// body links to the new entry's asset directory. The normal ingestion pass
 /// then removes unreferenced copies and handles newly added assets.
-fn clone_entry_assets(source_path: &Path, target_path: &Path, body: &str) -> AppResult<String> {
+fn clone_entry_assets(
+    source_path: &Path,
+    target_path: &Path,
+    body: &str,
+    staged: &mut StagedAssets,
+) -> AppResult<String> {
     let (Some(source_dir), Some(target_dir), Some(source_name), Some(target_name)) = (
         entry_assets_dir(source_path),
         entry_assets_dir(target_path),
@@ -197,7 +183,9 @@ fn clone_entry_assets(source_path: &Path, target_path: &Path, body: &str) -> App
         for item in fs::read_dir(&source_dir)? {
             let item = item?;
             if item.file_type()?.is_file() {
-                fs::copy(item.path(), target_dir.join(item.file_name()))?;
+                let copy = target_dir.join(item.file_name());
+                staged.stage(copy.clone());
+                fs::copy(item.path(), copy)?;
             }
         }
     }
@@ -280,12 +268,6 @@ pub(crate) fn create_entry_file(
     }
 
     bail!("could not create a unique entry path after {ENTRY_CREATE_ATTEMPTS} attempts")
-}
-
-fn remove_assets_dir(path: &Path) {
-    if let Some(assets_dir) = entry_assets_dir(path) {
-        let _ = fs::remove_dir_all(assets_dir);
-    }
 }
 
 fn write_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {

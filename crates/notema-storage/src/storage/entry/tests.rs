@@ -734,3 +734,243 @@ fn delete_does_not_move_entry_when_asset_trash_destination_exists() {
     assert!(path.exists());
     assert!(assets.join("x9.png").exists());
 }
+
+/// Seed `<stem>.assets/keep.png` and point `entry`'s body at it.
+fn seed_referenced_asset(entry: &Path) -> PathBuf {
+    let assets = super::paths::entry_assets_dir(entry).unwrap();
+    fs::create_dir_all(&assets).unwrap();
+    let kept = assets.join("keep.png");
+    fs::write(&kept, b"kept image bytes").unwrap();
+    kept
+}
+
+#[test]
+fn save_entry_edit_rolls_back_staged_assets_when_the_content_cannot_be_rendered() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("2026-07-06T10-00-00.md");
+    let assets_dir_name = "2026-07-06T10-00-00.assets";
+    // Unparseable front matter plus a metadata change makes `render_edited_content`
+    // bail — after ingest has already run, which is the window under test.
+    fs::write(
+        &path,
+        format!(
+            "+++\nschema_version = 1\ntags = [unterminated\n+++\n\n![k]({assets_dir_name}/keep.png)\n"
+        ),
+    )
+    .unwrap();
+    let kept = seed_referenced_asset(&path);
+    let incoming = dir.path().join("new.png");
+    fs::write(&incoming, png_test_bytes()).unwrap();
+
+    let original_metadata = Metadata::default();
+    let metadata = Metadata {
+        tags: vec!["added".to_string()],
+        ..Metadata::default()
+    };
+
+    let error = save_entry_edit(
+        &EntryCodec::plain(),
+        &path,
+        EntryEdit {
+            // Drops the `keep.png` reference, so cleanup would prune it.
+            body: &format!("![new]({})\n", incoming.display()),
+            metadata: &metadata,
+            original_metadata: &original_metadata,
+            writing_seconds: None,
+            remove_if_empty: true,
+            extra_fields: &[],
+        },
+        EntryAssetOptions::default(),
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("front matter"));
+    assert!(kept.exists(), "asset the on-disk entry still references");
+    let remaining: Vec<_> = fs::read_dir(kept.parent().unwrap())
+        .unwrap()
+        .map(|item| item.unwrap().file_name())
+        .collect();
+    assert_eq!(remaining, ["keep.png"], "nothing staged was left behind");
+}
+
+#[test]
+fn create_entry_copy_rolls_back_cloned_assets_when_ingest_fails() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("work/2026/07/01/source.md");
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(
+        &source,
+        "+++\nschema_version = 1\n+++\n\n![p](source.assets/photo.png)\n",
+    )
+    .unwrap();
+    let source_assets = dir.path().join("work/2026/07/01/source.assets");
+    fs::create_dir_all(&source_assets).unwrap();
+    fs::write(source_assets.join("photo.png"), png_test_bytes()).unwrap();
+
+    // A roster file that exists but does not parse: `encrypts_new_entries` is true,
+    // so ingest resolves recipients and fails — after `clone_entry_assets` has
+    // already copied the source's assets into the new entry's folder.
+    //
+    // This injector depends on `EncryptionRecipients::for_store` being resolved
+    // inside ingest. If recipient resolution ever moves out to the callers, this
+    // test has to move with it.
+    let age_dir = dir.path().join(".age");
+    fs::create_dir_all(&age_dir).unwrap();
+    let devices = age_dir.join("devices.toml");
+    fs::write(&devices, "this is not valid toml {{{").unwrap();
+    let codec = EntryCodec::new(
+        KeyPaths {
+            age_dir: age_dir.clone(),
+            devices_file: devices,
+            identity_file: age_dir.join("identity.age"),
+            trust_file: age_dir.join("trust.toml"),
+        },
+        None,
+    );
+    let metadata = Metadata::default();
+
+    let result = create_entry_copy(
+        &codec,
+        dir.path(),
+        &source,
+        EntryDraft::new("work", "![p](source.assets/photo.png)\n", &metadata),
+        EntryAssetOptions::default(),
+    );
+
+    assert!(result.is_err(), "ingest fails on the broken roster");
+    assert!(
+        source_assets.join("photo.png").exists(),
+        "source assets untouched"
+    );
+    // The copy is dated now, not from the source, so look across the journal.
+    let leaked = assets_dirs_under(&dir.path().join("work"));
+    assert_eq!(
+        leaked,
+        [source_assets],
+        "the failed copy left its cloned asset folder behind"
+    );
+}
+
+fn png_test_bytes() -> Vec<u8> {
+    let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    bytes.extend_from_slice(&[0u8; 16]);
+    bytes
+}
+
+/// The revision check that guards a save brackets asset ingest: it runs before,
+/// and again just before the write. Ingest is where a save spends real time,
+/// because it downloads remote images — so a write landing in that window is the
+/// reachable conflict. Serve the image from a local socket that rewrites the
+/// entry the moment the download starts, to land inside the window on purpose.
+#[test]
+fn save_entry_edit_if_revision_conflict_during_ingest_keeps_on_disk_assets() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let dir = tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("work/2026/07/01/2026-07-01T10-00-00-abcd.md");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        &path,
+        "+++\nschema_version = 1\n\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\n![k](2026-07-01T10-00-00-abcd.assets/keep.png)\n",
+    )
+    .unwrap();
+    let kept = seed_referenced_asset(&path);
+    let revision = crate::EntryRevision::read(&path).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let entry = path.clone();
+    let server = std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            // The reachability probe connects and drops without sending; ignore it
+            // and keep waiting for the real request.
+            let mut head = [0u8; 1];
+            if stream.read(&mut head).unwrap_or(0) == 0 {
+                continue;
+            }
+            // Inside the window: change the entry's length, so the stamp differs
+            // whatever the filesystem's mtime granularity is.
+            fs::write(&entry, "replaced by another process, and rather longer\n").unwrap();
+            let body = png_test_bytes();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.write_all(&body);
+            let _ = stream.flush();
+            return;
+        }
+    });
+
+    let metadata = Metadata::default();
+    let error = save_entry_edit_if_revision(
+        &EntryCodec::plain(),
+        &path,
+        revision,
+        EntryEdit {
+            // Drops the `keep.png` reference, so cleanup would prune it.
+            body: &format!("![shot](http://127.0.0.1:{port}/pic.png)\n"),
+            metadata: &metadata,
+            original_metadata: &metadata,
+            writing_seconds: None,
+            remove_if_empty: true,
+            extra_fields: &[],
+        },
+        EntryAssetOptions {
+            download_remote: true,
+            replace_offline: false,
+        },
+    )
+    .unwrap_err();
+    server.join().unwrap();
+
+    assert!(
+        matches!(
+            error.downcast_ref::<crate::StorageError>(),
+            Some(crate::StorageError::EntryRevisionConflict { .. })
+        ),
+        "expected a revision conflict, got: {error}"
+    );
+    assert!(
+        kept.exists(),
+        "the refused save destroyed an asset the on-disk entry references"
+    );
+    let remaining: Vec<_> = fs::read_dir(kept.parent().unwrap())
+        .unwrap()
+        .map(|item| item.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert_eq!(
+        remaining,
+        ["keep.png"],
+        "the downloaded asset was rolled back"
+    );
+}
+
+/// Every `<stem>.assets` directory under `root`, sorted, for leak assertions.
+fn assets_dirs_under(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(items) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for item in items.flatten() {
+            let path = item.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if super::paths::is_assets_dir(&path) {
+                found.push(path);
+            } else {
+                pending.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
+}

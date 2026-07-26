@@ -1,11 +1,12 @@
 //! Per-entry assets.
 //!
-//! [`ingest_and_cleanup`] copies/downloads external images (local paths or
+//! [`StagedAssets::ingest`] copies/downloads external images (local paths or
 //! `http(s)` URLs, in `![alt](target)` tags or bare on their own line) and
 //! non-image file attachments (existing local files in `[label](target)` links)
 //! into the entry's sibling `<stem>.assets/` folder, age-encrypting when the
 //! store is encrypted, and rewrites references to the stored copy. Assets no
-//! longer referenced by the rewritten body are deleted.
+//! longer referenced by the rewritten body are deleted by
+//! [`StagedAssets::commit`], once the entry that references them is on disk.
 //!
 //! Stored references are always canonical markdown pointing inside the entry's
 //! own asset folder — `![alt](<stem>.assets/<id>.<ext>)` for images,
@@ -15,6 +16,7 @@
 
 mod net;
 
+use super::create::EntryAssetOptions;
 use super::paths::{entry_assets_dir, entry_assets_dir_name, random_id};
 use crate::AppResult;
 use anyhow::bail;
@@ -90,11 +92,6 @@ impl AssetReport {
 }
 
 /// Ingest external image and attachment references, then delete orphaned assets.
-///
-/// `encryption` is `Some` when the store encrypts entries (assets get an `.age`
-/// suffix and are age-encrypted); `download_remote` gates fetching `http(s)`
-/// URLs. Returns the rewritten body only when it changed. Sources that fail to
-/// fetch are skipped and recorded in the report rather than aborting.
 #[cfg(test)]
 pub(crate) fn ingest_and_cleanup(
     entry_path: &Path,
@@ -102,48 +99,147 @@ pub(crate) fn ingest_and_cleanup(
     encryption: Option<&KeyPaths>,
     download_remote: bool,
 ) -> AppResult<(Option<String>, AssetReport)> {
-    ingest_and_cleanup_opts(entry_path, body, encryption, download_remote, false)
+    let mut staged = StagedAssets::for_entry(entry_path);
+    let rewritten = staged.ingest(
+        body,
+        encryption,
+        EntryAssetOptions {
+            download_remote,
+            replace_offline: false,
+        },
+    )?;
+    Ok((rewritten, staged.commit()?))
 }
 
-/// Like [`ingest_and_cleanup`], but when `replace_offline` is set, external image
-/// references that could not be ingested are replaced with an `[Offline Image]`
-/// placeholder instead of being left in the body. Used by bulk import so dead
-/// links don't linger as broken image tags.
-pub(crate) fn ingest_and_cleanup_opts(
-    entry_path: &Path,
-    body: &str,
-    encryption: Option<&KeyPaths>,
-    download_remote: bool,
-    replace_offline: bool,
-) -> AppResult<(Option<String>, AssetReport)> {
-    let (Some(assets_dir), Some(dir_name)) = (
-        entry_assets_dir(entry_path),
-        entry_assets_dir_name(entry_path),
-    ) else {
-        return Ok((None, AssetReport::default()));
-    };
+/// Where an entry's assets live: the folder, and the name body links use for it.
+struct AssetFolder {
+    dir: PathBuf,
+    name: String,
+}
 
-    let encryption = encryption
-        .map(crypto::EncryptionRecipients::for_store)
-        .transpose()?;
-    let mut ctx = IngestContext {
-        assets_dir: &assets_dir,
-        dir_name: &dir_name,
-        encryption,
-        download_remote,
-        replace_offline,
-        asset_ids: existing_asset_ids(&assets_dir)?,
-        stored_sources: HashMap::new(),
-        report: AssetReport::default(),
-    };
+/// Files this operation wrote into an entry's asset folder, held until the entry
+/// that references them is on disk.
+///
+/// Dropping without [`commit`](Self::commit) removes exactly the files this
+/// operation created — never anything that was already there, and the folder
+/// itself only when this operation created it. Rollback can only ever touch a
+/// path obtained through `create_new`, so it cannot remove a file another
+/// process wrote.
+///
+/// Deliberate destruction — emptying an entry, trashing one, deleting a journal
+/// — does not go through here and must not be staged.
+#[must_use = "commit once the entry is written, or drop to roll the staged files back"]
+pub(crate) struct StagedAssets {
+    folder: Option<AssetFolder>,
+    /// Whether this operation created the asset folder, so rollback knows
+    /// whether removing it is its business.
+    created_dir: bool,
+    staged: Vec<PathBuf>,
+    /// The rewritten body, kept so the deferred orphan sweep knows what is still
+    /// referenced. `None` until `ingest` runs, so a commit without one sweeps
+    /// nothing rather than treating an empty body as "nothing is referenced".
+    body: Option<String>,
+    report: AssetReport,
+    committed: bool,
+}
 
-    let new_body = rewrite_body(body, &mut ctx);
-    let changed = new_body != body;
+impl StagedAssets {
+    /// Arm rollback for `entry_path`'s asset folder, before anything writes into
+    /// it.
+    pub(crate) fn for_entry(entry_path: &Path) -> Self {
+        let folder = entry_assets_dir(entry_path)
+            .zip(entry_assets_dir_name(entry_path))
+            .map(|(dir, name)| AssetFolder { dir, name });
+        let created_dir = folder.as_ref().is_some_and(|folder| !folder.dir.exists());
+        Self {
+            folder,
+            created_dir,
+            staged: Vec::new(),
+            body: None,
+            report: AssetReport::default(),
+            committed: false,
+        }
+    }
 
-    cleanup_orphans(&assets_dir, &dir_name, &new_body, &mut ctx.report)?;
+    /// Record a file this operation created, so rollback removes it. Call once
+    /// the path is reserved and before writing to it.
+    pub(crate) fn stage(&mut self, path: PathBuf) {
+        self.staged.push(path);
+    }
 
-    let report = ctx.report;
-    Ok((changed.then_some(new_body), report))
+    /// Ingest external image and attachment references, writing new assets but
+    /// deleting nothing.
+    ///
+    /// `encryption` is `Some` when the store encrypts entries (assets get an
+    /// `.age` suffix and are age-encrypted); `download_remote` gates fetching
+    /// `http(s)` URLs, and `replace_offline` swaps an image that could not be
+    /// ingested for an `[Offline Image]` placeholder instead of leaving the dead
+    /// link in the body. Returns the rewritten body only when it changed.
+    /// Sources that fail to fetch are recorded in the report rather than
+    /// aborting.
+    pub(crate) fn ingest(
+        &mut self,
+        body: &str,
+        encryption: Option<&KeyPaths>,
+        options: EntryAssetOptions,
+    ) -> AppResult<Option<String>> {
+        let Some(folder) = &self.folder else {
+            return Ok(None);
+        };
+        let encryption = encryption
+            .map(crypto::EncryptionRecipients::for_store)
+            .transpose()?;
+        let (new_body, report) = {
+            let mut ctx = IngestContext {
+                assets_dir: &folder.dir,
+                dir_name: &folder.name,
+                encryption,
+                download_remote: options.download_remote,
+                replace_offline: options.replace_offline,
+                asset_ids: existing_asset_ids(&folder.dir)?,
+                stored_sources: HashMap::new(),
+                staged: &mut self.staged,
+                report: AssetReport::default(),
+            };
+            let new_body = rewrite_body(body, &mut ctx);
+            (new_body, ctx.report)
+        };
+
+        self.report = report;
+        let changed = new_body != body;
+        self.body = Some(new_body.clone());
+        Ok(changed.then_some(new_body))
+    }
+
+    /// The entry bytes are on disk: keep everything staged, and sweep the assets
+    /// the saved body no longer references.
+    pub(crate) fn commit(mut self) -> AppResult<AssetReport> {
+        // Set first, so an error from the sweep still leaves the staged files in
+        // place — the entry on disk references them.
+        self.committed = true;
+        if let (Some(folder), Some(body)) = (&self.folder, &self.body) {
+            cleanup_orphans(&folder.dir, &folder.name, body, &mut self.report)?;
+        }
+        Ok(std::mem::take(&mut self.report))
+    }
+}
+
+impl Drop for StagedAssets {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        for path in &self.staged {
+            let _ = fs::remove_file(path);
+        }
+        if self.created_dir
+            && let Some(folder) = &self.folder
+        {
+            // Non-recursive on purpose: this succeeds only once the folder holds
+            // nothing but what was just rolled back.
+            let _ = fs::remove_dir(&folder.dir);
+        }
+    }
 }
 
 /// Retarget canonical stored-asset references (image embeds and attachment
@@ -222,6 +318,7 @@ struct IngestContext<'a> {
     replace_offline: bool,
     asset_ids: HashSet<String>,
     stored_sources: HashMap<String, String>,
+    staged: &'a mut Vec<PathBuf>,
     report: AssetReport,
 }
 
@@ -539,6 +636,9 @@ fn write_asset(ctx: &mut IngestContext<'_>, data: &AssetData, ext: &str) -> AppR
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error.into()),
         };
+        // `create_new` reserved the path, so it is ours to roll back. Record it
+        // before writing, so a failure mid-write is covered too.
+        ctx.staged.push(path.clone());
         if let Err(error) = data.write_to(&mut output, ctx.encryption.as_ref()) {
             drop(output);
             let _ = fs::remove_file(&path);
@@ -968,6 +1068,98 @@ mod tests {
         let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
         bytes.extend_from_slice(&[0u8; 16]);
         bytes
+    }
+
+    #[test]
+    fn dropping_uncommitted_staging_removes_only_what_it_staged() {
+        let dir = tempdir().unwrap();
+        let entry = entry_path(dir.path());
+        let assets = entry_assets_dir(&entry).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+        fs::write(assets.join("existing.png"), png_bytes()).unwrap();
+        let src = dir.path().join("pic.png");
+        fs::write(&src, png_bytes()).unwrap();
+
+        let mut staged = StagedAssets::for_entry(&entry);
+        let body = format!(
+            "![keep](2026-07-05T14-30-00-abc123.assets/existing.png)\n![new]({})",
+            src.display()
+        );
+        let rewritten = staged
+            .ingest(&body, None, EntryAssetOptions::default())
+            .unwrap()
+            .unwrap();
+        assert!(rewritten.contains("existing.png"), "kept reference intact");
+        assert_eq!(
+            fs::read_dir(&assets).unwrap().count(),
+            2,
+            "ingest wrote one"
+        );
+
+        drop(staged);
+
+        let remaining: Vec<_> = fs::read_dir(&assets)
+            .unwrap()
+            .map(|item| item.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            remaining,
+            ["existing.png"],
+            "only the staged file rolled back"
+        );
+    }
+
+    #[test]
+    fn dropping_uncommitted_staging_removes_a_directory_it_created() {
+        let dir = tempdir().unwrap();
+        let entry = entry_path(dir.path());
+        let assets = entry_assets_dir(&entry).unwrap();
+        let src = dir.path().join("pic.png");
+        fs::write(&src, png_bytes()).unwrap();
+
+        let mut staged = StagedAssets::for_entry(&entry);
+        staged
+            .ingest(
+                &format!("![new]({})", src.display()),
+                None,
+                EntryAssetOptions::default(),
+            )
+            .unwrap();
+        assert!(assets.exists(), "ingest created the folder");
+
+        drop(staged);
+
+        assert!(
+            !assets.exists(),
+            "the folder this operation created is gone"
+        );
+    }
+
+    #[test]
+    fn dropping_uncommitted_staging_keeps_a_directory_it_did_not_create() {
+        let dir = tempdir().unwrap();
+        let entry = entry_path(dir.path());
+        let assets = entry_assets_dir(&entry).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+        let src = dir.path().join("pic.png");
+        fs::write(&src, png_bytes()).unwrap();
+
+        let mut staged = StagedAssets::for_entry(&entry);
+        staged
+            .ingest(
+                &format!("![new]({})", src.display()),
+                None,
+                EntryAssetOptions::default(),
+            )
+            .unwrap();
+
+        drop(staged);
+
+        assert!(
+            assets.exists(),
+            "a pre-existing folder is not this operation's to remove"
+        );
+        assert_eq!(fs::read_dir(&assets).unwrap().count(), 0);
     }
 
     #[test]

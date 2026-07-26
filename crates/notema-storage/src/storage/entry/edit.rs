@@ -137,13 +137,10 @@ fn save_entry_edit_inner(
     }
 
     let encryption = super::paths::is_encrypted_entry_file(path).then(|| codec.encryption_paths());
-    let (rewritten_body, report) = super::assets::ingest_and_cleanup_opts(
-        path,
-        body,
-        encryption,
-        assets.download_remote,
-        assets.replace_offline,
-    )?;
+    // Assets are written but nothing is deleted until the entry is on disk, so
+    // every early return below leaves the on-disk asset state as it was.
+    let mut staged = super::assets::StagedAssets::for_entry(path);
+    let rewritten_body = staged.ingest(body, encryption, assets)?;
     let final_body = rewritten_body.as_deref().unwrap_or(body);
     let content = render_edited_content(
         entry.front_matter.as_deref(),
@@ -157,7 +154,7 @@ fn save_entry_edit_inner(
 
     Ok(EntryEditOutcome {
         outcome: EditOutcome::Changed,
-        assets: report,
+        assets: staged.commit()?,
     })
 }
 
