@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use notema_timing as timing;
 
 use super::schema::parse;
 use super::{DEFAULT_THEME, Mode, Theme};
@@ -109,10 +110,13 @@ pub(super) fn builtin(name: &str, mode: Mode) -> Option<Theme> {
 /// Query the terminal for its background luminance, defaulting to dark when the
 /// terminal doesn't answer.
 fn detect_terminal_background() -> Mode {
-    match terminal_colorsaurus::theme_mode(terminal_colorsaurus::QueryOptions::default()) {
+    let mode = match terminal_colorsaurus::theme_mode(terminal_colorsaurus::QueryOptions::default())
+    {
         Ok(terminal_colorsaurus::ThemeMode::Light) => Mode::Light,
         Ok(terminal_colorsaurus::ThemeMode::Dark) | Err(_) => Mode::Dark,
-    }
+    };
+    timing::mark("theme:bg-query");
+    mode
 }
 
 pub(crate) struct StartupTheme {

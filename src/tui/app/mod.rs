@@ -6,6 +6,7 @@ use notema_domain::Entry;
 use notema_storage::{
     CachePolicy, CachedLibrary, Journal, JournalStore, LibrarySnapshot, is_entry_file,
 };
+use notema_timing as timing;
 use std::{
     cell::RefCell,
     collections::{BTreeSet, HashMap},
@@ -440,6 +441,8 @@ impl AppModel {
         detected_mode: crate::tui::theme::Mode,
     ) -> AppResult<(Self, Option<CachedLibrary>)> {
         let cache = store.read_cached_library(CachePolicy::Normal)?;
+        timing::mark("tui:cache-read");
+        timing::note_with(|| cache.report.timing_summary());
         // A passphrase-locked store can't decrypt its entries, and no background
         // validation runs while locked — so don't walk the journal root (slow start)
         // and don't raise the "Loading journals…" toast we'd never dismiss.

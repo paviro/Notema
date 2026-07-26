@@ -104,3 +104,40 @@ fixed per-run overhead.
 
 Numbers are machine-relative; compare runs on the same hardware, ideally with a
 quiet system and on the `release`/`bench` profile (which `cargo bench` uses).
+
+## Startup timing
+
+Benchmarks cover the paths that scale with journal size; they say nothing about
+the fixed cost of starting up. `NOTEMA_TIMING=1` prints a phase-by-phase timeline
+to stderr — cumulative and delta per step — so a slow launch on a device you
+can't attach a profiler to (Termux on Android, iSH on iOS) can be attributed to
+something specific.
+
+`NOTEMA_TIMING=2` adds cache-miss causes and filesystem mtime precision. Level 1
+keeps the phase timeline and aggregate library summaries without those details.
+
+```bash
+NOTEMA_TIMING=1 notema log "probe" 2> timing.log
+NOTEMA_TIMING=1 notema 2> timing-tui.log   # lines flush after the TUI exits
+```
+
+It's gated on the env var rather than a cargo feature on purpose: the build that
+needs measuring is the released one. With the variable unset each hook is one
+relaxed atomic load.
+
+Reading it:
+
+- **`pre-main`** (Linux/Android only, from `/proc`, ±10 ms) is exec plus dynamic
+  linking. A large number here means loader and page-in cost, not application
+  code. `time notema log "x"` minus the reported `total` measures the same thing
+  more precisely.
+- **`store:ensure-*`** is the first thing to touch the journal root. If these
+  dominate, the journal filesystem is the bottleneck — on Android that means
+  `/storage/emulated/0`, where every syscall is a FUSE round-trip.
+- **`roster:verify (N ops)`** scales with `N`, the append-only roster length, not
+  the device count; every op costs a signature check.
+- **`theme:bg-query`**, **`term:kbd-enhance-query`** and **`image:picker-query`**
+  are blocking terminal round-trips before the first frame, with 1–2 s timeouts.
+  A large value is the terminal emulator not answering, not Rust.
+- **`library:`** lines come from `LibraryLoadReport`, split into cache read,
+  discovery walk, source read and cache write.

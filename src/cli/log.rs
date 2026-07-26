@@ -8,6 +8,7 @@ use chrono::Local;
 use notema_context::{EnvironmentProvider, fetch_environment, resolve_zone, rezone};
 use notema_domain::{Location, MOOD_RANGE, Metadata, validate_feelings};
 use notema_storage::JournalStore;
+use notema_timing as timing;
 
 use crate::{AppResult, startup, tui};
 
@@ -32,6 +33,7 @@ pub(super) fn run(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<(
         .or(config.journal.default.as_deref())
         .context("no journal specified; pass --journal or set one with `notema use <name>`")?;
     validate_existing_journal(&config.journal.path, journal)?;
+    timing::mark("log:validate-journal");
 
     // No inline text: compose interactively in the fullscreen built-in editor. Its
     // own on-screen shortcuts set tags/people/mood and location (Ctrl+L, which
@@ -103,6 +105,7 @@ pub(super) fn run(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<(
     // and date-folder match where it was written, and captures the ambient
     // weather/air/celestial there — the same enrichment the TUI performs.
     let mut created_at = Local::now().fixed_offset();
+    timing::mark("log:now");
     let mut timezone = None;
     let mut environment = None;
     if let Some(coordinates) = metadata.location.as_ref().and_then(Location::coordinates) {

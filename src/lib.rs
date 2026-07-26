@@ -10,7 +10,11 @@ mod tui;
 pub(crate) type AppResult<T> = anyhow::Result<T>;
 
 pub fn run() -> anyhow::Result<()> {
-    cli::run()
+    notema_timing::init();
+    notema_timing::mark("main");
+    let result = cli::run();
+    notema_timing::mark("total");
+    result
 }
 
 /// Bench-only handles onto the otherwise-private TUI hot paths (search, full-frame

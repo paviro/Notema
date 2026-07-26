@@ -2,6 +2,7 @@
 //! into a [`SlicedProtocol`] sized to fit the viewer.
 
 use notema_storage::JournalStore;
+use notema_timing as timing;
 use ratatui::layout::Size;
 use ratatui_image::{
     picker::{Picker, ProtocolType},
@@ -18,7 +19,9 @@ const MAX_IMAGE_DIMENSION: u32 = 3000;
 /// Query the terminal for a graphics protocol, applying the iTerm2 fix. `None`
 /// when the query fails; the caller then falls back to ASCII art.
 pub(super) fn detect_picker() -> Option<Picker> {
-    let mut picker = Picker::from_query_stdio().ok()?;
+    let picker = Picker::from_query_stdio();
+    timing::mark("image:picker-query");
+    let mut picker = picker.ok()?;
     prefer_iterm2_over_kitty(&mut picker);
     Some(picker)
 }

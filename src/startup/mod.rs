@@ -6,6 +6,7 @@ use crate::{
 };
 use anyhow::bail;
 use notema_storage::{CachePolicy, JournalStore, LibraryDiscovery, LibraryLoadProgress};
+use notema_timing as timing;
 use std::{
     io::{self, Write},
     path::{Path, PathBuf},
@@ -24,6 +25,7 @@ pub(crate) struct Startup {
 
 pub(crate) fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult<Startup> {
     let config_path = config_path(path_override)?;
+    timing::mark("startup:config-path");
 
     // An encrypted store this device can't yet read (no key, awaiting approval, or
     // revoked) is still opened: the TUI shows the enroll/awaiting notice instead
@@ -32,7 +34,9 @@ pub(crate) fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult
     // which must run it before probing for a lock.
     let (config, store, discovery) = if config_path.exists() {
         let config = config::load_config(&config_path)?;
+        timing::mark("startup:config-load");
         let prepared = ish::prepare_store(&config_path, &config.journal.path, true)?;
+        timing::mark("startup:prepare-store");
         (config, prepared.store, prepared.discovery)
     } else {
         let (config, store) = interactive_setup(&config_path)?;
@@ -49,6 +53,7 @@ pub(crate) fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult
 
 pub(crate) fn load_existing(path_override: Option<&Path>) -> AppResult<Startup> {
     let config_path = config_path(path_override)?;
+    timing::mark("startup:config-path");
     if !config_path.exists() {
         bail!(
             "config file not found at {}; run `journal` once to set it up or pass --config <DIR>",
@@ -57,12 +62,15 @@ pub(crate) fn load_existing(path_override: Option<&Path>) -> AppResult<Startup> 
     }
 
     let config = config::load_config(&config_path)?;
+    timing::mark("startup:config-load");
     let store = ish::prepare_store(&config_path, &config.journal.path, false)?.store;
+    timing::mark("startup:prepare-store");
     if store.reconcile_disabled_encryption()? {
         eprintln!(
             "Note: encryption was disabled on another device; retired this device's key and trust pins."
         );
     }
+    timing::mark("startup:reconcile-encryption");
     Ok(Startup {
         config_path,
         config,

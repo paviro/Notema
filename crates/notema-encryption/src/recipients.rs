@@ -3,6 +3,7 @@ use crate::signing::{generate_signing_key, parse_signing_public, sign_bytes};
 use crate::{EncryptionError, KeyPaths, Result, roster};
 use age::secrecy::SecretString;
 use age::x25519;
+use notema_timing as timing;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
@@ -63,8 +64,15 @@ pub fn read_recipients(paths: &KeyPaths) -> Result<Vec<Recipient>> {
 /// recipient set plus the genesis/head hashes to pin.
 fn verified_roster(paths: &KeyPaths) -> Result<roster::Verified> {
     let ops = roster::read_ops(&paths.devices_file)?;
+    timing::mark("roster:read-ops");
     let pins = roster::read_pins(&paths.trust_file)?;
-    roster::verify(&ops, &pins)
+    timing::mark("roster:read-pins");
+    let verified = roster::verify(&ops, &pins);
+    // The op count, not the device count, is what verification cost scales with:
+    // the log is append-only, so revokes and rotations keep adding signatures to
+    // check on every read.
+    timing::mark_with(|| format!("roster:verify ({} ops)", ops.len()));
+    verified
 }
 
 /// Advance this device's trust pins to the roster's current, verified head (also

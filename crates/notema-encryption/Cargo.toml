@@ -12,6 +12,7 @@ age.workspace = true
 ed25519-dalek.workspace = true
 getrandom.workspace = true
 hex.workspace = true
+notema-timing.workspace = true
 serde.workspace = true
 sha2.workspace = true
 thiserror.workspace = true

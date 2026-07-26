@@ -60,6 +60,26 @@ pub struct LibraryLoadReport {
     pub cache_warning: Option<String>,
 }
 
+impl LibraryLoadReport {
+    /// One-line breakdown for `NOTEMA_TIMING`. These durations are measured on
+    /// every load already; without this they're just discarded.
+    pub fn timing_summary(&self) -> String {
+        let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
+        format!(
+            "library: {:?} {} entries ({} hit / {} miss), total {:.1} ms; components: cache-read {:.1}, discovery {:.1}, source-read {:.1}, cache-write {:.1}",
+            self.cache_status,
+            self.entries,
+            self.cache_hits,
+            self.cache_misses,
+            ms(self.total),
+            ms(self.cache_read),
+            ms(self.discovery),
+            ms(self.source_read),
+            ms(self.cache_write),
+        )
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum CacheStatus {
     Hit,

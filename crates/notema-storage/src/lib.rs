@@ -16,6 +16,7 @@ mod store_id;
 
 use notema_domain::{Entry, EntryPath, ImportSource, MetadataField};
 use notema_encryption as crypto;
+use notema_timing as timing;
 
 type AppResult<T> = anyhow::Result<T>;
 
@@ -197,8 +198,12 @@ impl JournalStore {
 
     pub fn ensure(&self) -> AppResult<()> {
         storage::ensure_store(&self.paths.journal_root)?;
+        timing::mark("store:ensure-tree");
         store_id::ensure(&self.paths.journal_root)?;
-        entry_cache::remove_incompatible(&self.paths, self.encryption_enabled())
+        timing::mark("store:ensure-store-id");
+        let result = entry_cache::remove_incompatible(&self.paths, self.encryption_enabled());
+        timing::mark("store:cache-compat");
+        result
     }
 
     /// Read this root's stable identity without creating or changing anything.
@@ -755,6 +760,10 @@ impl JournalStore {
         let cache = self.read_cached_library(policy)?;
         let mut snapshot = self.validate_library(cache.cached, policy)?;
         snapshot.report.cache_read = cache.report.cache_read;
+        snapshot.report.total = snapshot
+            .report
+            .total
+            .saturating_add(cache.report.cache_read);
         if snapshot.report.cache_warning.is_none() {
             snapshot.report.cache_warning = cache.report.cache_warning;
         }
@@ -777,6 +786,10 @@ impl JournalStore {
             Some(progress),
         )?;
         snapshot.report.cache_read = cache.report.cache_read;
+        snapshot.report.total = snapshot
+            .report
+            .total
+            .saturating_add(cache.report.cache_read);
         if snapshot.report.cache_warning.is_none() {
             snapshot.report.cache_warning = cache.report.cache_warning;
         }
@@ -801,6 +814,10 @@ impl JournalStore {
             Some(progress),
         )?;
         snapshot.report.cache_read = cache.report.cache_read;
+        snapshot.report.total = snapshot
+            .report
+            .total
+            .saturating_add(cache.report.cache_read);
         if snapshot.report.cache_warning.is_none() {
             snapshot.report.cache_warning = cache.report.cache_warning;
         }

@@ -9,7 +9,7 @@ publish.workspace = true
 
 [workspace]
 resolver = "3"
-members = ["crates/notema-domain", "crates/notema-encryption", "crates/notema-storage", "crates/notema-context", "crates/notema-import", "crates/notema-analytics", "crates/notema-seed", "crates/notema-locate", "crates/notema-fuse"]
+members = ["crates/notema-timing", "crates/notema-domain", "crates/notema-encryption", "crates/notema-storage", "crates/notema-context", "crates/notema-import", "crates/notema-analytics", "crates/notema-seed", "crates/notema-locate", "crates/notema-fuse"]
 
 # One version for the whole workspace: the macOS location helper stamps this into
 # its bundle and the runtime checks it, so the crates must not drift apart.
@@ -97,6 +97,7 @@ notema-encryption = { path = "crates/notema-encryption" }
 notema-fuse = { path = "crates/notema-fuse" }
 notema-import = { path = "crates/notema-import" }
 notema-storage = { path = "crates/notema-storage" }
+notema-timing = { path = "crates/notema-timing" }
 
 # Thin LTO and one codegen unit reduce release binary and startup overhead.
 [profile.release]
@@ -140,6 +141,7 @@ notema-domain.workspace = true
 notema-encryption.workspace = true
 notema-import.workspace = true
 notema-storage.workspace = true
+notema-timing.workspace = true
 notify.workspace = true
 open.workspace = true
 pulldown-cmark.workspace = true

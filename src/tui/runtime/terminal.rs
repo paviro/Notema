@@ -11,12 +11,16 @@ use crossterm::{
         supports_keyboard_enhancement,
     },
 };
+use notema_timing as timing;
 use ratatui::Terminal;
 use std::io::{self, Write};
 
 pub(super) fn with_terminal(
     inner: impl FnOnce(&mut Terminal<CrosstermBackend<io::Stdout>>) -> AppResult<()>,
 ) -> AppResult<()> {
+    // Declared before the terminal guard so unwinding restores the terminal
+    // before deferred diagnostics are flushed.
+    let _timing_guard = timing::defer();
     enable_raw_mode()?;
     let mut terminal_guard = TerminalRestoreGuard::new();
     let mut stdout = io::stdout();
@@ -33,7 +37,9 @@ pub(super) fn with_terminal(
     // it crossterm can't report the Super (Cmd) modifier at all, so Cmd+C/X/V would
     // be invisible. Disambiguation also makes modified keys explicit. Terminals that
     // don't support it (e.g. macOS Terminal.app) simply keep legacy reporting.
-    if supports_keyboard_enhancement().unwrap_or(false) {
+    let supports_enhancement = supports_keyboard_enhancement().unwrap_or(false);
+    timing::mark("term:kbd-enhance-query");
+    if supports_enhancement {
         let _ = execute!(
             stdout,
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
@@ -47,7 +53,6 @@ pub(super) fn with_terminal(
     if restore_result.is_ok() {
         terminal_guard.disarm();
     }
-
     match result {
         Ok(()) => restore_result,
         Err(error) => Err(error),

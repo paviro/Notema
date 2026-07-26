@@ -2324,6 +2324,7 @@ dependencies = [
  "notema-import",
  "notema-storage",
  "notema-textarea",
+ "notema-timing",
  "notify",
  "open",
  "pulldown-cmark",
@@ -2397,6 +2398,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom 0.4.3",
  "hex",
+ "notema-timing",
  "serde",
  "sha2 0.11.0",
  "tempfile",
@@ -2470,6 +2472,7 @@ dependencies = [
  "moxcms",
  "notema-domain",
  "notema-encryption",
+ "notema-timing",
  "rand 0.10.2",
  "rayon",
  "rmp-serde",
@@ -2491,6 +2494,13 @@ dependencies = [
  "ratatui-widgets",
  "unicode-segmentation",
  "unicode-width",
+]
+
+[[package]]
+name = "notema-timing"
+version = "2026.7.7"
+dependencies = [
+ "rustix 1.1.4",
 ]
 
 [[package]]

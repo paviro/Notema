@@ -12,6 +12,7 @@ use anyhow::bail;
 use clap::{Args, Parser, Subcommand};
 use notema_encryption::{PendingRequest, SecretString};
 use notema_storage::JournalStore;
+use notema_timing as timing;
 #[cfg(feature = "fuse")]
 use std::path::Path;
 use std::path::PathBuf;
@@ -222,6 +223,7 @@ struct LogArgs {
 
 pub(crate) fn run() -> AppResult<()> {
     let cli = Cli::parse();
+    timing::mark("cli:parse");
     let stdin_is_pipe = stdin_has_command_input();
 
     if let Some(command) = &cli.command {

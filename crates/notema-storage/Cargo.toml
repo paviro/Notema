@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 notema-domain.workspace = true
 notema-encryption.workspace = true
+notema-timing.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 getrandom.workspace = true
