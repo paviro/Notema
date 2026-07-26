@@ -48,6 +48,15 @@ struct CacheRecordFile {
     entry: Entry,
 }
 
+/// Just enough of a cache file to tell one written by a different wire version
+/// apart from a damaged one. Must stay lenient — `deny_unknown_fields` here
+/// would defeat the whole point, since the fields it skips are exactly the ones
+/// that failed to decode.
+#[derive(Deserialize)]
+struct CacheVersion {
+    wire_version: u32,
+}
+
 pub(super) fn read(
     paths: &JournalStorePaths,
     identity: Option<&crypto::UnlockedIdentity>,
@@ -95,9 +104,21 @@ pub(super) fn read(
     };
     let cache: CacheFile = match rmp_serde::from_slice(bytes.as_ref()) {
         Ok(cache) => cache,
+        // A cache this binary cannot decode is only damage if it isn't simply
+        // from a wire version that shaped it differently. Probed second, not
+        // first: rmp-serde walks skipped fields rather than stepping over them,
+        // so a version probe ahead of the decode would traverse every record
+        // twice on the launches that succeed.
         Err(error) => {
-            report.cache_status = CacheStatus::Corrupt;
-            report.cache_warning = Some(format!("cache decode failed: {error}"));
+            report.cache_status = match rmp_serde::from_slice::<CacheVersion>(bytes.as_ref()) {
+                Ok(header) if header.wire_version != CACHE_WIRE_VERSION => {
+                    CacheStatus::Incompatible
+                }
+                _ => {
+                    report.cache_warning = Some(format!("cache decode failed: {error}"));
+                    CacheStatus::Corrupt
+                }
+            };
             report.cache_read = started.elapsed();
             return Ok(CacheRead {
                 cached: None,
@@ -679,6 +700,55 @@ mod tests {
         let read = store.read_cached_library(CachePolicy::Normal).unwrap();
         assert!(read.cached.is_none());
         assert_eq!(read.report.cache_status, CacheStatus::Incompatible);
+    }
+
+    /// A wire version that reshapes the file enough that it no longer decodes.
+    /// The version is still readable, so this is an upgrade, not damage — and
+    /// an upgrade must rebuild quietly, with no warning shown to the user.
+    #[test]
+    fn an_undecodable_cache_with_a_readable_version_is_incompatible() {
+        #[derive(Serialize)]
+        struct FutureShape {
+            wire_version: u32,
+            unrecognizable: bool,
+        }
+
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["body"],
+        );
+        store.load_library(CachePolicy::Normal).unwrap();
+        let future = rmp_serde::to_vec_named(&FutureShape {
+            wire_version: CACHE_WIRE_VERSION + 1,
+            unrecognizable: true,
+        })
+        .unwrap();
+        fs::write(plain_path(store.paths()), future).unwrap();
+
+        let read = store.read_cached_library(CachePolicy::Normal).unwrap();
+        assert!(read.cached.is_none());
+        assert_eq!(read.report.cache_status, CacheStatus::Incompatible);
+        assert_eq!(read.report.cache_warning, None);
+    }
+
+    /// The version probe must not swallow real damage.
+    #[test]
+    fn a_cache_without_a_readable_version_is_corrupt() {
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["body"],
+        );
+        store.load_library(CachePolicy::Normal).unwrap();
+        fs::write(plain_path(store.paths()), b"not msgpack at all").unwrap();
+
+        let read = store.read_cached_library(CachePolicy::Normal).unwrap();
+        assert!(read.cached.is_none());
+        assert_eq!(read.report.cache_status, CacheStatus::Corrupt);
+        assert!(read.report.cache_warning.is_some());
     }
 
     #[test]
