@@ -30,8 +30,8 @@ pub use age::secrecy::{ExposeSecret, SecretString};
 pub use zeroize::Zeroizing;
 
 pub use cipher::{
-    CiphertextBytes, EncryptionRecipients, PlaintextBytes, decrypt_file_bytes, decrypt_file_reader,
-    encrypt_bytes, encrypt_new_entry, encrypt_to_file,
+    CiphertextBytes, EncryptionRecipients, PlaintextBytes, decrypt_bytes, decrypt_file_bytes,
+    decrypt_file_reader, encrypt_bytes, encrypt_new_entry, encrypt_to_file,
 };
 pub use error::{EncryptionError, Result};
 pub use files::{atomic_write, atomic_write_private, atomic_write_with, sibling_temp_path};

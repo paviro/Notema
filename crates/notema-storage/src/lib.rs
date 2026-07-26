@@ -832,23 +832,15 @@ impl JournalStore {
         storage::read_entry(journal, path, self.identity.as_ref())
     }
 
-    /// Read an entry from disk together with the exact file version observed.
-    /// If the file changes during the read, retry so the returned entry and
-    /// revision always describe the same stable source state.
+    /// Read an entry together with the revision of the bytes it was parsed from.
+    /// One read, so the two always describe the same source state and a file
+    /// being written concurrently cannot make this fail.
     pub fn read_entry_with_revision(
         &self,
         journal: &str,
         path: &Path,
     ) -> AppResult<(Entry, EntryRevision)> {
-        for _ in 0..3 {
-            let before = EntryRevision::read(path)?;
-            let entry = self.read_entry(journal, path)?;
-            let after = EntryRevision::read(path)?;
-            if before == after {
-                return Ok((entry, after));
-            }
-        }
-        bail!("entry kept changing while it was being opened; try again")
+        storage::read_entry_with_revision(journal, path, self.identity.as_ref())
     }
 
     pub fn read_entry_content(&self, path: &Path) -> AppResult<String> {

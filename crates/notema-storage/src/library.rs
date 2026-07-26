@@ -1,5 +1,6 @@
 use crate::{Entry, Journal};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{fs::Metadata, path::PathBuf, time::Duration};
 
 /// How a library load may use or update the local derived cache.
@@ -92,6 +93,9 @@ pub enum CacheStatus {
     Rebuilt,
 }
 
+/// Metadata-only fingerprint for entry-cache validity. Cheap enough to take for
+/// every file in a scan, and correspondingly weaker than [`EntryRevision`] —
+/// never use it to guard a write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FileStamp {
     len: u64,
@@ -124,12 +128,25 @@ impl FileStamp {
 /// Opaque version of an entry file captured alongside an authoritative read.
 /// Pass it back when saving to avoid overwriting a file changed by another
 /// process while the editor was open.
+///
+/// This is a digest of the exact bytes the file holds — ciphertext for an
+/// encrypted entry — not a summary of its metadata, so two different contents
+/// can never share a revision whatever the filesystem reports about length or
+/// timestamps. [`FileStamp`] answers a different, weaker question for the entry
+/// cache; the two must not be conflated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EntryRevision(FileStamp);
+pub struct EntryRevision([u8; 32]);
 
 impl EntryRevision {
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Self {
+        Self(Sha256::digest(bytes).into())
+    }
+
+    /// Take a revision with no bytes already in hand. Only the write-time
+    /// conflict check needs this; every other caller hashes a read it was
+    /// making anyway.
     pub(crate) fn read(path: &std::path::Path) -> std::io::Result<Self> {
-        Ok(Self(FileStamp::from_metadata(&std::fs::metadata(path)?)))
+        Ok(Self::from_bytes(&std::fs::read(path)?))
     }
 }
 
@@ -180,4 +197,23 @@ impl CachedLibrary {
 
 pub(crate) fn path_for_record(record: &CachedRecord) -> PathBuf {
     record.entry.path.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EntryRevision;
+
+    /// The property [`FileStamp`] cannot offer, and the reason a revision is not
+    /// one: equal-length contents are still told apart.
+    #[test]
+    fn revisions_separate_equal_length_contents() {
+        assert_eq!(
+            EntryRevision::from_bytes(b"aaaa"),
+            EntryRevision::from_bytes(b"aaaa")
+        );
+        assert_ne!(
+            EntryRevision::from_bytes(b"aaaa"),
+            EntryRevision::from_bytes(b"bbbb")
+        );
+    }
 }

@@ -1,8 +1,8 @@
 use super::edit::{write_encrypted_entry_content, write_plain_atomic};
 use super::paths::is_encrypted_entry_file;
-use super::read::read_entry_content;
-use crate::AppResult;
+use super::read::{read_entry_content, read_entry_content_with_revision};
 use crate::markdown;
+use crate::{AppResult, EntryRevision};
 use notema_encryption::{self as crypto, KeyPaths, UnlockedIdentity};
 use std::path::Path;
 
@@ -80,12 +80,23 @@ impl<'a> EntryCodec<'a> {
     /// Read an entry and split it into its raw front matter (if any) and its
     /// body with leading blank lines trimmed.
     pub(crate) fn open(&self, path: &Path) -> AppResult<OpenEntry> {
-        let content = self.read(path)?;
+        Ok(Self::split(self.read(path)?))
+    }
+
+    /// [`open`](Self::open) plus the revision of the exact bytes it read, in one
+    /// read. Returned as a pair rather than a field on [`OpenEntry`] so no entry
+    /// can carry a revision that describes different bytes.
+    pub(crate) fn open_with_revision(&self, path: &Path) -> AppResult<(OpenEntry, EntryRevision)> {
+        let (content, revision) = read_entry_content_with_revision(path, self.identity)?;
+        Ok((Self::split(content), revision))
+    }
+
+    fn split(content: String) -> OpenEntry {
         let (front_matter, body) = markdown::split_front_matter(&content);
-        Ok(OpenEntry {
+        OpenEntry {
             front_matter: front_matter.map(str::to_string),
             body: body.trim_start_matches('\n').to_string(),
-        })
+        }
     }
 
     /// Overwrite an existing entry file in place, preserving its on-disk

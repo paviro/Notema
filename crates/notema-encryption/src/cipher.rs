@@ -74,12 +74,20 @@ pub fn encrypt_to_file(paths: &KeyPaths, plaintext: &PlaintextBytes, output: &Pa
     Ok(())
 }
 
+/// Decrypt ciphertext the caller has already read, so one read can serve both
+/// decryption and whatever else the caller needs the stored bytes for.
+pub fn decrypt_bytes(
+    identity: &UnlockedIdentity,
+    ciphertext: &CiphertextBytes,
+) -> Result<PlaintextBytes> {
+    decrypt_bytes_with_identity(ciphertext, &identity.identity)
+}
+
 /// Decrypt an encrypted file into memory. Used both for reading encrypted entry
 /// text and for viewing encrypted binary assets (e.g. images) without ever
 /// writing a plaintext copy to disk.
 pub fn decrypt_file_bytes(identity: &UnlockedIdentity, input: &Path) -> Result<PlaintextBytes> {
-    let ciphertext = CiphertextBytes::from_vec(fs::read(input)?);
-    decrypt_bytes_with_identity(&ciphertext, &identity.identity)
+    decrypt_bytes(identity, &CiphertextBytes::from_vec(fs::read(input)?))
 }
 
 /// Open an encrypted file as a streaming plaintext reader, decrypting on demand

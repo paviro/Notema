@@ -2,7 +2,7 @@ use super::paths::{entry_id, is_assets_dir, is_encrypted_entry_file, is_entry_fi
 use super::{Entry, EntryEncryptionState, EntryPath, ImportSource, Metadata, Timestamp};
 use crate::storage::{journals::is_hidden_name, list_journals};
 use crate::{
-    AppResult,
+    AppResult, EntryRevision,
     library::{DiscoveredEntry, FileStamp},
     markdown::{FrontMatter, display_preview, split_front_matter},
 };
@@ -135,20 +135,64 @@ pub(super) fn scan_entries(
     read_entries(collect_entry_paths(root)?, identity)
 }
 
+/// The state an entry file's bytes would decode to, or `None` when it is an
+/// encrypted entry this device holds no identity for. Decided from the path
+/// alone, so a caller can decline to read bytes it could not use.
+fn decodable_state(
+    path: &Path,
+    identity: Option<&crypto::UnlockedIdentity>,
+) -> Option<EntryEncryptionState> {
+    if is_encrypted_entry_file(path) {
+        identity
+            .is_some()
+            .then_some(EntryEncryptionState::EncryptedUnlocked)
+    } else {
+        Some(EntryEncryptionState::Plain)
+    }
+}
+
+/// The scan path. The locked check stays above the read: a locked store must
+/// return placeholders without opening ciphertext it cannot decrypt, or every
+/// launch reads the whole library and throws it away.
 pub(crate) fn read_entry(
     journal: &str,
     path: &Path,
     identity: Option<&crypto::UnlockedIdentity>,
 ) -> AppResult<Entry> {
-    let encryption_state = if is_encrypted_entry_file(path) {
-        if identity.is_none() {
-            return locked_entry(journal, path);
-        }
-        EntryEncryptionState::EncryptedUnlocked
-    } else {
-        EntryEncryptionState::Plain
+    let Some(encryption_state) = decodable_state(path, identity) else {
+        return locked_entry(journal, path);
     };
-    let content = match read_entry_content(path, identity) {
+    entry_from_stored_bytes(journal, path, identity, encryption_state, fs::read(path)?)
+}
+
+/// The edit path. The entry and its revision come from one read, so they always
+/// describe the same stored bytes. A locked entry is read here — a revision of
+/// the ciphertext is exactly what the caller asked for — which is why this is
+/// not the function a scan uses.
+pub(crate) fn read_entry_with_revision(
+    journal: &str,
+    path: &Path,
+    identity: Option<&crypto::UnlockedIdentity>,
+) -> AppResult<(Entry, EntryRevision)> {
+    let bytes = fs::read(path)?;
+    let revision = EntryRevision::from_bytes(&bytes);
+    let entry = match decodable_state(path, identity) {
+        Some(encryption_state) => {
+            entry_from_stored_bytes(journal, path, identity, encryption_state, bytes)?
+        }
+        None => locked_entry(journal, path)?,
+    };
+    Ok((entry, revision))
+}
+
+fn entry_from_stored_bytes(
+    journal: &str,
+    path: &Path,
+    identity: Option<&crypto::UnlockedIdentity>,
+    encryption_state: EntryEncryptionState,
+    bytes: Vec<u8>,
+) -> AppResult<Entry> {
+    let content = match decode_entry_content(path, bytes, identity) {
         Ok(content) => content,
         // An encrypted entry the loaded identity can't decrypt (e.g. a device
         // not yet approved as a recipient, or a partially re-encrypted store)
@@ -307,14 +351,40 @@ fn placeholder_entry(
     })
 }
 
+/// Read an entry's text. Takes no revision, so it does no hashing. The locked
+/// check stays above the read for the same reason it does in [`read_entry`].
 pub(crate) fn read_entry_content(
     path: &Path,
     identity: Option<&crypto::UnlockedIdentity>,
 ) -> AppResult<String> {
+    if decodable_state(path, identity).is_none() {
+        return Err(crate::EncryptionError::Locked { context: "entry" }.into());
+    }
+    decode_entry_content(path, fs::read(path)?, identity)
+}
+
+/// The one read that hashes. Used only where the caller will guard a write with
+/// the revision.
+pub(crate) fn read_entry_content_with_revision(
+    path: &Path,
+    identity: Option<&crypto::UnlockedIdentity>,
+) -> AppResult<(String, EntryRevision)> {
+    let bytes = fs::read(path)?;
+    let revision = EntryRevision::from_bytes(&bytes);
+    Ok((decode_entry_content(path, bytes, identity)?, revision))
+}
+
+/// Decode bytes already read. `path` only selects the codec; nothing is read.
+fn decode_entry_content(
+    path: &Path,
+    bytes: Vec<u8>,
+    identity: Option<&crypto::UnlockedIdentity>,
+) -> AppResult<String> {
     if is_encrypted_entry_file(path) {
         let identity = identity.ok_or(crate::EncryptionError::Locked { context: "entry" })?;
-        Ok(crypto::decrypt_file_bytes(identity, path)?.into_string()?)
+        let ciphertext = crypto::CiphertextBytes::from_vec(bytes);
+        Ok(crypto::decrypt_bytes(identity, &ciphertext)?.into_string()?)
     } else {
-        Ok(fs::read_to_string(path)?)
+        Ok(String::from_utf8(bytes)?)
     }
 }

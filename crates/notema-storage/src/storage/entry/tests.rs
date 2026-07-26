@@ -447,6 +447,85 @@ fn scan_entries_skips_trash() {
     assert_eq!(entries[0].preview, "Active");
 }
 
+/// A locked store must return placeholders without opening ciphertext it cannot
+/// use — otherwise every launch reads the whole library and throws it away.
+/// Making the file unreadable is the only way to prove no read happened.
+#[test]
+#[cfg(unix)]
+fn scan_entries_does_not_read_locked_encrypted_entries() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("work/2026/07/01/2026-07-01T10-23-00-secret.md.age");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "ciphertext no one may read").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(&path).is_ok() {
+        return; // Running as root, where the probe cannot work.
+    }
+
+    let entries = scan_entries(dir.path(), None).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].encryption_state,
+        EntryEncryptionState::EncryptedLocked
+    );
+}
+
+/// The same rule on the content read, which the import scanner walks the whole
+/// tree with. An unreadable file proves the locked check runs before the read.
+#[test]
+#[cfg(unix)]
+fn read_entry_content_does_not_read_locked_encrypted_entries() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("work/2026/07/01/2026-07-01T10-23-00-secret.md.age");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "ciphertext no one may read").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(&path).is_ok() {
+        return; // Running as root, where the probe cannot work.
+    }
+
+    let error = read_entry_content(&path, None).unwrap_err();
+    assert!(
+        matches!(
+            error.downcast_ref::<crate::EncryptionError>(),
+            Some(crate::EncryptionError::Locked { .. })
+        ),
+        "expected a locked-store error rather than an IO error, got: {error}"
+    );
+
+    assert!(scan_import_sources(dir.path(), None).unwrap().is_empty());
+}
+
+/// The deliberate asymmetry with the scan path above: asking for a revision
+/// means asking for a digest of the stored ciphertext, so this one does read the
+/// file even when the entry itself can only be a placeholder.
+#[test]
+fn read_entry_with_revision_hashes_locked_ciphertext() {
+    let dir = tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("work/2026/07/01/2026-07-01T10-23-00-secret.md.age");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "ciphertext this device cannot open").unwrap();
+
+    let (entry, revision) = read_entry_with_revision("work", &path, None).unwrap();
+
+    assert_eq!(
+        entry.encryption_state,
+        EntryEncryptionState::EncryptedLocked
+    );
+    assert_eq!(revision, crate::EntryRevision::read(&path).unwrap());
+}
+
 #[test]
 fn scan_entries_returns_locked_placeholder_for_encrypted_entry_without_key() {
     let dir = tempdir().unwrap();
@@ -857,11 +936,74 @@ fn png_test_bytes() -> Vec<u8> {
     bytes
 }
 
-/// The revision check that guards a save brackets asset ingest: it runs before,
-/// and again just before the write. Ingest is where a save spends real time,
-/// because it downloads remote images — so a write landing in that window is the
-/// reachable conflict. Serve the image from a local socket that rewrites the
-/// entry the moment the download starts, to land inside the window on purpose.
+/// A rewrite the entry cache's stamp is blind to once plan 04 drops `ctime`:
+/// same byte length, mtime put back. A save must not depend on that stamp, so
+/// the conflict is still caught.
+#[test]
+fn save_entry_edit_if_revision_detects_a_same_length_same_mtime_rewrite() {
+    let dir = tempdir().unwrap();
+    let path = dir
+        .path()
+        .join("work/2026/07/01/2026-07-01T10-00-00-abcd.md");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let head =
+        "+++\nschema_version = 1\n\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\n";
+    fs::write(&path, format!("{head}original\n")).unwrap();
+    let before = fs::metadata(&path).unwrap();
+    let revision = crate::EntryRevision::read(&path).unwrap();
+
+    fs::write(&path, format!("{head}replaced\n")).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(before.modified().unwrap())
+        .unwrap();
+
+    let after = fs::metadata(&path).unwrap();
+    assert_eq!(after.len(), before.len(), "the test rewrite changed length");
+    assert_eq!(
+        after.modified().unwrap(),
+        before.modified().unwrap(),
+        "the test rewrite left a different mtime"
+    );
+
+    let metadata = Metadata::default();
+    let error = save_entry_edit_if_revision(
+        &EntryCodec::plain(),
+        &path,
+        revision,
+        EntryEdit {
+            body: "mine\n",
+            metadata: &metadata,
+            original_metadata: &metadata,
+            writing_seconds: None,
+            remove_if_empty: false,
+            extra_fields: &[],
+        },
+        EntryAssetOptions::default(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            error.downcast_ref::<crate::StorageError>(),
+            Some(crate::StorageError::EntryRevisionConflict { .. })
+        ),
+        "expected a revision conflict, got: {error}"
+    );
+    assert!(
+        fs::read_to_string(&path).unwrap().ends_with("replaced\n"),
+        "the refused save overwrote the other process's write"
+    );
+}
+
+/// The revision check that guards a save brackets asset ingest: once on the
+/// bytes the save opened, and again just before the write. Ingest is where a
+/// save spends real time, because it downloads remote images — so a write
+/// landing in that window is the reachable conflict. Serve the image from a
+/// local socket that rewrites the entry the moment the download starts, to land
+/// inside the window on purpose.
 #[test]
 fn save_entry_edit_if_revision_conflict_during_ingest_keeps_on_disk_assets() {
     use std::io::{Read, Write};

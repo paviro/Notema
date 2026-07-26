@@ -110,12 +110,21 @@ fn save_entry_edit_inner(
     edit: EntryEdit<'_>,
     assets: EntryAssetOptions,
 ) -> AppResult<EntryEditOutcome> {
-    ensure_revision(path, revision)?;
-    let entry = codec.open(path)?;
-    ensure_revision(path, revision)?;
+    // Checking the revision of the bytes just parsed is both cheaper and
+    // stronger than re-stating around the read: there is no window in which the
+    // entry and the version it was checked against can disagree.
+    let entry = match revision {
+        Some(expected) => {
+            let (entry, actual) = codec.open_with_revision(path)?;
+            if actual != expected {
+                return Err(revision_conflict(path));
+            }
+            entry
+        }
+        None => codec.open(path)?,
+    };
 
     if edit.remove_if_empty && edit.body.trim().is_empty() {
-        ensure_revision(path, revision)?;
         fs::remove_file(path)?;
         remove_entry_assets(path);
         return Ok(EntryEditOutcome {
@@ -149,6 +158,9 @@ fn save_entry_edit_inner(
         edit.extra_fields,
         edit.writing_seconds,
     )?;
+    // The one check that has to touch disk. `ingest` can download remote images,
+    // so a competing write has a real window to land in between the read above
+    // and this one.
     ensure_revision(path, revision)?;
     codec.write_existing(path, &content)?;
 
@@ -158,14 +170,20 @@ fn save_entry_edit_inner(
     })
 }
 
+/// A file that can no longer be read counts as changed, so a vanished or
+/// unreadable entry fails the save rather than being silently recreated.
 fn ensure_revision(path: &Path, expected: Option<EntryRevision>) -> AppResult<()> {
     if expected.is_some_and(|expected| EntryRevision::read(path).ok() != Some(expected)) {
-        return Err(StorageError::EntryRevisionConflict {
-            path: path.to_path_buf(),
-        }
-        .into());
+        return Err(revision_conflict(path));
     }
     Ok(())
+}
+
+fn revision_conflict(path: &Path) -> anyhow::Error {
+    StorageError::EntryRevisionConflict {
+        path: path.to_path_buf(),
+    }
+    .into()
 }
 
 fn changed_metadata_fields(original: &Metadata, current: &Metadata) -> Vec<MetadataField> {
