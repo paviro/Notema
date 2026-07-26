@@ -253,7 +253,10 @@ fn split_unquoted(input: &str, sep: char) -> Vec<&str> {
 /// Strip one surrounding pair of quotes from a filter value, undoubling the
 /// quotes [`quote_filter_value`] doubled.
 fn unquote(value: &str) -> Cow<'_, str> {
-    match value.strip_prefix('"').and_then(|rest| rest.strip_suffix('"')) {
+    match value
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+    {
         Some(inner) if inner.contains('"') => Cow::Owned(inner.replace("\"\"", "\"")),
         Some(inner) => Cow::Borrowed(inner),
         None => Cow::Borrowed(value),
