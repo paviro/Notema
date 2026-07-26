@@ -1079,6 +1079,53 @@ fn load_falls_back_to_builtin_on_a_broken_theme() {
 }
 
 #[test]
+fn startup_probes_the_terminal_even_when_the_mode_is_explicit() {
+    use crate::config::{ColorMode, UiSection};
+    use loading::load_startup_with;
+
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+
+    // The probe answers the opposite of what the config asks for: the theme must
+    // resolve at the configured mode, and the probe's answer must still be kept
+    // for a later switch to Auto.
+    for (configured, resolved) in [
+        (ColorMode::Dark, Mode::Dark),
+        (ColorMode::Light, Mode::Light),
+    ] {
+        let ui = UiSection {
+            color_mode: configured,
+            ..UiSection::default()
+        };
+        let probed = match resolved {
+            Mode::Dark => Mode::Light,
+            Mode::Light => Mode::Dark,
+        };
+        let startup = load_startup_with(&config_path, &ui, || probed);
+        assert_eq!(startup.detected_mode, probed);
+        assert_eq!(startup.theme, load(&config_path, &ui.theme, resolved).0);
+    }
+}
+
+#[test]
+fn startup_resolves_auto_at_the_probed_mode() {
+    use crate::config::{ColorMode, UiSection};
+    use loading::load_startup_with;
+
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let ui = UiSection {
+        color_mode: ColorMode::Auto,
+        ..UiSection::default()
+    };
+
+    let startup = load_startup_with(&config_path, &ui, || Mode::Light);
+
+    assert_eq!(startup.detected_mode, Mode::Light);
+    assert_eq!(startup.theme, load(&config_path, &ui.theme, Mode::Light).0);
+}
+
+#[test]
 fn owned_theme_can_be_cloned_without_global_installation() {
     let journal = builtin("journal", Mode::Dark).unwrap();
     assert_eq!(journal.clone(), journal);

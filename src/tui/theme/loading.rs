@@ -121,6 +121,9 @@ fn detect_terminal_background() -> Mode {
 
 pub(crate) struct StartupTheme {
     pub(crate) theme: Theme,
+    /// The terminal's own mode, kept for the rest of the session: a journal
+    /// sidecar or the picker can select `Auto` later, when the terminal is no
+    /// longer free to answer an OSC query.
     pub(crate) detected_mode: Mode,
 }
 
@@ -128,9 +131,21 @@ pub(crate) struct StartupTheme {
 /// dark/light config or the detected terminal background under `Auto`), load it,
 /// and apply the configured chrome override.
 pub(crate) fn load_startup(config_path: &Path, ui: &crate::config::UiSection) -> StartupTheme {
+    load_startup_with(config_path, ui, detect_terminal_background)
+}
+
+/// [`load_startup`] with the background probe injected, so tests can drive it
+/// without a terminal.
+pub(super) fn load_startup_with(
+    config_path: &Path,
+    ui: &crate::config::UiSection,
+    detect: impl FnOnce() -> Mode,
+) -> StartupTheme {
     use crate::config::ColorMode;
 
-    let detected_mode = detect_terminal_background();
+    // Unconditional: the probe has to run while the terminal can still answer,
+    // even when this config never uses its result.
+    let detected_mode = detect();
     let mode = match ui.color_mode {
         ColorMode::Dark => Mode::Dark,
         ColorMode::Light => Mode::Light,
