@@ -397,7 +397,7 @@ fn run_loop(
     let watcher = if is_ish {
         None
     } else {
-        match watcher::FileWatcher::start(&app.services.config.journal.path) {
+        let started = match watcher::FileWatcher::start(&app.services.config.journal.path) {
             Ok(watcher) => Some(watcher),
             Err(error) => {
                 app.toast(
@@ -406,7 +406,9 @@ fn run_loop(
                 );
                 None
             }
-        }
+        };
+        timing::mark("watch:journal");
+        started
     };
     let validation_generation = initial_validation
         .as_ref()
@@ -439,20 +441,24 @@ fn run_loop(
     let theme_watcher = if is_ish {
         None
     } else {
-        match watcher::FileWatcher::start(&theme::themes_dir(&app.services.config_path)) {
-            Ok(watcher) => Some(watcher),
-            Err(error) => {
-                app.toast(
-                    state::ToastVariant::Warning,
-                    format!("Live theme reload unavailable: {error}"),
-                );
-                None
-            }
-        }
+        let started =
+            match watcher::FileWatcher::start(&theme::themes_dir(&app.services.config_path)) {
+                Ok(watcher) => Some(watcher),
+                Err(error) => {
+                    app.toast(
+                        state::ToastVariant::Warning,
+                        format!("Live theme reload unavailable: {error}"),
+                    );
+                    None
+                }
+            };
+        timing::mark("watch:themes");
+        started
     };
     let mut pending_theme_reload_at: Option<Instant> = None;
 
     redraw::draw(terminal, &mut app, &mut view)?;
+    timing::mark("tui:first-frame");
     let mut overlay_was_visible = app.has_overlay();
     // iTerm2 can miss the mouse-capture enable sent during terminal setup: its
     // motion-tracking area is rebuilt on a main-thread side effect that races
