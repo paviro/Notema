@@ -682,7 +682,7 @@ impl AppModel {
     /// Confirm the highlighted theme: persist it — with the previewed color mode
     /// and chrome — to the active scope (the journal's sidecar, or the config
     /// plus clearing the journal's override) and close. A broken row or a failed
-    /// save toasts and keeps the picker open.
+    /// save toasts and keeps the picker open, with both files left as they were.
     pub(crate) fn theme_picker_confirm(&mut self) {
         let Some(entry) = self
             .theme_picker_state()
@@ -738,30 +738,44 @@ impl AppModel {
                 )
             }
             (_, journal) => {
+                let previous_ui = self.services.config.ui.clone();
                 self.services.config.ui.theme = name.clone();
                 self.services.config.ui.color_mode = self.appearance.color_mode;
                 self.services.config.ui.chrome =
                     crate::tui::theme::chrome_mode(self.appearance.chrome_override);
-                // Switching a journal to Global removes its own override so it
-                // follows the (possibly just-changed) global theme.
-                if let Some(journal_name) = journal {
-                    if let Err(err) = self.services.store.set_journal_theme(&journal_name, None) {
-                        self.toast(
-                            ToastVariant::Error,
-                            format!("Couldn't clear theme: {}", crate::tui::concise_error(&err)),
-                        );
-                        return;
-                    }
-                    self.set_local_journal_theme(&journal_name, None);
-                }
+                // The config goes first so a failure here has nothing to undo:
+                // the journal's override is still on disk, untouched.
                 if let Err(err) =
                     crate::config::save_config(&self.services.config_path, &self.services.config)
                 {
+                    self.services.config.ui = previous_ui;
                     self.toast(
                         ToastVariant::Error,
                         format!("Couldn't save config: {}", crate::tui::concise_error(&err)),
                     );
                     return;
+                }
+                // Switching a journal to Global removes its own override so it
+                // follows the (possibly just-changed) global theme.
+                if let Some(journal_name) = journal {
+                    if let Err(err) = self.services.store.set_journal_theme(&journal_name, None) {
+                        self.services.config.ui = previous_ui;
+                        let rollback = crate::config::save_config(
+                            &self.services.config_path,
+                            &self.services.config,
+                        );
+                        let mut message =
+                            format!("Couldn't clear theme: {}", crate::tui::concise_error(&err));
+                        if let Err(err) = rollback {
+                            message.push_str(&format!(
+                                "; the global theme also couldn't be put back: {}",
+                                crate::tui::concise_error(&err)
+                            ));
+                        }
+                        self.toast(ToastVariant::Error, message);
+                        return;
+                    }
+                    self.set_local_journal_theme(&journal_name, None);
                 }
                 format!("Global theme set to {name}")
             }

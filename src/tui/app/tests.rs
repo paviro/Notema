@@ -1146,6 +1146,98 @@ fn theme_picker_global_scope_clears_a_journal_override() {
     assert_eq!(app.effective_theme_name(), "fjord");
 }
 
+/// An app with a `work` journal that has its own theme, selected, with a global
+/// theme saved to disk — the setup for a Global-scope save that clears the
+/// override.
+fn app_with_a_journal_override() -> AppModel {
+    let mut app = app_with_journals(&["work"]);
+    app.services.config.ui.theme = "blossom".to_string();
+    crate::config::save_config(&app.services.config_path, &app.services.config).unwrap();
+    app.select_journal(0);
+    app.services
+        .store
+        .set_journal_theme("work", Some(&journal_theme("gameboy")))
+        .unwrap();
+    app.library.journals[0].theme = Some(journal_theme("gameboy"));
+    app
+}
+
+/// Move the picker to Global scope with `fjord` highlighted, ready to confirm.
+fn arm_a_global_save(app: &mut AppModel) {
+    app.open_theme_picker();
+    app.theme_picker_toggle_scope();
+    let fjord = app
+        .theme_picker_state()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|entry| entry.name == "fjord")
+        .unwrap();
+    app.theme_picker_select(fjord);
+}
+
+#[test]
+fn theme_picker_keeps_the_journal_override_when_the_config_cant_be_saved() {
+    let mut app = app_with_a_journal_override();
+    arm_a_global_save(&mut app);
+    // A directory where the config file goes: the atomic rename can't land.
+    fs::remove_file(&app.services.config_path).unwrap();
+    fs::create_dir(&app.services.config_path).unwrap();
+
+    app.theme_picker_confirm();
+
+    assert!(app.theme_picker_state().is_some(), "picker stays open");
+    assert!(
+        app.toasts
+            .items()
+            .iter()
+            .any(|toast| toast.message.starts_with("Couldn't save config:"))
+    );
+    // Nothing was written, so nothing needed undoing — including in memory.
+    assert_eq!(app.services.config.ui.theme, "blossom");
+    assert_eq!(
+        app.library.journals[0].theme,
+        Some(journal_theme("gameboy"))
+    );
+    let reloaded = app.services.store.list_journals().unwrap();
+    let work = reloaded.iter().find(|j| j.name == "work").unwrap();
+    assert_eq!(work.theme, Some(journal_theme("gameboy")));
+}
+
+#[test]
+fn theme_picker_restores_the_global_theme_when_the_override_cant_be_cleared() {
+    let mut app = app_with_a_journal_override();
+    arm_a_global_save(&mut app);
+    // A directory where the sidecar goes: the atomic rename can't land.
+    let sidecar = app
+        .services
+        .config
+        .journal
+        .path
+        .join("work")
+        .join(".journal.toml");
+    fs::remove_file(&sidecar).unwrap();
+    fs::create_dir(&sidecar).unwrap();
+
+    app.theme_picker_confirm();
+
+    assert!(app.theme_picker_state().is_some(), "picker stays open");
+    assert!(
+        app.toasts
+            .items()
+            .iter()
+            .any(|toast| toast.message.starts_with("Couldn't clear theme:"))
+    );
+    // The config had already been written with fjord; it was put back.
+    assert_eq!(app.services.config.ui.theme, "blossom");
+    let saved = crate::config::load_config(&app.services.config_path).unwrap();
+    assert_eq!(saved.ui.theme, "blossom");
+    assert_eq!(
+        app.library.journals[0].theme,
+        Some(journal_theme("gameboy"))
+    );
+}
+
 #[test]
 fn theme_picker_offers_no_journal_scope_when_journal_themes_are_ignored() {
     use crate::tui::state::ThemePickerScope;
