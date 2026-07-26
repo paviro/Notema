@@ -15,6 +15,7 @@ use std::{
     fs,
     path::Path,
     sync::atomic::{AtomicUsize, Ordering},
+    time::SystemTime,
 };
 
 pub(crate) fn scan_import_sources(
@@ -51,9 +52,19 @@ pub(crate) fn collect_discovered_entries_with_progress(
     journals: &[crate::Journal],
     progress: Option<&(dyn Fn(usize) + Sync)>,
 ) -> AppResult<Vec<DiscoveredEntry>> {
+    // One clock read for the whole walk, taken before the first stat. Every
+    // file is therefore judged against a time no later than the one it was
+    // actually statted at, so the racy test errs toward distrust.
+    let walk_started = SystemTime::now();
     let mut entries = Vec::new();
     for journal in journals {
-        collect_paths(&journal.name, &journal.path, &mut entries, progress)?;
+        collect_paths(
+            &journal.name,
+            &journal.path,
+            walk_started,
+            &mut entries,
+            progress,
+        )?;
     }
     Ok(entries)
 }
@@ -61,6 +72,7 @@ pub(crate) fn collect_discovered_entries_with_progress(
 fn collect_paths(
     journal: &str,
     dir: &Path,
+    walk_started: SystemTime,
     entries: &mut Vec<DiscoveredEntry>,
     progress: Option<&(dyn Fn(usize) + Sync)>,
 ) -> AppResult<()> {
@@ -74,18 +86,20 @@ fn collect_paths(
         let name = item.file_name().to_string_lossy().to_string();
         if item.file_type()?.is_dir() {
             if !is_hidden_name(&name) && !is_assets_dir(&path) {
-                collect_paths(journal, &path, entries, progress)?;
+                collect_paths(journal, &path, walk_started, entries, progress)?;
             }
             continue;
         }
 
         if is_entry_file(&path) {
+            let stamp = FileStamp::from_metadata(&item.metadata()?);
             entries.push(DiscoveredEntry {
                 source: EntryPath {
                     journal: journal.to_string(),
                     path,
                 },
-                stamp: FileStamp::from_metadata(&item.metadata()?),
+                stamp_trusted: stamp.is_trustworthy_at(walk_started),
+                stamp,
             });
             if let Some(progress) = progress {
                 progress(entries.len());

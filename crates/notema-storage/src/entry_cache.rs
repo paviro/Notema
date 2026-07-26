@@ -18,7 +18,8 @@ use std::{
     time::Instant,
 };
 
-const CACHE_WIRE_VERSION: u32 = 1;
+/// Version 2 drops `ctime` from the stamp: length plus mtime on every platform.
+const CACHE_WIRE_VERSION: u32 = 2;
 const PLAIN_CACHE_FILE: &str = "library-cache.msgpack";
 const ENCRYPTED_CACHE_FILE: &str = "library-cache.msgpack.age";
 
@@ -248,6 +249,17 @@ pub(super) fn validate_discovery(
             }
         }
     }
+    // Without an mtime the stamp is only a length, which is never enough to
+    // trust. Such a store re-reads and rewrites everything on every launch, so
+    // say so rather than let it look like ordinary slowness.
+    let cache_warning = cache_warning.or_else(|| {
+        (discovered_total > 0 && causes.count(MissCause::Unstamped) == discovered_total).then(
+            || {
+                "this filesystem reports no modification times, so the entry cache cannot be used"
+                    .to_owned()
+            },
+        )
+    });
     if timing::detailed() {
         timing::note(&format!(
             "cache mtime precision: {subsecond_mtimes}/{discovered_total} stamps carry sub-second mtime"
@@ -337,6 +349,13 @@ impl MissCauses {
             Some((_, count)) => *count += 1,
             None => self.counts.push((cause, 1)),
         }
+    }
+
+    fn count(&self, cause: MissCause) -> usize {
+        self.counts
+            .iter()
+            .find(|(seen, _)| *seen == cause)
+            .map_or(0, |(_, count)| *count)
     }
 
     /// `None` when nothing missed.
@@ -498,6 +517,34 @@ mod tests {
     use notema_domain::Metadata;
     use tempfile::tempdir;
 
+    fn set_mtime(path: &Path, when: std::time::SystemTime) {
+        let times = fs::FileTimes::new().set_modified(when);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(times)
+            .unwrap();
+    }
+
+    fn seconds_ago(seconds: u64) -> std::time::SystemTime {
+        std::time::SystemTime::now() - std::time::Duration::from_secs(seconds)
+    }
+
+    /// Push an entry's mtime into the past so its stamp is outside the coarse
+    /// window whatever the test machine resolves mtime to. Without it, a test
+    /// that writes a file and then expects a cache hit is a coin flip on a
+    /// one-second-granularity filesystem.
+    fn settle(path: &Path) {
+        set_mtime(path, seconds_ago(60));
+    }
+
+    fn settle_all(store: &JournalStore) {
+        for entry in store.scan_entries().unwrap() {
+            settle(&entry.path);
+        }
+    }
+
     fn store_with_entries(root: &Path, config: &Path, bodies: &[&str]) -> JournalStore {
         let store = JournalStore::new(root, config);
         store.ensure().unwrap();
@@ -538,6 +585,7 @@ mod tests {
             &dir.path().join("config"),
             &["first", "second"],
         );
+        settle_all(&store);
         store.load_library(CachePolicy::Normal).unwrap();
         let cached = store.read_cached_library(CachePolicy::Normal).unwrap();
         assert!(cached.report.cache_read_summary().contains("2 records"));
@@ -555,6 +603,167 @@ mod tests {
         );
     }
 
+    /// The point of the change: chmod bumps `ctime` and nothing else, and so do
+    /// Spotlight, Time Machine and every sync client.
+    #[cfg(unix)]
+    #[test]
+    fn a_permission_change_alone_is_a_cache_hit() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["body"],
+        );
+        settle_all(&store);
+        let path = store.load_library(CachePolicy::Normal).unwrap().entries[0]
+            .path
+            .clone();
+        let cached = store
+            .read_cached_library(CachePolicy::Normal)
+            .unwrap()
+            .cached;
+        fs::set_permissions(&path, PermissionsExt::from_mode(0o600)).unwrap();
+
+        let validated = store.validate_library(cached, CachePolicy::Normal).unwrap();
+        assert_eq!(validated.report.cache_hits, 1);
+        assert_eq!(validated.report.cache_misses, 0);
+        assert_eq!(validated.report.cache_status, CacheStatus::Hit);
+    }
+
+    /// What length plus mtime can still catch, and what plan 04 traded `ctime`
+    /// away for.
+    #[test]
+    fn a_same_length_rewrite_with_a_new_mtime_is_a_miss() {
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["first"],
+        );
+        settle_all(&store);
+        let path = store.load_library(CachePolicy::Normal).unwrap().entries[0]
+            .path
+            .clone();
+        let cached = store
+            .read_cached_library(CachePolicy::Normal)
+            .unwrap()
+            .cached;
+
+        let before = fs::metadata(&path).unwrap().len();
+        let rewritten = fs::read_to_string(&path).unwrap().replace("first", "FIRST");
+        fs::write(&path, rewritten).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().len(),
+            before,
+            "the rewrite has to keep the length for this test to test anything"
+        );
+
+        let validated = store.validate_library(cached, CachePolicy::Normal).unwrap();
+        assert_eq!(validated.report.cache_misses, 1);
+        assert_eq!(validated.report.cache_hits, 0);
+        assert!(validated.entries[0].body.contains("FIRST"));
+    }
+
+    /// A restore writes the backup's own modification time, which differs from
+    /// the one recorded for the newer content it replaces — so the stamp does
+    /// not match and the entry is re-read. Ordering is not what saves this;
+    /// inequality is.
+    #[test]
+    fn restoring_an_older_entry_over_a_newer_one_is_a_miss() {
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["aaaaa"],
+        );
+        let path = store.scan_entries().unwrap()[0].path.clone();
+        let backup = fs::read_to_string(&path).unwrap();
+        let backup_mtime = seconds_ago(3600);
+        set_mtime(&path, backup_mtime);
+
+        // The newer content that gets cached: same length, later mtime.
+        fs::write(&path, backup.replace("aaaaa", "bbbbb")).unwrap();
+        set_mtime(&path, seconds_ago(60));
+        store.load_library(CachePolicy::Normal).unwrap();
+        let cached = store
+            .read_cached_library(CachePolicy::Normal)
+            .unwrap()
+            .cached;
+
+        // What `cp -p`, `tar -x` or a restic restore does.
+        fs::write(&path, &backup).unwrap();
+        set_mtime(&path, backup_mtime);
+
+        let validated = store.validate_library(cached, CachePolicy::Normal).unwrap();
+        assert_eq!(validated.report.cache_misses, 1);
+        assert_eq!(validated.entries[0].body, "aaaaa\n");
+    }
+
+    /// The hole `ctime` used to close, and the reason the trade is written down
+    /// in `docs/STORAGE-FORMAT.md`: a same-length rewrite that puts the
+    /// recorded mtime back is indistinguishable from no change at all.
+    #[test]
+    fn a_same_length_rewrite_that_restores_the_recorded_mtime_is_missed() {
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["aaaaa"],
+        );
+        settle_all(&store);
+        let path = store.load_library(CachePolicy::Normal).unwrap().entries[0]
+            .path
+            .clone();
+        let recorded_mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        let cached = store
+            .read_cached_library(CachePolicy::Normal)
+            .unwrap()
+            .cached;
+
+        let rewritten = fs::read_to_string(&path).unwrap().replace("aaaaa", "bbbbb");
+        fs::write(&path, rewritten).unwrap();
+        set_mtime(&path, recorded_mtime);
+
+        let validated = store.validate_library(cached, CachePolicy::Normal).unwrap();
+        assert_eq!(validated.report.cache_hits, 1);
+        assert_eq!(
+            validated.entries[0].body, "aaaaa\n",
+            "the stale cached body is served; the file on disk says bbbbb"
+        );
+    }
+
+    /// An untrusted stamp is refused even when it matches exactly. Driven off
+    /// the flag rather than a real coarse filesystem, which the test machine is
+    /// unlikely to have.
+    #[test]
+    fn an_untrusted_stamp_is_not_reused_even_when_it_matches() {
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["body"],
+        );
+        settle_all(&store);
+        store.load_library(CachePolicy::Normal).unwrap();
+        let cached = store
+            .read_cached_library(CachePolicy::Normal)
+            .unwrap()
+            .cached;
+
+        let mut discovery = store.discover_library_with_progress(&|_| {}).unwrap();
+        assert!(discovery.entries[0].stamp_trusted);
+        discovery.entries[0].stamp_trusted = false;
+
+        let validated = store
+            .validate_discovered_library(cached, CachePolicy::Normal, discovery)
+            .unwrap();
+        assert_eq!(validated.report.cache_hits, 0);
+        assert_eq!(validated.report.cache_misses, 1);
+        assert_eq!(validated.entries[0].body, "body\n");
+    }
+
     #[test]
     fn cached_snapshot_is_available_before_source_validation() {
         let dir = tempdir().unwrap();
@@ -563,6 +772,7 @@ mod tests {
             &dir.path().join("config"),
             &["first", "second"],
         );
+        settle_all(&store);
         let first = store.load_library(CachePolicy::Normal).unwrap();
         assert_eq!(first.report.cache_misses, 2);
 
@@ -661,6 +871,7 @@ mod tests {
             &dir.path().join("config"),
             &["first", "second"],
         );
+        settle_all(&store);
         let initial = store.load_library(CachePolicy::Normal).unwrap();
         let changed_path = initial.entries[0].path.clone();
         let deleted_path = initial.entries[1].path.clone();

@@ -38,6 +38,29 @@ synced. The cache is `library-cache.msgpack` for plaintext journals and
 `library-cache.msgpack.age` for encrypted journals. iSH also stores the selected
 root's binding in `ish-store.toml` there.
 
+## Entry cache
+
+The cache holds a parsed copy of every entry so a launch doesn't have to read,
+decrypt and parse the whole journal again. An entry is reused when its length
+and modification time both match what was recorded; anything else is re-read.
+
+A rewrite that keeps the same length *and* puts back the exact modification
+time the cache recorded is invisible to that check. Writing a file always moves
+its modification time forward, so this takes something deliberately setting it
+back afterwards — `touch -r`, or a tool that stamps a file with a timestamp it
+already had. Restoring a backup does not do this: `cp -p`, `tar -x` and restic
+or borg all write the *backup's* timestamp, which differs from the one recorded
+for the newer content it replaces, so the entry is re-read.
+
+If it does happen, the entry on disk is still correct — only the cached copy is
+stale. Delete the cache file and start the app again to rebuild it from the
+entries.
+
+A filesystem that records modification times only to the nearest second or two
+(FAT, exFAT, SMB shares) can't be trusted for an entry written moments before
+the last launch, so those entries are re-read rather than reused. One that
+reports no modification times at all can't use the cache, and the app says so.
+
 `.notema-store.toml` contains a random stable id used to identify the synced root.
 It stays plaintext when entry encryption is enabled.
 

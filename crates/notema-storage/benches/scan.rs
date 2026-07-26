@@ -1,7 +1,11 @@
 //! Compare source parsing, immediate cache decode, and cache validation over
 //! deterministic 1k/10k/25k corpora. Plain `Instant` timing, no framework.
 
-use std::{fs, hint::black_box, time::Instant};
+use std::{
+    fs,
+    hint::black_box,
+    time::{Duration, Instant, SystemTime},
+};
 
 use notema_storage::{CachePolicy, JournalStore};
 
@@ -70,11 +74,18 @@ fn build_store(root: &std::path::Path, size: usize) -> JournalStore {
             1 + (index % 28),
             index % 24
         );
-        fs::write(
-            dir.join(format!("{stamp}-{index:05}.md")),
-            entry_text(index),
-        )
-        .unwrap();
+        let path = dir.join(format!("{stamp}-{index:05}.md"));
+        fs::write(&path, entry_text(index)).unwrap();
+        // Age the entry past the cache's coarse-mtime window, so the validate
+        // row measures the hit path on a filesystem with second-granularity
+        // mtimes instead of silently becoming a second rebuild row.
+        let times = fs::FileTimes::new().set_modified(SystemTime::now() - Duration::from_secs(60));
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(times)
+            .unwrap();
     }
 
     store

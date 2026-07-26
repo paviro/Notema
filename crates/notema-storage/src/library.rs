@@ -1,7 +1,11 @@
 use crate::{Entry, Journal};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{fs::Metadata, path::PathBuf, time::Duration};
+use std::{
+    fs::Metadata,
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 /// How a library load may use or update the local derived cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -105,15 +109,22 @@ pub enum CacheStatus {
     Rebuilt,
 }
 
+/// The coarsest mtime granularity in common use: FAT and exFAT resolve to 2
+/// seconds, SMB and HFS+ to 1.
+const COARSE_MTIME_WINDOW: Duration = Duration::from_secs(2);
+
 /// Metadata-only fingerprint for entry-cache validity. Cheap enough to take for
 /// every file in a scan, and correspondingly weaker than [`EntryRevision`] —
 /// never use it to guard a write.
+///
+/// Blind to a same-length rewrite that also puts back the exact mtime recorded
+/// here. A restore does not do that — it writes the backup's own mtime, which
+/// differs — so this needs a `touch -r` or equivalent. Deliberate trade; see
+/// `docs/STORAGE-FORMAT.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FileStamp {
     len: u64,
     modified: Option<(u64, u32)>,
-    #[cfg(unix)]
-    changed: (i64, i64),
 }
 
 impl FileStamp {
@@ -123,17 +134,34 @@ impl FileStamp {
             .ok()
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|duration| (duration.as_secs(), duration.subsec_nanos()));
-        #[cfg(unix)]
-        let changed = {
-            use std::os::unix::fs::MetadataExt;
-            (metadata.ctime(), metadata.ctime_nsec())
-        };
         Self {
             len: metadata.len(),
             modified,
-            #[cfg(unix)]
-            changed,
         }
+    }
+
+    /// Whether a stamp taken at `observed_at` can rule out a later same-length
+    /// write going unnoticed. A non-zero nanosecond field proves the filesystem
+    /// resolves finer than a second, so nothing can hide. A whole-second mtime
+    /// only becomes trustworthy once it is old enough that any subsequent write
+    /// must land in a strictly later tick. No mtime at all leaves length as the
+    /// sole discriminator, which is never enough.
+    ///
+    /// An mtime that lands exactly on a whole second on a nanosecond-resolution
+    /// filesystem reads as coarse and costs one needless miss. Leave it — the
+    /// alternative is trusting a stamp we cannot prove.
+    pub(crate) fn is_trustworthy_at(&self, observed_at: SystemTime) -> bool {
+        let Some((seconds, nanos)) = self.modified else {
+            return false;
+        };
+        if nanos != 0 {
+            return true;
+        }
+        let modified = UNIX_EPOCH + Duration::from_secs(seconds);
+        // An mtime in the future (clock skew, or one set by hand) is not old.
+        observed_at
+            .duration_since(modified)
+            .is_ok_and(|age| age >= COARSE_MTIME_WINDOW)
     }
 
     /// Whether the filesystem resolved this mtime finer than a whole second.
@@ -150,8 +178,12 @@ pub(crate) enum MissCause {
     Absent,
     Len,
     Mtime,
-    #[cfg(unix)]
-    Ctime,
+    /// The stamp matched but was taken too soon after a whole-second mtime to
+    /// rule out a further write in the same tick.
+    Racy,
+    /// The stamp matched but the filesystem reported no modification time, so
+    /// only length distinguishes one revision from another.
+    Unstamped,
     /// Same file, different journal — the journal folder was renamed.
     Journal,
     /// The policy forced a reload. Not a cache failure.
@@ -164,8 +196,8 @@ impl MissCause {
             Self::Absent => "absent",
             Self::Len => "len",
             Self::Mtime => "mtime",
-            #[cfg(unix)]
-            Self::Ctime => "ctime",
+            Self::Racy => "racy",
+            Self::Unstamped => "unstamped",
             Self::Journal => "journal",
             Self::Rebuild => "rebuild",
         }
@@ -200,12 +232,21 @@ impl EntryRevision {
 pub(crate) struct DiscoveredEntry {
     pub source: notema_domain::EntryPath,
     pub stamp: FileStamp,
+    /// Whether `stamp` was taken far enough past the file's own mtime to rule
+    /// out a further write hiding inside the filesystem's mtime granularity.
+    /// A property of the observation, not of the file, so it is decided during
+    /// the walk and never persisted.
+    pub stamp_trusted: bool,
 }
 
 impl DiscoveredEntry {
     /// Why `record` cannot be reused for this file, or `None` for a cache hit.
     /// The one place a hit is decided, so the cause reported by
     /// `NOTEMA_TIMING=2` can never disagree with what actually happened.
+    ///
+    /// The stamp fields are compared before the trust check so that `Racy` and
+    /// `Unstamped` count only files that looked unchanged and were re-read
+    /// anyway — what the racy rule actually costs.
     pub(crate) fn miss_cause(&self, record: Option<&CachedRecord>) -> Option<MissCause> {
         let Some(record) = record else {
             return Some(MissCause::Absent);
@@ -216,9 +257,11 @@ impl DiscoveredEntry {
         if record.stamp.modified != self.stamp.modified {
             return Some(MissCause::Mtime);
         }
-        #[cfg(unix)]
-        if record.stamp.changed != self.stamp.changed {
-            return Some(MissCause::Ctime);
+        if !self.stamp_trusted {
+            return Some(match self.stamp.modified {
+                Some(_) => MissCause::Racy,
+                None => MissCause::Unstamped,
+            });
         }
         if record.entry.journal != self.source.journal {
             return Some(MissCause::Journal);
@@ -273,7 +316,52 @@ pub(crate) fn path_for_record(record: &CachedRecord) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::EntryRevision;
+    use super::{Duration, EntryRevision, FileStamp, SystemTime, UNIX_EPOCH};
+
+    fn stamp_at(seconds: u64, nanos: u32) -> FileStamp {
+        FileStamp {
+            len: 64,
+            modified: Some((seconds, nanos)),
+        }
+    }
+
+    /// Built from values rather than from a real file, so the answer does not
+    /// depend on what the test machine's filesystem happens to resolve.
+    #[test]
+    fn a_coarse_mtime_is_trusted_only_once_its_tick_has_closed() {
+        let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let seconds = 1_800_000_000u64;
+
+        assert!(
+            !stamp_at(seconds, 0).is_trustworthy_at(now),
+            "coarse, fresh"
+        );
+        assert!(
+            !stamp_at(seconds - 1, 0).is_trustworthy_at(now),
+            "still inside the coarse window"
+        );
+        assert!(
+            stamp_at(seconds - 5, 0).is_trustworthy_at(now),
+            "coarse but settled"
+        );
+        assert!(
+            stamp_at(seconds, 1).is_trustworthy_at(now),
+            "sub-second resolution proven"
+        );
+        assert!(
+            !stamp_at(seconds + 60, 0).is_trustworthy_at(now),
+            "a future mtime is not an old one"
+        );
+
+        let unstamped = FileStamp {
+            len: 64,
+            modified: None,
+        };
+        assert!(!unstamped.is_trustworthy_at(SystemTime::now()));
+
+        assert!(stamp_at(seconds, 1).has_subsecond_mtime());
+        assert!(!stamp_at(seconds, 0).has_subsecond_mtime());
+    }
 
     /// The property [`FileStamp`] cannot offer, and the reason a revision is not
     /// one: equal-length contents are still told apart.
