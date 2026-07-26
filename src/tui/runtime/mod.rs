@@ -15,11 +15,13 @@ use crossterm::{
     execute,
 };
 use notema_encryption::SecretString;
-use notema_storage::{CachePolicy, CachedLibrary, JournalStore, LibraryDiscovery, StoreAccess};
+use notema_storage::{
+    CachePolicy, CachedLibrary, JournalStore, LibraryDiscovery, LibrarySnapshot, StoreAccess,
+};
 use notema_timing as timing;
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{
     io,
     time::{Duration, Instant},
@@ -394,66 +396,24 @@ fn run_loop(
 ) -> AppResult<()> {
     let mut view = super::ui::ViewState::default();
     let is_ish = crate::platform::ish::is_ish();
-    let watcher = if is_ish {
-        None
-    } else {
-        let started = match watcher::FileWatcher::start(&app.services.config.journal.path) {
-            Ok(watcher) => Some(watcher),
-            Err(error) => {
-                app.toast(
-                    state::ToastVariant::Warning,
-                    format!("Live journal reload unavailable: {error}"),
-                );
-                None
-            }
-        };
-        timing::mark("watch:journal");
-        started
-    };
     let validation_generation = initial_validation
         .as_ref()
         .map(|validation| validation.generation);
-    let validation_rx = initial_validation.map(|validation| {
-        let store = app.services.store.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let result = match validation.discovery {
-                Some(discovery) => store.validate_discovered_library(
-                    validation.cached,
-                    CachePolicy::Normal,
-                    discovery,
-                ),
-                None => store.validate_library(validation.cached, CachePolicy::Normal),
-            }
-            .map_err(|error| format!("{error:#}"));
-            // Timestamped where validation finished, not where the main loop
-            // gets around to reading it — and emitted even when the result is
-            // later discarded as stale.
-            if let Ok(snapshot) = &result {
-                timing::event_with(|| snapshot.report.timing_summary());
-            }
-            let _ = tx.send(result);
-        });
-        rx
-    });
+    let (mut watcher, validation_rx) = start_journal_watch(
+        &app.services.config.journal.path,
+        app.services.store.clone(),
+        initial_validation,
+        is_ish,
+    );
     // Watch the themes directory too: edits to the active theme's file repaint
     // live, no restart needed. (The directory exists — startup materialized it.)
-    let theme_watcher = if is_ish {
-        None
+    let mut theme_watcher = if is_ish {
+        watcher::PendingWatcher::off()
     } else {
-        let started =
-            match watcher::FileWatcher::start(&theme::themes_dir(&app.services.config_path)) {
-                Ok(watcher) => Some(watcher),
-                Err(error) => {
-                    app.toast(
-                        state::ToastVariant::Warning,
-                        format!("Live theme reload unavailable: {error}"),
-                    );
-                    None
-                }
-            };
-        timing::mark("watch:themes");
-        started
+        watcher::PendingWatcher::start(
+            &theme::themes_dir(&app.services.config_path),
+            "watch:themes",
+        )
     };
     let mut pending_theme_reload_at: Option<Instant> = None;
 
@@ -481,14 +441,21 @@ fn run_loop(
         // Consume source changes before accepting the startup snapshot. If any
         // landed while validation was running, rebuild once from the current
         // tree instead of installing a result that may predate the change.
-        let changed = watcher
-            .as_ref()
-            .map_or_else(Vec::new, watcher::FileWatcher::poll_changes);
-        if !changed.is_empty() {
+        // Draining here rather than after the snapshot is what makes that
+        // possible: the watcher is handed over before validation starts, so it
+        // is always adoptable by the time a result arrives.
+        let changed = watcher.poll();
+        if let Some(error) = changed.failure {
+            app.toast(
+                state::ToastVariant::Warning,
+                format!("Live journal reload unavailable: {error}"),
+            );
+        }
+        if !changed.paths.is_empty() {
             if !validation_finished {
                 validation_dirty = true;
             }
-            pending_paths.extend(changed);
+            pending_paths.extend(changed.paths);
             pending_refresh_at = Some(Instant::now() + REFRESH_DEBOUNCE);
         }
         let validation_result = validation_rx
@@ -691,17 +658,20 @@ fn run_loop(
         // Live theme reload, debounced the same way: only changes to the
         // active theme's file count (edits to other themes wait until they're
         // selected). A broken edit keeps the current theme and says so.
+        let theme_changes = theme_watcher.poll();
+        if let Some(error) = theme_changes.failure {
+            app.toast(
+                state::ToastVariant::Warning,
+                format!("Live theme reload unavailable: {error}"),
+            );
+        }
         let active_theme = app.effective_theme_name();
-        let active_theme_changed = theme_watcher
-            .as_ref()
-            .map_or_else(Vec::new, watcher::FileWatcher::poll_changes)
-            .iter()
-            .any(|path| {
-                path.extension().is_some_and(|ext| ext == "toml")
-                    && path
-                        .file_stem()
-                        .is_some_and(|stem| stem == active_theme.as_str())
-            });
+        let active_theme_changed = theme_changes.paths.iter().any(|path| {
+            path.extension().is_some_and(|ext| ext == "toml")
+                && path
+                    .file_stem()
+                    .is_some_and(|stem| stem == active_theme.as_str())
+        });
         if active_theme_changed {
             pending_theme_reload_at = Some(Instant::now() + REFRESH_DEBOUNCE);
         }
@@ -793,6 +763,69 @@ fn run_loop(
     }
 
     Ok(())
+}
+
+/// Registers the journal watcher and runs the initial library validation behind
+/// it, on one background thread.
+///
+/// Ordering the two rather than racing them is what keeps a change from
+/// slipping through unseen: with the watch armed first, every write either
+/// predates the walk's read of its directory or is reported by the watcher.
+/// Reconciling after the fact would instead cost a second traversal of the
+/// corpus on every launch.
+///
+/// iSH loses the watcher, not the validation.
+fn start_journal_watch(
+    root: &Path,
+    store: JournalStore,
+    initial: Option<InitialLibraryValidation>,
+    is_ish: bool,
+) -> (
+    watcher::PendingWatcher,
+    Option<std::sync::mpsc::Receiver<Result<LibrarySnapshot, String>>>,
+) {
+    let Some(validation) = initial else {
+        let watcher = if is_ish {
+            watcher::PendingWatcher::off()
+        } else {
+            watcher::PendingWatcher::start(root, "watch:journal")
+        };
+        return (watcher, None);
+    };
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    // Sharing the validation's thread with the registration also means a panic
+    // there drops this sender, which the main loop already reports.
+    let validate = move || {
+        let _ = tx.send(run_library_validation(&store, validation));
+    };
+    let watcher = if is_ish {
+        std::thread::spawn(validate);
+        watcher::PendingWatcher::off()
+    } else {
+        watcher::PendingWatcher::start_then(root, "watch:journal", validate)
+    };
+    (watcher, Some(rx))
+}
+
+fn run_library_validation(
+    store: &JournalStore,
+    validation: InitialLibraryValidation,
+) -> Result<LibrarySnapshot, String> {
+    let result = match validation.discovery {
+        Some(discovery) => {
+            store.validate_discovered_library(validation.cached, CachePolicy::Normal, discovery)
+        }
+        None => store.validate_library(validation.cached, CachePolicy::Normal),
+    }
+    .map_err(|error| format!("{error:#}"));
+    // Timestamped where validation finished, not where the main loop gets
+    // around to reading it — and emitted even when the result is later
+    // discarded as stale.
+    if let Ok(snapshot) = &result {
+        timing::event_with(|| snapshot.report.timing_summary());
+    }
+    result
 }
 
 fn poll_library_validation<T>(
