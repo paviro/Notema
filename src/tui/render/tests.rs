@@ -2910,8 +2910,10 @@ fn help_cheatsheet_lists_grouped_bindings() {
     assert!(text.contains("Quit"));
     assert!(text.contains("This help"));
 
-    // The search prefixes are documented on the Search tab, nowhere else.
-    let search = render_to_text(72, 44, |frame| {
+    // The search prefixes are documented on the Search tab, nowhere else. Wide
+    // enough for the two-column grid, so the whole tab sits above the fold —
+    // at 72 columns it is one column and the last rows need scrolling.
+    let search = render_to_text(100, 44, |frame| {
         menus::draw_help(
             &theme::Theme::terminal_default(),
             frame,

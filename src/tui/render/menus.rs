@@ -205,7 +205,8 @@ const SEARCH_SECTIONS: [(&str, &[(&str, &str)]); 5] = [
             ("today", "Today"),
             ("yesterday", "Yesterday"),
             ("7d 2w 3m 1y", "The day that long ago"),
-            ("*-07-25", "Recurring, date: only"),
+            ("*-07-25", "Every year, date: only"),
+            ("2026-*-25", "Every month, date: only"),
         ],
     ),
     (
