@@ -1,5 +1,6 @@
 use super::*;
 use crate::tui::features::metadata::EditMetadataFocus;
+use crate::tui::render::tab_strip::StripTab;
 use crate::tui::state::ListNav;
 
 /// Adjust the focused list's scroll offset so a selection moved by a handler
@@ -524,6 +525,9 @@ pub(super) fn overlay(app: &mut AppModel, action: OverlayAction) -> AppResult<()
         }
         OverlayAction::OpenHelp => app.open_help(),
         OverlayAction::HelpScroll(delta) => scroll_help(app, delta),
+        OverlayAction::HelpNextTab => move_help_tab(app, |tab| tab.next()),
+        OverlayAction::HelpPrevTab => move_help_tab(app, |tab| tab.prev()),
+        OverlayAction::HelpSelectTab(tab) => move_help_tab(app, |_| tab),
         OverlayAction::InputKey(key) => app.handle_text_input_key(key),
         OverlayAction::InputSelectAll => {
             if let Some(input) = app.focused_text_input_mut() {

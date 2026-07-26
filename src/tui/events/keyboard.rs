@@ -126,16 +126,22 @@ fn handle_editor_key(
     }
 
     if matches!(editor_prompt(app), Some(EditorPrompt::Help { .. })) {
+        // Modal like the global help: unmapped keys are swallowed here rather
+        // than falling through to the editor behind it.
         let action = match key.code {
-            KeyCode::Up => Action::Editor(EditorAction::ScrollHelp(-1)),
-            KeyCode::Down => Action::Editor(EditorAction::ScrollHelp(1)),
-            KeyCode::PageUp => Action::Editor(EditorAction::ScrollHelp(-10)),
-            KeyCode::PageDown => Action::Editor(EditorAction::ScrollHelp(10)),
-            KeyCode::Home => Action::Editor(EditorAction::ScrollHelp(i16::MIN)),
-            KeyCode::End => Action::Editor(EditorAction::ScrollHelp(i16::MAX)),
-            _ => Action::Editor(EditorAction::ClosePrompt),
+            KeyCode::Esc => Some(Action::Editor(EditorAction::ClosePrompt)),
+            KeyCode::Up => Some(Action::Editor(EditorAction::ScrollHelp(-1))),
+            KeyCode::Down => Some(Action::Editor(EditorAction::ScrollHelp(1))),
+            KeyCode::PageUp => Some(Action::Editor(EditorAction::ScrollHelp(-10))),
+            KeyCode::PageDown => Some(Action::Editor(EditorAction::ScrollHelp(10))),
+            KeyCode::Home => Some(Action::Editor(EditorAction::ScrollHelp(i16::MIN))),
+            KeyCode::End => Some(Action::Editor(EditorAction::ScrollHelp(i16::MAX))),
+            _ => None,
         };
-        return super::dispatch_action(terminal, app, action);
+        if let Some(action) = action {
+            return super::dispatch_action(terminal, app, action);
+        }
+        return Ok(DispatchOutcome::Continue);
     }
 
     if matches!(editor_prompt(app), Some(EditorPrompt::MetadataMenu)) {
@@ -328,17 +334,20 @@ fn settings_key_to_action(key: KeyEvent) -> Option<Action> {
     })
 }
 
-/// Keys while the global help cheatsheet is open: the arrow/page/home/end keys
-/// scroll it, and anything else closes it — it is a reference, not interactive.
+/// Keys while the global help overlay is open. A modal dialog like the others:
+/// only Esc closes it, so a stray key can't dismiss it.
 fn help_key_to_action(key: KeyEvent) -> Option<Action> {
     Some(match key.code {
+        KeyCode::Esc => Action::Overlay(OverlayAction::Cancel),
+        KeyCode::Tab | KeyCode::Right => Action::Overlay(OverlayAction::HelpNextTab),
+        KeyCode::BackTab | KeyCode::Left => Action::Overlay(OverlayAction::HelpPrevTab),
         KeyCode::Up => Action::Overlay(OverlayAction::HelpScroll(-1)),
         KeyCode::Down => Action::Overlay(OverlayAction::HelpScroll(1)),
         KeyCode::PageUp => Action::Overlay(OverlayAction::HelpScroll(-10)),
         KeyCode::PageDown => Action::Overlay(OverlayAction::HelpScroll(10)),
         KeyCode::Home => Action::Overlay(OverlayAction::HelpScroll(i16::MIN)),
         KeyCode::End => Action::Overlay(OverlayAction::HelpScroll(i16::MAX)),
-        _ => Action::Overlay(OverlayAction::Cancel),
+        _ => return None,
     })
 }
 

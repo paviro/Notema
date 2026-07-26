@@ -72,6 +72,8 @@ pub(crate) enum HoverTarget {
     InsightsTab(crate::tui::features::insights::InsightsTab),
     /// A tab header in the filter dialog.
     FilterTab(FilterTab),
+    /// A tab header in the help overlay.
+    HelpTab(HelpTab),
     FooterHint(crate::tui::render::HintId),
     /// A row in whichever list/menu dialog is open (settings menu, metadata
     /// menu, edit-metadata/feelings/location lists, theme picker) — only one is
@@ -416,18 +418,6 @@ impl FilterTab {
     /// Number of tabs.
     pub(crate) const COUNT: usize = Self::ALL.len();
 
-    pub(crate) fn index(self) -> usize {
-        Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0)
-    }
-
-    pub(crate) fn next(self) -> Self {
-        Self::ALL[(self.index() + 1) % Self::ALL.len()]
-    }
-
-    pub(crate) fn prev(self) -> Self {
-        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
-    }
-
     pub(crate) fn title(self) -> &'static str {
         match self {
             Self::Tags => "Tags",
@@ -469,6 +459,43 @@ impl FilterTab {
             Self::Activities => "activities",
             Self::Feelings => "feelings",
             Self::Locations => "location",
+        }
+    }
+}
+
+/// The two tabs of the global help overlay: the keyboard cheatsheet and the
+/// search-command reference. Lays out on the same shared tab strip as
+/// [`FilterTab`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum HelpTab {
+    #[default]
+    Shortcuts,
+    Search,
+}
+
+impl HelpTab {
+    pub(crate) const ALL: [HelpTab; 2] = [Self::Shortcuts, Self::Search];
+
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            Self::Shortcuts => "Shortcuts",
+            Self::Search => "Search",
+        }
+    }
+
+    /// A shorter label used when the full titles won't fit the tab strip.
+    pub(crate) fn short_title(self) -> &'static str {
+        match self {
+            Self::Shortcuts => "Keys",
+            Self::Search => "Find",
+        }
+    }
+
+    /// A single-letter label — the narrowest tab strip rung.
+    pub(crate) fn initial(self) -> &'static str {
+        match self {
+            Self::Shortcuts => "K",
+            Self::Search => "S",
         }
     }
 }
@@ -735,22 +762,33 @@ impl ThemePickerState {
             .is_some_and(|entry| !entry.mode_agnostic)
     }
 
-    /// The inputs the hint row and its geometry depend on, bundled so the draw
-    /// and the mouse hit-test always compute the same hints.
-    pub(crate) fn hint_state(&self) -> PickerHints {
+    /// The inputs the hint row and its geometry depend on, bundled so the draw,
+    /// the sizing pass and the hit-test always compute the same hints. Chrome and
+    /// mode come from the app: the picker cycles them live for preview.
+    pub(crate) fn hint_state(
+        &self,
+        chrome_override: Option<crate::tui::theme::ChromeStyle>,
+        color_mode: crate::config::ColorMode,
+    ) -> PickerHints {
         PickerHints {
             mode_switchable: self.mode_switchable(),
             has_journal: self.journal.is_some(),
+            chrome_override,
+            color_mode,
         }
     }
 }
 
 /// What the theme picker's hint row shows (labels and which optional hints
-/// appear), shared by the render and the mouse hit-test.
+/// appear), shared by the render and the mouse hit-test. Everything the labels
+/// depend on lives here, so the sizing pass and the draw can't disagree about
+/// how many rows the block needs.
 #[derive(Clone, Copy)]
 pub(crate) struct PickerHints {
     pub(crate) mode_switchable: bool,
     pub(crate) has_journal: bool,
+    pub(crate) chrome_override: Option<crate::tui::theme::ChromeStyle>,
+    pub(crate) color_mode: crate::config::ColorMode,
 }
 
 impl ListNav for ThemePickerState {
@@ -806,9 +844,12 @@ pub(crate) enum Overlay {
     /// sub-headers and their settings toggled/adjusted in place. Boxed to keep
     /// `Overlay` small, matching the other list-state variants.
     Settings(Box<SettingsState>),
-    /// The global keyboard-shortcut cheatsheet, scrolled to `scroll`. Opened with
-    /// `?` from browse or a search result; a reference only, so any key closes it.
+    /// The global help overlay: a two-tab reference (keyboard shortcuts and
+    /// search commands) scrolled to `scroll`. Opened with `?` from browse or a
+    /// search result. A modal dialog like the rest: Tab/arrows switch tabs and
+    /// scroll, esc closes, and every other key is ignored.
     Help {
+        tab: HelpTab,
         scroll: u16,
     },
     /// The theme picker list, live-previewing the highlighted theme. Boxed: it

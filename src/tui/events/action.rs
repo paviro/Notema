@@ -2,7 +2,7 @@ use crossterm::event::KeyEvent;
 
 use crate::tui::{
     features::{insights::InsightsTab, location::EditLocationFocus},
-    state::{FilterTab, HoverTarget, MetadataKind},
+    state::{FilterTab, HelpTab, HoverTarget, MetadataKind},
     ui::interaction::{PanelId, TextFieldId},
 };
 
@@ -51,6 +51,7 @@ pub(crate) enum DialogListTarget {
     Location,
     ThemePicker,
     Filter,
+    Settings,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -298,6 +299,9 @@ pub(crate) enum OverlayAction {
     Cancel,
     OpenHelp,
     HelpScroll(i16),
+    HelpNextTab,
+    HelpPrevTab,
+    HelpSelectTab(HelpTab),
     InputKey(KeyEvent),
     InputSelectAll,
     ToggleHints,

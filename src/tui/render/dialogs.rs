@@ -22,12 +22,12 @@ use crate::tui::theme::Theme;
 use super::{
     chrome::{
         centered_rect_fixed_size, dot_leader_line, flat_chrome, render_dialog_list_scrollbar,
-        separator_style,
     },
-    footer::{Hint, HintId, hint_height, hint_lines},
+    footer::{Hint, HintId, hint_height},
     frames::{
-        dialog_content_full, dialog_frame_rows, dialog_inner, dialog_list_width, draw_dialog_frame,
-        draw_dialog_frame_wide, render_confirm_buttons,
+        dialog_content_full, dialog_frame_rows, dialog_hints_rect, dialog_inner,
+        dialog_list_gutter, dialog_list_width, dialog_row, draw_dialog_frame,
+        draw_dialog_frame_wide, render_confirm_buttons, render_hint_line, render_separator,
     },
     list_state_for_render,
     metadata::MoodBar,
@@ -39,7 +39,7 @@ pub(super) use theme_picker::draw_theme_picker;
 pub(crate) use theme_picker::{theme_picker_hints, theme_picker_layout};
 mod filter;
 pub(super) use filter::draw_filter_dialog;
-pub(crate) use filter::{filter_dialog_hints, filter_dialog_layout, filter_tab_segments};
+pub(crate) use filter::{filter_dialog_hints, filter_dialog_layout};
 mod settings;
 pub(super) use settings::draw_settings_dialog;
 pub(crate) use settings::{settings_dialog_hints, settings_dialog_layout};
@@ -84,7 +84,7 @@ fn feelings_selected_rows(selected: &[String], width: u16) -> Vec<Vec<usize>> {
 /// and to render it, so the reserved height always matches the drawn lines.
 fn feelings_selected_line_count(theme: &Theme, frame_area: Rect, selected: &[String]) -> usize {
     let area = centered_rect_fixed_size(LIST_DIALOG_WIDTH, 1, frame_area);
-    feelings_selected_rows(selected, dialog_inner(theme, area).width)
+    feelings_selected_rows(selected, dialog_content_full(theme, area).width)
         .len()
         .max(1)
 }
@@ -170,10 +170,15 @@ fn location_row_lines(label: &str, list_width: u16) -> Vec<String> {
 }
 
 /// Total rows the list occupies once every label is wrapped — what the dialog is
-/// sized to, so multi-line rows aren't clipped.
+/// sized to, so multi-line rows aren't clipped. Measured at the narrowest the
+/// list can be — the width it takes once a scrollbar is drawn beside it. Whether
+/// that bar appears depends on this very count, so the narrow width is the only
+/// one that can't under-count: without a bar the list is wider and wraps less.
 fn location_list_rows(theme: &Theme, frame_area: Rect, labels: &[String]) -> usize {
     let area = centered_rect_fixed_size(LOCATION_DIALOG_WIDTH, 1, frame_area);
-    let list_width = dialog_inner(theme, area).width;
+    let list_width = dialog_content_full(theme, area)
+        .width
+        .saturating_sub(dialog_list_gutter(theme));
     labels
         .iter()
         .map(|label| location_row_lines(label, list_width).len())
@@ -246,8 +251,17 @@ pub(crate) fn metadata_dialog_hints(
 
 // ── Dialog area helpers (re-used by the mouse handler for hit-testing) ───────
 
+/// Rows inside the border that are not the list: the title, both list
+/// separators, the search input, and the blank spacer above the hints. Sizing
+/// the dialog and placing the list both derive from this, so they can't drift.
+const METADATA_DIALOG_CHROME: u16 = 5;
+
+/// The list's first row in the metadata and feelings dialogs, which share the
+/// same title-plus-separator framing above it.
+const LIST_DIALOG_LIST_TOP: u16 = 2;
+
 pub(crate) fn metadata_dialog_area(theme: &Theme, frame_area: Rect, filtered_len: usize) -> Rect {
-    let fixed: u16 = 5 + dialog_frame_rows(theme);
+    let fixed = METADATA_DIALOG_CHROME + dialog_frame_rows(theme);
     let hint_height = tag_dialog_hint_height(theme, frame_area);
     let visible = (filtered_len as u16).clamp(1, METADATA_DIALOG_MAX_VISIBLE_ROWS);
     let h = (fixed + hint_height + visible).min(frame_area.height.saturating_sub(2));
@@ -288,9 +302,13 @@ pub(crate) fn mood_dialog_area(theme: &Theme, frame_area: Rect) -> Rect {
     )
 }
 
-fn dialog_hint_width(theme: &Theme, frame_area: Rect, width: u16) -> u16 {
+/// The width a dialog of outer `width` lays its hint grid out in, for sizing the
+/// block before the dialog's own rect exists. Must match where the hints are
+/// finally drawn: probe narrow and the block reserves rows the draw never fills,
+/// probe wide and the last chips are clipped away.
+pub(super) fn dialog_hint_width(theme: &Theme, frame_area: Rect, width: u16) -> u16 {
     let area = super::centered_rect_fixed_size(width, 1, frame_area);
-    dialog_inner(theme, area).width
+    dialog_content_full(theme, area).width
 }
 
 fn tag_dialog_hint_height(theme: &Theme, frame_area: Rect) -> u16 {
@@ -309,7 +327,10 @@ fn feelings_dialog_hint_height(theme: &Theme, frame_area: Rect) -> u16 {
 }
 
 fn mood_dialog_hint_height(theme: &Theme, frame_area: Rect) -> u16 {
-    hint_height(&MOOD_DIALOG_HINTS, dialog_hint_width(theme, frame_area, 44))
+    hint_height(
+        &MOOD_DIALOG_HINTS,
+        dialog_hint_width(theme, frame_area, MOOD_DIALOG_WIDTH),
+    )
 }
 
 fn location_dialog_hint_height(theme: &Theme, frame_area: Rect) -> u16 {
@@ -363,12 +384,6 @@ pub(crate) fn location_dialog_layout(
     let area = location_dialog_area(theme, frame_area, list_rows);
     let inner = dialog_content_full(theme, area);
     let hint_height = location_dialog_hint_height(theme, frame_area);
-    let row = |offset: u16| Rect {
-        x: inner.x,
-        y: inner.y + offset,
-        width: inner.width,
-        height: 1,
-    };
     // Rows: title(0) sep(1) address(2) name(3) spacer(4) status(5) sep(6) heading(7),
     // then the list, a blank spacer, and the hints.
     let list_height = inner
@@ -380,25 +395,19 @@ pub(crate) fn location_dialog_layout(
         width: dialog_list_width(theme, inner.width, labels.len(), list_height),
         height: list_height,
     };
-    let hints = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(hint_height),
-        width: inner.width,
-        height: hint_height,
-    };
 
     LocationDialogLayout {
         area,
-        title: row(0),
-        title_separator: row(1),
-        query: row(2),
-        name: row(3),
-        // row(4) is a blank spacer between the inputs and the status line.
-        status: row(5),
-        list_separator: row(6),
-        heading: row(7),
+        title: dialog_row(inner, 0),
+        title_separator: dialog_row(inner, 1),
+        query: dialog_row(inner, 2),
+        name: dialog_row(inner, 3),
+        // Row 4 is a blank spacer between the inputs and the status line.
+        status: dialog_row(inner, 5),
+        list_separator: dialog_row(inner, 6),
+        heading: dialog_row(inner, 7),
         list,
-        hints,
+        hints: dialog_hints_rect(inner, hint_height),
     }
 }
 
@@ -421,46 +430,25 @@ pub(crate) fn metadata_dialog_layout(
     let area = metadata_dialog_area(theme, frame_area, filtered_len);
     let inner = dialog_content_full(theme, area);
     let hint_height = tag_dialog_hint_height(theme, frame_area);
-    let list_height = inner.height.saturating_sub(5 + hint_height);
+    let list_height = inner
+        .height
+        .saturating_sub(METADATA_DIALOG_CHROME + hint_height);
     let list = Rect {
         x: inner.x,
-        y: inner.y + 2,
+        y: inner.y + LIST_DIALOG_LIST_TOP,
         width: dialog_list_width(theme, inner.width, filtered_len, list_height),
         height: list_height,
     };
-    let list_top_separator = Rect {
-        x: inner.x,
-        y: inner.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    let list_bottom_separator = Rect {
-        x: inner.x,
-        y: list.y + list.height,
-        width: inner.width,
-        height: 1,
-    };
-    let input = Rect {
-        x: inner.x,
-        y: list_bottom_separator.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    let hints = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(hint_height),
-        width: inner.width,
-        height: hint_height,
-    };
+    let below_list = LIST_DIALOG_LIST_TOP + list_height;
 
     MetadataDialogLayout {
         area,
         inner,
-        list_top_separator,
+        list_top_separator: dialog_row(inner, 1),
         list,
-        list_bottom_separator,
-        input,
-        hints,
+        list_bottom_separator: dialog_row(inner, below_list),
+        input: dialog_row(inner, below_list + 1),
+        hints: dialog_hints_rect(inner, hint_height),
     }
 }
 
@@ -491,52 +479,28 @@ pub(crate) fn feelings_dialog_layout(
     let list_height = inner.height.saturating_sub(chrome);
     let list = Rect {
         x: inner.x,
-        y: inner.y + 2,
+        y: inner.y + LIST_DIALOG_LIST_TOP,
         width: dialog_list_width(theme, inner.width, all_len, list_height),
         height: list_height,
     };
-    let list_top_separator = Rect {
-        x: inner.x,
-        y: inner.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    let list_bottom_separator = Rect {
-        x: inner.x,
-        y: list.y + list.height,
-        width: inner.width,
-        height: 1,
-    };
-    let input = Rect {
-        x: inner.x,
-        y: list_bottom_separator.y + 1,
-        width: inner.width,
-        height: 1,
-    };
-    // A blank spacer line sits between the search input and the summary.
+    let below_list = LIST_DIALOG_LIST_TOP + list_height;
+    let input_offset = below_list + 1;
+    // A blank spacer line sits between the search input and the summary, and
+    // another between the summary and the hints.
     let selected = Rect {
-        x: inner.x,
-        y: input.y + 2,
-        width: inner.width,
         height: selected_h,
-    };
-    // A blank spacer line sits between `selected` and `hints`.
-    let hints = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(hint_height),
-        width: inner.width,
-        height: hint_height,
+        ..dialog_row(inner, input_offset + 2)
     };
 
     FeelingsDialogLayout {
         area,
         inner,
-        list_top_separator,
+        list_top_separator: dialog_row(inner, 1),
         list,
-        list_bottom_separator,
-        input,
+        list_bottom_separator: dialog_row(inner, below_list),
+        input: dialog_row(inner, input_offset),
         selected,
-        hints,
+        hints: dialog_hints_rect(inner, hint_height),
     }
 }
 
@@ -551,15 +515,12 @@ pub(crate) struct MoodDialogLayout {
 
 pub(crate) fn mood_dialog_layout(theme: &Theme, frame_area: Rect) -> MoodDialogLayout {
     let area = mood_dialog_area(theme, frame_area);
-    let inner = dialog_inner(theme, area);
+    // No list, so no scrollbar gutter to hold back — the rows run the full width
+    // the hints are sized against.
+    let inner = dialog_content_full(theme, area);
     let hint_height = mood_dialog_hint_height(theme, frame_area);
     let right_w = " Blissful".len() as u16;
-    let bar_row = Rect {
-        x: inner.x,
-        y: inner.y + 1,
-        width: inner.width,
-        height: 1,
-    };
+    let bar_row = dialog_row(inner, 1);
     let bar_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -568,12 +529,7 @@ pub(crate) fn mood_dialog_layout(theme: &Theme, frame_area: Rect) -> MoodDialogL
             Constraint::Length(right_w),
         ])
         .split(bar_row);
-    let value_row = Rect {
-        x: inner.x,
-        y: inner.y + 3,
-        width: inner.width,
-        height: 1,
-    };
+    let value_row = dialog_row(inner, 3);
     let value_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -582,19 +538,13 @@ pub(crate) fn mood_dialog_layout(theme: &Theme, frame_area: Rect) -> MoodDialogL
             Constraint::Length(right_w),
         ])
         .split(value_row);
-    let hints = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(hint_height),
-        width: inner.width,
-        height: hint_height,
-    };
 
     MoodDialogLayout {
         area,
         inner,
         bar: bar_chunks[1],
         value: value_chunks[1],
-        hints,
+        hints: dialog_hints_rect(inner, hint_height),
     }
 }
 
@@ -676,46 +626,6 @@ fn render_lines_in_area<'a>(
     }
 }
 
-fn render_separator(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
-    if area.width == 0 {
-        return;
-    }
-
-    frame.render_widget(
-        Paragraph::new(
-            theme
-                .glyphs()
-                .separator
-                .to_string()
-                .repeat(area.width as usize),
-        )
-        .style(separator_style(theme)),
-        Rect { height: 1, ..area },
-    );
-}
-
-fn render_hint_line(
-    theme: &Theme,
-    frame: &mut Frame<'_>,
-    hints: &[Hint],
-    area: Rect,
-    hover: HoverTarget,
-) {
-    frame.render_widget(
-        Paragraph::new(hint_lines(theme, hints, area.width, hovered_hint(hover))),
-        area,
-    );
-}
-
-/// The hint chip a hover targets, if any — dialog hint bars share the footer's
-/// [`HoverTarget::FooterHint`] since the chips are the same clickable kind.
-fn hovered_hint(hover: HoverTarget) -> Option<crate::tui::render::HintId> {
-    match hover {
-        HoverTarget::FooterHint(id) => Some(id),
-        _ => None,
-    }
-}
-
 /// The dialog list/menu row a hover targets, if any.
 fn hovered_dialog_row(hover: HoverTarget) -> Option<usize> {
     match hover {
@@ -767,6 +677,17 @@ mod tests {
         assert_eq!(location_list_row_at(list, &labels, 1, 10), Some(1));
     }
 
+    /// Both chrome styles. A probe that measures at a different width than the
+    /// draw is invisible in bordered chrome, which insets the two rects
+    /// identically; only flat holds them apart.
+    fn chrome_variants() -> [Theme; 2] {
+        use crate::tui::theme::{ChromeStyle, test_flat_theme};
+        [
+            Theme::terminal_default(),
+            test_flat_theme().with_chrome_override(Some(ChromeStyle::Flat)),
+        ]
+    }
+
     #[test]
     fn narrow_location_layout_sizes_and_hit_tests_from_its_actual_width() {
         let frame_area = Rect::new(0, 0, 30, 24);
@@ -774,31 +695,44 @@ mod tests {
             "A long place name that wraps on a narrow terminal".to_string(),
             "Another place name that also wraps across rows".to_string(),
         ];
-        let layout = location_dialog_layout(&Theme::terminal_default(), frame_area, &labels);
-        let first_height = location_row_lines(&labels[0], layout.list.width).len();
-        let total_rows: usize = labels
-            .iter()
-            .map(|label| location_row_lines(label, layout.list.width).len())
-            .sum();
+        // Bordered chrome has the room to show every wrapped row at once.
+        let bordered = location_dialog_layout(&Theme::terminal_default(), frame_area, &labels);
+        assert_eq!(
+            bordered.list.height as usize,
+            location_list_rows(&Theme::terminal_default(), frame_area, &labels)
+        );
 
-        assert_eq!(
-            location_list_rows(&Theme::terminal_default(), frame_area, &labels),
-            total_rows
-        );
-        assert_eq!(layout.list.height as usize, total_rows);
-        assert_eq!(
-            location_list_row_at(
-                layout.list,
-                &labels,
-                0,
-                layout.list.y + first_height as u16 - 1,
-            ),
-            Some(0),
-        );
-        assert_eq!(
-            location_list_row_at(layout.list, &labels, 0, layout.list.y + first_height as u16,),
-            Some(1),
-        );
+        for theme in chrome_variants() {
+            let layout = location_dialog_layout(&theme, frame_area, &labels);
+            let first_height = location_row_lines(&labels[0], layout.list.width).len();
+            let total_rows: usize = labels
+                .iter()
+                .map(|label| location_row_lines(label, layout.list.width).len())
+                .sum();
+
+            // The probe the dialog is sized from never comes in under what the
+            // list wraps onto at the width it is finally drawn at. When the
+            // terminal is too short for all of them the list scrolls; what it
+            // must never do is size itself as if the rows didn't wrap.
+            assert!(
+                location_list_rows(&theme, frame_area, &labels) >= total_rows,
+                "the probe undercounts by {} rows",
+                total_rows - location_list_rows(&theme, frame_area, &labels)
+            );
+            assert_eq!(
+                location_list_row_at(
+                    layout.list,
+                    &labels,
+                    0,
+                    layout.list.y + first_height as u16 - 1,
+                ),
+                Some(0),
+            );
+            assert_eq!(
+                location_list_row_at(layout.list, &labels, 0, layout.list.y + first_height as u16,),
+                Some(1),
+            );
+        }
     }
 
     #[test]
@@ -809,10 +743,12 @@ mod tests {
             "appreciative".to_string(),
             "self-conscious".to_string(),
         ];
-        let layout = feelings_dialog_layout(&Theme::terminal_default(), frame_area, 4, &selected);
-        let rows = feelings_selected_rows(&selected, layout.selected.width);
+        for theme in chrome_variants() {
+            let layout = feelings_dialog_layout(&theme, frame_area, 4, &selected);
+            let rows = feelings_selected_rows(&selected, layout.selected.width);
 
-        assert_eq!(layout.selected.height as usize, rows.len());
-        assert!(rows.len() > 1);
+            assert_eq!(layout.selected.height as usize, rows.len());
+            assert!(rows.len() > 1);
+        }
     }
 }

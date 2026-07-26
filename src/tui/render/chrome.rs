@@ -321,11 +321,17 @@ pub(crate) fn render_scrollbar_if_needed(
     }
 }
 
-/// The column a dialog list's scrollbar occupies: one padding column past the
-/// list's right edge. In flat chrome that seats it inside the surface with a
-/// symmetric margin; in bordered chrome it lands on the frame's right border.
-fn dialog_list_scrollbar_x(list: Rect) -> u16 {
-    list.x.saturating_add(list.width).saturating_add(1)
+/// The bar a dialog list's scrollbar occupies: one padding column past the
+/// list's right edge, spanning the list's rows. In flat chrome that seats it
+/// inside the surface with a symmetric margin; in bordered chrome it lands on
+/// the frame's right border. Drawing and the drag hit-test share it.
+pub(crate) fn dialog_list_scrollbar_rect(list: Rect) -> Rect {
+    Rect {
+        x: list.x.saturating_add(list.width).saturating_add(1),
+        y: list.y,
+        width: 1,
+        height: list.height,
+    }
 }
 
 /// Draw a dialog list's scrollbar one padding column past the list, spanning
@@ -350,12 +356,7 @@ pub(crate) fn render_dialog_list_scrollbar(
                 total_height,
                 viewport,
             ));
-        let bar = Rect {
-            x: dialog_list_scrollbar_x(list),
-            y: list.y,
-            width: 1,
-            height: list.height,
-        };
+        let bar = dialog_list_scrollbar_rect(list);
         render_vertical_scrollbar_in(theme, frame, bar, &mut state, focused);
     }
 }

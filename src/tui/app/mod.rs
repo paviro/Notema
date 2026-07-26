@@ -389,13 +389,16 @@ pub(crate) struct InsightsScrollGeometry {
     pub(crate) scroll: u16,
 }
 
-/// Which pane's vertical scrollbar a mouse drag is currently manipulating.
+/// Which vertical scrollbar a mouse drag is currently manipulating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScrollbarDrag {
     Journals,
     EntryList,
     Reader,
     Insights,
+    /// The open dialog's list. Only one dialog is open at a time, so the id names
+    /// the bar rather than the state to scroll.
+    Dialog(crate::tui::ui::DialogId),
 }
 
 /// The in-progress scrollbar drag, if any. A drag keeps scrolling even after the

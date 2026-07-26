@@ -19,6 +19,7 @@ pub(super) fn mapped_hover_target(col: u16, row: u16, view: &ViewState) -> Hover
         }
         Some(InteractionKind::Hint(id)) => HoverTarget::FooterHint(*id),
         Some(InteractionKind::FilterTab(tab)) => HoverTarget::FilterTab(*tab),
+        Some(InteractionKind::HelpTab(tab)) => HoverTarget::HelpTab(*tab),
         Some(InteractionKind::DialogRow { index, .. }) => HoverTarget::DialogRow(*index),
         Some(InteractionKind::ConfirmButton { destructive, .. }) => {
             HoverTarget::ConfirmButton(*destructive)
@@ -77,9 +78,9 @@ pub(super) fn overlay_mouse_action(
         MouseEventKind::Down(MouseButton::Left) => {
             mapped_overlay_click(app, mouse.column, mouse.row, view)
         }
-        MouseEventKind::Drag(MouseButton::Left) => {
-            mapped_mood_action(mouse.column, mouse.row, view)
-        }
+        MouseEventKind::Drag(MouseButton::Left) => scrollbar_drag_action(app, mouse, view)
+            .or_else(|| mapped_mood_action(mouse.column, mouse.row, view)),
+        MouseEventKind::Up(MouseButton::Left) => Some(Action::Mouse(MouseAction::ScrollbarRelease)),
         _ => None,
     }
 }
@@ -92,23 +93,41 @@ pub(super) fn prompt_mouse_action(
     let prompt = app.editor.as_ref().map(|editor| &editor.prompt)?;
     match prompt {
         EditorPrompt::None => None,
-        EditorPrompt::Help { .. } => match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                Some(Action::Editor(EditorAction::ClosePrompt))
-            }
-            _ => None,
-        },
+        // The help reference and the other prompts are modal dialogs: only their
+        // registered regions (the close chip) act; clicks elsewhere are inert.
         _ if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
             mapped_overlay_click(app, mouse.column, mouse.row, view)
+        }
+        _ if mouse.kind == MouseEventKind::Drag(MouseButton::Left) => {
+            scrollbar_drag_action(app, mouse, view)
+        }
+        _ if mouse.kind == MouseEventKind::Up(MouseButton::Left) => {
+            Some(Action::Mouse(MouseAction::ScrollbarRelease))
         }
         _ => None,
     }
 }
 
+/// Keep a dialog scrollbar drag going. The metrics are re-read from the current
+/// frame by target, so the drag survives the cursor drifting off the bar.
+fn scrollbar_drag_action(app: &AppModel, mouse: MouseEvent, view: &ViewState) -> Option<Action> {
+    let which = app.scrollbar.active?;
+    let metrics = view.interactions.scrollbar(which)?;
+    Some(Action::Mouse(MouseAction::ScrollbarDrag {
+        metrics,
+        row: mouse.row,
+    }))
+}
+
 fn mapped_overlay_click(app: &AppModel, col: u16, row: u16, view: &ViewState) -> Option<Action> {
     match view.interactions.hit(col, row)? {
+        InteractionKind::Scrollbar(metrics) => Some(Action::Mouse(MouseAction::ScrollbarPress {
+            metrics: *metrics,
+            row,
+        })),
         InteractionKind::Hint(id) => hint_id_to_action(app, *id),
         InteractionKind::FilterTab(tab) => Some(Action::Filter(FilterAction::SelectTab(*tab))),
+        InteractionKind::HelpTab(tab) => Some(Action::Overlay(OverlayAction::HelpSelectTab(*tab))),
         InteractionKind::DialogRow { dialog, index } => dialog_row_action(*dialog, *index),
         InteractionKind::DialogList { dialog, .. } => dialog_list_focus_action(*dialog),
         InteractionKind::DialogInput(input) => dialog_input_focus_action(*input),
@@ -131,9 +150,6 @@ fn mapped_overlay_click(app: &AppModel, col: u16, row: u16, view: &ViewState) ->
         InteractionKind::MoodBar(bar) => Some(Action::Mouse(MouseAction::SetMood(mood_score_at(
             *bar, col,
         )))),
-        InteractionKind::Overlay if matches!(app.overlay, Overlay::Help { .. }) => {
-            Some(Action::Overlay(OverlayAction::Cancel))
-        }
         _ => None,
     }
 }
@@ -157,6 +173,8 @@ fn dialog_row_action(dialog: DialogId, index: usize) -> Option<Action> {
             _ => None,
         },
         DialogId::ThemePicker => Some(Action::Settings(SettingsAction::ThemePickerClick(index))),
+        // The help tables have no rows to click.
+        DialogId::Help | DialogId::EditorHelp => None,
         DialogId::Metadata => Some(Action::Mouse(MouseAction::DialogRow {
             target: DialogListTarget::Metadata,
             index,
@@ -234,6 +252,8 @@ pub(super) fn mapped_overlay_wheel(
         DialogId::Location => DialogListTarget::Location,
         DialogId::ThemePicker => DialogListTarget::ThemePicker,
         DialogId::Filter => DialogListTarget::Filter,
+        DialogId::Settings => DialogListTarget::Settings,
+        // The menus and the help tables scroll by other routes, or not at all.
         _ => return None,
     };
     Some(Action::Mouse(MouseAction::DialogScroll {

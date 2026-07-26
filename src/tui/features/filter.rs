@@ -18,6 +18,7 @@ use crate::tui::features::metadata::count_metadata;
 use crate::tui::features::search::{
     entry_in_search_scope, feeling_predicate, location_predicate, metadata_predicate,
 };
+use crate::tui::render::tab_strip::StripTab;
 use crate::tui::state::{FilterTab, ListNav, MetadataKind, Overlay, SelectableList};
 
 /// One row of a filter tab: its display `label`, the search payload it

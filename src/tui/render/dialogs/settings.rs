@@ -99,23 +99,15 @@ pub(crate) fn settings_dialog_layout(
         height: list_height,
     };
     let description = Rect {
-        x: inner.x,
-        y: inner.y + list_height + SETTINGS_DESC_SPACER,
-        width: inner.width,
         height: desc_rows,
-    };
-    let hints = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(hint_height),
-        width: inner.width,
-        height: hint_height,
+        ..dialog_row(inner, list_height + SETTINGS_DESC_SPACER)
     };
 
     SettingsDialogLayout {
         area,
         list,
         description,
-        hints,
+        hints: dialog_hints_rect(inner, hint_height),
     }
 }
 

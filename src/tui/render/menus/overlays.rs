@@ -40,13 +40,11 @@ fn metadata_menu_layout(theme: &Theme, frame_area: Rect) -> MetadataMenuLayout {
         width: inner.width,
         height: rows.min(inner.height),
     };
-    let footer = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(1),
-        width: inner.width,
-        height: 1,
-    };
-    MetadataMenuLayout { area, list, footer }
+    MetadataMenuLayout {
+        area,
+        list,
+        footer: dialog_hints_rect(inner, 1),
+    }
 }
 
 /// Draw the "Add metadata" chooser: a centered popup whose key chips open the

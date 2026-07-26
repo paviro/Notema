@@ -311,6 +311,33 @@ fn set_pane_scroll(app: &mut AppModel, which: ScrollbarDrag, offset: usize) {
             app.nav.scroll.insights = offset.min(u16::MAX as usize) as u16;
             app.focus_insights();
         }
+        ScrollbarDrag::Dialog(dialog) => set_dialog_scroll(app, dialog, offset),
+    }
+}
+
+/// Set the open dialog's scroll offset. The draw clamps it against the viewport
+/// it alone knows, so an over-large offset self-corrects on the next frame.
+fn set_dialog_scroll(app: &mut AppModel, dialog: DialogId, offset: usize) {
+    match dialog {
+        DialogId::Help => {
+            if let Overlay::Help { scroll, .. } = &mut app.overlay {
+                *scroll = offset.min(u16::MAX as usize) as u16;
+            }
+        }
+        DialogId::EditorHelp => {
+            if let Some(EditorPrompt::Help { scroll }) =
+                app.editor.as_mut().map(|editor| &mut editor.prompt)
+            {
+                *scroll = offset.min(u16::MAX as usize) as u16;
+            }
+        }
+        // The list dialogs all navigate through one handle; the menus never
+        // scroll, so they register no bar to drag.
+        _ => {
+            if let Some(list) = super::open_dialog_list_mut(app) {
+                list.list_mut().set_offset(offset);
+            }
+        }
     }
 }
 
@@ -332,6 +359,20 @@ fn step_pane_scroll(app: &mut AppModel, target: &ScrollbarTarget, delta: i16) {
         ScrollbarDrag::Insights => {
             app.scroll_insights(delta);
             app.focus_insights();
+        }
+        ScrollbarDrag::Dialog(dialog) => step_dialog_scroll(app, dialog, delta, target.viewport),
+    }
+}
+
+/// Step the open dialog's scroll by one line, reusing the wheel's setters.
+fn step_dialog_scroll(app: &mut AppModel, dialog: DialogId, delta: i16, viewport: u16) {
+    match dialog {
+        DialogId::Help => super::scroll_help(app, delta),
+        DialogId::EditorHelp => super::scroll_editor_help(app, delta),
+        _ => {
+            if let Some(list) = super::open_dialog_list_mut(app) {
+                list.scroll_by(delta, viewport);
+            }
         }
     }
 }
@@ -604,6 +645,8 @@ pub(super) fn apply_mouse_action(
                     index,
                 ))));
             }
+            // Settings rows click through `SettingsAction::Click`, not here.
+            DialogListTarget::Settings => {}
             DialogListTarget::Filter => {
                 if let Some(state) = app.filter_state_mut() {
                     state.select_index(index);
@@ -654,6 +697,11 @@ pub(super) fn apply_mouse_action(
             }
             DialogListTarget::Filter => {
                 if let Some(state) = app.filter_state_mut() {
+                    state.scroll_by(delta, viewport);
+                }
+            }
+            DialogListTarget::Settings => {
+                if let Some(state) = app.settings_state_mut() {
                     state.scroll_by(delta, viewport);
                 }
             }
@@ -902,12 +950,12 @@ pub(super) fn hint_id_to_action(app: &AppModel, id: render::HintId) -> Option<Ac
             Some(Action::Browser(BrowserAction::BeginDelete))
         }
         render::HintId::ExitSearch => Some(Action::Search(SearchAction::Exit)),
-        // The metadata chooser can ride on an editor prompt, which isn't an
-        // overlay; there the close chip ends the prompt instead.
+        // The metadata chooser and the shortcut reference can ride on an editor
+        // prompt, which isn't an overlay; there the close chip ends the prompt.
         render::HintId::CancelOverlay
             if matches!(
                 app.editor.as_ref().map(|editor| &editor.prompt),
-                Some(EditorPrompt::MetadataMenu)
+                Some(EditorPrompt::MetadataMenu | EditorPrompt::Help { .. })
             ) =>
         {
             Some(Action::Editor(EditorAction::ClosePrompt))
@@ -1011,6 +1059,9 @@ pub(super) fn hint_id_to_action(app: &AppModel, id: render::HintId) -> Option<Ac
         }
         render::HintId::FilterNextTab if app.filter_state().is_some() => {
             Some(Action::Filter(FilterAction::NextTab))
+        }
+        render::HintId::HelpSwitchTab if matches!(app.overlay, Overlay::Help { .. }) => {
+            Some(Action::Overlay(OverlayAction::HelpNextTab))
         }
         render::HintId::FilterLaunch if app.filter_state().is_some() => {
             Some(Action::Filter(FilterAction::Launch))

@@ -50,7 +50,7 @@ fn question_mark_opens_help_from_browse_and_search_panes() {
 }
 
 #[test]
-fn help_overlay_scrolls_on_arrows_and_closes_on_any_other_key() {
+fn help_overlay_scrolls_on_arrows_and_closes_only_on_esc() {
     let mut app = app_with_entries(1);
     app.open_help();
 
@@ -62,10 +62,123 @@ fn help_overlay_scrolls_on_arrows_and_closes_on_any_other_key() {
         keyboard::key_to_action(&app, key(KeyCode::PageUp), true),
         Some(Action::Overlay(OverlayAction::HelpScroll(-10)))
     );
-    // A quit key does not quit while the reference is up — it dismisses it.
+    // A quit key is swallowed, not treated as a dismiss.
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Char('q')), true),
+        None
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
         Some(Action::Overlay(OverlayAction::Cancel))
+    );
+}
+
+#[test]
+fn help_tabs_switch_on_tab_and_arrow_keys_and_reset_scroll() {
+    let mut app = app_with_entries(1);
+    app.open_help();
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Tab), true),
+        Some(Action::Overlay(OverlayAction::HelpNextTab))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Left), true),
+        Some(Action::Overlay(OverlayAction::HelpPrevTab))
+    );
+
+    let backend = ratatui::backend::TestBackend::new(80, 20);
+    let mut terminal = ratatui::Terminal::new(backend).unwrap();
+
+    dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::Overlay(OverlayAction::HelpScroll(3)),
+    )
+    .unwrap();
+    dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::Overlay(OverlayAction::HelpNextTab),
+    )
+    .unwrap();
+    match app.overlay {
+        crate::tui::state::Overlay::Help { tab, scroll } => {
+            assert_eq!(tab, crate::tui::state::HelpTab::Search);
+            assert_eq!(scroll, 0, "switching tabs resets the scroll");
+        }
+        _ => panic!("help overlay closed on tab switch"),
+    }
+}
+
+#[test]
+fn help_tab_click_selects_that_tab() {
+    use crate::tui::ui::InteractionKind;
+
+    let mut app = app_with_entries(1);
+    app.open_help();
+    let area = Rect::new(0, 0, 90, 30);
+    let (_, view) = render_view(&mut app, area.width, area.height);
+
+    let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+        matches!(
+            kind,
+            InteractionKind::HelpTab(crate::tui::state::HelpTab::Search)
+        )
+    })
+    .expect("help tab registered");
+
+    assert_eq!(
+        mouse::mouse_to_action(&app, mouse(down(), col, row), area, &view, false),
+        Some(Action::Overlay(OverlayAction::HelpSelectTab(
+            crate::tui::state::HelpTab::Search
+        )))
+    );
+}
+
+/// The overlay is modal: only its own regions act, so a click on the panes
+/// behind it produces no action at all. Asserting only that the overlay stays
+/// open would pass just as well if the click had focused the pane behind it.
+#[test]
+fn click_outside_the_help_overlay_is_inert() {
+    let mut app = app_with_entries(1);
+    app.open_help();
+    let area = Rect::new(0, 0, 90, 30);
+    let (_, view) = render_view(&mut app, area.width, area.height);
+
+    assert_eq!(
+        mouse::mouse_to_action(&app, mouse(down(), 1, 1), area, &view, false),
+        None
+    );
+
+    mouse_in_area(&mut app, mouse(down(), 1, 1), area.width, area.height);
+    assert!(matches!(
+        app.overlay,
+        crate::tui::state::Overlay::Help { .. }
+    ));
+}
+
+/// The editor's reference rides a prompt, not an overlay, so its close chip has
+/// to end the prompt instead of cancelling an overlay.
+#[test]
+fn editor_shortcut_close_chip_ends_the_prompt() {
+    use crate::tui::ui::InteractionKind;
+
+    let mut app = app_with_entries(1);
+    app.select_entry_index(0);
+    app.open_editor_for_selected().unwrap();
+    app.editor.as_mut().unwrap().prompt = EditorPrompt::Help { scroll: 0 };
+    let area = Rect::new(0, 0, 90, 30);
+    let (_, view) = render_view(&mut app, area.width, area.height);
+
+    let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+        matches!(kind, InteractionKind::Hint(render::HintId::CancelOverlay))
+    })
+    .expect("close chip registered");
+
+    assert_eq!(
+        mouse::mouse_to_action(&app, mouse(down(), col, row), area, &view, false),
+        Some(Action::Editor(EditorAction::ClosePrompt))
     );
 }
 
@@ -88,7 +201,7 @@ fn wheel_over_help_scrolls_it_without_closing() {
     // The wheel bumps the reference's scroll and the overlay stays open — the
     // early-return keeps the event off the panes behind it.
     match app.overlay {
-        crate::tui::state::Overlay::Help { scroll } => assert_eq!(scroll, 1),
+        crate::tui::state::Overlay::Help { scroll, .. } => assert_eq!(scroll, 1),
         _ => panic!("help overlay closed on wheel"),
     }
 }
@@ -512,7 +625,12 @@ fn theme_picker_hover_targets_rows_without_selecting() {
     } else {
         offset
     };
-    let layout = render::theme_picker_layout(&app.appearance.theme, area, len, state.hint_state());
+    let layout = render::theme_picker_layout(
+        &app.appearance.theme,
+        area,
+        len,
+        state.hint_state(app.appearance.chrome_override, app.appearance.color_mode),
+    );
 
     let row = layout.list.y + (target - offset) as u16;
     assert!(apply_hover(&mut app, layout.list.x + 1, row, area));
@@ -1099,9 +1217,7 @@ fn theme_picker_hides_the_mode_switch_on_mode_agnostic_themes() {
     assert!(!state.mode_switchable());
     assert!(
         render::theme_picker_hints(
-            state.hint_state(),
-            app.appearance.chrome_override,
-            app.appearance.color_mode,
+            state.hint_state(app.appearance.chrome_override, app.appearance.color_mode)
         )
         .iter()
         .all(|hint| hint.id != render::HintId::ThemePickerMode),
@@ -1219,7 +1335,13 @@ fn wheel_over_confirm_dialog_is_a_no_op() {
     // A confirm dialog has nothing to scroll, so the wheel is dropped on both the
     // coalesced and per-event paths.
     assert_eq!(
-        mouse::wheel_to_action(&app, mouse(MouseEventKind::ScrollDown, 5, 5), 2, area, &view),
+        mouse::wheel_to_action(
+            &app,
+            mouse(MouseEventKind::ScrollDown, 5, 5),
+            2,
+            area,
+            &view
+        ),
         None
     );
 }

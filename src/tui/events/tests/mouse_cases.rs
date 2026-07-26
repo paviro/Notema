@@ -649,6 +649,119 @@ fn scrollbar_track_press_jumps_then_drag_tracks_the_cursor() {
     }
 }
 
+/// A dialog list's bar drags like a pane's: arrows step, the track jumps, the
+/// drag tracks the cursor off the bar, and release ends it.
+#[test]
+fn dialog_scrollbar_presses_and_drags_scroll_the_list() {
+    use crate::tui::state::ListNav;
+
+    let area = Rect::new(0, 0, 120, 30);
+    let mut app = app_with_entries(1);
+    app.begin_edit_feelings();
+
+    let offset = |app: &AppModel| app.edit_feeling_state().unwrap().offset();
+    let state = app.edit_feeling_state().unwrap();
+    let list = render::feelings_dialog_layout(
+        &app.appearance.theme,
+        area,
+        state.item_count(),
+        &state.selected,
+    )
+    .list;
+    let bar = render::dialog_list_scrollbar_rect(list);
+    assert!(
+        state.item_count() > list.height as usize,
+        "the list must overflow for a bar to be drawn"
+    );
+
+    // The down arrow steps one row without arming a drag.
+    mouse_in_area(
+        &mut app,
+        mouse(down(), bar.x, bar.y),
+        area.width,
+        area.height,
+    );
+    assert_eq!(offset(&app), 0);
+    mouse_in_area(
+        &mut app,
+        mouse(down(), bar.x, bar.y + bar.height - 1),
+        area.width,
+        area.height,
+    );
+    assert_eq!(offset(&app), 1);
+    assert!(app.scrollbar.active.is_none());
+
+    // Pressing empty track near the bottom jumps and arms the drag.
+    mouse_in_area(
+        &mut app,
+        mouse(down(), bar.x, bar.y + bar.height - 2),
+        area.width,
+        area.height,
+    );
+    assert_eq!(
+        app.scrollbar.active,
+        Some(ScrollbarDrag::Dialog(crate::tui::ui::DialogId::Feelings))
+    );
+    assert!(offset(&app) > 1);
+
+    // Dragging back to the top scrolls to 0 even with the cursor off the bar.
+    mouse_in_area(
+        &mut app,
+        mouse(drag(), 0, bar.y + 1),
+        area.width,
+        area.height,
+    );
+    assert_eq!(offset(&app), 0);
+
+    mouse_in_area(&mut app, mouse(up(), 0, bar.y + 1), area.width, area.height);
+    assert!(app.scrollbar.active.is_none());
+}
+
+/// The help overlay's table scrolls from its bar too, though its scroll lives on
+/// the overlay rather than in a list.
+#[test]
+fn help_scrollbar_drag_scrolls_the_cheatsheet() {
+    // Short enough that the shortcut table overflows.
+    let area = Rect::new(0, 0, 90, 16);
+    let mut app = app_with_entries(1);
+    app.open_help();
+
+    let layout = render::help_dialog_layout(
+        &app.appearance.theme,
+        area,
+        crate::tui::state::HelpTab::Shortcuts,
+    );
+    let bar = render::dialog_list_scrollbar_rect(layout.track);
+
+    mouse_in_area(
+        &mut app,
+        mouse(down(), bar.x, bar.y + bar.height - 2),
+        area.width,
+        area.height,
+    );
+    assert_eq!(
+        app.scrollbar.active,
+        Some(ScrollbarDrag::Dialog(crate::tui::ui::DialogId::Help))
+    );
+    match app.overlay {
+        crate::tui::state::Overlay::Help { scroll, .. } => {
+            assert!(scroll > 0, "the track press scrolled the table")
+        }
+        _ => panic!("help overlay closed on a scrollbar press"),
+    }
+
+    mouse_in_area(
+        &mut app,
+        mouse(drag(), 0, bar.y + 1),
+        area.width,
+        area.height,
+    );
+    match app.overlay {
+        crate::tui::state::Overlay::Help { scroll, .. } => assert_eq!(scroll, 0),
+        _ => panic!("help overlay closed on a scrollbar drag"),
+    }
+}
+
 #[test]
 fn reader_scrollbar_press_and_drag_scroll_the_reader() {
     let mut app = app_with_entry();

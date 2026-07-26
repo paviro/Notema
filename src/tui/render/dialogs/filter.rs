@@ -12,7 +12,7 @@ use ratatui::{
 
 use crate::tui::app::SearchScope;
 use crate::tui::features::filter::FilterState;
-use crate::tui::render::tab_strip::{StripTab, full_strip_width, tab_segments, tab_strip_line};
+use crate::tui::render::tab_strip::{StripTab, full_strip_width, tab_strip_line};
 use crate::tui::state::{FilterTab, HoverTarget, ListNav};
 use crate::tui::theme::Theme;
 
@@ -21,7 +21,8 @@ use super::super::chrome::{
 };
 use super::super::footer::{Hint, HintId, hint_height};
 use super::super::frames::{
-    dialog_content_full, dialog_frame_rows, dialog_inner, dialog_list_width, draw_dialog_frame_wide,
+    dialog_content_full, dialog_frame_rows, dialog_hints_rect, dialog_list_width, dialog_row,
+    draw_dialog_frame_wide,
 };
 use super::super::list_state_for_render;
 
@@ -58,23 +59,6 @@ impl StripTab for FilterTab {
     }
 }
 
-/// Each tab header's clickable rect on the strip row `tabs`, so a click maps
-/// straight to its [`FilterTab`]. No leading pad: the strip runs flush.
-pub(crate) fn filter_tab_segments(tabs: Rect) -> Vec<(FilterTab, Rect)> {
-    tab_segments::<FilterTab>(0, tabs.width)
-        .into_iter()
-        .map(|(tab, range)| {
-            let rect = Rect {
-                x: tabs.x + range.start,
-                y: tabs.y,
-                width: range.end - range.start,
-                height: 1,
-            };
-            (tab, rect)
-        })
-        .collect()
-}
-
 // ── Layout ────────────────────────────────────────────────────────────────────
 
 /// The dialog's outer width: the tab strip at full labels (its widest row), so the
@@ -85,8 +69,7 @@ fn filter_dialog_width() -> u16 {
 }
 
 fn filter_dialog_hint_height(theme: &Theme, frame_area: Rect) -> u16 {
-    let probe = centered_rect_fixed_size(filter_dialog_width(), 1, frame_area);
-    let width = dialog_inner(theme, probe).width;
+    let width = super::dialog_hint_width(theme, frame_area, filter_dialog_width());
     hint_height(&FILTER_DIALOG_HINTS, width)
 }
 
@@ -121,12 +104,6 @@ pub(crate) fn filter_dialog_layout(
     // right edge; the list narrows to leave the bar room only when it overflows.
     let inner = dialog_content_full(theme, area);
     let hint_height = filter_dialog_hint_height(theme, frame_area);
-    let row = |offset: u16| Rect {
-        x: inner.x,
-        y: inner.y + offset,
-        width: inner.width,
-        height: 1,
-    };
     let list_height = inner
         .height
         .saturating_sub(FILTER_DIALOG_CHROME + FILTER_DIALOG_HINTS_SPACER + hint_height);
@@ -136,19 +113,12 @@ pub(crate) fn filter_dialog_layout(
         width: dialog_list_width(theme, inner.width, state.current_rows().len(), list_height),
         height: list_height,
     };
-    let hints = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(hint_height),
-        width: inner.width,
-        height: hint_height,
-    };
-
     FilterDialogLayout {
         area,
-        tabs: row(0),
-        separator: row(1),
+        tabs: dialog_row(inner, 0),
+        separator: dialog_row(inner, 1),
         list,
-        hints,
+        hints: dialog_hints_rect(inner, hint_height),
     }
 }
 

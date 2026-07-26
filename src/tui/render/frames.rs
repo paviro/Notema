@@ -9,11 +9,14 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
+use crate::tui::state::HoverTarget;
 use crate::tui::surface::surface_content_inner;
 use crate::tui::theme::Theme;
 
-use super::chrome::{centered_rect_fixed_size, clear_surface, flat_chrome, surface_style};
-use super::footer::key_chip_style;
+use super::chrome::{
+    centered_rect_fixed_size, clear_surface, flat_chrome, separator_style, surface_style,
+};
+use super::footer::{Hint, hint_lines, key_chip_style};
 
 /// Rows a dialog's frame consumes above and below its content: the two border
 /// rows when bordered; flat trades them for a padding row, the title row, and
@@ -80,6 +83,28 @@ pub(crate) fn dialog_list_width(
         inner_width.saturating_sub(dialog_list_gutter(theme))
     } else {
         inner_width
+    }
+}
+
+/// A single full-width content row `offset` rows below the top of `inner`.
+pub(crate) fn dialog_row(inner: Rect, offset: u16) -> Rect {
+    Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(offset),
+        width: inner.width,
+        height: 1,
+    }
+}
+
+/// A dialog's hint block: `height` rows flush with the bottom of `inner`, full
+/// content width. Anchoring to the bottom rather than to the content above it
+/// keeps the hints pinned when a short terminal squeezes the rows between.
+pub(crate) fn dialog_hints_rect(inner: Rect, height: u16) -> Rect {
+    Rect {
+        x: inner.x,
+        y: inner.y.saturating_add(inner.height.saturating_sub(height)),
+        width: inner.width,
+        height,
     }
 }
 
@@ -161,6 +186,49 @@ fn draw_dialog_frame_with_title_row(
     dialog_inner(theme, area)
 }
 
+/// Draw a dialog's horizontal rule across the first row of `area`.
+pub(crate) fn render_separator(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
+    if area.width == 0 {
+        return;
+    }
+
+    frame.render_widget(
+        Paragraph::new(
+            theme
+                .glyphs()
+                .separator
+                .to_string()
+                .repeat(area.width as usize),
+        )
+        .style(separator_style(theme)),
+        Rect { height: 1, ..area },
+    );
+}
+
+/// Draw a dialog's hint block into `area`, which must be [`dialog_hints_rect`]'s
+/// rect for the same hints — its height is what the wrapped grid needs.
+pub(crate) fn render_hint_line(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    hints: &[Hint],
+    area: Rect,
+    hover: HoverTarget,
+) {
+    frame.render_widget(
+        Paragraph::new(hint_lines(theme, hints, area.width, hovered_hint(hover))),
+        area,
+    );
+}
+
+/// The hint chip a hover targets, if any — dialog hint bars share the footer's
+/// [`HoverTarget::FooterHint`] since the chips are the same clickable kind.
+fn hovered_hint(hover: HoverTarget) -> Option<super::HintId> {
+    match hover {
+        HoverTarget::FooterHint(id) => Some(id),
+        _ => None,
+    }
+}
+
 /// Width and gap of the two confirm buttons; sized for a comfortable click target
 /// with room for the label and its key hint.
 const CONFIRM_BUTTON_WIDTH: u16 = 16;
@@ -170,14 +238,13 @@ const CONFIRM_BUTTON_GAP: u16 = 2;
 /// The `(yes, no)` button rects, centered on the last row of `inner`. Sizing and
 /// hit-testing both derive from this, so the drawn buttons match the click targets.
 pub(crate) fn confirm_button_rects(inner: Rect) -> (Rect, Rect) {
-    let y = inner.y + inner.height.saturating_sub(1);
+    let row = dialog_hints_rect(inner, 1);
     let total = CONFIRM_BUTTON_WIDTH * 2 + CONFIRM_BUTTON_GAP;
     let start = inner.x + inner.width.saturating_sub(total) / 2;
     let yes = Rect {
         x: start,
-        y,
         width: CONFIRM_BUTTON_WIDTH,
-        height: 1,
+        ..row
     };
     let no = Rect {
         x: start + CONFIRM_BUTTON_WIDTH + CONFIRM_BUTTON_GAP,

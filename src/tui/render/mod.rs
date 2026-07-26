@@ -13,7 +13,7 @@ mod menus;
 mod metadata;
 mod pending;
 mod reader;
-mod tab_strip;
+pub(crate) mod tab_strip;
 mod table;
 mod toasts;
 mod unlock;
@@ -52,6 +52,8 @@ use super::ui::{
     ConfirmId, DialogId, DialogInputId, InteractionKind, RenderContext, TextFieldId,
     interaction::PanelId,
 };
+#[cfg(test)]
+pub(crate) use chrome::dialog_list_scrollbar_rect;
 pub(crate) use chrome::{
     centered_rect_fixed_size, container_block, container_block_vertical_inset, count_label,
     flat_chrome, panel_block, panel_focus_stripe, render_centered_notice,
@@ -89,6 +91,8 @@ pub(crate) use journals::{journal_list_rect, journal_row_height};
 #[cfg(test)]
 use layout::metadata_scrolls_with_body;
 pub(crate) use layout::{TuiLayout, tui_layout};
+#[cfg(test)]
+pub(crate) use menus::help_dialog_layout;
 pub(crate) use menus::{draw_editor_shortcuts, draw_metadata_menu};
 pub(crate) use pending::{
     AccessNotice, draw_disable_notice, draw_pending_notice, draw_pending_request,
@@ -247,10 +251,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut AppModel, context: &mut Rend
     draw_toasts(theme, frame, app);
 }
 
-/// Register a pane scrollbar's grab region — the one-cell bar plus one column
-/// on each side, so it is easier to hit — carrying the metrics the mouse
-/// handler needs to map presses and drags to scroll offsets. Skipped when the
-/// content fits (no bar is drawn — `render_scrollbar_if_needed`'s guard).
+/// Register a pane scrollbar's grab region from its panel area.
 fn register_scrollbar(
     context: &mut RenderContext<'_>,
     which: crate::tui::app::ScrollbarDrag,
@@ -260,6 +261,41 @@ fn register_scrollbar(
     scroll: usize,
 ) {
     let bar = scrollbar_bar_rect(context.theme, panel_area);
+    register_scrollbar_bar(context, which, bar, content_length, viewport, scroll);
+}
+
+/// Register a dialog list's scrollbar from the rect the list occupies, so the
+/// grab region tracks `render_dialog_list_scrollbar`'s bar.
+fn register_dialog_scrollbar(
+    context: &mut RenderContext<'_>,
+    dialog: DialogId,
+    list: ratatui::layout::Rect,
+    content_length: usize,
+    scroll: usize,
+) {
+    let bar = chrome::dialog_list_scrollbar_rect(list);
+    register_scrollbar_bar(
+        context,
+        crate::tui::app::ScrollbarDrag::Dialog(dialog),
+        bar,
+        content_length,
+        list.height,
+        scroll,
+    );
+}
+
+/// Register a scrollbar's grab region — the one-cell bar plus one column on each
+/// side, so it is easier to hit — carrying the metrics the mouse handler needs to
+/// map presses and drags to scroll offsets. Skipped when the content fits, since
+/// then no bar is drawn.
+fn register_scrollbar_bar(
+    context: &mut RenderContext<'_>,
+    which: crate::tui::app::ScrollbarDrag,
+    bar: ratatui::layout::Rect,
+    content_length: usize,
+    viewport: u16,
+    scroll: usize,
+) {
     let max_scroll = content_length.saturating_sub(viewport as usize);
     if max_scroll == 0 || bar.height == 0 {
         return;
@@ -447,6 +483,13 @@ fn register_overlay_interactions(
                     },
                 );
             }
+            register_dialog_scrollbar(
+                context,
+                DialogId::Settings,
+                layout.list,
+                state.items.len(),
+                offset,
+            );
             register_hint_regions(context, layout.hints, dialogs::settings_dialog_hints());
         }
         Overlay::MetadataMenu => {
@@ -543,6 +586,13 @@ fn register_overlay_interactions(
                     },
                 );
             }
+            register_dialog_scrollbar(
+                context,
+                DialogId::Location,
+                layout.list,
+                labels.len(),
+                state.offset(),
+            );
             register_hint_regions(
                 context,
                 layout.hints,
@@ -558,7 +608,8 @@ fn register_overlay_interactions(
             );
         }
         Overlay::ThemePicker(state) => {
-            let hint_state = state.hint_state();
+            let hint_state =
+                state.hint_state(app.appearance.chrome_override, app.appearance.color_mode);
             let layout = dialogs::theme_picker_layout(
                 context.theme,
                 frame_area,
@@ -575,16 +626,12 @@ fn register_overlay_interactions(
             register_hint_regions(
                 context,
                 layout.hints,
-                &dialogs::theme_picker_hints(
-                    hint_state,
-                    app.appearance.chrome_override,
-                    app.appearance.color_mode,
-                ),
+                &dialogs::theme_picker_hints(hint_state),
             );
         }
         Overlay::Filter(state) => {
             let layout = dialogs::filter_dialog_layout(context.theme, frame_area, state);
-            for (tab, rect) in dialogs::filter_tab_segments(layout.tabs) {
+            for (tab, rect) in tab_strip::tab_rects::<crate::tui::state::FilterTab>(layout.tabs) {
                 context
                     .view
                     .interactions
@@ -598,6 +645,25 @@ fn register_overlay_interactions(
                 DialogId::Filter,
             );
             register_hint_regions(context, layout.hints, dialogs::filter_dialog_hints());
+        }
+        Overlay::Help { tab, scroll } => {
+            let layout = menus::help_dialog_layout(context.theme, frame_area, *tab);
+            if let Some(tabs) = layout.tabs {
+                for (tab, rect) in tab_strip::tab_rects::<crate::tui::state::HelpTab>(tabs) {
+                    context
+                        .view
+                        .interactions
+                        .push(rect, InteractionKind::HelpTab(tab));
+                }
+            }
+            register_dialog_scrollbar(
+                context,
+                DialogId::Help,
+                layout.track,
+                layout.total as usize,
+                *scroll as usize,
+            );
+            register_hint_regions(context, layout.hints, menus::help_dialog_hints());
         }
         _ => {}
     }
@@ -616,7 +682,18 @@ fn register_overlay_interactions(
                     ConfirmId::EditorDiscard,
                 );
             }
-            EditorPrompt::Help { .. } | EditorPrompt::None => {}
+            EditorPrompt::Help { scroll } => {
+                let layout = menus::editor_shortcuts_layout(context.theme, frame_area);
+                register_dialog_scrollbar(
+                    context,
+                    DialogId::EditorHelp,
+                    layout.track,
+                    layout.total as usize,
+                    scroll as usize,
+                );
+                register_hint_regions(context, layout.hints, menus::editor_shortcuts_hints());
+            }
+            EditorPrompt::None => {}
         }
     }
 
@@ -718,6 +795,7 @@ fn register_dialog_list(
             InteractionKind::DialogRow { dialog, index },
         );
     }
+    register_dialog_scrollbar(context, dialog, list, len, offset);
 }
 
 fn register_hint_regions(
@@ -725,32 +803,19 @@ fn register_hint_regions(
     area: ratatui::layout::Rect,
     hints: &[Hint],
 ) {
+    // Lay the grid out at the very origin and width `render_hint_line` draws at:
+    // the gaps absorb leftover width, so an inset probe shifts every chip.
+    let hint_at = |x, y| footer::hint_id_at_wrapped(hints, area.x, area.y, area.width, x, y);
     for y in area.y..area.bottom() {
         let mut x = area.x;
         while x < area.right() {
-            let Some(id) = footer::hint_id_at_wrapped(
-                hints,
-                area.x.saturating_add(1),
-                area.y,
-                area.width.saturating_sub(1),
-                x,
-                y,
-            ) else {
+            let Some(id) = hint_at(x, y) else {
                 x += 1;
                 continue;
             };
             let start = x;
             x += 1;
-            while x < area.right()
-                && footer::hint_id_at_wrapped(
-                    hints,
-                    area.x.saturating_add(1),
-                    area.y,
-                    area.width.saturating_sub(1),
-                    x,
-                    y,
-                ) == Some(id)
-            {
+            while x < area.right() && hint_at(x, y) == Some(id) {
                 x += 1;
             }
             context.view.interactions.push(
@@ -854,8 +919,8 @@ fn draw_overlays(theme: &crate::tui::theme::Theme, frame: &mut Frame<'_>, app: &
         draw_settings_dialog(theme, frame, state, &app.services.config, hover);
     }
 
-    if let crate::tui::state::Overlay::Help { scroll } = &mut app.overlay {
-        menus::draw_help(theme, frame, scroll);
+    if let crate::tui::state::Overlay::Help { tab, scroll } = &mut app.overlay {
+        menus::draw_help(theme, frame, *tab, hover, scroll);
     }
 
     let picker_chrome = app.appearance.chrome_override;
@@ -901,7 +966,7 @@ fn draw_overlays(theme: &crate::tui::theme::Theme, frame: &mut Frame<'_>, app: &
             EditorPrompt::MetadataMenu => {
                 draw_metadata_menu(theme, frame, hovered_dialog_row, hovered_menu_hint)
             }
-            EditorPrompt::Help { scroll } => draw_editor_shortcuts(theme, frame, scroll),
+            EditorPrompt::Help { scroll } => draw_editor_shortcuts(theme, frame, hover, scroll),
             EditorPrompt::ConfirmDiscard { discard_selected } => {
                 draw_editor_discard_confirm(theme, frame, *discard_selected, hovered_button)
             }

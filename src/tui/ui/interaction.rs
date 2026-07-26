@@ -45,6 +45,8 @@ pub(crate) enum DialogId {
     Feelings,
     Location,
     Filter,
+    Help,
+    EditorHelp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -80,6 +82,8 @@ pub(crate) enum InteractionKind {
     },
     /// A tab header in the filter dialog.
     FilterTab(crate::tui::state::FilterTab),
+    /// A tab header in the help overlay.
+    HelpTab(crate::tui::state::HelpTab),
     DialogInput(DialogInputId),
     ConfirmButton {
         confirm: ConfirmId,

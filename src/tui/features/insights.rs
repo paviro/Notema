@@ -50,10 +50,6 @@ impl InsightsTab {
     pub(crate) const ALL: [InsightsTab; 4] =
         [Self::Overview, Self::Writing, Self::Feelings, Self::Drivers];
 
-    pub(crate) fn index(self) -> usize {
-        Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0)
-    }
-
     /// Whether this tab renders a scrollable list (Drivers' ranking, Feelings'
     /// frequency table) rather than a fixed dashboard — the tabs that record
     /// scrollbar geometry and respond to arrow/page keys.
@@ -103,14 +99,6 @@ impl InsightsTab {
             Self::Feelings => "M",
             Self::Drivers => "D",
         }
-    }
-
-    pub(crate) fn next(self) -> Self {
-        Self::ALL[(self.index() + 1) % Self::ALL.len()]
-    }
-
-    pub(crate) fn prev(self) -> Self {
-        Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 }
 

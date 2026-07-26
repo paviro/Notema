@@ -72,6 +72,7 @@ pub(crate) enum HintId {
     OpenFilter,
     FilterNextTab,
     FilterLaunch,
+    HelpSwitchTab,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

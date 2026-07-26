@@ -1082,6 +1082,55 @@ fn list_dialogs_keep_preferred_width_until_they_hit_edges() {
     assert_eq!(narrow_mood.area.width, 80);
 }
 
+/// The mood dialog is 90 columns wide, so its five hints fit on one row. It used
+/// to size its hint block against a 44-column probe and reserve three, leaving
+/// two dead rows under the bar.
+#[test]
+fn mood_dialog_reserves_only_the_hint_rows_it_draws() {
+    for theme in [
+        theme::Theme::terminal_default(),
+        theme::test_flat_theme().with_chrome_override(Some(crate::tui::theme::ChromeStyle::Flat)),
+    ] {
+        let layout = mood_dialog_layout(&theme, Rect::new(0, 0, 120, 30));
+        assert_eq!(
+            layout.hints.height, 1,
+            "five hints fit one row at 90 columns"
+        );
+        assert_eq!(
+            layout.hints.y + layout.hints.height,
+            layout.inner.y + layout.inner.height
+        );
+    }
+}
+
+/// The picker's chrome/mode hints carry live labels, and the wider ones ("chrome:
+/// bordered", "mode: light") can push the grid onto more rows than the narrow
+/// defaults. Sizing reads the same labels the draw does, so nothing is clipped.
+#[test]
+fn theme_picker_reserves_hint_rows_for_the_live_labels() {
+    use crate::config::ColorMode;
+    use crate::tui::theme::ChromeStyle;
+
+    let mut app = app_with_journals(&["work"]);
+    app.open_theme_picker();
+    let state = app.theme_picker_state().unwrap();
+    let len = state.entries.len();
+    let active = app.appearance.theme.clone();
+
+    let narrow = state.hint_state(None, ColorMode::Auto);
+    let widest = state.hint_state(Some(ChromeStyle::Bordered), ColorMode::Light);
+    let area = Rect::new(0, 0, 90, 30);
+
+    for inputs in [narrow, widest] {
+        let layout = theme_picker_layout(&active, area, len, inputs);
+        let drawn = footer::hint_height(&theme_picker_hints(inputs), layout.hints.width);
+        assert_eq!(
+            layout.hints.height, drawn,
+            "the reserved block matches the rows the hints wrap onto"
+        );
+    }
+}
+
 #[test]
 fn feelings_dialog_folds_groups_and_marks_disclosure() {
     use crate::tui::features::feelings::EditFeelingState;
@@ -2743,7 +2792,12 @@ fn reader_and_editor_frame_the_body_the_same() {
 #[test]
 fn editor_shortcuts_list_grouped_bindings() {
     let text = render_to_text(90, 44, |frame| {
-        super::menus::draw_editor_shortcuts(&theme::Theme::terminal_default(), frame, &mut 0)
+        super::menus::draw_editor_shortcuts(
+            &theme::Theme::terminal_default(),
+            frame,
+            crate::tui::state::HoverTarget::None,
+            &mut 0,
+        )
     });
     assert!(text.contains("Editor Shortcuts"));
     // A group header, plus bindings from each section.
@@ -2796,12 +2850,58 @@ fn editor_metadata_menu_registers_row_and_close_regions() {
     assert!(close, "close footer registered");
 }
 
+/// The hint grid spreads its leftover width across the gaps, so laying the
+/// hit-test out at a different origin or width than the draw shifts every chip.
+/// The first chip is where that showed: its leftmost cell used to be dead.
+#[test]
+fn dialog_hint_regions_start_where_the_chips_are_drawn() {
+    use crate::tui::ui::InteractionKind;
+
+    let mut app = app_with_entries(3);
+    app.begin_filter();
+    let area = Rect::new(0, 0, 80, 30);
+    let mut view = crate::tui::ui::ViewState::default();
+    let backend = render_backend(area.width, area.height, |frame| {
+        draw_app(frame, &mut app, &mut view)
+    });
+
+    let state = app.filter_state().unwrap();
+    let hints = dialogs::filter_dialog_layout(&app.appearance.theme, area, state).hints;
+    let buffer = backend.buffer();
+
+    // The key chip is the only reversed run on the row, and its leading pad is a
+    // styled space — so the style, not the glyph, marks where the chip starts.
+    let chip_style = footer::key_chip_style(&app.appearance.theme);
+    let mut checked = 0;
+    for y in hints.y..hints.y + hints.height {
+        let Some(x) = (hints.x..hints.x + hints.width)
+            .find(|x| buffer[(*x, y)].modifier.contains(chip_style.add_modifier))
+        else {
+            continue;
+        };
+        assert!(
+            matches!(view.interactions.hit(x, y), Some(InteractionKind::Hint(_))),
+            "the chip drawn at ({x}, {y}) is not clickable at its first cell"
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no hint chips were found to check");
+}
+
 #[test]
 fn help_cheatsheet_lists_grouped_bindings() {
+    use crate::tui::state::HelpTab;
+
     let text = render_to_text(72, 44, |frame| {
-        menus::draw_help(&theme::Theme::terminal_default(), frame, &mut 0)
+        menus::draw_help(
+            &theme::Theme::terminal_default(),
+            frame,
+            HelpTab::Shortcuts,
+            crate::tui::state::HoverTarget::None,
+            &mut 0,
+        )
     });
-    assert!(text.contains("Keyboard Shortcuts"));
+    assert!(text.contains("Help"));
     // A bare metadata key the footer no longer advertises, plus a grouped label.
     assert!(text.contains("Tags"));
     assert!(text.contains("Metadata"));
@@ -2809,10 +2909,19 @@ fn help_cheatsheet_lists_grouped_bindings() {
     assert!(text.contains("Settings"));
     assert!(text.contains("Quit"));
     assert!(text.contains("This help"));
-    // The search prefixes are documented nowhere else in the app.
-    assert!(text.contains("Search filters"));
-    assert!(text.contains("date:"));
-    assert!(text.contains("mood:"));
+
+    // The search prefixes are documented on the Search tab, nowhere else.
+    let search = render_to_text(72, 44, |frame| {
+        menus::draw_help(
+            &theme::Theme::terminal_default(),
+            frame,
+            HelpTab::Search,
+            crate::tui::state::HoverTarget::None,
+            &mut 0,
+        )
+    });
+    assert!(search.contains("date:"));
+    assert!(search.contains("mood:"));
 }
 
 /// On a terminal too short to show every row, the cheatsheet scrolls rather than
@@ -2822,15 +2931,27 @@ fn help_cheatsheet_scrolls_when_the_terminal_is_short() {
     // "This help" (the `?` binding) sits low in its column, so it is below the
     // fold at scroll 0 on a short terminal but reachable once scrolled.
     let top = render_to_text(72, 14, |frame| {
-        menus::draw_help(&theme::Theme::terminal_default(), frame, &mut 0)
+        menus::draw_help(
+            &theme::Theme::terminal_default(),
+            frame,
+            crate::tui::state::HelpTab::Shortcuts,
+            crate::tui::state::HoverTarget::None,
+            &mut 0,
+        )
     });
     let bottom = render_to_text(72, 14, |frame| {
-        menus::draw_help(&theme::Theme::terminal_default(), frame, &mut 9999)
+        menus::draw_help(
+            &theme::Theme::terminal_default(),
+            frame,
+            crate::tui::state::HelpTab::Shortcuts,
+            crate::tui::state::HoverTarget::None,
+            &mut 9999,
+        )
     });
 
     // The footer is pinned in both — the box never clips it away.
-    assert!(top.contains("press any key to close"));
-    assert!(bottom.contains("press any key to close"));
+    assert!(top.contains("switch"));
+    assert!(bottom.contains("switch"));
 
     // Scrolling actually moves the viewport and brings the hidden row into view.
     assert!(
@@ -3099,7 +3220,10 @@ fn theme_picker_renders_broken_rows_in_the_error_style() {
     fs::write(themes.join("busted.toml"), "surfaces = 12\n").unwrap();
     app.open_theme_picker();
     let state = app.theme_picker_state().unwrap();
-    let (len, hint_inputs) = (state.entries.len(), state.hint_state());
+    let (len, hint_inputs) = (
+        state.entries.len(),
+        state.hint_state(app.appearance.chrome_override, app.appearance.color_mode),
+    );
     let active_theme = app.appearance.theme.clone();
 
     let backend = render_app(app, 90, 30);
@@ -3316,6 +3440,49 @@ mod flat_chrome_tests {
         assert!(is_scrollbar(bar_x, layout.list.y));
         assert!(!is_scrollbar(bar_x, layout.tabs.y));
         assert!(!is_scrollbar(bar_x, layout.hints.y));
+    }
+
+    /// The help overlay is a dialog like the rest, so its bar rides the same
+    /// column and stays on the table's rows — it used to span the whole box at
+    /// the outer edge, crossing the tab strip and the hint block.
+    #[test]
+    fn help_dialog_scrollbar_matches_the_other_dialogs() {
+        use crate::tui::state::HelpTab;
+
+        for theme in [
+            flat_theme().with_chrome_override(Some(theme::ChromeStyle::Flat)),
+            flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered)),
+        ] {
+            // Short enough that the shortcut table has to scroll.
+            let frame_area = Rect::new(0, 0, 90, 20);
+            let layout = menus::help_dialog_layout(&theme, frame_area, HelpTab::Shortcuts);
+            let tabs = layout.tabs.expect("the help dialog has tabs");
+            let bar_x = layout.track.x + layout.track.width + 1;
+
+            let backend = render_backend(frame_area.width, frame_area.height, |frame| {
+                menus::draw_help(&theme, frame, HelpTab::Shortcuts, HoverTarget::None, &mut 0)
+            });
+            let glyphs = theme.glyphs();
+            let scrollbar_glyphs = [
+                glyphs.scrollbar_thumb,
+                glyphs.scrollbar_track,
+                glyphs.scrollbar_up,
+                glyphs.scrollbar_down,
+            ];
+            let is_scrollbar = |x: u16, y: u16| {
+                backend.buffer()[(x, y)]
+                    .symbol()
+                    .chars()
+                    .next()
+                    .is_some_and(|c| scrollbar_glyphs.contains(&c))
+            };
+            assert!(
+                is_scrollbar(bar_x, layout.hints.y - 2),
+                "the bar paints on the table's rows"
+            );
+            assert!(!is_scrollbar(bar_x, tabs.y), "not on the tab strip");
+            assert!(!is_scrollbar(bar_x, layout.hints.y), "not on the hints");
+        }
     }
 
     #[test]

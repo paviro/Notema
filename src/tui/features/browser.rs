@@ -7,6 +7,7 @@ use crate::tui::{
     app::{AppModel, EntryTarget, Focus, Mode, single_panel_is_active},
     entry_rows::RowMeta,
     features::{insights::InsightsTab, metadata::metadata_values},
+    render::tab_strip::StripTab,
     state::{MetadataKind, move_list_selection},
 };
 

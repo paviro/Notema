@@ -15,14 +15,10 @@ fn theme_picker_title(state: &ThemePickerState) -> String {
 /// The picker's hint row, with the chrome and mode hints' labels reflecting
 /// the live `[ui]` settings so cycling them reads back immediately. The mode
 /// hint only shows when the highlighted theme has dark/light variants.
-pub(crate) fn theme_picker_hints(
-    inputs: crate::tui::state::PickerHints,
-    chrome_override: Option<crate::tui::theme::ChromeStyle>,
-    color_mode: crate::config::ColorMode,
-) -> Vec<Hint> {
+pub(crate) fn theme_picker_hints(inputs: crate::tui::state::PickerHints) -> Vec<Hint> {
     use crate::config::ColorMode;
     use crate::tui::theme::ChromeStyle;
-    let chrome = match chrome_override {
+    let chrome = match inputs.chrome_override {
         None => Hint::new("chrome: default", "b", HintId::ThemePickerChrome),
         Some(ChromeStyle::Flat) => Hint::new("chrome: flat", "b", HintId::ThemePickerChrome),
         Some(ChromeStyle::Bordered) => {
@@ -34,7 +30,7 @@ pub(crate) fn theme_picker_hints(
         chrome,
     ];
     if inputs.mode_switchable {
-        hints.push(match color_mode {
+        hints.push(match inputs.color_mode {
             ColorMode::Auto => Hint::new("mode: auto", "m", HintId::ThemePickerMode),
             ColorMode::Dark => Hint::new("mode: dark", "m", HintId::ThemePickerMode),
             ColorMode::Light => Hint::new("mode: light", "m", HintId::ThemePickerMode),
@@ -54,7 +50,7 @@ fn theme_picker_hint_height(
     inputs: crate::tui::state::PickerHints,
 ) -> u16 {
     hint_height(
-        &theme_picker_hints(inputs, None, crate::config::ColorMode::Auto),
+        &theme_picker_hints(inputs),
         dialog_hint_width(theme, frame_area, LIST_DIALOG_WIDTH),
     )
 }
@@ -99,14 +95,11 @@ pub(crate) fn theme_picker_layout(
         width: dialog_list_width(theme, inner.width, len, list_height),
         height: list_height,
     };
-    let hints = Rect {
-        x: inner.x,
-        y: inner.y + inner.height.saturating_sub(hint_height),
-        width: inner.width,
-        height: hint_height,
-    };
-
-    ThemePickerLayout { area, list, hints }
+    ThemePickerLayout {
+        area,
+        list,
+        hints: dialog_hints_rect(inner, hint_height),
+    }
 }
 
 pub(crate) fn draw_theme_picker(
@@ -118,7 +111,7 @@ pub(crate) fn draw_theme_picker(
     hover: HoverTarget,
 ) {
     let hovered_row = hovered_dialog_row(hover);
-    let hint_inputs = state.hint_state();
+    let hint_inputs = state.hint_state(chrome_override, color_mode);
     let layout = theme_picker_layout(theme, frame.area(), state.entries.len(), hint_inputs);
 
     state.normalize_list_state();
@@ -181,7 +174,7 @@ pub(crate) fn draw_theme_picker(
     render_hint_line(
         theme,
         frame,
-        &theme_picker_hints(hint_inputs, chrome_override, color_mode),
+        &theme_picker_hints(hint_inputs),
         layout.hints,
         hover,
     );

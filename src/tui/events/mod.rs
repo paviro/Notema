@@ -12,7 +12,7 @@ use crate::{
         app::{AppModel, Focus, ReaderLinkTarget, reader_is_available},
         editor_state::{EditorPrompt, EditorTarget},
         render,
-        state::{ListNav, Overlay, ToastVariant},
+        state::{HelpTab, ListNav, Overlay, ToastVariant},
     },
 };
 use ratatui_textarea::CursorMove;
@@ -483,13 +483,22 @@ fn request_editor_discard(app: &mut AppModel) {
 
 /// Scroll the global help cheatsheet, clamping at the top; the draw clamps the
 /// bottom against the rendered height it alone knows.
-fn scroll_help(app: &mut AppModel, delta: i16) {
-    if let Overlay::Help { scroll } = &mut app.overlay {
+pub(super) fn scroll_help(app: &mut AppModel, delta: i16) {
+    if let Overlay::Help { scroll, .. } = &mut app.overlay {
         *scroll = scroll.saturating_add_signed(delta);
     }
 }
 
-fn scroll_editor_help(app: &mut AppModel, delta: i16) {
+/// Switch the help overlay's tab via `f`, resetting the scroll so the new tab
+/// opens at its top.
+fn move_help_tab(app: &mut AppModel, f: impl Fn(HelpTab) -> HelpTab) {
+    if let Overlay::Help { tab, scroll } = &mut app.overlay {
+        *tab = f(*tab);
+        *scroll = 0;
+    }
+}
+
+pub(super) fn scroll_editor_help(app: &mut AppModel, delta: i16) {
     if let Some(EditorPrompt::Help { scroll }) =
         app.editor.as_mut().map(|editor| &mut editor.prompt)
     {
@@ -634,7 +643,7 @@ fn open_dialog_list_height<B: Backend>(
             &app.appearance.theme,
             area,
             state.entries.len(),
-            state.hint_state(),
+            state.hint_state(app.appearance.chrome_override, app.appearance.color_mode),
         )
         .list
         .height

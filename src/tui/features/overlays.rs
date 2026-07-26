@@ -1,7 +1,7 @@
 use crate::tui::{
     app::{AppModel, Focus, Mode},
     features::{location::EditLocationFocus, metadata::EditMetadataFocus},
-    state::{DeleteContext, Overlay},
+    state::{DeleteContext, HelpTab, Overlay},
     text_input::TextInput,
 };
 
@@ -132,7 +132,10 @@ impl AppModel {
 
     /// Open the global keyboard-shortcut cheatsheet.
     pub(crate) fn open_help(&mut self) {
-        self.overlay = Overlay::Help { scroll: 0 };
+        self.overlay = Overlay::Help {
+            tab: HelpTab::default(),
+            scroll: 0,
+        };
     }
 
     pub(crate) fn has_overlay(&self) -> bool {

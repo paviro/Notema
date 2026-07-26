@@ -1,13 +1,16 @@
-//! A horizontal tab strip shared by the insights panel and the filter
-//! dialog. Both lay their tabs out the same way: leading pad, labels joined by a
-//! ` · ` separator, collapsing from full titles to short titles to single-letter
-//! initials as the width shrinks. The segment math is the one source of truth for
-//! both drawing ([`tab_strip_line`]) and hit-testing ([`tab_segments`]) so they
-//! never drift.
+//! A horizontal tab strip shared by the insights panel and the filter and help
+//! dialogs. All three lay their tabs out the same way: leading pad, labels joined
+//! by a ` · ` separator, collapsing from full titles to short titles to
+//! single-letter initials as the width shrinks. The segment math is the one
+//! source of truth for both drawing ([`tab_strip_line`]) and hit-testing
+//! ([`tab_segments`], [`tab_rects`]) so they never drift.
 
 use std::ops::Range;
 
-use ratatui::text::{Line, Span};
+use ratatui::{
+    layout::Rect,
+    text::{Line, Span},
+};
 
 use crate::tui::entry_rows::text_width;
 use crate::tui::theme::Theme;
@@ -16,12 +19,32 @@ use crate::tui::theme::Theme;
 const SEPARATOR: u16 = 3;
 
 /// A tab enum that lays out on a strip with three label widths — full, short, and
-/// single-letter — collapsing to the narrowest that fits.
+/// single-letter — collapsing to the narrowest that fits. [`all`](Self::all)
+/// drives the shared cyclic navigation ([`index`](Self::index),
+/// [`next`](Self::next), [`prev`](Self::prev)), so implementors only supply the
+/// tab list and its labels.
 pub(crate) trait StripTab: Copy + PartialEq + 'static {
     fn all() -> &'static [Self];
     fn title(self) -> &'static str;
     fn short_title(self) -> &'static str;
     fn initial(self) -> &'static str;
+
+    /// This tab's position within [`all`](Self::all).
+    fn index(self) -> usize {
+        Self::all().iter().position(|tab| *tab == self).unwrap_or(0)
+    }
+
+    /// The next tab, wrapping past the last back to the first.
+    fn next(self) -> Self {
+        let all = Self::all();
+        all[(self.index() + 1) % all.len()]
+    }
+
+    /// The previous tab, wrapping past the first back to the last.
+    fn prev(self) -> Self {
+        let all = Self::all();
+        all[(self.index() + all.len() - 1) % all.len()]
+    }
 }
 
 /// Which label set the strip is using at a given width.
@@ -81,6 +104,24 @@ pub(crate) fn tab_segments<T: StripTab>(leading: u16, width: u16) -> Vec<(T, Ran
         x += w;
     }
     segments
+}
+
+/// Each tab header's clickable rect on the strip row `strip`, so a click maps
+/// straight to its tab. No leading pad: a dialog's strip runs flush with its
+/// content rows.
+pub(crate) fn tab_rects<T: StripTab>(strip: Rect) -> Vec<(T, Rect)> {
+    tab_segments::<T>(0, strip.width)
+        .into_iter()
+        .map(|(tab, range)| {
+            let rect = Rect {
+                x: strip.x + range.start,
+                y: strip.y,
+                width: range.end - range.start,
+                height: 1,
+            };
+            (tab, rect)
+        })
+        .collect()
 }
 
 /// The strip as a styled line: the `active` tab carries the focused-or-not
