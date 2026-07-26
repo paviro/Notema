@@ -2922,6 +2922,11 @@ fn help_cheatsheet_lists_grouped_bindings() {
     });
     assert!(search.contains("date:"));
     assert!(search.contains("mood:"));
+    // Chaining, value operators, and quoting are documented here too.
+    assert!(search.contains("Combine"));
+    assert!(search.contains("Every filter matches"));
+    assert!(search.contains("Any value matches"));
+    assert!(search.contains("Literal value"));
 }
 
 /// On a terminal too short to show every row, the cheatsheet scrolls rather than

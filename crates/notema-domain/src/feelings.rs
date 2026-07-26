@@ -336,7 +336,9 @@ pub fn normalize_feeling(feeling: &str) -> Option<String> {
 /// `query`: the (trimmed, lowercased) query is a substring of the feeling name or of one
 /// of that feeling's search aliases. Mirrors the feelings picker filter (see
 /// `EditFeelingState::visible_rows`) so `feelings:` search and the picker agree. An empty
-/// query matches every feeling, like an empty `tags:` filter matches any tagged entry.
+/// query matches every feeling, which is what the picker wants before you type; the
+/// `feelings:` search drops empty values before it gets here, so a bare `feelings:`
+/// matches nothing.
 pub fn feeling_matches_search(feeling: &str, query: &str) -> bool {
     let query = query.trim().to_lowercase();
     feeling.contains(&query)

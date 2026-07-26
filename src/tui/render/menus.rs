@@ -171,10 +171,10 @@ const HELP_SECTIONS: [(&str, &[(&str, &str)]); 6] = [
     ),
 ];
 
-/// The search-box command reference: the prefixes the search field understands
-/// and the date values they accept. One command per search — no prefix runs a
+/// The search-box command reference: the prefixes the search field understands,
+/// the date values they accept, and how to chain them. No prefix runs a
 /// full-text search instead.
-const SEARCH_SECTIONS: [(&str, &[(&str, &str)]); 4] = [
+const SEARCH_SECTIONS: [(&str, &[(&str, &str)]); 5] = [
     (
         "Filters",
         &[
@@ -182,7 +182,7 @@ const SEARCH_SECTIONS: [(&str, &[(&str, &str)]); 4] = [
             ("people:", "Person contains…"),
             ("activities:", "Activity contains…"),
             ("feelings:", "Feeling or its alias"),
-            ("location:", "Place; all words match"),
+            ("location:", "Place, all words match"),
             ("mood:", "Exact score -5 to 5"),
             ("star:", "Favorites"),
             ("star:false", "Everything else"),
@@ -205,16 +205,21 @@ const SEARCH_SECTIONS: [(&str, &[(&str, &str)]); 4] = [
             ("today", "Today"),
             ("yesterday", "Yesterday"),
             ("7d 2w 3m 1y", "The day that long ago"),
-            ("*-07-25", "Recurring; date: only"),
+            ("*-07-25", "Recurring, date: only"),
         ],
     ),
     (
-        "Notes",
+        "Combine",
         &[
-            ("one command", "No mixing in one search"),
-            ("no prefix", "Full-text search"),
+            ("tags:x; people:y", "Every filter matches"),
+            ("tags:x+y", "All values match"),
+            ("tags:x|y", "Any value matches"),
+            ("tags:x+y|z", "x and (y or z)"),
+            ("beach; tags:x", "Text plus filters"),
+            ("tags:\"x+y\"", "Literal value"),
         ],
     ),
+    ("Notes", &[("no prefix", "Full-text search")]),
 ];
 
 /// The section set shown on each help tab.

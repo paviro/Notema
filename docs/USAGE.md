@@ -37,7 +37,7 @@ it.
 ## Search filters
 
 `/` searches the whole corpus — body text and metadata — ranked by how well each
-entry matches. A `prefix:` instead filters on one field exactly:
+entry matches. A `prefix:` filters on one field exactly:
 
 ```
 tags:project        people:Alice        activities:coding
@@ -64,6 +64,32 @@ date:2026-*-25      the 25th of every month in 2026
 
 Because an open component recurs, it has no single span for `before:`/`after:` to
 compare against — those two take a fixed date.
+
+Chain filters with `;` to require all of them. `tags:`, `people:`, `activities:`,
+and `feelings:` take several values: `+` requires all of them and `|` accepts any.
+`+` binds looser, so `a+b|c` means a and (b or c):
+
+```
+tags:work+urgent; people:alice     both tags, and Alice
+tags:berlin|paris                  either tag
+after:2025-01; before:2025-06      a bounded range
+beach; tags:travel                 full-text "beach" and the travel tag
+```
+
+A prefix-less piece is a full-text search AND-ed with the filters, so it also
+supplies the ranking. Only `;`, `+`, and `|` are structural — values keep
+everything else (`location:Berlin, Germany`). Quote a value to match one of the
+three literally:
+
+```
+tags:"C++"          the tag C++, not "C" and "+"
+tags:"Berlin; Mitte"
+tags:"say ""hi"""   a quote inside a quoted value is written twice
+```
+
+Searches launched by clicking a tag, person, feeling, or a filter-browser row
+(`f`) quote themselves when they need to, so the query they drop in the search box
+always matches the value you clicked.
 
 ## Location
 

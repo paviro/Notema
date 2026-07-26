@@ -5,6 +5,7 @@ use notema_domain::Entry;
 use crate::tui::state::{ListNav, SelectableList};
 use crate::tui::{
     app::AppModel,
+    features::search::quote_filter_value,
     state::{EditMoodState, MetadataKind, Overlay},
     text_input::TextInput,
 };
@@ -138,7 +139,10 @@ impl AppModel {
 
     fn begin_metadata_search(&mut self, kind: MetadataKind, value: &str) {
         let scope = self.current_journal_scope();
-        let hits = self.search_results_by_metadata(kind, value);
+        // One quoted value for both the hits and the query box, so re-running the
+        // visible query reproduces them.
+        let value = quote_filter_value(value);
+        let hits = self.search_results_by_metadata(kind, &value);
         self.enter_search(scope, format!("{}:{value}", kind.search_prefix()), hits);
     }
 

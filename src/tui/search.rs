@@ -1,22 +1,37 @@
 use notema_domain::{Entry, EntryEncryptionState, SearchHit, SearchScope, normalize_for_search};
 
-/// Filter already-loaded entries in memory. No disk I/O or decryption — the
-/// caller's `Entry` cache already holds decrypted `content` for every entry.
-///
-/// A prefix-less query matches against the entry body and every metadata field
-/// (tags, people, activities, feelings) merged into one haystack. Whitespace
-/// splits the query into terms that must all match (AND). Each term is matched
-/// against whole *words* in the haystack — as an exact word, a prefix, a
-/// substring, or within a small edit distance for typos — never as a scattered
-/// subsequence, so a search only surfaces entries that actually contain the
-/// word. Matching is case- and accent-insensitive. Field-specific (`tags:` etc.)
-/// searches stay exact and are handled by the caller before reaching here.
-///
-/// Results are ordered by match quality; ties keep their incoming date order.
+/// [`search_loaded_entries_where`] with no extra gate. Only the benches and tests
+/// search without one; the app always has a predicate to pass.
+#[cfg(any(test, feature = "bench"))]
 pub(crate) fn search_loaded_entries(
     entries: &[Entry],
     query: &str,
     scope: &SearchScope,
+) -> Vec<SearchHit> {
+    search_loaded_entries_where(entries, query, scope, |_| true)
+}
+
+/// Filter already-loaded entries in memory. No disk I/O or decryption — the
+/// caller's `Entry` cache already holds decrypted `content` for every entry.
+///
+/// The query matches against the entry body and every metadata field (tags,
+/// people, activities, feelings) merged into one haystack. Whitespace splits it
+/// into terms that must all match (AND). Each term is matched against whole
+/// *words* in the haystack — as an exact word, a prefix, a substring, or within a
+/// small edit distance for typos — never as a scattered subsequence, so a search
+/// only surfaces entries that actually contain the word. Matching is case- and
+/// accent-insensitive.
+///
+/// Field-specific (`tags:` etc.) filters stay exact and are parsed by the caller,
+/// which passes them here as `predicate`; it runs after the scope and encryption
+/// checks. So a query mixing the two intersects them, with the text supplying the
+/// ranking: results are ordered by match quality, ties keeping their incoming
+/// date order.
+pub(crate) fn search_loaded_entries_where(
+    entries: &[Entry],
+    query: &str,
+    scope: &SearchScope,
+    predicate: impl Fn(&Entry) -> bool,
 ) -> Vec<SearchHit> {
     let terms: Vec<String> = query.split_whitespace().map(normalize_for_search).collect();
     if terms.is_empty() {
@@ -32,6 +47,9 @@ pub(crate) fn search_loaded_entries(
             entry.encryption_state,
             EntryEncryptionState::EncryptedLocked | EntryEncryptionState::EncryptedUnreadable
         ) {
+            continue;
+        }
+        if !predicate(entry) {
             continue;
         }
 

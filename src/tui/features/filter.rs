@@ -17,6 +17,7 @@ use crate::tui::app::{AppModel, Focus, SearchScope};
 use crate::tui::features::metadata::count_metadata;
 use crate::tui::features::search::{
     entry_in_search_scope, feeling_predicate, location_predicate, metadata_predicate,
+    quote_filter_value,
 };
 use crate::tui::render::tab_strip::StripTab;
 use crate::tui::state::{FilterTab, ListNav, MetadataKind, Overlay, SelectableList};
@@ -146,11 +147,12 @@ impl AppModel {
     fn metadata_filter_rows(&self, scope: &SearchScope, kind: MetadataKind) -> Vec<FilterRow> {
         // The distinct display values (nicely cased); their counts are then
         // recomputed with the substring predicate the launched `tags:`/`people:`/
-        // `activities:` search uses, so each row's count equals its result count.
+        // `activities:` search uses — quoted as `launch_filter_search` quotes it —
+        // so each row's count equals its result count.
         let mut rows: Vec<FilterRow> = count_metadata(self.scoped_entries(scope), kind)
             .into_iter()
             .map(|(label, _)| {
-                let matches = metadata_predicate(kind, &label);
+                let matches = metadata_predicate(kind, &quote_filter_value(&label));
                 let count = self.scoped_entries(scope).filter(|e| matches(e)).count();
                 FilterRow {
                     search_value: label.clone(),
@@ -171,7 +173,7 @@ impl AppModel {
         let mut rows: Vec<FilterRow> = distinct
             .into_iter()
             .map(|feeling| {
-                let matches = feeling_predicate(&feeling);
+                let matches = feeling_predicate(&quote_filter_value(&feeling));
                 let count = self.scoped_entries(scope).filter(|e| matches(e)).count();
                 FilterRow {
                     search_value: feeling.clone(),
@@ -220,7 +222,11 @@ impl AppModel {
             return;
         };
         let scope = state.scope.clone();
-        let query = format!("{}:{}", state.tab.search_prefix(), row.search_value);
+        let query = format!(
+            "{}:{}",
+            state.tab.search_prefix(),
+            quote_filter_value(&row.search_value)
+        );
         self.close_overlay();
         // `search_results` parses the query box and reads `self.search.scope`, so
         // set both to the captured values before computing hits; `enter_search`
@@ -298,9 +304,10 @@ mod tests {
                 e.location = Some(place("Berlin", "Germany"));
             }),
             entry("trips", |e| {
-                e.tags = strings(&["berlin"]);
+                // Values holding characters the query parser reads as structure.
+                e.tags = strings(&["berlin", "c++", "kreuzberg; mitte", "say \"hi\""]);
                 e.people = strings(&["alice", "Bob"]);
-                e.activities = strings(&["hiking"]);
+                e.activities = strings(&["hiking", "r&d|ops", "a\";b"]);
                 e.feelings = strings(&["calm"]);
                 e.mood = Some(-2);
                 e.starred = true;
@@ -321,9 +328,11 @@ mod tests {
     /// Run the search a row would launch and return its hit count.
     fn search_count(app: &mut AppModel, scope: &SearchScope, tab: FilterTab, value: &str) -> usize {
         app.search.scope = scope.clone();
-        app.search
-            .query
-            .set_text(&format!("{}:{}", tab.search_prefix(), value));
+        app.search.query.set_text(&format!(
+            "{}:{}",
+            tab.search_prefix(),
+            quote_filter_value(value)
+        ));
         app.search_results().len()
     }
 

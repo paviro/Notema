@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{borrow::Cow, time::Instant};
 
 use chrono::{Local, NaiveDate};
 use notema_domain::{
@@ -9,9 +9,12 @@ use notema_domain::{
 use crate::tui::{
     app::{AppModel, Focus, Mode, SearchScope},
     features::metadata::metadata_values,
-    search::search_loaded_entries,
+    search::search_loaded_entries_where,
     state::MetadataKind,
 };
+
+/// Boxed so segments with different predicate types share one `Vec`.
+type EntryPredicate = Box<dyn Fn(&Entry) -> bool>;
 
 impl AppModel {
     pub(crate) fn begin_search(&mut self) {
@@ -97,40 +100,44 @@ impl AppModel {
         }
     }
 
+    /// Run the search query. Filters chain on `;` and all must match; a segment
+    /// with no known prefix is full-text, AND-ed with the filters and supplying
+    /// the ranking.
     pub(crate) fn search_results(&self) -> Vec<SearchHit> {
-        let query = self.search.query.as_str();
-        if let Some(tag) = query.strip_prefix("tags:") {
-            self.search_results_by_metadata(MetadataKind::Tags, tag.trim())
-        } else if let Some(person) = query.strip_prefix("people:") {
-            self.search_results_by_metadata(MetadataKind::People, person.trim())
-        } else if let Some(activity) = query.strip_prefix("activities:") {
-            self.search_results_by_metadata(MetadataKind::Activities, activity.trim())
-        } else if let Some(feeling) = query.strip_prefix("feelings:") {
-            self.search_results_by_feeling(feeling.trim())
-        } else if let Some(value) = query.strip_prefix("star:") {
-            match parse_starred_value(value) {
-                Some(want) => self.search_results_by_starred(want),
-                // An unparseable flag (e.g. `star:maybe`) matches nothing,
-                // mirroring how an unknown `feelings:` value yields no hits.
-                None => Vec::new(),
+        let today = Local::now().date_naive();
+
+        let mut predicates: Vec<EntryPredicate> = Vec::new();
+        let mut text_parts: Vec<&str> = Vec::new();
+        for segment in split_unquoted(self.search.query.as_str(), ';') {
+            let segment = segment.trim();
+            if segment.is_empty() {
+                continue;
             }
-        } else if let Some(place) = query.strip_prefix("location:") {
-            self.search_results_by_location(place.trim())
-        } else if let Some(mood) = query.strip_prefix("mood:") {
-            match mood.trim().parse::<i8>() {
-                Ok(score) if MOOD_RANGE.contains(&score) => self.search_results_by_mood(score),
-                // Unparseable or out-of-range matches nothing, like an unknown `star:`.
-                _ => Vec::new(),
+            match classify_segment(segment, today) {
+                Segment::Filter(predicate) => predicates.push(predicate),
+                // A known filter with an unreadable value zeroes the whole query,
+                // as a lone unreadable filter always has.
+                Segment::NoMatch => return Vec::new(),
+                Segment::Text(text) => text_parts.push(text),
             }
-        } else if let Some((bound, value)) = strip_date_prefix(query) {
-            match DateSpec::parse(value) {
-                Some(spec) => self.search_results_by_date(DateFilter { bound, spec }),
-                // An unreadable date matches nothing rather than falling through
-                // to a fuzzy search for the literal `date:…` text.
-                None => Vec::new(),
+        }
+
+        let has_filters = !predicates.is_empty();
+        let matches_all = move |entry: &Entry| predicates.iter().all(|predicate| predicate(entry));
+        if text_parts.is_empty() {
+            // A wholly empty query (no filters, no text) matches nothing, rather
+            // than every entry (which an all-of-nothing predicate would return).
+            if !has_filters {
+                return Vec::new();
             }
+            self.search_results_matching(matches_all)
         } else {
-            search_loaded_entries(&self.library.entries, query, &self.search.scope)
+            search_loaded_entries_where(
+                &self.library.entries,
+                &text_parts.join(" "),
+                &self.search.scope,
+                matches_all,
+            )
         }
     }
 
@@ -155,28 +162,63 @@ impl AppModel {
     pub(crate) fn search_results_by_feeling(&self, feeling: &str) -> Vec<SearchHit> {
         self.search_results_matching(feeling_predicate(feeling))
     }
+}
 
-    pub(crate) fn search_results_by_starred(&self, want: bool) -> Vec<SearchHit> {
-        self.search_results_matching(|entry| entry.starred == want)
-    }
+/// One `;`-separated piece of a search query.
+enum Segment<'a> {
+    /// A recognized `prefix:` filter, as a predicate to AND with the others.
+    Filter(EntryPredicate),
+    /// A recognized filter whose value couldn't be read (e.g. `date:garbage`);
+    /// it zeroes the whole query rather than matching everything.
+    NoMatch,
+    /// No known prefix: full-text, to be AND-ed with the filter predicates.
+    Text(&'a str),
+}
 
-    /// Entries whose location matches `query` (see [`location_predicate`]).
-    pub(crate) fn search_results_by_location(&self, query: &str) -> Vec<SearchHit> {
-        self.search_results_matching(location_predicate(query))
-    }
-
-    pub(crate) fn search_results_by_mood(&self, score: i8) -> Vec<SearchHit> {
-        self.search_results_matching(|entry| entry.mood == Some(score))
-    }
-
-    /// Entries whose date satisfies `filter` (see [`date_predicate`]).
-    pub(crate) fn search_results_by_date(&self, filter: DateFilter) -> Vec<SearchHit> {
-        self.search_results_matching(date_predicate(filter, Local::now().date_naive()))
+/// Classify one query segment. `today` is threaded in so date matching stays pure.
+fn classify_segment(segment: &str, today: NaiveDate) -> Segment<'_> {
+    if let Some(tag) = segment.strip_prefix("tags:") {
+        Segment::Filter(Box::new(metadata_predicate(MetadataKind::Tags, tag.trim())))
+    } else if let Some(person) = segment.strip_prefix("people:") {
+        Segment::Filter(Box::new(metadata_predicate(
+            MetadataKind::People,
+            person.trim(),
+        )))
+    } else if let Some(activity) = segment.strip_prefix("activities:") {
+        Segment::Filter(Box::new(metadata_predicate(
+            MetadataKind::Activities,
+            activity.trim(),
+        )))
+    } else if let Some(feeling) = segment.strip_prefix("feelings:") {
+        Segment::Filter(Box::new(feeling_predicate(feeling.trim())))
+    } else if let Some(value) = segment.strip_prefix("star:") {
+        match parse_starred_value(&unquote(value.trim())) {
+            Some(want) => Segment::Filter(Box::new(move |entry: &Entry| entry.starred == want)),
+            None => Segment::NoMatch,
+        }
+    } else if let Some(place) = segment.strip_prefix("location:") {
+        Segment::Filter(Box::new(location_predicate(&unquote(place.trim()))))
+    } else if let Some(mood) = segment.strip_prefix("mood:") {
+        match unquote(mood.trim()).parse::<i8>() {
+            Ok(score) if MOOD_RANGE.contains(&score) => {
+                Segment::Filter(Box::new(move |entry: &Entry| entry.mood == Some(score)))
+            }
+            _ => Segment::NoMatch,
+        }
+    } else if let Some((bound, value)) = strip_date_prefix(segment) {
+        match DateSpec::parse(&value) {
+            Some(spec) => {
+                Segment::Filter(Box::new(date_predicate(DateFilter { bound, spec }, today)))
+            }
+            None => Segment::NoMatch,
+        }
+    } else {
+        Segment::Text(segment)
     }
 }
 
 /// Split a `date:`/`before:`/`after:` query into its bound and value.
-fn strip_date_prefix(query: &str) -> Option<(DateBound, &str)> {
+fn strip_date_prefix(query: &str) -> Option<(DateBound, Cow<'_, str>)> {
     [
         ("date:", DateBound::On),
         ("before:", DateBound::Before),
@@ -186,8 +228,51 @@ fn strip_date_prefix(query: &str) -> Option<(DateBound, &str)> {
     .find_map(|(prefix, bound)| {
         query
             .strip_prefix(prefix)
-            .map(|value| (bound, value.trim()))
+            .map(|value| (bound, unquote(value.trim())))
     })
+}
+
+/// Split `input` on `sep`, ignoring separators inside a `"…"` span — how a value
+/// carries a structural character (`;`, `+`, `|`) literally.
+fn split_unquoted(input: &str, sep: char) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    for (index, character) in input.char_indices() {
+        if character == '"' {
+            quoted = !quoted;
+        } else if character == sep && !quoted {
+            pieces.push(&input[start..index]);
+            start = index + character.len_utf8();
+        }
+    }
+    pieces.push(&input[start..]);
+    pieces
+}
+
+/// Strip one surrounding pair of quotes from a filter value, undoubling the
+/// quotes [`quote_filter_value`] doubled.
+fn unquote(value: &str) -> Cow<'_, str> {
+    match value.strip_prefix('"').and_then(|rest| rest.strip_suffix('"')) {
+        Some(inner) if inner.contains('"') => Cow::Owned(inner.replace("\"\"", "\"")),
+        Some(inner) => Cow::Borrowed(inner),
+        None => Cow::Borrowed(value),
+    }
+}
+
+/// Quote `value` if it holds a character the parser would read as structure.
+/// Everything building a query from a stored value — the chip searches, the
+/// filter browser's rows *and* its counts — goes through this, so what a row
+/// counts, launches, and displays stay the same set.
+///
+/// A `"` inside the value is doubled, so it can't close the wrapping pair early
+/// and expose a `;`/`+`/`|` after it to the splitters.
+pub(crate) fn quote_filter_value(value: &str) -> Cow<'_, str> {
+    if value.contains([';', '+', '|', '"']) {
+        Cow::Owned(format!("\"{}\"", value.replace('"', "\"\"")))
+    } else {
+        Cow::Borrowed(value)
+    }
 }
 
 /// Whether an entry's date satisfies `filter`. Entries with neither a creation
@@ -199,20 +284,46 @@ pub(crate) fn date_predicate(
     move |entry| entry_group_date(entry).is_some_and(|date| filter.matches(date, today))
 }
 
-/// Whether an entry matches a `tags:`/`people:`/`activities:` search: any of its
-/// `kind` values contains `query`, case-insensitively. The filter browser's row
-/// counter and the launched search share this predicate (and the location/feeling
-/// ones below), so a row's count always equals the hits its search returns.
+/// Whether an entry matches a `tags:`/`people:`/`activities:` search: every
+/// `+`-group in `query` must match, where a group matches if *any* of its
+/// `|`-alternatives is contained (case-insensitively) in one of the entry's
+/// `kind` values. The filter browser's row counter and the launched search share
+/// this predicate (and the location/feeling ones below), so a row's count always
+/// equals the hits its search returns; the value split lives here, not in the
+/// parser, to keep that true.
 pub(crate) fn metadata_predicate(
     kind: MetadataKind,
     query: &str,
 ) -> impl Fn(&Entry) -> bool + use<> {
-    let needle = query.to_lowercase();
+    let groups = split_values(query);
     move |entry| {
-        metadata_values(entry, kind)
-            .iter()
-            .any(|value| value.to_lowercase().contains(&needle))
+        let values = metadata_values(entry, kind);
+        !groups.is_empty()
+            && groups.iter().all(|alternatives| {
+                alternatives.iter().any(|needle| {
+                    values
+                        .iter()
+                        .any(|value| value.to_lowercase().contains(needle))
+                })
+            })
     }
+}
+
+/// Split a filter value into AND-groups (on `+`) of OR-alternatives (on `|`),
+/// unquoted, lowercased and trimmed, dropping empties — so `alice+bob|rob` is
+/// alice AND (bob OR rob), and a quoted `"C++"` is one literal needle.
+fn split_values(query: &str) -> Vec<Vec<String>> {
+    split_unquoted(query, '+')
+        .into_iter()
+        .map(|group| {
+            split_unquoted(group, '|')
+                .into_iter()
+                .map(|value| unquote(value.trim()).trim().to_lowercase())
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|group| !group.is_empty())
+        .collect()
 }
 
 /// Whether an entry matches a `location:` search: every word in `query` appears
@@ -236,14 +347,21 @@ pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<>
     }
 }
 
-/// Whether an entry matches a `feelings:` search for `feeling`.
+/// Whether an entry matches a `feelings:` search: the [`split_values`] groups
+/// applied to the entry's feelings through [`feeling_matches_search`], which is
+/// alias-aware and lowercases its own query.
 pub(crate) fn feeling_predicate(feeling: &str) -> impl Fn(&Entry) -> bool + use<> {
-    let feeling = feeling.to_string();
+    let groups = split_values(feeling);
     move |entry| {
-        entry
-            .feelings
-            .iter()
-            .any(|entry_feeling| feeling_matches_search(entry_feeling, &feeling))
+        !groups.is_empty()
+            && groups.iter().all(|alternatives| {
+                alternatives.iter().any(|needle| {
+                    entry
+                        .feelings
+                        .iter()
+                        .any(|entry_feeling| feeling_matches_search(entry_feeling, needle))
+                })
+            })
     }
 }
 
@@ -458,5 +576,177 @@ mod tests {
         // Unparseable or out-of-range values match nothing.
         assert_eq!(run(&mut app, "mood:x"), 0);
         assert_eq!(run(&mut app, "mood:9"), 0);
+    }
+
+    // --- Chained filters ---------------------------------------------------
+
+    /// An entry carrying `body`, `tags`, `people`, and a date, with the search
+    /// haystack built from body + metadata so full-text mixing works.
+    fn rich_entry(body: &str, tags: &[&str], people: &[&str], date: Option<&str>) -> Entry {
+        let mut entry = located_entry("Berlin", "Germany", None);
+        entry.tags = tags.iter().map(|value| value.to_string()).collect();
+        entry.people = people.iter().map(|value| value.to_string()).collect();
+        entry.created_at =
+            date.map(|day| notema_domain::Timestamp::parse(format!("{day}T10:00:00+02:00")));
+        entry.body = body.to_string();
+        let metadata = notema_domain::Metadata {
+            tags: entry.tags.clone(),
+            people: entry.people.clone(),
+            ..Default::default()
+        };
+        entry.search_haystack = notema_domain::build_search_haystack(body, &metadata);
+        entry
+    }
+
+    #[test]
+    fn chained_filters_all_must_match() {
+        let mut app = app_with(vec![
+            rich_entry("", &["work"], &["alice"], None),
+            rich_entry("", &["work"], &["bob"], None),
+            rich_entry("", &["home"], &["alice"], None),
+        ]);
+
+        // Each filter alone is looser than the two chained together.
+        assert_eq!(run(&mut app, "tags:work"), 2);
+        assert_eq!(run(&mut app, "people:alice"), 2);
+        assert_eq!(run(&mut app, "tags:work; people:alice"), 1);
+        // Whitespace around the separator is ignored.
+        assert_eq!(run(&mut app, "tags:work ; people:alice"), 1);
+    }
+
+    #[test]
+    fn plus_requires_every_value() {
+        let mut app = app_with(vec![
+            rich_entry("", &[], &["alice", "bob"], None),
+            rich_entry("", &[], &["alice"], None),
+        ]);
+
+        // Both must be present, each matching partially.
+        assert_eq!(run(&mut app, "people:alice+bob"), 1);
+        assert_eq!(run(&mut app, "people:ali+bo"), 1);
+        assert_eq!(run(&mut app, "people:alice"), 2);
+        assert_eq!(run(&mut app, "people:alice+carol"), 0);
+    }
+
+    #[test]
+    fn pipe_accepts_any_alternative() {
+        let mut app = app_with(vec![
+            rich_entry("", &["work"], &[], None),
+            rich_entry("", &["home"], &[], None),
+            rich_entry("", &["travel"], &[], None),
+        ]);
+
+        assert_eq!(run(&mut app, "tags:work|home"), 2);
+        assert_eq!(run(&mut app, "tags:work|home|travel"), 3);
+        assert_eq!(run(&mut app, "tags:work|missing"), 1);
+    }
+
+    #[test]
+    fn plus_binds_looser_than_pipe() {
+        let mut app = app_with(vec![
+            rich_entry("", &["work", "berlin"], &[], None),
+            rich_entry("", &["work", "paris"], &[], None),
+            rich_entry("", &["home", "berlin"], &[], None),
+        ]);
+
+        // `work+berlin|paris` is work AND (berlin OR paris): the two work entries.
+        assert_eq!(run(&mut app, "tags:work+berlin|paris"), 2);
+        assert_eq!(run(&mut app, "tags:home+berlin|paris"), 1);
+    }
+
+    #[test]
+    fn before_and_after_bracket_a_range() {
+        let mut app = app_with(vec![
+            rich_entry("", &[], &[], Some("2025-01-15")),
+            rich_entry("", &[], &[], Some("2025-03-10")),
+            rich_entry("", &[], &[], Some("2025-05-20")),
+            rich_entry("", &[], &[], Some("2025-06-01")),
+            rich_entry("", &[], &[], Some("2026-03-01")),
+        ]);
+
+        // Strictly after January and strictly before June leaves Feb–May 2025.
+        assert_eq!(run(&mut app, "after:2025-01; before:2025-06"), 2);
+    }
+
+    #[test]
+    fn free_text_and_filter_intersect() {
+        let mut app = app_with(vec![
+            rich_entry("beach trip", &["travel"], &[], None),
+            rich_entry("beach cleanup", &["work"], &[], None),
+            rich_entry("mountain trip", &["travel"], &[], None),
+        ]);
+
+        // The bare word is full-text; the tag narrows it further.
+        assert_eq!(run(&mut app, "beach"), 2);
+        assert_eq!(run(&mut app, "beach; tags:travel"), 1);
+    }
+
+    #[test]
+    fn an_unreadable_segment_zeroes_the_whole_query() {
+        let mut app = app_with(vec![rich_entry("", &["work"], &[], None)]);
+
+        // `tags:work` alone would match; the bad date segment kills the query.
+        assert_eq!(run(&mut app, "tags:work"), 1);
+        assert_eq!(run(&mut app, "tags:work; date:garbage"), 0);
+    }
+
+    #[test]
+    fn a_bare_prefix_matches_nothing() {
+        let mut app = app_with(vec![rich_entry("", &["work"], &[], None)]);
+
+        // No value to match on, so the filter is empty rather than universal.
+        assert_eq!(run(&mut app, "tags:"), 0);
+        assert_eq!(run(&mut app, "feelings:"), 0);
+    }
+
+    // --- Quoted values -----------------------------------------------------
+
+    #[test]
+    fn quoting_matches_a_value_holding_an_operator() {
+        let mut app = app_with(vec![
+            rich_entry("", &["c++"], &[], None),
+            rich_entry("", &["cooking"], &[], None),
+        ]);
+
+        // Unquoted, `+` splits and the leftover `c` matches both tags.
+        assert_eq!(run(&mut app, "tags:c++"), 2);
+        assert_eq!(run(&mut app, "tags:\"c++\""), 1);
+    }
+
+    #[test]
+    fn a_quoted_value_may_hold_the_chain_separator() {
+        let mut app = app_with(vec![
+            rich_entry("", &["berlin; mitte"], &[], None),
+            rich_entry("", &["berlin"], &[], None),
+        ]);
+
+        assert_eq!(run(&mut app, "tags:\"berlin; mitte\""), 1);
+        // The quotes only shield what they wrap — chaining still works after them.
+        assert_eq!(run(&mut app, "tags:\"berlin; mitte\"; tags:berlin"), 1);
+    }
+
+    #[test]
+    fn quote_filter_value_quotes_only_when_needed() {
+        assert_eq!(quote_filter_value("berlin"), "berlin");
+        assert_eq!(quote_filter_value("Berlin, Germany"), "Berlin, Germany");
+        assert_eq!(quote_filter_value("c++"), "\"c++\"");
+        assert_eq!(quote_filter_value("r&d|ops"), "\"r&d|ops\"");
+        assert_eq!(quote_filter_value("berlin; mitte"), "\"berlin; mitte\"");
+        // A quote is itself structural: it has to be doubled, so it can't close
+        // the wrapping pair and let a later separator split the value.
+        assert_eq!(quote_filter_value("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(quote_filter_value("a\";b"), "\"a\"\";b\"");
+    }
+
+    #[test]
+    fn a_quoted_value_may_hold_a_quote() {
+        let mut app = app_with(vec![
+            rich_entry("", &["a\";b"], &[], None),
+            rich_entry("", &["a"], &[], None),
+        ]);
+
+        // What the chip and the filter browser build round-trips to the one tag.
+        let query = format!("tags:{}", quote_filter_value("a\";b"));
+        assert_eq!(run(&mut app, &query), 1);
     }
 }

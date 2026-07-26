@@ -2,7 +2,8 @@ use notema_domain::{FEELING_GROUPS, FeelingGroup};
 
 use crate::tui::state::{ListNav, SelectableList};
 use crate::tui::{
-    app::AppModel, features::metadata::EditMetadataFocus, state::Overlay, text_input::TextInput,
+    app::AppModel, features::metadata::EditMetadataFocus, features::search::quote_filter_value,
+    state::Overlay, text_input::TextInput,
 };
 
 impl AppModel {
@@ -17,7 +18,8 @@ impl AppModel {
 
     pub(crate) fn begin_feeling_search(&mut self, feeling: &str) {
         let scope = self.current_journal_scope();
-        let hits = self.search_results_by_feeling(feeling);
+        let feeling = quote_filter_value(feeling);
+        let hits = self.search_results_by_feeling(&feeling);
         self.enter_search(scope, format!("feelings:{feeling}"), hits);
     }
 
