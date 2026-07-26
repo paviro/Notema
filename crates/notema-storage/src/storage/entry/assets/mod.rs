@@ -48,6 +48,10 @@ pub struct AssetReport {
     /// Sources that could not be ingested, tagged by cause so callers can tell a
     /// benign remote skip from a genuine failure without parsing message text.
     pub failed: Vec<AssetFailure>,
+    /// The orphan sweep could not finish after the entry was written. The entry
+    /// is saved; unreferenced files were left in the asset folder. Kept separate
+    /// from `failed`, whose variants all name a source that did not get stored.
+    pub cleanup_failed: Option<String>,
 }
 
 /// Why an external asset reference was not stored, carrying enough to report it.
@@ -87,7 +91,10 @@ impl AssetReport {
     }
 
     pub fn is_noop(&self) -> bool {
-        self.stored == 0 && self.removed == 0 && self.failed.is_empty()
+        self.stored == 0
+            && self.removed == 0
+            && self.failed.is_empty()
+            && self.cleanup_failed.is_none()
     }
 }
 
@@ -108,7 +115,7 @@ pub(crate) fn ingest_and_cleanup(
             replace_offline: false,
         },
     )?;
-    Ok((rewritten, staged.commit()?))
+    Ok((rewritten, staged.commit()))
 }
 
 /// Where an entry's assets live: the folder, and the name body links use for it.
@@ -213,14 +220,20 @@ impl StagedAssets {
 
     /// The entry bytes are on disk: keep everything staged, and sweep the assets
     /// the saved body no longer references.
-    pub(crate) fn commit(mut self) -> AppResult<AssetReport> {
-        // Set first, so an error from the sweep still leaves the staged files in
-        // place — the entry on disk references them.
+    ///
+    /// A sweep that fails is reported, not returned. The entry is written, and
+    /// an error here would read as a lost save when all that happened is that
+    /// some unreferenced files were left behind.
+    pub(crate) fn commit(mut self) -> AssetReport {
+        // Set first, so a failed sweep still leaves the staged files in place —
+        // the entry on disk references them.
         self.committed = true;
-        if let (Some(folder), Some(body)) = (&self.folder, &self.body) {
-            cleanup_orphans(&folder.dir, &folder.name, body, &mut self.report)?;
+        if let (Some(folder), Some(body)) = (&self.folder, &self.body)
+            && let Err(error) = cleanup_orphans(&folder.dir, &folder.name, body, &mut self.report)
+        {
+            self.report.cleanup_failed = Some(error.to_string());
         }
-        Ok(std::mem::take(&mut self.report))
+        std::mem::take(&mut self.report)
     }
 }
 
@@ -1068,6 +1081,52 @@ mod tests {
         let mut bytes = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
         bytes.extend_from_slice(&[0u8; 16]);
         bytes
+    }
+
+    #[test]
+    fn cleanup_failure_after_a_durable_write_is_reported_not_returned() {
+        let dir = tempdir().unwrap();
+        let entry = entry_path(dir.path());
+        let assets = entry_assets_dir(&entry).unwrap();
+        let src = dir.path().join("pic.png");
+        fs::write(&src, png_bytes()).unwrap();
+
+        let mut staged = StagedAssets::for_entry(&entry);
+        staged
+            .ingest(
+                &format!("![new]({})", src.display()),
+                None,
+                EntryAssetOptions::default(),
+            )
+            .unwrap();
+
+        // Break the sweep without touching what it would have swept: move the
+        // folder aside and leave a regular file in its place, so `read_dir` fails.
+        let displaced = dir.path().join("displaced.assets");
+        fs::rename(&assets, &displaced).unwrap();
+        fs::write(&assets, b"not a directory").unwrap();
+
+        let report = staged.commit();
+
+        assert!(
+            report.cleanup_failed.is_some(),
+            "the sweep failure is reported"
+        );
+        assert_eq!(
+            report.images_not_stored(),
+            0,
+            "not counted as an image failure"
+        );
+        assert_eq!(report.attachments_not_stored(), 0);
+        assert!(
+            !report.is_noop(),
+            "a cleanup-only failure is still worth reporting"
+        );
+        assert_eq!(
+            fs::read_dir(&displaced).unwrap().count(),
+            1,
+            "the staged asset survives a failed sweep"
+        );
     }
 
     #[test]

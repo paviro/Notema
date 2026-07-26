@@ -79,12 +79,15 @@ fn save_status(base: &str, report: &notema_storage::AssetReport) -> String {
             if attachments_not_stored == 1 { "" } else { "s" }
         ));
     }
+    if report.cleanup_failed.is_some() {
+        parts.push("asset cleanup incomplete".to_string());
+    }
     parts.join(" — ")
 }
 
 /// A save that dropped assets is a warning, not a clean success.
 fn save_variant(report: &notema_storage::AssetReport) -> ToastVariant {
-    if report.failed.is_empty() {
+    if report.failed.is_empty() && report.cleanup_failed.is_none() {
         ToastVariant::Success
     } else {
         ToastVariant::Warning
@@ -172,7 +175,9 @@ fn defer_for_pending_environment(app: &mut AppModel) -> bool {
 }
 
 /// Save the open internal-editor buffer. The editor stays open until every
-/// fallible write/refresh step succeeds.
+/// fallible write/refresh step succeeds. Orphan asset cleanup runs after the
+/// entry is on disk and is reported rather than fatal, so it never holds the
+/// editor open.
 pub(super) fn save_internal_editor(app: &mut AppModel) -> AppResult<()> {
     let Some(editor) = app.editor.as_ref() else {
         return Ok(());
@@ -699,6 +704,26 @@ mod tests {
             save_status("Saved", &report),
             "Saved — 2 images stored — 1 attachment stored — 1 attachment not stored"
         );
+    }
+
+    #[test]
+    fn save_status_reports_cleanup_without_counting_an_ingest_failure() {
+        let report = notema_storage::AssetReport {
+            cleanup_failed: Some("permission denied".to_string()),
+            ..notema_storage::AssetReport::default()
+        };
+
+        assert_eq!(report.images_not_stored(), 0);
+        assert_eq!(report.attachments_not_stored(), 0);
+        assert!(
+            !report.is_noop(),
+            "otherwise the toast swallows it entirely"
+        );
+        assert_eq!(
+            save_status("Entry saved", &report),
+            "Entry saved — asset cleanup incomplete"
+        );
+        assert_eq!(save_variant(&report), ToastVariant::Warning);
     }
 
     #[test]

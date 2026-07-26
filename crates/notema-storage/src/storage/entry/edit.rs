@@ -154,7 +154,7 @@ fn save_entry_edit_inner(
 
     Ok(EntryEditOutcome {
         outcome: EditOutcome::Changed,
-        assets: staged.commit()?,
+        assets: staged.commit(),
     })
 }
 

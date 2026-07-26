@@ -148,7 +148,7 @@ fn create_entry_inner(
             Ok(()) => {
                 return Ok(EntryCreateOutcome {
                     path,
-                    assets: staged.commit()?,
+                    assets: staged.commit(),
                 });
             }
             // The next attempt picks a fresh id, so this attempt's asset folder

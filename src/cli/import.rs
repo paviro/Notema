@@ -88,6 +88,13 @@ pub(super) fn run_dayone(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
                 }
             }
         }
+        if let Some(error) = created.assets.cleanup_failed {
+            report.cleanup_incomplete += 1;
+            report.failures.push(format!(
+                "{}: asset cleanup incomplete: {error}",
+                entry.provenance.id
+            ));
+        }
     }
     progress(total, total);
 
@@ -156,6 +163,13 @@ fn import_report_summary(report: &ImportReport, journal: &str, download_images: 
             plural(report.images_failed, "image", "images")
         ));
     }
+    if report.cleanup_incomplete > 0 {
+        parts.push(format!(
+            "{} {} left unreferenced asset files behind",
+            report.cleanup_incomplete,
+            plural(report.cleanup_incomplete, "entry", "entries")
+        ));
+    }
     parts.join("; ")
 }
 
@@ -168,5 +182,6 @@ struct ImportReport {
     remote_images_skipped: usize,
     attachments_copied: usize,
     attachments_failed: usize,
+    cleanup_incomplete: usize,
     failures: Vec<String>,
 }

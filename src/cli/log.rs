@@ -186,6 +186,9 @@ fn asset_report_message(report: &notema_storage::AssetReport) -> String {
             plural(attachments_not_stored, "attachment", "attachments")
         ));
     }
+    if let Some(error) = &report.cleanup_failed {
+        parts.push(format!("asset cleanup incomplete ({error})"));
+    }
     parts.join("; ")
 }
 
