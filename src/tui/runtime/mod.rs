@@ -16,6 +16,7 @@ use crossterm::{
 };
 use notema_encryption::SecretString;
 use notema_storage::{CachePolicy, CachedLibrary, JournalStore, LibraryDiscovery, StoreAccess};
+use notema_timing as timing;
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -423,6 +424,12 @@ fn run_loop(
                 None => store.validate_library(validation.cached, CachePolicy::Normal),
             }
             .map_err(|error| format!("{error:#}"));
+            // Timestamped where validation finished, not where the main loop
+            // gets around to reading it — and emitted even when the result is
+            // later discarded as stale.
+            if let Ok(snapshot) = &result {
+                timing::event_with(|| snapshot.report.timing_summary());
+            }
             let _ = tx.send(result);
         });
         rx

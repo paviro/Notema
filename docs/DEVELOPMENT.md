@@ -139,5 +139,15 @@ Reading it:
 - **`theme:bg-query`**, **`term:kbd-enhance-query`** and **`image:picker-query`**
   are blocking terminal round-trips before the first frame, with 1–2 s timeouts.
   A large value is the terminal emulator not answering, not Rust.
-- **`library:`** lines come from `LibraryLoadReport`, split into cache read,
-  discovery walk, source read and cache write.
+- **`cache read:`** is the decode alone, before the journal tree is walked. The
+  **`library:`** line comes later, from `LibraryLoadReport`, once background
+  validation has reconciled the cache against the source tree — it is the one
+  that carries the real hit and miss counts, split across discovery walk, source
+  read and cache write.
+- **`cache misses by cause:`** (level 2) attributes every miss to one of `len`,
+  `mtime`, `ctime`, `journal` (the entry moved between journals), `absent` (no
+  cached record) or `rebuild` (the policy forced a reload). A large `ctime`
+  bucket means something is touching inodes without changing content.
+- **`cache mtime precision:`** (level 2) counts how many stamps carry a
+  sub-second mtime. A count of zero means the filesystem resolves mtime no finer
+  than a second, which limits what the cache can tell apart.

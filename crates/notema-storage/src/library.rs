@@ -62,6 +62,18 @@ pub struct LibraryLoadReport {
 }
 
 impl LibraryLoadReport {
+    /// One line for the cache decode alone. The hit and miss counts are not
+    /// known yet at that point — validation has not run — so they are left out
+    /// rather than reported as zero.
+    pub fn cache_read_summary(&self) -> String {
+        format!(
+            "cache read: {:?}, {} records in {:.1} ms",
+            self.cache_status,
+            self.entries,
+            self.cache_read.as_secs_f64() * 1000.0
+        )
+    }
+
     /// One-line breakdown for `NOTEMA_TIMING`. These durations are measured on
     /// every load already; without this they're just discarded.
     pub fn timing_summary(&self) -> String {
@@ -123,6 +135,41 @@ impl FileStamp {
             changed,
         }
     }
+
+    /// Whether the filesystem resolved this mtime finer than a whole second.
+    pub(crate) fn has_subsecond_mtime(&self) -> bool {
+        self.modified.is_some_and(|(_, nanos)| nanos != 0)
+    }
+}
+
+/// Why a discovered entry could not be served from the cache. Reported in
+/// aggregate by `NOTEMA_TIMING=2`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MissCause {
+    /// No cached record for this path: a new entry, or one renamed into place.
+    Absent,
+    Len,
+    Mtime,
+    #[cfg(unix)]
+    Ctime,
+    /// Same file, different journal — the journal folder was renamed.
+    Journal,
+    /// The policy forced a reload. Not a cache failure.
+    Rebuild,
+}
+
+impl MissCause {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Absent => "absent",
+            Self::Len => "len",
+            Self::Mtime => "mtime",
+            #[cfg(unix)]
+            Self::Ctime => "ctime",
+            Self::Journal => "journal",
+            Self::Rebuild => "rebuild",
+        }
+    }
 }
 
 /// Opaque version of an entry file captured alongside an authoritative read.
@@ -153,6 +200,31 @@ impl EntryRevision {
 pub(crate) struct DiscoveredEntry {
     pub source: notema_domain::EntryPath,
     pub stamp: FileStamp,
+}
+
+impl DiscoveredEntry {
+    /// Why `record` cannot be reused for this file, or `None` for a cache hit.
+    /// The one place a hit is decided, so the cause reported by
+    /// `NOTEMA_TIMING=2` can never disagree with what actually happened.
+    pub(crate) fn miss_cause(&self, record: Option<&CachedRecord>) -> Option<MissCause> {
+        let Some(record) = record else {
+            return Some(MissCause::Absent);
+        };
+        if record.stamp.len != self.stamp.len {
+            return Some(MissCause::Len);
+        }
+        if record.stamp.modified != self.stamp.modified {
+            return Some(MissCause::Mtime);
+        }
+        #[cfg(unix)]
+        if record.stamp.changed != self.stamp.changed {
+            return Some(MissCause::Ctime);
+        }
+        if record.entry.journal != self.source.journal {
+            return Some(MissCause::Journal);
+        }
+        None
+    }
 }
 
 pub(crate) struct CachedRecord {

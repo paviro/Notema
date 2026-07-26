@@ -2,12 +2,13 @@ use crate::{
     AppResult, JournalStorePaths,
     library::{
         CachePolicy, CacheRead, CacheStatus, CachedLibrary, CachedRecord, FileStamp,
-        LibraryDiscovery, LibraryLoadReport, LibrarySnapshot, path_for_record,
+        LibraryDiscovery, LibraryLoadReport, LibrarySnapshot, MissCause, path_for_record,
     },
     storage,
 };
 use notema_domain::Entry;
 use notema_encryption as crypto;
+use notema_timing as timing;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -203,20 +204,35 @@ pub(super) fn validate_discovery(
         .flat_map(|cache| cache.records)
         .map(|record| (path_for_record(&record), record))
         .collect();
-    let mut stamps = HashMap::with_capacity(discovered.len());
-    let mut entries = Vec::with_capacity(discovered.len());
+    let discovered_total = discovered.len();
+    let mut stamps = HashMap::with_capacity(discovered_total);
+    let mut entries = Vec::with_capacity(discovered_total);
     let mut misses = Vec::new();
+    let mut causes = MissCauses::default();
+    let mut subsecond_mtimes = 0usize;
     for discovered in discovered {
+        subsecond_mtimes += usize::from(discovered.stamp.has_subsecond_mtime());
         stamps.insert(discovered.source.path.clone(), discovered.stamp);
-        match records.remove(&discovered.source.path) {
-            Some(record)
-                if policy == CachePolicy::Normal
-                    && record.stamp == discovered.stamp
-                    && record.entry.journal == discovered.source.journal =>
-            {
-                entries.push(record.entry);
+        let record = records.remove(&discovered.source.path);
+        let cause = discovered
+            .miss_cause(record.as_ref())
+            .or_else(|| (policy != CachePolicy::Normal).then_some(MissCause::Rebuild));
+        match (cause, record) {
+            (None, Some(record)) => entries.push(record.entry),
+            (cause, _) => {
+                // `miss_cause` answers `Absent` when there is no record, so the
+                // cause is always known here.
+                causes.record(cause.unwrap_or(MissCause::Absent));
+                misses.push(discovered.source);
             }
-            _ => misses.push(discovered.source),
+        }
+    }
+    if timing::detailed() {
+        timing::note(&format!(
+            "cache mtime precision: {subsecond_mtimes}/{discovered_total} stamps carry sub-second mtime"
+        ));
+        if let Some(summary) = causes.summary() {
+            timing::note(&format!("cache misses by cause: {summary}"));
         }
     }
     let cache_hits = entries.len();
@@ -284,6 +300,39 @@ pub(super) fn validate_discovery(
         entries,
         report,
     })
+}
+
+/// Miss causes tallied over one validation run. Counted unconditionally: the
+/// cause falls out of the hit decision the loop has to make anyway, and gating
+/// it on `NOTEMA_TIMING` would mean two copies of that decision.
+#[derive(Default)]
+struct MissCauses {
+    counts: Vec<(MissCause, usize)>,
+}
+
+impl MissCauses {
+    fn record(&mut self, cause: MissCause) {
+        match self.counts.iter_mut().find(|(seen, _)| *seen == cause) {
+            Some((_, count)) => *count += 1,
+            None => self.counts.push((cause, 1)),
+        }
+    }
+
+    /// `None` when nothing missed.
+    fn summary(&self) -> Option<String> {
+        if self.counts.is_empty() {
+            return None;
+        }
+        let mut counts = self.counts.clone();
+        counts.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        Some(
+            counts
+                .iter()
+                .map(|(cause, count)| format!("{}={count}", cause.name()))
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    }
 }
 
 fn read_bytes(
@@ -441,6 +490,48 @@ mod tests {
                 .unwrap();
         }
         store
+    }
+
+    #[test]
+    fn miss_causes_are_summarized_by_descending_count() {
+        let mut causes = MissCauses::default();
+        assert_eq!(causes.summary(), None);
+
+        causes.record(MissCause::Absent);
+        for _ in 0..3 {
+            causes.record(MissCause::Mtime);
+        }
+        causes.record(MissCause::Len);
+        causes.record(MissCause::Len);
+
+        assert_eq!(causes.summary().as_deref(), Some("mtime=3 len=2 absent=1"));
+    }
+
+    /// The hit and miss counts only exist after validation. Reporting the cache
+    /// read's own counts instead would always say "0 miss".
+    #[test]
+    fn the_validated_report_carries_real_hit_and_miss_counts() {
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["first", "second"],
+        );
+        store.load_library(CachePolicy::Normal).unwrap();
+        let cached = store.read_cached_library(CachePolicy::Normal).unwrap();
+        assert!(cached.report.cache_read_summary().contains("2 records"));
+
+        let changed = store.scan_entries().unwrap()[0].path.clone();
+        fs::write(&changed, "a body of an entirely different length\n").unwrap();
+
+        let validated = store
+            .validate_library(cached.cached, CachePolicy::Normal)
+            .unwrap();
+        assert!(
+            validated.report.timing_summary().contains("1 hit / 1 miss"),
+            "{}",
+            validated.report.timing_summary()
+        );
     }
 
     #[test]
