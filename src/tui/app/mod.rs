@@ -599,8 +599,13 @@ impl AppModel {
     /// composing, the scope journal of a journal-scoped search, otherwise the
     /// selected journal. An all-journals search has no context journal — it
     /// follows the global theme, so stepping through cross-journal hits doesn't
-    /// re-theme per hit.
+    /// re-theme per hit. Neither does anything when this device ignores
+    /// per-journal themes: no journal's theme applies, so the picker has no
+    /// journal scope to offer and no sidecar to write.
     pub(crate) fn context_journal(&self) -> Option<&Journal> {
+        if self.services.config.ui.ignore_journal_themes {
+            return None;
+        }
         if self.compose
             && let Some(editor) = &self.editor
             && let crate::tui::editor_state::EditorTarget::New { journal } = &editor.target
@@ -628,9 +633,6 @@ impl AppModel {
             color_mode: self.services.config.ui.color_mode,
             chrome: self.services.config.ui.chrome,
         };
-        if self.services.config.ui.ignore_journal_themes {
-            return global;
-        }
         let Some(theme) = self.context_journal().and_then(|j| j.theme.as_ref()) else {
             return global;
         };

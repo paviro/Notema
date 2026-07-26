@@ -1147,6 +1147,63 @@ fn theme_picker_global_scope_clears_a_journal_override() {
 }
 
 #[test]
+fn theme_picker_offers_no_journal_scope_when_journal_themes_are_ignored() {
+    use crate::tui::state::ThemePickerScope;
+    let mut app = app_with_journals(&["work"]);
+    app.services.config.ui.ignore_journal_themes = true;
+    app.select_journal(0);
+    app.services
+        .store
+        .set_journal_theme("work", Some(&journal_theme("gameboy")))
+        .unwrap();
+    app.library.journals[0].theme = Some(journal_theme("gameboy"));
+
+    app.open_theme_picker();
+
+    let state = app.theme_picker_state().unwrap();
+    assert_eq!(state.journal, None);
+    assert_eq!(state.scope, ThemePickerScope::Global);
+    // No journal in context, so the scope hint isn't offered either.
+    let hints = state.hint_state(app.appearance.chrome_override, app.appearance.color_mode);
+    assert!(!hints.has_journal);
+}
+
+#[test]
+fn theme_picker_global_save_keeps_the_sidecar_when_journal_themes_are_ignored() {
+    let mut app = app_with_journals(&["work"]);
+    app.services.config.ui.ignore_journal_themes = true;
+    app.select_journal(0);
+    app.services
+        .store
+        .set_journal_theme("work", Some(&journal_theme("gameboy")))
+        .unwrap();
+    app.library.journals[0].theme = Some(journal_theme("gameboy"));
+
+    app.open_theme_picker();
+    let fjord = app
+        .theme_picker_state()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|entry| entry.name == "fjord")
+        .unwrap();
+    app.theme_picker_select(fjord);
+    app.theme_picker_confirm();
+
+    assert_eq!(app.services.config.ui.theme, "fjord");
+    // The sidecar syncs to the user's other devices, which do honor it.
+    let reloaded = app.services.store.list_journals().unwrap();
+    let work = reloaded.iter().find(|j| j.name == "work").unwrap();
+    assert_eq!(work.theme, Some(journal_theme("gameboy")));
+    assert_eq!(
+        app.library.journals[0].theme,
+        Some(journal_theme("gameboy"))
+    );
+    // This device still shows the global theme.
+    assert_eq!(app.effective_theme_name(), "fjord");
+}
+
+#[test]
 fn theme_picker_toggle_scope_moves_the_highlight_to_that_scopes_theme() {
     let mut app = app_with_journals(&["work"]);
     app.services.config.ui.theme = "blossom".to_string();

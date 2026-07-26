@@ -29,7 +29,8 @@ The title names the scope and rows are tagged `global` / `this journal`.
 Per-journal themes live in the journal folder, so they sync across devices. An
 all-journals search shows the global theme. On a device where per-journal themes
 render poorly (e-ink), set `ignore_journal_themes = true` under `[ui]` in its
-`config.toml` to always use that device's global theme.
+`config.toml` to always use that device's global theme. Its picker then offers no
+scope toggle and never writes a `.journal.toml`, so the other devices keep theirs.
 
 Want to build your own? See the **[theme reference](THEME-REFERENCE.md)** for the
 file format and the full token reference. Each name below links to its bundled
