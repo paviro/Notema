@@ -13,7 +13,7 @@ use notema::bench::{
     BenchCorpus, FILTER_TAB_COUNT, METADATA_KIND_COUNT, app_with_corpus, app_with_entries,
     close_picker, draw_frame, filter_metadata_picker, filter_tab_rows, first_entry_path,
     install_snapshot, library_snapshot, open_filter, open_location_picker, open_metadata_picker,
-    refresh_path, reload_journal_list, rename_journal, search,
+    refresh_path, reload_journal_list, rename_journal, search, search_query,
 };
 
 fn main() {
@@ -166,5 +166,32 @@ fn main() {
             "location_picker/{size}: {:?}",
             started.elapsed() / iterations
         );
+
+        // A whole query, not just the text kernel: the parse, one predicate per
+        // filter, and the scoring pass when there is text to score.
+        for (label, query) in SEARCH_QUERIES {
+            let hits = search_query(&mut app, query);
+            let started = Instant::now();
+            for _ in 0..iterations {
+                black_box(search_query(black_box(&mut app), black_box(query)));
+            }
+            println!(
+                "search_query/{label}/{size}: {:?} ({hits} hits, `{query}`)",
+                started.elapsed() / iterations
+            );
+        }
     }
 }
+
+/// The query shapes worth separating: an unquoted value matches substrings, a
+/// quoted one is exact, `location:` is substring even quoted, and a text part
+/// pulls in the scoring pass the filters alone skip.
+const SEARCH_QUERIES: [(&str, &str); 5] = [
+    ("substring", "tags:topic-5"),
+    ("exact", "tags:\"topic-5\""),
+    ("location", "location:city-3"),
+    // Both values are `-1`, which is the residue the topic and contact cycles
+    // share: any other pair leaves the intersection empty at some corpus size.
+    ("chained", "tags:topic-1; people:contact-1"),
+    ("with_text", "tags:topic-5; representative"),
+];

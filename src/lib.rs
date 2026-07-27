@@ -27,7 +27,7 @@ pub mod bench {
         app_with_corpus, app_with_entries, close_picker, draw_frame, filter_metadata_picker,
         filter_tab_rows, first_entry_path, install_snapshot, library_snapshot, open_filter,
         open_location_picker, open_metadata_picker, refresh_path, reload_journal_list,
-        rename_journal, search,
+        rename_journal, search, search_query,
     };
 }
 

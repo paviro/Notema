@@ -195,6 +195,19 @@ pub fn open_location_picker(app: &mut BenchApp) -> usize {
     presets
 }
 
+/// Run a whole search query over all journals and return the hit count: the
+/// segment split, a boxed predicate per recognized `prefix:` filter, and the
+/// scoring text pass when the query has one.
+///
+/// This is the rescan the search box's debounce defers. [`search`] is the text
+/// kernel alone, with no predicate and no parse, and stays that way so its
+/// numbers remain comparable with everything recorded before.
+pub fn search_query(app: &mut BenchApp, query: &str) -> usize {
+    app.0.search.scope = SearchScope::AllJournals;
+    app.0.search.query.set_text(query);
+    app.0.search_results().len()
+}
+
 /// An owned copy of the app's library, so [`install_snapshot`] — which consumes
 /// what it installs, as the worker result it stands for does — can be repeated.
 #[derive(Clone)]
