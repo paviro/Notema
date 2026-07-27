@@ -5,11 +5,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use notema_domain::{SearchScope, feelings};
 use notema_storage::{JournalStore, LibraryLoadReport, LibrarySnapshot};
 use ratatui::{Terminal, backend::TestBackend};
 
 use super::app::{AppModel, Focus};
+use super::events::{Action, EditorAction};
 use super::search::search_loaded_entries;
 use super::state::{FilterTab, MetadataKind};
 use crate::config::Config;
@@ -193,6 +195,63 @@ pub fn open_location_picker(app: &mut BenchApp) -> usize {
         .map_or(0, |state| state.presets.len());
     app.0.close_overlay();
     presets
+}
+
+/// A reusable `TestBackend` terminal for [`editor_input`], built once so a
+/// keystroke measurement is not swamped by allocating a screen buffer per call.
+pub struct BenchTerminal(Terminal<TestBackend>);
+
+/// Build the terminal [`editor_input`] dispatches through.
+pub fn bench_terminal(width: u16, height: u16) -> BenchTerminal {
+    BenchTerminal(Terminal::new(TestBackend::new(width, height)).unwrap())
+}
+
+/// Open a new-entry editor holding `lines` of generated markdown.
+///
+/// The editor's cost tracks document length rather than corpus size, so its
+/// benches sweep that axis instead; a corpus sweep would hold the only dimension
+/// that matters fixed.
+pub fn open_editor_with_body(terminal: &mut BenchTerminal, app: &mut BenchApp, lines: usize) {
+    app.0.open_editor_for_new();
+    let body: String = (0..lines).map(editor_body_line).collect();
+    dispatch_editor(terminal, app, EditorAction::InsertText(body));
+}
+
+/// One keystroke through the action dispatch and into the buffer.
+///
+/// This enters below `handle_key`, whose chord classification is bound to a
+/// crossterm terminal. Widening that for a benchmark is a production change this
+/// does not justify: what it skips is a match on a key code.
+pub fn editor_input(terminal: &mut BenchTerminal, app: &mut BenchApp, ch: char) {
+    let key = KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE);
+    dispatch_editor(terminal, app, EditorAction::Input(key));
+}
+
+/// Re-highlight the editor body: `highlight_body` over the whole buffer plus the
+/// word count. Every keystroke makes this a miss by construction, so the caller
+/// has to change the buffer between calls or it times the memo check alone.
+pub fn editor_highlight(app: &mut BenchApp) {
+    let theme = &app.0.appearance.theme;
+    if let Some(editor) = app.0.editor.as_mut() {
+        editor.refresh_for_body(theme);
+    }
+}
+
+fn dispatch_editor(terminal: &mut BenchTerminal, app: &mut BenchApp, action: EditorAction) {
+    super::events::dispatch_action(&mut terminal.0, &mut app.0, Action::Editor(action)).unwrap();
+}
+
+/// One line of markdown, cycling the constructs the highlighter has to paint:
+/// headings, list markers, emphasis, links, code and highlight marks.
+fn editor_body_line(index: usize) -> String {
+    match index % 6 {
+        0 => format!("## Heading {index}\n"),
+        1 => format!("- a list item with **bold {index}** in it\n"),
+        2 => format!("Plain prose for line {index}, long enough to wrap on a narrow pane.\n"),
+        3 => format!("A [link {index}](https://example.com/{index}) and `code {index}`.\n"),
+        4 => format!("> quoted line {index} with ==a highlight mark==\n"),
+        _ => "\n".to_string(),
+    }
 }
 
 /// Run a whole search query over all journals and return the hit count: the

@@ -76,13 +76,15 @@ creation dates, and `--seed <n>` makes the data set reproducible. Run
 
 Benchmarks are deterministic and run as plain timed binaries (`harness = false`)
 over 1k / 10k / 25k corpora, printing one line per size. They exist to catch
-performance regressions on the paths that scale with journal size.
+performance regressions on the paths that scale with journal size. The `editor_*`
+lines are the exception: they sweep document length (200 / 2k / 10k lines)
+instead, because that is the axis the editor scales on.
 
 | Bench | Crate | Covers |
 |---|---|---|
 | `analytics` | `notema-analytics` | Cadence/mood/correlation aggregation |
 | `scan` | `notema-storage` | Full journal scan: walk + parse + preview + haystack |
-| `tui` | root (`--features bench`) | Full-frame render, in-memory search, filter browser, metadata/location pickers, incremental reloads |
+| `tui` | root (`--features bench`) | Full-frame render, in-memory search, filter browser, metadata/location pickers, incremental reloads, editor keystrokes |
 
 ```bash
 cargo bench -p notema-analytics --bench analytics
@@ -117,6 +119,12 @@ assign from, and neither is cached. `metadata_filter` is the picker's
 per-keystroke refilter with the value list already built. The picker's cost is
 dominated by the per-entry walk rather than the vocabulary — the 12-value
 Activities line is within a factor of two of the 1280-value Tags one.
+
+`editor_input` is one keystroke reaching the buffer; `editor_highlight` is the
+whole-body re-scan the next frame pays for, which every keystroke makes a miss
+by construction. Both are linear in document length, so read the 10k-line row
+as the slope rather than as a realistic entry — a long journal entry is closer
+to the 200-line row.
 
 `search` and `search_query` are two different things. `search` is the text
 kernel alone — no parse, no predicate — and stays on the narrow corpus so its

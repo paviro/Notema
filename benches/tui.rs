@@ -11,9 +11,10 @@ use std::{
 
 use notema::bench::{
     BenchCorpus, FILTER_TAB_COUNT, METADATA_KIND_COUNT, app_with_corpus, app_with_entries,
-    close_picker, draw_frame, filter_metadata_picker, filter_tab_rows, first_entry_path,
-    install_snapshot, library_snapshot, open_filter, open_location_picker, open_metadata_picker,
-    refresh_path, reload_journal_list, rename_journal, search, search_query,
+    bench_terminal, close_picker, draw_frame, editor_highlight, editor_input,
+    filter_metadata_picker, filter_tab_rows, first_entry_path, install_snapshot, library_snapshot,
+    open_editor_with_body, open_filter, open_location_picker, open_metadata_picker, refresh_path,
+    reload_journal_list, rename_journal, search, search_query,
 };
 
 fn main() {
@@ -180,6 +181,43 @@ fn main() {
                 started.elapsed() / iterations
             );
         }
+    }
+
+    editor();
+}
+
+/// The editor re-scans the whole buffer on every keystroke, so it scales with
+/// document length rather than corpus size — an axis the corpus sweep holds
+/// fixed and therefore cannot see.
+/// The corpus is small on purpose — it exists only to give the editor a journal
+/// to open in.
+fn editor() {
+    for lines in [200, 2_000, 10_000] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_with_entries(dir.path(), 100);
+        let mut terminal = bench_terminal(120, 40);
+        let iterations = 20;
+
+        open_editor_with_body(&mut terminal, &mut app, lines);
+
+        // One keystroke into the buffer, through the action dispatch.
+        editor_input(&mut terminal, &mut app, 'x');
+        let started = Instant::now();
+        for _ in 0..iterations {
+            editor_input(black_box(&mut terminal), black_box(&mut app), 'x');
+        }
+        println!("editor_input/{lines}: {:?}", started.elapsed() / iterations);
+
+        // The re-highlight the next frame pays for. The keystroke that makes it a
+        // miss is untimed — timing it here would count the dispatch twice.
+        let mut elapsed = Duration::ZERO;
+        for _ in 0..iterations {
+            editor_input(&mut terminal, &mut app, 'x');
+            let started = Instant::now();
+            editor_highlight(black_box(&mut app));
+            elapsed += started.elapsed();
+        }
+        println!("editor_highlight/{lines}: {:?}", elapsed / iterations);
     }
 }
 
