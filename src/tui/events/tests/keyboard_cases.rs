@@ -90,6 +90,36 @@ fn a_failed_watcher_registration_names_the_reload_it_costs() {
     }
 }
 
+/// The whole point of the journal-list path: none of these walk the corpus, so
+/// none of them may end up queueing a reload behind the user's back.
+#[test]
+fn journal_bookkeeping_never_asks_for_a_corpus_walk() {
+    let mut app = app_with_journals(&["work"]);
+
+    app.begin_new_journal_input();
+    app.new_journal_input_mut().unwrap().set_text("personal");
+    actions::submit_new_journal(&mut app).unwrap();
+
+    assert!(
+        app.library
+            .journals
+            .iter()
+            .any(|journal| journal.name == "personal")
+    );
+    assert!(!app.library_reload.has_pending());
+
+    app.select_journal_by_name("personal");
+    actions::toggle_archive_selected_journal(&mut app).unwrap();
+
+    assert!(
+        app.library
+            .journals
+            .iter()
+            .any(|journal| journal.name == "personal.archived")
+    );
+    assert!(!app.library_reload.has_pending());
+}
+
 #[test]
 fn a_watcher_that_lost_track_asks_for_a_quiet_reload() {
     let mut app = app_with_journals(&["work"]);
