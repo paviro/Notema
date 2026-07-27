@@ -45,23 +45,6 @@ fn sort_casing(map: BTreeMap<String, CasingCount>) -> Vec<(String, usize)> {
 /// A list of `(display value, usage count)` pairs, sorted by count descending.
 pub(crate) type MetadataCounts = Vec<(String, usize)>;
 
-/// Distinct metadata values across `entries` (case-folded, most-frequent casing
-/// wins for display), sorted by count descending then label ascending.
-pub(crate) fn count_metadata<'a>(
-    entries: impl Iterator<Item = &'a Entry>,
-    kind: MetadataKind,
-) -> MetadataCounts {
-    let mut map: BTreeMap<String, CasingCount> = BTreeMap::new();
-    for entry in entries {
-        for value in metadata_values(entry, kind) {
-            let cc = map.entry(value.to_lowercase()).or_default();
-            cc.total += 1;
-            *cc.forms.entry(value.clone()).or_default() += 1;
-        }
-    }
-    sort_casing(map)
-}
-
 impl AppModel {
     /// Split metadata values into `(active, archived_only)`. Archived journals
     /// don't contribute to the offered list or usage counts, so `active` counts

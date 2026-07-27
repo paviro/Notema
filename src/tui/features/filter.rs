@@ -4,21 +4,20 @@
 //!
 //! Scope is captured when the dialog opens — all journals from the journals
 //! column, the selected journal from the entries column — and drives both the
-//! listed counts and the launched search. Each row's count is computed through
-//! the *same* predicate the launched search uses (via [`AppModel::search_results`]
-//! at launch), so the number shown on a row always equals the number of results
-//! the search returns.
+//! listed counts and the launched search. The number shown on a row always
+//! equals the number of results the search returns: a token row means one value,
+//! so its count is a tally of that value and the search it launches asks for
+//! exactly it, while a place row keeps containment and so is still counted
+//! through the predicate itself.
 
 use std::collections::BTreeSet;
 
 use notema_domain::{Entry, Location, PlaceGroup};
 
 use crate::tui::app::{AppModel, Focus, SearchScope};
-use crate::tui::features::metadata::count_metadata;
-use crate::tui::features::search::{
-    entry_in_search_scope, feeling_predicate, location_predicate, metadata_predicate,
-    quote_filter_value,
-};
+use crate::tui::features::facets::FacetTally;
+use crate::tui::features::metadata::metadata_values;
+use crate::tui::features::search::{entry_in_search_scope, location_predicate, quote_filter_value};
 use crate::tui::render::tab_strip::StripTab;
 use crate::tui::state::{FilterTab, ListNav, MetadataKind, Overlay, SelectableList};
 
@@ -96,6 +95,34 @@ fn sort_by_count(rows: &mut [FilterRow]) {
     rows.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.label.cmp(&b.label)));
 }
 
+/// The values a token facet reads off an entry, or `None` for locations, which
+/// are counted by address rather than by value.
+fn facet_values(entry: &Entry, tab: FilterTab) -> Option<&[String]> {
+    match tab {
+        FilterTab::Tags => Some(metadata_values(entry, MetadataKind::Tags)),
+        FilterTab::People => Some(metadata_values(entry, MetadataKind::People)),
+        FilterTab::Activities => Some(metadata_values(entry, MetadataKind::Activities)),
+        FilterTab::Feelings => Some(&entry.feelings),
+        FilterTab::Locations => None,
+    }
+}
+
+/// A token facet's rows. The row launches an exact search for the value it
+/// shows, so the label and the search value are one string.
+fn facet_rows(tally: FacetTally) -> Vec<FilterRow> {
+    let mut rows: Vec<FilterRow> = tally
+        .rows()
+        .into_iter()
+        .map(|(label, count)| FilterRow {
+            search_value: label.clone(),
+            label,
+            count,
+        })
+        .collect();
+    sort_by_count(&mut rows);
+    rows
+}
+
 impl AppModel {
     pub(crate) fn begin_filter(&mut self) {
         let scope = if self.nav.focus == Focus::Journals {
@@ -103,9 +130,33 @@ impl AppModel {
         } else {
             self.current_journal_scope()
         };
-        let rows: [Vec<FilterRow>; FilterTab::COUNT] =
-            std::array::from_fn(|i| self.filter_rows(&scope, FilterTab::ALL[i]));
+        let rows = self.all_filter_rows(&scope);
         self.overlay = Overlay::Filter(Box::new(FilterState::new(scope, rows)));
+    }
+
+    /// Every tab's rows from one walk of the entries in scope, which is what the
+    /// dialog opens with.
+    fn all_filter_rows(&self, scope: &SearchScope) -> [Vec<FilterRow>; FilterTab::COUNT] {
+        let mut tallies: [FacetTally; FilterTab::COUNT] = Default::default();
+        let mut places = BTreeSet::new();
+        for entry in self.scoped_entries(scope) {
+            for tab in FilterTab::ALL {
+                if let Some(values) = facet_values(entry, tab) {
+                    tallies[tab.index()].add_entry(values);
+                }
+            }
+            if let Some(group) = entry.location.as_ref().and_then(Location::place_group) {
+                places.insert(group);
+            }
+        }
+        let mut rows: [Vec<FilterRow>; FilterTab::COUNT] = Default::default();
+        for (index, tally) in tallies.into_iter().enumerate() {
+            rows[index] = facet_rows(tally);
+        }
+        // Locations have no tally: their rows keep containment, so their counts
+        // still come from the predicate.
+        rows[FilterTab::Locations.index()] = self.place_rows(scope, places);
+        rows
     }
 
     pub(crate) fn filter_state(&self) -> Option<&FilterState> {
@@ -134,67 +185,32 @@ impl AppModel {
             .filter(move |entry| entry_in_search_scope(entry, scope))
     }
 
+    /// One tab's rows. The dialog opens through
+    /// [`all_filter_rows`](Self::all_filter_rows) instead, so this exists for the
+    /// per-tab benchmark and the tests, which need one facet's cost and rows on
+    /// their own.
+    #[cfg(any(test, feature = "bench"))]
     pub(crate) fn filter_rows(&self, scope: &SearchScope, tab: FilterTab) -> Vec<FilterRow> {
-        match tab {
-            FilterTab::Tags => self.metadata_filter_rows(scope, MetadataKind::Tags),
-            FilterTab::People => self.metadata_filter_rows(scope, MetadataKind::People),
-            FilterTab::Activities => self.metadata_filter_rows(scope, MetadataKind::Activities),
-            FilterTab::Feelings => self.feeling_filter_rows(scope),
-            FilterTab::Locations => self.location_filter_rows(scope),
+        if tab == FilterTab::Locations {
+            let places = self
+                .scoped_entries(scope)
+                .filter_map(|entry| entry.location.as_ref().and_then(Location::place_group))
+                .collect();
+            return self.place_rows(scope, places);
         }
-    }
-
-    fn metadata_filter_rows(&self, scope: &SearchScope, kind: MetadataKind) -> Vec<FilterRow> {
-        // The distinct display values (nicely cased); their counts are then
-        // recomputed with the substring predicate the launched `tags:`/`people:`/
-        // `activities:` search uses — quoted as `launch_filter_search` quotes it —
-        // so each row's count equals its result count.
-        let mut rows: Vec<FilterRow> = count_metadata(self.scoped_entries(scope), kind)
-            .into_iter()
-            .map(|(label, _)| {
-                let matches = metadata_predicate(kind, &quote_filter_value(&label));
-                let count = self.scoped_entries(scope).filter(|e| matches(e)).count();
-                FilterRow {
-                    search_value: label.clone(),
-                    label,
-                    count,
-                }
-            })
-            .collect();
-        sort_by_count(&mut rows);
-        rows
-    }
-
-    fn feeling_filter_rows(&self, scope: &SearchScope) -> Vec<FilterRow> {
-        let mut distinct: BTreeSet<String> = BTreeSet::new();
+        let mut tally = FacetTally::default();
         for entry in self.scoped_entries(scope) {
-            distinct.extend(entry.feelings.iter().cloned());
-        }
-        let mut rows: Vec<FilterRow> = distinct
-            .into_iter()
-            .map(|feeling| {
-                let matches = feeling_predicate(&quote_filter_value(&feeling));
-                let count = self.scoped_entries(scope).filter(|e| matches(e)).count();
-                FilterRow {
-                    search_value: feeling.clone(),
-                    label: feeling,
-                    count,
-                }
-            })
-            .collect();
-        sort_by_count(&mut rows);
-        rows
-    }
-
-    fn location_filter_rows(&self, scope: &SearchScope) -> Vec<FilterRow> {
-        // A row shows the bucket's display label but launches — and counts through —
-        // its search query, so the count equals the search's results.
-        let mut groups: BTreeSet<PlaceGroup> = BTreeSet::new();
-        for entry in self.scoped_entries(scope) {
-            if let Some(group) = entry.location.as_ref().and_then(Location::place_group) {
-                groups.insert(group);
+            if let Some(values) = facet_values(entry, tab) {
+                tally.add_entry(values);
             }
         }
+        facet_rows(tally)
+    }
+
+    /// Rows for the locations tab, whose counts still come from the predicate.
+    fn place_rows(&self, scope: &SearchScope, groups: BTreeSet<PlaceGroup>) -> Vec<FilterRow> {
+        // A row shows the bucket's display label but launches — and counts through —
+        // its search query, so the count equals the search's results.
         let mut rows: Vec<FilterRow> = groups
             .into_iter()
             .map(|group| {
@@ -456,6 +472,17 @@ mod tests {
         assert_eq!(work[0].label, "work");
         // The first entry carries both casings and is still one entry.
         assert_eq!(work[0].count, 2);
+    }
+
+    /// The parser drops an empty needle, so `tags:""` matches nothing. A row for
+    /// it would show a count its own search could never return.
+    #[test]
+    fn a_value_that_folds_to_nothing_gets_no_row() {
+        let mut app = crate::tui::test_support::app_with_journals(&[]);
+        app.library.entries = vec![entry("work", |e| e.tags = strings(&["", "work"]))];
+        let rows = app.filter_rows(&SearchScope::AllJournals, FilterTab::Tags);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].label, "work");
     }
 
     /// Folding with `to_lowercase` rather than `eq_ignore_ascii_case` is what keeps

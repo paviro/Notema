@@ -4,6 +4,7 @@ pub(crate) const PAGE_STEP: i16 = 10;
 pub(crate) mod browser;
 pub(crate) mod editor;
 pub(crate) mod environment;
+pub(crate) mod facets;
 pub(crate) mod feelings;
 pub(crate) mod filter;
 pub(crate) mod images;
