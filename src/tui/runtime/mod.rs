@@ -1,5 +1,6 @@
 mod effects;
 mod redraw;
+pub(crate) mod reload;
 mod scheduler;
 mod terminal;
 mod watcher;
@@ -537,6 +538,14 @@ fn run_loop(
             events::Action::Background(events::BackgroundAction::PollEnvironment),
         )?;
         let context_ready = effects::execute(terminal, &mut app, context_outcome)?.redraw;
+        // Install a finished whole-library reload, or re-request one that
+        // finished against a library the app has moved past.
+        let library_reloaded = events::dispatch_action(
+            terminal,
+            &mut app,
+            events::Action::Background(events::BackgroundAction::PollLibraryReload),
+        )?
+        .redraw;
         let poll_timeout = scheduler::poll_timeout(
             &app,
             terminal.size()?.width,
@@ -749,6 +758,7 @@ fn run_loop(
         if redraw
             || journal_watch_failed
             || theme_watch_failed
+            || library_reloaded
             || library_updated
             || refreshed
             || theme_reloaded

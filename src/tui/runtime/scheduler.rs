@@ -28,6 +28,9 @@ pub(super) fn poll_timeout(
     if app.environment.has_pending() {
         timeout = timeout.min(Duration::from_millis(100));
     }
+    if app.library_reload.has_pending() {
+        timeout = timeout.min(Duration::from_millis(100));
+    }
     if !app.toasts.items().is_empty() {
         let columns = render::countdown_cols(terminal_width);
         if let Some(step) = app.toasts.next_countdown_step(columns) {

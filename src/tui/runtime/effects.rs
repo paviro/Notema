@@ -33,7 +33,6 @@ fn execute_with_opener<B: Backend>(
     let mut pending = VecDeque::from(std::mem::take(&mut outcome.effects));
     while let Some(effect) = pending.pop_front() {
         match effect {
-            Effect::Redraw => outcome.redraw = true,
             Effect::Geocode(request) => {
                 app.geocode.request(request, crate::tui::geocode::resolve);
             }
@@ -82,17 +81,6 @@ mod tests {
             redraw: false,
             effects,
         }
-    }
-
-    #[test]
-    fn redraw_effect_marks_the_frame_dirty() {
-        let mut app = app_with_journals(&["work"]);
-        let mut term = terminal();
-
-        let out = execute(&mut term, &mut app, outcome_with(vec![Effect::Redraw])).unwrap();
-
-        assert!(out.redraw);
-        assert!(out.effects.is_empty());
     }
 
     #[test]
@@ -149,7 +137,10 @@ mod tests {
             &mut term,
             &mut app,
             outcome_with(vec![
-                Effect::Redraw,
+                Effect::PrepareImages(crate::tui::image::WarmRequest {
+                    assets: Vec::new(),
+                    size: ratatui::layout::Size::new(0, 0),
+                }),
                 Effect::Open {
                     target: OpenTarget::Uri("https://example.com".to_string()),
                     success_message: "Opened link".to_string(),

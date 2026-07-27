@@ -153,6 +153,7 @@ pub(crate) enum BackgroundAction {
     PollImages,
     PollGeocode,
     PollEnvironment,
+    PollLibraryReload,
     PollTimers,
     LibraryPathsChanged(Vec<std::path::PathBuf>),
     ReloadTheme(String),

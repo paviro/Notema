@@ -154,8 +154,20 @@ impl Toasts {
         self.enforce_cap();
     }
 
+    /// Push a toast that stays until something dismisses it by message.
+    ///
+    /// Repeating one already on screen does nothing: these mark an ongoing
+    /// state, so the second card would say what the first one already says and
+    /// only the first would ever be dismissed.
     pub(crate) fn push_persistent(&mut self, variant: ToastVariant, message: impl Into<String>) {
         let message = message.into();
+        if self
+            .items
+            .iter()
+            .any(|toast| toast.persistent && toast.message == message)
+        {
+            return;
+        }
         let lifetime = toast_lifetime(&message);
         self.items.push(Toast {
             message,

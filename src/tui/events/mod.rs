@@ -45,7 +45,6 @@ pub(crate) struct DispatchOutcome {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Effect {
-    Redraw,
     Geocode(crate::tui::geocode::GeocodeRequest),
     Environment(crate::tui::environment::EnvironmentRequest),
     PrepareImages(crate::tui::image::WarmRequest),
@@ -222,19 +221,7 @@ fn apply_action<B: Backend>(
         }
         Action::Quit => return Ok(DispatchOutcome::Quit),
         Action::RefreshLibrary => {
-            app.begin_manual_refresh();
-            let mut view = crate::tui::ui::ViewState::default();
-            let active_theme = app.appearance.theme.clone();
-            let mut context = crate::tui::ui::RenderContext::new(&active_theme, &mut view);
-            if let Err(error) = terminal.draw(|frame| render::draw(frame, app, &mut context)) {
-                app.finish_manual_refresh();
-                return Err(anyhow::anyhow!(error.to_string()));
-            }
-            let refresh = app.refresh();
-            app.finish_manual_refresh();
-            refresh?;
-            app.toast(ToastVariant::Success, "Refreshed from disk");
-            return Ok(DispatchOutcome::Continue.with_effect(Effect::Redraw));
+            app.request_library_reload(crate::tui::runtime::reload::ReloadReason::Manual);
         }
         Action::Background(action) => {
             return Ok(apply_background_action(app, action));
@@ -290,21 +277,10 @@ fn apply_background_action(app: &mut AppModel, action: BackgroundAction) -> Disp
             true
         }
         BackgroundAction::LibraryValidationStale => {
-            match app
-                .services
-                .store
-                .load_library(notema_storage::CachePolicy::Normal)
-            {
-                Ok(snapshot) => app.install_library_snapshot(snapshot),
-                Err(error) => {
-                    app.finish_initial_library_loading();
-                    app.toast(
-                        ToastVariant::Error,
-                        format!("Journal changes not loaded: {error:#}"),
-                    );
-                }
-            }
-            true
+            // The startup walk read a tree that has since changed. Keep the
+            // "Loading journals…" toast up and let the reload dismiss it.
+            app.request_library_reload(crate::tui::runtime::reload::ReloadReason::Automatic);
+            false
         }
         BackgroundAction::LibraryValidationFailed(error) => {
             app.finish_initial_library_loading();
@@ -332,6 +308,7 @@ fn apply_background_action(app: &mut AppModel, action: BackgroundAction) -> Disp
         BackgroundAction::PollImages => app.image.runtime.poll_results(),
         BackgroundAction::PollGeocode => app.apply_geocode_results(),
         BackgroundAction::PollEnvironment => app.apply_environment_results(),
+        BackgroundAction::PollLibraryReload => app.apply_library_reload_results(),
         BackgroundAction::PollTimers => {
             let toasts_expired = app.expire_toasts();
             let flash_expired = app.expire_reader_heading_flash();

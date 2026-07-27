@@ -26,6 +26,7 @@ use super::state::{HoverTarget, Overlay, ScrollState, SearchState, ToastVariant,
 use crate::tui::editor_state::EntryEditor;
 use crate::tui::features::insights::{InsightsScope, InsightsTab, InsightsTimeframe};
 use crate::tui::image::{ImageAsset, ImageRuntime};
+use crate::tui::runtime::reload::{self, ReloadReason, ReloadRequest};
 
 mod cache;
 pub(crate) use cache::RenderCaches;
@@ -343,6 +344,12 @@ pub(crate) struct AppModel {
     pub(crate) image: ImageState,
     /// Background geocoding for the location dialog; spawned on first lookup.
     pub(crate) geocode: crate::tui::geocode::GeocodeWorker,
+    /// Whole-library reloads; spawned on the first one that can't be satisfied
+    /// incrementally. See [`Self::request_library_reload`].
+    pub(crate) library_reload: crate::tui::runtime::reload::LibraryReloadWorker,
+    /// A reload asked for while one was already running, folded into a single
+    /// follow-up rather than a second walk.
+    queued_reload: Option<ReloadReason>,
     /// Background weather/air-quality/celestial fetching; spawned on first use.
     /// Serves the editor prefetch and direct location-sets. Bulk enrichment of
     /// existing entries is the `notema backfill` CLI command's job, not the TUI's.
@@ -499,6 +506,8 @@ impl AppModel {
             compose: false,
             toasts: Toasts::default(),
             image: ImageState::default(),
+            library_reload: crate::tui::runtime::reload::LibraryReloadWorker::default(),
+            queued_reload: None,
             geocode: crate::tui::geocode::GeocodeWorker::default(),
             environment: crate::tui::environment::EnvironmentWorker::default(),
             next_environment_id: 0,
@@ -690,6 +699,66 @@ impl AppModel {
         Ok(())
     }
 
+    /// Ask for a whole-library reload on the worker. Asking again while one is
+    /// running folds into it: the walk in flight already reads the current tree,
+    /// so a second one would duplicate it.
+    pub(crate) fn request_library_reload(&mut self, reason: ReloadReason) {
+        if reason == ReloadReason::Manual {
+            self.begin_manual_refresh();
+        }
+        if self.library_reload.has_pending() {
+            self.queued_reload = Some(match self.queued_reload {
+                Some(queued) => queued.merge(reason),
+                None => reason,
+            });
+            return;
+        }
+        let request = ReloadRequest {
+            store: self.services.store.clone(),
+            reason,
+            generation: self.library_generation,
+        };
+        self.library_reload.request(request, reload::reload);
+    }
+
+    /// Install whatever the reload worker finished, reporting whether the frame
+    /// needs repainting.
+    ///
+    /// A result built against a library the app has since moved past is asked
+    /// for again rather than applied: the walk may have read a directory before
+    /// an edit landed in it, and installing it would put the edit back.
+    pub(crate) fn apply_library_reload_results(&mut self) -> bool {
+        let results = self.library_reload.drain();
+        let changed = !results.is_empty();
+        for result in results {
+            if result.generation != self.library_generation {
+                self.request_library_reload(result.reason);
+                continue;
+            }
+            match result.snapshot {
+                Ok(snapshot) => {
+                    self.install_library_snapshot(snapshot);
+                    if result.reason == ReloadReason::Manual {
+                        self.finish_manual_refresh();
+                        self.toast(ToastVariant::Success, "Refreshed from disk");
+                    }
+                }
+                Err(error) => {
+                    self.finish_initial_library_loading();
+                    self.finish_manual_refresh();
+                    self.toast(
+                        ToastVariant::Error,
+                        format!("Journal changes not loaded: {error}"),
+                    );
+                }
+            }
+        }
+        if let Some(reason) = self.queued_reload.take() {
+            self.request_library_reload(reason);
+        }
+        changed
+    }
+
     /// Rebuild derived state after `entries` is replaced or edited: the entry
     /// indexes, the cache-invalidating data version, the search hits (when a
     /// query is active), and the clamped selection. Shared by the full load and
@@ -717,8 +786,8 @@ impl AppModel {
 
     /// Reload only the entries under the changed `paths` when every change is an
     /// entry-file upsert/remove inside an existing journal. Anything else — a
-    /// new or removed journal, an asset, or a directory event — falls back to a
-    /// full [`Self::refresh`], since the journal list or grouping may have moved.
+    /// new or removed journal, an asset, or a directory event — asks for a full
+    /// reload instead, since the journal list or grouping may have moved.
     pub(crate) fn refresh_paths(&mut self, paths: &[PathBuf]) -> AppResult<()> {
         self.services.store.ensure()?;
         let root = self.services.store.root().to_path_buf();
@@ -736,10 +805,12 @@ impl AppModel {
                 continue;
             }
             let Some(journal) = journal_for_path(&root, path) else {
-                return self.refresh();
+                self.request_library_reload(ReloadReason::Automatic);
+                return Ok(());
             };
             if !is_entry_file(path) || !self.library.journals.iter().any(|j| j.name == journal) {
-                return self.refresh();
+                self.request_library_reload(ReloadReason::Automatic);
+                return Ok(());
             }
             targets.push((journal, path.clone()));
         }

@@ -14,6 +14,17 @@ fn key_char(ch: char) -> crossterm::event::KeyEvent {
 use std::fs;
 use tempfile::tempdir;
 
+/// Drive a requested reload to completion the way the event loop does — poll
+/// until the worker's result has been drained and installed.
+fn settle_library_reload(app: &mut AppModel) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while app.library_reload.has_pending() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+        app.apply_library_reload_results();
+    }
+    app.apply_library_reload_results();
+}
+
 #[test]
 fn appearance_reports_each_theme_warning_once_until_recovery() {
     let mut appearance = Appearance {
@@ -778,6 +789,12 @@ fn refresh_paths_falls_back_to_full_reload_for_a_new_journal() {
     let z = write_entry(&personal, "z.md", "2026-07-02T10:00:00+02:00", "# Z\nzed");
     app.refresh_paths(&[z]).unwrap();
 
+    // The walk runs on the worker, so nothing has landed yet.
+    assert!(app.library_reload.has_pending());
+    assert!(app.library.entry_by_id("z").is_none());
+
+    settle_library_reload(&mut app);
+
     assert!(
         app.library
             .journals
@@ -785,6 +802,96 @@ fn refresh_paths_falls_back_to_full_reload_for_a_new_journal() {
             .any(|journal| journal.name == "personal")
     );
     assert!(app.library.entry_by_id("z").is_some());
+}
+
+#[test]
+fn a_manual_refresh_shows_its_progress_until_the_walk_lands() {
+    let mut app = app_with_journals(&["work"]);
+
+    app.request_library_reload(ReloadReason::Manual);
+
+    assert!(app.library_reload.has_pending());
+    assert_eq!(
+        app.toasts
+            .items()
+            .last()
+            .map(|toast| toast.message.as_str()),
+        Some("Refreshing from disk…")
+    );
+
+    settle_library_reload(&mut app);
+
+    assert!(
+        !app.toasts
+            .items()
+            .iter()
+            .any(|toast| toast.message == "Refreshing from disk…")
+    );
+    assert_eq!(
+        app.toasts
+            .items()
+            .last()
+            .map(|toast| toast.message.as_str()),
+        Some("Refreshed from disk")
+    );
+}
+
+#[test]
+fn an_automatic_reload_lands_without_saying_anything() {
+    let mut app = app_with_journals(&["work"]);
+
+    app.request_library_reload(ReloadReason::Automatic);
+    settle_library_reload(&mut app);
+
+    assert!(app.toasts.items().is_empty());
+}
+
+#[test]
+fn a_second_refresh_folds_into_the_walk_already_running() {
+    let mut app = app_with_journals(&["work"]);
+
+    app.request_library_reload(ReloadReason::Automatic);
+    // Pressing `r` while the quiet reload runs must not start a second walk,
+    // but must still be reported when the running one lands.
+    app.request_library_reload(ReloadReason::Manual);
+
+    assert_eq!(app.queued_reload, Some(ReloadReason::Manual));
+
+    settle_library_reload(&mut app);
+
+    assert_eq!(
+        app.toasts
+            .items()
+            .last()
+            .map(|toast| toast.message.as_str()),
+        Some("Refreshed from disk")
+    );
+}
+
+#[test]
+fn a_reload_built_against_a_superseded_library_is_asked_for_again() {
+    let mut app = app_with_journals(&["work"]);
+
+    app.request_library_reload(ReloadReason::Automatic);
+    // Something changed the library while the walk was out; its result now
+    // describes a tree the app has moved past.
+    app.library_generation = app.library_generation.wrapping_add(1);
+    let generation = app.library_generation;
+
+    // Stop on the drain that consumed the stale result, before the replacement
+    // walk it asks for can land.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !app.apply_library_reload_results() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    // Nothing was installed — installing bumps the generation — and a fresh
+    // walk is out against the library now in hand.
+    assert_eq!(app.library_generation, generation);
+    assert!(app.library_reload.has_pending());
+
+    settle_library_reload(&mut app);
+    assert_ne!(app.library_generation, generation);
 }
 
 #[test]
