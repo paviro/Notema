@@ -3,10 +3,10 @@
 //! Not part of the shipped binary.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use notema_domain::{SearchScope, feelings};
-use notema_storage::JournalStore;
+use notema_storage::{JournalStore, LibraryLoadReport, LibrarySnapshot};
 use ratatui::{Terminal, backend::TestBackend};
 
 use super::app::{AppModel, Focus};
@@ -193,6 +193,68 @@ pub fn open_location_picker(app: &mut BenchApp) -> usize {
         .map_or(0, |state| state.presets.len());
     app.0.close_overlay();
     presets
+}
+
+/// An owned copy of the app's library, so [`install_snapshot`] — which consumes
+/// what it installs, as the worker result it stands for does — can be repeated.
+#[derive(Clone)]
+pub struct BenchSnapshot(LibrarySnapshot);
+
+/// Copy the app's current library out as a snapshot. The report is left empty:
+/// `install_library_snapshot` never reads it.
+pub fn library_snapshot(app: &BenchApp) -> BenchSnapshot {
+    BenchSnapshot(LibrarySnapshot {
+        journals: app.0.library.journals.clone(),
+        entries: app.0.library.entries.clone(),
+        report: LibraryLoadReport::default(),
+    })
+}
+
+/// Install a whole-library snapshot: swap it in, re-resolve the selected journal
+/// and entry by id, rebuild every index. The TUI half of a full reload — the walk
+/// that produces the snapshot runs on the worker and is timed by
+/// `cargo bench -p notema-storage --bench scan`.
+///
+/// This includes a real `theme::load`, because `apply_effective_theme` is stubbed
+/// under `cfg(test)` but not under the bench feature. That is what production
+/// pays too, but it is a fixed cost — do not read it as scaling with the corpus.
+pub fn install_snapshot(app: &mut BenchApp, snapshot: BenchSnapshot) {
+    app.0.install_library_snapshot(snapshot.0);
+}
+
+/// Re-read the top-level journal list, walking no entry. What creating,
+/// archiving or deleting a journal costs now that none of them reload the
+/// library.
+pub fn reload_journal_list(app: &mut BenchApp) {
+    app.0.reload_journal_list().unwrap();
+}
+
+/// The first loaded entry's path, for [`refresh_path`] to reconcile.
+pub fn first_entry_path(app: &BenchApp) -> PathBuf {
+    app.0.library.entries[0].path.clone()
+}
+
+/// Reconcile one changed entry path: re-read that file, upsert it, rebuild the
+/// indexes — the watcher's incremental route, against a full walk.
+///
+/// `path` must be an entry file under a journal the app already knows. Anything
+/// else makes `refresh_paths` hand the work to the reload worker instead, and
+/// this would time the microsecond hand-off rather than the reconcile.
+pub fn refresh_path(app: &mut BenchApp, path: &Path) {
+    app.0
+        .refresh_paths(std::slice::from_ref(&path.to_path_buf()))
+        .unwrap();
+}
+
+/// Follow an archive/unarchive rename in memory: rewrite the journal name and
+/// path of every entry under it, re-sort, rebuild the indexes. No file is read.
+///
+/// The rename is one-way, so a bench has to swap the names back and forth; a
+/// straight repeat finds nothing to rename after the first pass. `library.journals`
+/// is deliberately left alone — the production flow re-reads it separately, and
+/// it does not change the work measured here.
+pub fn rename_journal(app: &mut BenchApp, from: &str, to: &str) {
+    app.0.rename_journal_entries(from, to);
 }
 
 fn narrow_entry_text(index: usize) -> String {

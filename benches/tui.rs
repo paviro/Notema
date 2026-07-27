@@ -4,12 +4,16 @@
 //! matching the analytics and storage scan benches. Needs `--features bench`,
 //! which the `[[bench]]` entry requires automatically.
 
-use std::{hint::black_box, time::Instant};
+use std::{
+    hint::black_box,
+    time::{Duration, Instant},
+};
 
 use notema::bench::{
     BenchCorpus, FILTER_TAB_COUNT, METADATA_KIND_COUNT, app_with_corpus, app_with_entries,
-    close_picker, draw_frame, filter_metadata_picker, filter_tab_rows, open_filter,
-    open_location_picker, open_metadata_picker, search,
+    close_picker, draw_frame, filter_metadata_picker, filter_tab_rows, first_entry_path,
+    install_snapshot, library_snapshot, open_filter, open_location_picker, open_metadata_picker,
+    refresh_path, reload_journal_list, rename_journal, search,
 };
 
 fn main() {
@@ -33,6 +37,57 @@ fn main() {
             black_box(search(black_box(&app), black_box("representative bold")));
         }
         println!("search/{size}: {:?}", started.elapsed() / iterations);
+
+        // The reload spectrum, cheapest first. Read these against
+        // `cargo bench -p notema-storage --bench scan`, which times the full walk
+        // each of them exists to avoid.
+        reload_journal_list(&mut app);
+        let started = Instant::now();
+        for _ in 0..iterations {
+            reload_journal_list(black_box(&mut app));
+        }
+        println!(
+            "reload_journal_list/{size}: {:?}",
+            started.elapsed() / iterations
+        );
+
+        // One changed entry file, reconciled without walking the corpus.
+        let path = first_entry_path(&app);
+        refresh_path(&mut app, &path);
+        let started = Instant::now();
+        for _ in 0..iterations {
+            refresh_path(black_box(&mut app), black_box(&path));
+        }
+        println!("refresh_path/{size}: {:?}", started.elapsed() / iterations);
+
+        // An archive rename, applied in memory. One iteration is both directions,
+        // because the rename is one-way and a repeat would find nothing to move.
+        rename_journal(&mut app, "journal-0", "journal-0.archived");
+        rename_journal(&mut app, "journal-0.archived", "journal-0");
+        let started = Instant::now();
+        for _ in 0..iterations {
+            rename_journal(black_box(&mut app), "journal-0", "journal-0.archived");
+            rename_journal(black_box(&mut app), "journal-0.archived", "journal-0");
+        }
+        println!(
+            "rename_journal/{size}: {:?}",
+            started.elapsed() / (iterations * 2)
+        );
+
+        // Installing a whole-library snapshot — the TUI half of a full reload.
+        // The copy is untimed: production moves the worker's snapshot in rather
+        // than cloning it, so the elapsed time is accumulated per iteration
+        // instead of measured across the loop.
+        let reference = library_snapshot(&app);
+        install_snapshot(&mut app, reference.clone());
+        let mut elapsed = Duration::ZERO;
+        for _ in 0..iterations {
+            let snapshot = reference.clone();
+            let started = Instant::now();
+            install_snapshot(black_box(&mut app), black_box(snapshot));
+            elapsed += started.elapsed();
+        }
+        println!("install_snapshot/{size}: {:?}", elapsed / iterations);
     }
 
     // The filter browser scales with the number of *distinct* values, so it gets

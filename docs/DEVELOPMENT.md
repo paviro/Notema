@@ -82,7 +82,7 @@ performance regressions on the paths that scale with journal size.
 |---|---|---|
 | `analytics` | `notema-analytics` | Cadence/mood/correlation aggregation |
 | `scan` | `notema-storage` | Full journal scan: walk + parse + preview + haystack |
-| `tui` | root (`--features bench`) | Full-frame render, in-memory fuzzy search, filter browser, metadata/location pickers |
+| `tui` | root (`--features bench`) | Full-frame render, in-memory fuzzy search, filter browser, metadata/location pickers, incremental reloads |
 
 ```bash
 cargo bench -p notema-analytics --bench analytics
@@ -117,6 +117,12 @@ assign from, and neither is cached. `metadata_filter` is the picker's
 per-keystroke refilter with the value list already built. The picker's cost is
 dominated by the per-entry walk rather than the vocabulary — the 12-value
 Activities line is within a factor of two of the 1280-value Tags one.
+
+The `reload_journal_list`, `refresh_path`, `rename_journal` and
+`install_snapshot` lines are the incremental routes that replaced whole-library
+reloads. Read them against `validate/{size}` in the `scan` bench, which is the
+warm-cache full walk each of them exists to avoid — that is the comparison, and
+none of them should ever approach it.
 
 Reading the numbers: each line is the mean wall-clock time per iteration, e.g.
 `scan/25000: 1.1s`. There is no built-in baseline comparison — record the 25k
