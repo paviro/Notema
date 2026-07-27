@@ -2,7 +2,7 @@
 
 use chrono::NaiveDate;
 use notema_domain::{
-    DateFilter, Entry, EntryEncryptionState, entry_group_date, feeling_matches_search,
+    DateFilter, Entry, EntryEncryptionState, FeelingMatch, entry_group_date, feeling_matches_search,
 };
 
 use super::parse::split_values;
@@ -19,11 +19,11 @@ pub(super) fn date_predicate(
 
 /// Whether an entry matches a `tags:`/`people:`/`activities:` search: every
 /// `+`-group in `query` must match, where a group matches if *any* of its
-/// `|`-alternatives is contained (case-insensitively) in one of the entry's
-/// `kind` values. The filter browser's row counter and the launched search share
-/// this predicate (and the location/feeling ones below), so a row's count always
-/// equals the hits its search returns; the value split lives here, not in the
-/// parser, to keep that true.
+/// `|`-alternatives matches one of the entry's `kind` values.
+///
+/// An alternative is a substring unless it was quoted, so `tags:app` keeps
+/// narrowing to `apple` as it is typed while `tags:"app"` — what a chip or a
+/// filter row commits — means that tag and no other.
 pub(crate) fn metadata_predicate(
     kind: MetadataKind,
     query: &str,
@@ -33,11 +33,9 @@ pub(crate) fn metadata_predicate(
         let values = metadata_values(entry, kind);
         !groups.is_empty()
             && groups.iter().all(|alternatives| {
-                alternatives.iter().any(|needle| {
-                    values
-                        .iter()
-                        .any(|value| value.to_lowercase().contains(needle))
-                })
+                alternatives
+                    .iter()
+                    .any(|needle| values.iter().any(|value| needle.matches(value)))
             })
     }
 }
@@ -64,18 +62,39 @@ pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<>
 }
 
 /// Whether an entry matches a `feelings:` search: the [`split_values`] groups
-/// applied to the entry's feelings through [`feeling_matches_search`], which is
-/// alias-aware and lowercases its own query.
+/// applied to the entry's feelings through [`feeling_matches_search`], which
+/// resolves aliases so `feelings:"joyous"` reaches `happy`.
+///
+/// Exactness matters more here than elsewhere, because `happy`/`unhappy` and
+/// `interested`/`uninterested` are each two canonical feelings, one holding the
+/// other's name.
 pub(crate) fn feeling_predicate(feeling: &str) -> impl Fn(&Entry) -> bool + use<> {
-    let groups = split_values(feeling);
+    // The mode is a property of the needle, so resolve it once rather than once
+    // per entry per feeling.
+    let groups: Vec<Vec<(String, FeelingMatch)>> = split_values(feeling)
+        .into_iter()
+        .map(|alternatives| {
+            alternatives
+                .into_iter()
+                .map(|needle| {
+                    let mode = if needle.exact {
+                        FeelingMatch::Exact
+                    } else {
+                        FeelingMatch::Contains
+                    };
+                    (needle.text, mode)
+                })
+                .collect()
+        })
+        .collect();
     move |entry| {
         !groups.is_empty()
             && groups.iter().all(|alternatives| {
-                alternatives.iter().any(|needle| {
+                alternatives.iter().any(|(needle, mode)| {
                     entry
                         .feelings
                         .iter()
-                        .any(|entry_feeling| feeling_matches_search(entry_feeling, needle))
+                        .any(|entry_feeling| feeling_matches_search(entry_feeling, needle, *mode))
                 })
             })
     }

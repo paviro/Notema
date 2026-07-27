@@ -537,6 +537,81 @@ mod tests {
         // No value to match on, so the filter is empty rather than universal.
         assert_eq!(run(&mut app, "tags:"), 0);
         assert_eq!(run(&mut app, "feelings:"), 0);
+        // An empty quoted value is empty too, not "match everything exactly".
+        assert_eq!(run(&mut app, "tags:\"\""), 0);
+        assert_eq!(run(&mut app, "feelings:\"\""), 0);
+    }
+
+    // --- Exactness ---------------------------------------------------------
+
+    #[test]
+    fn quoting_matches_exactly_while_typing_still_narrows() {
+        let mut app = app_with(vec![
+            rich_entry("", &["app"], &[], None),
+            rich_entry("", &["apple"], &[], None),
+            rich_entry("", &["pineapple"], &[], None),
+        ]);
+
+        // Unquoted stays a substring, so the list narrows as the value is typed.
+        assert_eq!(run(&mut app, "tags:app"), 3);
+        assert_eq!(run(&mut app, "tags:appl"), 2);
+        // Quoted is the value itself — what a chip or a filter row commits.
+        assert_eq!(run(&mut app, "tags:\"app\""), 1);
+        assert_eq!(run(&mut app, "tags:\"apple\""), 1);
+        assert_eq!(run(&mut app, "tags:\"pineapple\""), 1);
+    }
+
+    /// A quoted value means the bytes between the quotes, so a tag stored with
+    /// surrounding whitespace is reachable and distinct from the trimmed one.
+    #[test]
+    fn a_quoted_value_keeps_its_surrounding_whitespace() {
+        let mut app = app_with(vec![
+            rich_entry("", &[" work "], &[], None),
+            rich_entry("", &["work"], &[], None),
+        ]);
+
+        assert_eq!(run(&mut app, "tags:\" work \""), 1);
+        assert_eq!(run(&mut app, "tags:\"work\""), 1);
+        assert_eq!(run(&mut app, "tags:work"), 2);
+    }
+
+    #[test]
+    fn mixed_quoting_within_one_group() {
+        let mut app = app_with(vec![
+            rich_entry("", &["a"], &[], None),
+            rich_entry("", &["ab"], &[], None),
+            rich_entry("", &["bc"], &[], None),
+            rich_entry("", &["z"], &[], None),
+        ]);
+
+        // Exactly-a, or anything containing b.
+        assert_eq!(run(&mut app, "tags:\"a\"|b"), 3);
+        assert_eq!(run(&mut app, "tags:\"a\""), 1);
+        assert_eq!(run(&mut app, "tags:a"), 2);
+        // Unbalanced quotes are not a pair, so the `"` stays literal.
+        assert_eq!(run(&mut app, "tags:\"a\"b"), 0);
+    }
+
+    /// `happy` and `unhappy` are both canonical feelings, one holding the other's
+    /// name. A committed value must separate them; a typed one must not.
+    #[test]
+    fn feelings_match_exactly_or_through_an_alias() {
+        let mut happy = rich_entry("", &[], &[], None);
+        happy.feelings = vec!["happy".to_string()];
+        let mut unhappy = rich_entry("", &[], &[], None);
+        unhappy.feelings = vec!["unhappy".to_string()];
+        let mut joyful = rich_entry("", &[], &[], None);
+        joyful.feelings = vec!["joyful".to_string()];
+        let mut app = app_with(vec![happy, unhappy, joyful]);
+
+        assert_eq!(run(&mut app, "feelings:happy"), 2);
+        assert_eq!(run(&mut app, "feelings:\"happy\""), 1);
+        assert_eq!(run(&mut app, "feelings:\"unhappy\""), 1);
+        // An alias is a synonym for a whole value, so it survives exactness.
+        assert_eq!(run(&mut app, "feelings:\"joyous\""), 1);
+        // `joyful` is a canonical feeling in its own right, never an alias of
+        // `happy`, so it reaches only itself.
+        assert_eq!(run(&mut app, "feelings:\"joyful\""), 1);
     }
 
     // --- Quoted values -----------------------------------------------------

@@ -2975,7 +2975,7 @@ fn help_cheatsheet_lists_grouped_bindings() {
     assert!(search.contains("Combine"));
     assert!(search.contains("Every filter matches"));
     assert!(search.contains("Any value matches"));
-    assert!(search.contains("Literal value"));
+    assert!(search.contains("Exactly x, not xy"));
 }
 
 /// On a terminal too short to show every row, the cheatsheet scrolls rather than

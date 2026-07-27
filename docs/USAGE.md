@@ -37,7 +37,7 @@ it.
 ## Search filters
 
 `/` searches the whole corpus — body text and metadata — ranked by how well each
-entry matches. A `prefix:` filters on one field exactly:
+entry matches. A `prefix:` narrows it to one field:
 
 ```
 tags:project        people:Alice        activities:coding
@@ -78,18 +78,26 @@ beach; tags:travel                 full-text "beach" and the travel tag
 
 A prefix-less piece is a full-text search AND-ed with the filters, so it also
 supplies the ranking. Only `;`, `+`, and `|` are structural — values keep
-everything else (`location:Berlin, Germany`). Quote a value to match one of the
-three literally:
+everything else (`location:Berlin, Germany`).
+
+`tags:`, `people:`, `activities:` and `feelings:` match a bare value anywhere in
+the field, which is what keeps the list narrowing as you type. Quote it to mean
+that value and nothing else, and to carry a `;`, `+`, or `|` literally:
 
 ```
+tags:app            app, apple, and pineapple
+tags:"app"          the tag app
 tags:"C++"          the tag C++, not "C" and "+"
 tags:"Berlin; Mitte"
 tags:"say ""hi"""   a quote inside a quoted value is written twice
 ```
 
+`location:` is not exact either way: a place contains the places around it, so
+`location:Germany` finds every entry in it.
+
 Searches launched by clicking a tag, person, feeling, or a filter-browser row
-(`f`) quote themselves when they need to, so the query they drop in the search box
-always matches the value you clicked.
+(`f`) quote themselves, so the query they drop in the search box means the value
+you clicked and only that one.
 
 ## Location
 

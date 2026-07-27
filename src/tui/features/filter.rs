@@ -286,10 +286,16 @@ mod tests {
 
     /// A fixture spanning two journals with every facet populated, plus one locked
     /// entry (whose "secret" tag must never surface).
+    ///
+    /// The tags carry the shapes a row's value has to survive: one value holding
+    /// another (`work`/`homework`), a casing pair both across entries and within
+    /// one, a value with surrounding whitespace, and characters the query parser
+    /// reads as structure. The feelings carry `happy`/`unhappy`, which are two
+    /// canonical feelings, one holding the other's name.
     fn fixture_app() -> AppModel {
         let entries = vec![
             entry("work", |e| {
-                e.tags = strings(&["berlin", "work"]);
+                e.tags = strings(&["berlin", "work", "Work"]);
                 e.people = strings(&["Alice"]);
                 e.activities = strings(&["coding"]);
                 e.feelings = strings(&["happy"]);
@@ -298,17 +304,18 @@ mod tests {
                 e.location = Some(place("Berlin", "Germany"));
             }),
             entry("work", |e| {
-                e.tags = strings(&["Berlin"]);
+                e.tags = strings(&["Berlin", "homework", "work"]);
                 e.feelings = strings(&["happy", "calm"]);
                 e.mood = Some(3);
                 e.location = Some(place("Berlin", "Germany"));
             }),
             entry("trips", |e| {
-                // Values holding characters the query parser reads as structure.
-                e.tags = strings(&["berlin", "c++", "kreuzberg; mitte", "say \"hi\""]);
+                // Values holding characters the query parser reads as structure,
+                // plus one whose whitespace is part of the value.
+                e.tags = strings(&["berlin", "c++", "kreuzberg; mitte", "say \"hi\"", " work "]);
                 e.people = strings(&["alice", "Bob"]);
                 e.activities = strings(&["hiking", "r&d|ops", "a\";b"]);
-                e.feelings = strings(&["calm"]);
+                e.feelings = strings(&["calm", "unhappy"]);
                 e.mood = Some(-2);
                 e.starred = true;
                 e.location = Some(place("Paris", "France"));
@@ -381,6 +388,93 @@ mod tests {
         assert_eq!(people.len(), 1);
         assert_eq!(people[0].count, 1);
         assert!(people[0].label.eq_ignore_ascii_case("alice"));
+    }
+
+    /// The premise of the whole tab: a row selects the value it displays. `work`
+    /// and `homework` are separate rows because a click on one must not return the
+    /// other's entries.
+    #[test]
+    fn a_row_counts_its_value_and_not_the_ones_holding_it() {
+        let mut app = fixture_app();
+        let scope = SearchScope::AllJournals;
+        let rows = app.filter_rows(&scope, FilterTab::Tags);
+        let count_of = |label: &str| {
+            rows.iter()
+                .find(|r| r.label == label)
+                .unwrap_or_else(|| panic!("{label:?} row"))
+                .count
+        };
+
+        // Two entries are tagged `work`; a third is tagged `homework` and a fourth
+        // `" work "`, and neither belongs to the `work` row.
+        assert_eq!(count_of("work"), 2);
+        assert_eq!(count_of("homework"), 1);
+        assert_eq!(count_of(" work "), 1);
+
+        // Typed by hand, the value is still a substring — which is what keeps the
+        // results narrowing while it is being typed. It reaches all three unlocked
+        // entries, where the `work` row reaches two.
+        app.search.scope = scope.clone();
+        app.search.query.set_text("tags:work");
+        assert_eq!(app.search_results().len(), 3);
+    }
+
+    /// `happy` and `unhappy` are both canonical feelings, so before rows meant
+    /// themselves the `happy` row counted the `unhappy` entry too.
+    #[test]
+    fn a_feeling_row_excludes_the_feelings_holding_its_name() {
+        let mut app = fixture_app();
+        let scope = SearchScope::AllJournals;
+        let rows = app.filter_rows(&scope, FilterTab::Feelings);
+        let count_of = |label: &str| {
+            rows.iter()
+                .find(|r| r.label == label)
+                .unwrap_or_else(|| panic!("{label:?} row"))
+                .count
+        };
+
+        assert_eq!(count_of("happy"), 2);
+        assert_eq!(count_of("unhappy"), 1);
+
+        // The other half of the guarantee: a hand-typed value still reaches both,
+        // so exactness did not simply replace the substring rule.
+        app.search.scope = scope.clone();
+        app.search.query.set_text("feelings:happy");
+        assert_eq!(app.search_results().len(), 3);
+    }
+
+    #[test]
+    fn a_case_pair_is_one_row_and_an_entry_holding_both_counts_once() {
+        let app = fixture_app();
+        let rows = app.filter_rows(&SearchScope::AllJournals, FilterTab::Tags);
+        // `Work` and `work` fold together, and the most-used casing labels the row.
+        let work: Vec<&FilterRow> = rows
+            .iter()
+            .filter(|r| r.label.eq_ignore_ascii_case("work"))
+            .collect();
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].label, "work");
+        // The first entry carries both casings and is still one entry.
+        assert_eq!(work[0].count, 2);
+    }
+
+    /// Folding with `to_lowercase` rather than `eq_ignore_ascii_case` is what keeps
+    /// a non-ASCII casing pair one row whose own search returns both its entries.
+    #[test]
+    fn a_non_ascii_case_pair_is_one_row() {
+        let mut app = crate::tui::test_support::app_with_journals(&[]);
+        app.library.entries = vec![
+            entry("work", |e| e.tags = strings(&["Ärger"])),
+            entry("work", |e| e.tags = strings(&["ärger"])),
+        ];
+        let scope = SearchScope::AllJournals;
+        let rows = app.filter_rows(&scope, FilterTab::Tags);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].count, 2);
+        assert_eq!(
+            search_count(&mut app, &scope, FilterTab::Tags, &rows[0].search_value),
+            2
+        );
     }
 
     #[test]

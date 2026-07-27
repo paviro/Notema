@@ -164,7 +164,7 @@ fn narrow_entry_text(index: usize) -> String {
 /// two are separate costs. The country is derived from the city, so place groups
 /// number exactly as many as cities.
 ///
-/// Feelings cannot grow with the corpus: the vocabulary is the 166 canonical
+/// Feelings cannot grow with the corpus: the vocabulary is the 170 canonical
 /// words in `FEELING_GROUPS` and anything else is dropped on read. They are here
 /// because matching one used to scan the whole alias table, which is a per-entry
 /// cost rather than a per-vocabulary one.

@@ -1,6 +1,6 @@
 /// A single canonical feeling plus the alternate words that resolve to it.
 /// Search aliases are never offered in the picker; they only let a typed or
-/// `--feeling` value like "joyful" map onto the canonical "happy".
+/// `--feeling` value like "joyous" map onto the canonical "happy".
 pub struct Feeling {
     pub name: &'static str,
     pub search_aliases: &'static [&'static str],
@@ -341,25 +341,47 @@ pub fn normalize_feeling(feeling: &str) -> Option<String> {
     if feelings().any(|f| f == feeling) {
         return Some(feeling);
     }
-    // Fall back to a search alias so words like "joyful" resolve to "happy".
+    // Fall back to a search alias so words like "joyous" resolve to "happy".
     feeling_aliases()
         .find(|(alias, _)| *alias == feeling)
         .map(|(_, canonical)| canonical.to_string())
 }
 
-/// Whether a canonical `feeling` stored on an entry should match the partial search
-/// `query`: the (trimmed, lowercased) query is a substring of the feeling name or of one
-/// of that feeling's search aliases. Mirrors the feelings picker filter (see
-/// `EditFeelingState::visible_rows`) so `feelings:` search and the picker agree. An empty
-/// query matches every feeling, which is what the picker wants before you type; the
-/// `feelings:` search drops empty values before it gets here, so a bare `feelings:`
-/// matches nothing.
-pub fn feeling_matches_search(feeling: &str, query: &str) -> bool {
+/// How a `feelings:` value is compared against a feeling stored on an entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeelingMatch {
+    /// The query is a fragment of what is meant, so `hap` reaches `happy`.
+    Contains,
+    /// The query is the whole word.
+    Exact,
+}
+
+/// Whether a canonical `feeling` stored on an entry matches the search `query`,
+/// which is trimmed and lowercased first. A feeling answers to its own name or to
+/// any of its search aliases, so `joyous` reaches `happy` under either mode.
+///
+/// Under [`FeelingMatch::Exact`] no two feelings can answer to the same query:
+/// `aliases_are_unique_and_never_shadow_a_canonical_feeling` guarantees that no
+/// alias repeats and none equals a canonical name, so treat that test as
+/// load-bearing rather than stylistic.
+///
+/// An empty query is contained in everything and equal to nothing. The
+/// `feelings:` search drops empty values before they get here, so a bare
+/// `feelings:` matches nothing either way.
+pub fn feeling_matches_search(feeling: &str, query: &str, mode: FeelingMatch) -> bool {
     let query = query.trim().to_lowercase();
-    feeling.contains(&query)
+    // The stored side is folded too under `Exact`: `feeling_aliases_of` looks a
+    // canonical name up case-sensitively, so an unfolded comparison would let a
+    // hand-written `Happy` sit in the `happy` filter row without its search
+    // returning it.
+    let matches = |candidate: &str| match mode {
+        FeelingMatch::Contains => candidate.contains(&query),
+        FeelingMatch::Exact => candidate.to_lowercase() == query,
+    };
+    matches(feeling)
         || feeling_aliases_of(feeling)
             .iter()
-            .any(|alias| alias.contains(&query))
+            .any(|alias| matches(alias))
 }
 
 pub fn normalize_feelings<'a>(feelings: impl IntoIterator<Item = &'a str>) -> Vec<String> {
@@ -448,20 +470,40 @@ mod tests {
 
     #[test]
     fn feeling_matches_search_handles_partial_name_alias_and_empty() {
+        use FeelingMatch::Contains;
         // Partial canonical name: `relaxe` still finds `relaxed`.
-        assert!(feeling_matches_search("relaxed", "relaxe"));
-        assert!(feeling_matches_search("relaxed", "relax"));
+        assert!(feeling_matches_search("relaxed", "relaxe", Contains));
+        assert!(feeling_matches_search("relaxed", "relax", Contains));
         // Partial alias resolves onto its canonical feeling: `thank` -> `grateful`.
-        assert!(feeling_matches_search("grateful", "thank"));
-        assert!(feeling_matches_search("grateful", "thankful"));
+        assert!(feeling_matches_search("grateful", "thank", Contains));
+        assert!(feeling_matches_search("grateful", "thankful", Contains));
         // Case-insensitive and trimmed.
-        assert!(feeling_matches_search("relaxed", "  RELAX  "));
+        assert!(feeling_matches_search("relaxed", "  RELAX  ", Contains));
         // A non-matching query matches nothing.
-        assert!(!feeling_matches_search("relaxed", "zzz"));
+        assert!(!feeling_matches_search("relaxed", "zzz", Contains));
         // An alias of another feeling doesn't leak across canonicals.
-        assert!(!feeling_matches_search("relaxed", "thank"));
+        assert!(!feeling_matches_search("relaxed", "thank", Contains));
         // Empty query matches any feeling.
-        assert!(feeling_matches_search("relaxed", ""));
+        assert!(feeling_matches_search("relaxed", "", Contains));
+    }
+
+    #[test]
+    fn feeling_matches_exactly_on_the_whole_name_or_alias() {
+        use FeelingMatch::Exact;
+        // The whole name, or a whole alias — never a fragment of either.
+        assert!(feeling_matches_search("relaxed", "relaxed", Exact));
+        assert!(!feeling_matches_search("relaxed", "relax", Exact));
+        assert!(feeling_matches_search("grateful", "thankful", Exact));
+        assert!(!feeling_matches_search("grateful", "thank", Exact));
+        // A canonical feeling holding another's name is a different feeling.
+        // Under `Contains` these are the wrong answer, which is the whole point.
+        assert!(!feeling_matches_search("unhappy", "happy", Exact));
+        assert!(!feeling_matches_search("uninterested", "interested", Exact));
+        // Still trimmed and folded on both sides.
+        assert!(feeling_matches_search("relaxed", "  RELAXED  ", Exact));
+        assert!(feeling_matches_search("Relaxed", "relaxed", Exact));
+        // An empty query equals nothing, where `Contains` matches everything.
+        assert!(!feeling_matches_search("relaxed", "", Exact));
     }
 
     #[test]
