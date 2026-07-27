@@ -211,15 +211,17 @@ fn main() {
 
 /// The editor re-scans the whole buffer on every keystroke, so it scales with
 /// document length rather than corpus size — an axis the corpus sweep holds
-/// fixed and therefore cannot see.
-/// The corpus is small on purpose — it exists only to give the editor a journal
-/// to open in.
+/// fixed and therefore cannot see. The corpus here is small on purpose: it
+/// exists only to give the editor a journal to open in.
 fn editor() {
     for lines in [200, 2_000, 10_000] {
         let dir = tempfile::tempdir().unwrap();
         let mut app = app_with_entries(dir.path(), 100);
         let mut terminal = bench_terminal(120, 40);
-        let iterations = 20;
+        // Far more than the corpus lines use: a keystroke on a short document is
+        // tens of microseconds, and at 20 iterations that swings several-fold
+        // run to run.
+        let iterations = if lines < 10_000 { 500 } else { 100 };
 
         open_editor_with_body(&mut terminal, &mut app, lines);
 
