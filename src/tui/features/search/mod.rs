@@ -17,10 +17,10 @@ use crate::tui::{
     state::MetadataKind,
 };
 
-use parse::{parse_starred_value, split_unquoted, strip_date_prefix, unquote};
+use parse::{parse_starred_value, split_unquoted, unquote};
 use predicate::date_predicate;
 
-pub(crate) use parse::quote_filter_value;
+pub(crate) use parse::{Prefix, quote_filter_value, split_prefix};
 pub(crate) use predicate::{
     entry_in_search_scope, feeling_predicate, location_predicate, location_tokens,
     metadata_predicate,
@@ -190,43 +190,37 @@ enum Segment<'a> {
 
 /// Classify one query segment. `today` is threaded in so date matching stays pure.
 fn classify_segment(segment: &str, today: NaiveDate) -> Segment<'_> {
-    if let Some(tag) = segment.strip_prefix("tags:") {
-        Segment::Filter(Box::new(metadata_predicate(MetadataKind::Tags, tag.trim())))
-    } else if let Some(person) = segment.strip_prefix("people:") {
-        Segment::Filter(Box::new(metadata_predicate(
-            MetadataKind::People,
-            person.trim(),
-        )))
-    } else if let Some(activity) = segment.strip_prefix("activities:") {
-        Segment::Filter(Box::new(metadata_predicate(
+    let Some((prefix, value)) = split_prefix(segment) else {
+        return Segment::Text(segment);
+    };
+    let value = value.trim();
+    match prefix {
+        Prefix::Tags => Segment::Filter(Box::new(metadata_predicate(MetadataKind::Tags, value))),
+        Prefix::People => {
+            Segment::Filter(Box::new(metadata_predicate(MetadataKind::People, value)))
+        }
+        Prefix::Activities => Segment::Filter(Box::new(metadata_predicate(
             MetadataKind::Activities,
-            activity.trim(),
-        )))
-    } else if let Some(feeling) = segment.strip_prefix("feelings:") {
-        Segment::Filter(Box::new(feeling_predicate(feeling.trim())))
-    } else if let Some(value) = segment.strip_prefix("star:") {
-        match parse_starred_value(&unquote(value.trim())) {
+            value,
+        ))),
+        Prefix::Feelings => Segment::Filter(Box::new(feeling_predicate(value))),
+        Prefix::Star => match parse_starred_value(&unquote(value)) {
             Some(want) => Segment::Filter(Box::new(move |entry: &Entry| entry.starred == want)),
             None => Segment::NoMatch,
-        }
-    } else if let Some(place) = segment.strip_prefix("location:") {
-        Segment::Filter(Box::new(location_predicate(&unquote(place.trim()))))
-    } else if let Some(mood) = segment.strip_prefix("mood:") {
-        match unquote(mood.trim()).parse::<i8>() {
+        },
+        Prefix::Location => Segment::Filter(Box::new(location_predicate(&unquote(value)))),
+        Prefix::Mood => match unquote(value).parse::<i8>() {
             Ok(score) if MOOD_RANGE.contains(&score) => {
                 Segment::Filter(Box::new(move |entry: &Entry| entry.mood == Some(score)))
             }
             _ => Segment::NoMatch,
-        }
-    } else if let Some((bound, value)) = strip_date_prefix(segment) {
-        match DateSpec::parse(&value) {
+        },
+        Prefix::Date(bound) => match DateSpec::parse(&unquote(value)) {
             Some(spec) => {
                 Segment::Filter(Box::new(date_predicate(DateFilter { bound, spec }, today)))
             }
             None => Segment::NoMatch,
-        }
-    } else {
-        Segment::Text(segment)
+        },
     }
 }
 

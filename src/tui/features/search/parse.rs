@@ -5,19 +5,42 @@ use std::borrow::Cow;
 
 use notema_domain::DateBound;
 
-/// Split a `date:`/`before:`/`after:` query into its bound and value.
-pub(super) fn strip_date_prefix(query: &str) -> Option<(DateBound, Cow<'_, str>)> {
-    [
-        ("date:", DateBound::On),
-        ("before:", DateBound::Before),
-        ("after:", DateBound::After),
-    ]
-    .into_iter()
-    .find_map(|(prefix, bound)| {
-        query
-            .strip_prefix(prefix)
-            .map(|value| (bound, unquote(value.trim())))
-    })
+/// A filter prefix the query grammar recognises.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Prefix {
+    Tags,
+    People,
+    Activities,
+    Feelings,
+    Star,
+    Location,
+    Mood,
+    Date(DateBound),
+}
+
+/// The whole vocabulary, in match order. One table so that what the parser binds
+/// to a predicate and what the query field highlights as a prefix cannot drift:
+/// a token the highlighter colours but the parser drops to full text would be
+/// worse than no highlighting at all.
+const PREFIXES: [(&str, Prefix); 10] = [
+    ("tags:", Prefix::Tags),
+    ("people:", Prefix::People),
+    ("activities:", Prefix::Activities),
+    ("feelings:", Prefix::Feelings),
+    ("star:", Prefix::Star),
+    ("location:", Prefix::Location),
+    ("mood:", Prefix::Mood),
+    ("date:", Prefix::Date(DateBound::On)),
+    ("before:", Prefix::Date(DateBound::Before)),
+    ("after:", Prefix::Date(DateBound::After)),
+];
+
+/// Split a segment into its filter prefix and the raw text after it; `None` is a
+/// full-text segment. Matching is byte-exact, so `Tags:` and `tags :` are text.
+pub(crate) fn split_prefix(segment: &str) -> Option<(Prefix, &str)> {
+    PREFIXES
+        .iter()
+        .find_map(|(token, prefix)| segment.strip_prefix(token).map(|rest| (*prefix, rest)))
 }
 
 /// Split `input` on `sep`, ignoring separators inside a `"…"` span — how a value
@@ -142,6 +165,7 @@ pub(super) fn parse_starred_value(value: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::state::{FilterTab, MetadataKind};
 
     /// The one needle a value must parse back to, or `None` if it produced no
     /// group at all.
@@ -169,6 +193,49 @@ mod tests {
             text: text.to_string(),
             exact: false,
         })
+    }
+
+    #[test]
+    fn a_prefix_is_matched_byte_exactly() {
+        assert_eq!(split_prefix("tags:work"), Some((Prefix::Tags, "work")));
+        assert_eq!(
+            split_prefix("before:2026"),
+            Some((Prefix::Date(DateBound::Before), "2026"))
+        );
+        // Case and a space before the colon both fall through to full text.
+        assert_eq!(split_prefix("Tags:work"), None);
+        assert_eq!(split_prefix("tags :work"), None);
+        assert_eq!(split_prefix("tag:work"), None);
+        // The value is handed over raw; trimming and unquoting are the caller's.
+        assert_eq!(
+            split_prefix("tags: \"a\" "),
+            Some((Prefix::Tags, " \"a\" "))
+        );
+    }
+
+    /// The two enums that *build* queries must name prefixes the parser reads
+    /// back. They hold their own `&'static str`, so nothing but this stops a
+    /// filter row from launching a search that silently ran as full text.
+    #[test]
+    fn every_produced_prefix_parses_back() {
+        for kind in [
+            MetadataKind::Tags,
+            MetadataKind::People,
+            MetadataKind::Activities,
+        ] {
+            let segment = format!("{}:x", kind.search_prefix());
+            assert!(
+                split_prefix(&segment).is_some(),
+                "MetadataKind::{kind:?} produces {segment:?}"
+            );
+        }
+        for tab in FilterTab::ALL {
+            let segment = format!("{}:x", tab.search_prefix());
+            assert!(
+                split_prefix(&segment).is_some(),
+                "FilterTab::{tab:?} produces {segment:?}"
+            );
+        }
     }
 
     #[test]

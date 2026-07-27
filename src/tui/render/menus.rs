@@ -710,6 +710,25 @@ fn draw_section_dialog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::features::search::split_prefix;
+
+    /// The reference documents prefixes; the parser decides which ones exist.
+    /// Nothing but this stops the table from teaching a filter that silently runs
+    /// as a full-text search.
+    #[test]
+    fn every_documented_prefix_parses() {
+        for (title, rows) in SEARCH_SECTIONS {
+            if !matches!(title, "Filters" | "Dates") {
+                continue;
+            }
+            for (token, _) in rows {
+                assert!(
+                    split_prefix(token).is_some(),
+                    "{title} documents {token:?}, which the parser reads as text"
+                );
+            }
+        }
+    }
 
     /// Each column takes only the width its own sections need. A uniform width
     /// would pad the narrow columns out to the table's widest row, which is what
