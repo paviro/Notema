@@ -111,6 +111,11 @@ impl FileWatcher {
         let (tx, rx) = mpsc::channel();
 
         let filter_root = root.to_path_buf();
+        // FSEvents reports the resolved path (`/private/var/…` for a `/var/…`
+        // root), which shares no prefix with the configured one. Map events back
+        // onto the root the app was given so everything downstream can attribute
+        // them.
+        let reported_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         let mut watcher = RecommendedWatcher::new(
             move |res: notify::Result<Event>| {
                 if let Ok(event) = res {
@@ -119,6 +124,7 @@ impl FileWatcher {
                     for path in event
                         .paths
                         .into_iter()
+                        .map(|p| rebase(&reported_root, &filter_root, p))
                         .filter(|p| is_relevant(&filter_root, p))
                     {
                         let _ = tx.send(path);
@@ -147,11 +153,23 @@ impl FileWatcher {
     }
 }
 
+/// Move `path` from the form the watcher reports it in back under the root the
+/// app configured. A path already under `configured` — or under neither — is
+/// left alone.
+fn rebase(reported: &Path, configured: &Path, path: PathBuf) -> PathBuf {
+    if reported == configured {
+        return path;
+    }
+    match path.strip_prefix(reported) {
+        Ok(below) => configured.join(below),
+        Err(_) => path,
+    }
+}
+
 /// Hidden-file filter, applied only to the path *below* the watch root — a
 /// root that itself lives under a dot directory (`~/.config/notema/themes`)
-/// must still report its children. A path outside the root (e.g. notify
-/// reporting a canonicalized form) falls back to the whole-path check rather
-/// than being dropped.
+/// must still report its children. [`rebase`] runs first, so a path that still
+/// doesn't strip against the root belongs to neither form and is checked whole.
 fn is_relevant(root: &Path, path: &Path) -> bool {
     let below = path.strip_prefix(root).unwrap_or(path);
     !below
@@ -230,6 +248,78 @@ mod tests {
         // The registration result is already queued: the follow-up only runs
         // after it is sent.
         assert!(watcher.poll().failure.is_some());
+    }
+
+    #[test]
+    fn a_reported_path_maps_back_onto_the_configured_root() {
+        let configured = Path::new("/tmp/journal");
+        let reported = Path::new("/private/tmp/journal");
+
+        assert_eq!(
+            rebase(
+                reported,
+                configured,
+                PathBuf::from("/private/tmp/journal/work/2026-07-27.md")
+            ),
+            PathBuf::from("/tmp/journal/work/2026-07-27.md")
+        );
+    }
+
+    #[test]
+    fn a_path_already_under_the_configured_root_is_left_alone() {
+        let configured = Path::new("/tmp/journal");
+        let reported = Path::new("/private/tmp/journal");
+        let path = PathBuf::from("/tmp/journal/work/2026-07-27.md");
+
+        assert_eq!(rebase(reported, configured, path.clone()), path);
+        // An unresolved root rebases nothing at all.
+        assert_eq!(rebase(configured, configured, path.clone()), path);
+    }
+
+    /// Under a dot ancestor (`$TMPDIR` on macOS, every `tempfile` directory) an
+    /// unrebased path fails the hidden-file check on the *ancestor's* dot, so
+    /// rebasing is what keeps these events from being dropped rather than merely
+    /// misattributed.
+    #[test]
+    fn a_reported_path_under_a_dot_ancestor_survives_the_filter() {
+        let configured = Path::new("/var/folders/x/.tmpAbC/journal");
+        let reported = Path::new("/private/var/folders/x/.tmpAbC/journal");
+        let entry = PathBuf::from("/private/var/folders/x/.tmpAbC/journal/work/2026-07-27.md");
+
+        assert!(!is_relevant(configured, &entry));
+        assert!(is_relevant(
+            configured,
+            &rebase(reported, configured, entry)
+        ));
+    }
+
+    /// End to end against the real backend. On macOS `$TMPDIR` resolves through
+    /// `/private`, so this is the symlinked-root case; elsewhere it just pins
+    /// that a written entry is reported at all.
+    #[test]
+    fn a_written_entry_is_reported_under_the_configured_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("journal");
+        let entry = root.join("work").join("2026-07-27.md");
+        std::fs::create_dir_all(entry.parent().unwrap()).unwrap();
+
+        let watcher = FileWatcher::start(&root).expect("watch registers");
+        // The watch acks before `start` returns, but FSEvents needs a moment
+        // before it reports; without this the write races registration.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::fs::write(&entry, "hello").unwrap();
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut seen = Vec::new();
+        while std::time::Instant::now() < deadline && seen.is_empty() {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            seen.extend(watcher.poll_changes());
+        }
+
+        assert!(
+            seen.contains(&entry),
+            "expected {entry:?} under the configured root, got {seen:?}"
+        );
     }
 
     #[test]
