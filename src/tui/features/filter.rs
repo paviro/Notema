@@ -7,17 +7,15 @@
 //! listed counts and the launched search. The number shown on a row always
 //! equals the number of results the search returns: a token row means one value,
 //! so its count is a tally of that value and the search it launches asks for
-//! exactly it, while a place row keeps containment and so is still counted
-//! through the predicate itself.
+//! exactly it, while a place row keeps containment and is counted by address,
+//! which the `location:` predicate is a pure function of.
 
-use std::collections::BTreeSet;
-
-use notema_domain::{Entry, Location, PlaceGroup};
+use notema_domain::Entry;
 
 use crate::tui::app::{AppModel, Focus, SearchScope};
-use crate::tui::features::facets::FacetTally;
+use crate::tui::features::facets::{FacetTally, PlaceCounter};
 use crate::tui::features::metadata::metadata_values;
-use crate::tui::features::search::{entry_in_search_scope, location_predicate, quote_filter_value};
+use crate::tui::features::search::{entry_in_search_scope, quote_filter_value};
 use crate::tui::render::tab_strip::StripTab;
 use crate::tui::state::{FilterTab, ListNav, MetadataKind, Overlay, SelectableList};
 
@@ -107,6 +105,22 @@ fn facet_values(entry: &Entry, tab: FilterTab) -> Option<&[String]> {
     }
 }
 
+/// The locations tab's rows. A row shows the group's display label but launches
+/// — and counts through — its search query, so the count equals the results.
+fn place_rows(places: PlaceCounter) -> Vec<FilterRow> {
+    let mut rows: Vec<FilterRow> = places
+        .counts()
+        .into_iter()
+        .map(|(group, count)| FilterRow {
+            label: group.display_label(),
+            search_value: group.search_query(),
+            count,
+        })
+        .collect();
+    sort_by_count(&mut rows);
+    rows
+}
+
 /// A token facet's rows. The row launches an exact search for the value it
 /// shows, so the label and the search value are one string.
 fn facet_rows(tally: FacetTally) -> Vec<FilterRow> {
@@ -138,24 +152,20 @@ impl AppModel {
     /// dialog opens with.
     fn all_filter_rows(&self, scope: &SearchScope) -> [Vec<FilterRow>; FilterTab::COUNT] {
         let mut tallies: [FacetTally; FilterTab::COUNT] = Default::default();
-        let mut places = BTreeSet::new();
+        let mut places = PlaceCounter::default();
         for entry in self.scoped_entries(scope) {
             for tab in FilterTab::ALL {
                 if let Some(values) = facet_values(entry, tab) {
                     tallies[tab.index()].add_entry(values);
                 }
             }
-            if let Some(group) = entry.location.as_ref().and_then(Location::place_group) {
-                places.insert(group);
-            }
+            places.add_entry(entry.location.as_ref());
         }
         let mut rows: [Vec<FilterRow>; FilterTab::COUNT] = Default::default();
         for (index, tally) in tallies.into_iter().enumerate() {
             rows[index] = facet_rows(tally);
         }
-        // Locations have no tally: their rows keep containment, so their counts
-        // still come from the predicate.
-        rows[FilterTab::Locations.index()] = self.place_rows(scope, places);
+        rows[FilterTab::Locations.index()] = place_rows(places);
         rows
     }
 
@@ -192,11 +202,11 @@ impl AppModel {
     #[cfg(any(test, feature = "bench"))]
     pub(crate) fn filter_rows(&self, scope: &SearchScope, tab: FilterTab) -> Vec<FilterRow> {
         if tab == FilterTab::Locations {
-            let places = self
-                .scoped_entries(scope)
-                .filter_map(|entry| entry.location.as_ref().and_then(Location::place_group))
-                .collect();
-            return self.place_rows(scope, places);
+            let mut places = PlaceCounter::default();
+            for entry in self.scoped_entries(scope) {
+                places.add_entry(entry.location.as_ref());
+            }
+            return place_rows(places);
         }
         let mut tally = FacetTally::default();
         for entry in self.scoped_entries(scope) {
@@ -205,27 +215,6 @@ impl AppModel {
             }
         }
         facet_rows(tally)
-    }
-
-    /// Rows for the locations tab, whose counts still come from the predicate.
-    fn place_rows(&self, scope: &SearchScope, groups: BTreeSet<PlaceGroup>) -> Vec<FilterRow> {
-        // A row shows the bucket's display label but launches — and counts through —
-        // its search query, so the count equals the search's results.
-        let mut rows: Vec<FilterRow> = groups
-            .into_iter()
-            .map(|group| {
-                let search_value = group.search_query();
-                let matches = location_predicate(&search_value);
-                let count = self.scoped_entries(scope).filter(|e| matches(e)).count();
-                FilterRow {
-                    label: group.display_label(),
-                    search_value,
-                    count,
-                }
-            })
-            .collect();
-        sort_by_count(&mut rows);
-        rows
     }
 
     /// Close the filter browser and run the search for the highlighted row under

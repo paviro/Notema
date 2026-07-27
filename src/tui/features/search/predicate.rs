@@ -40,17 +40,24 @@ pub(crate) fn metadata_predicate(
     }
 }
 
-/// Whether an entry matches a `location:` search: every word in `query` appears
-/// (case-insensitively, any order) somewhere in the location's
-/// [`search_haystack`](notema_domain::Location::search_haystack). Words split on any
-/// non-alphanumeric character, so `"Berlin, Germany"` and `"Berlin - Germany"`
-/// tokenize alike.
-pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<> {
-    let needles: Vec<String> = query
+/// The words a `location:` value matches on: maximal alphanumeric runs,
+/// lowercased — so `"Berlin, Germany"` and `"Berlin - Germany"` tokenize alike.
+///
+/// Shared with the filter browser's place counter so the two cannot tokenize a
+/// query differently and disagree about a row's count.
+pub(crate) fn location_tokens(query: &str) -> Vec<String> {
+    query
         .split(|c: char| !c.is_alphanumeric())
         .filter(|word| !word.is_empty())
         .map(str::to_lowercase)
-        .collect();
+        .collect()
+}
+
+/// Whether an entry matches a `location:` search: every word in `query` appears
+/// (case-insensitively, any order) somewhere in the location's
+/// [`search_haystack`](notema_domain::Location::search_haystack).
+pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<> {
+    let needles = location_tokens(query);
     move |entry| {
         // An empty or punctuation-only query matches nothing.
         !needles.is_empty()

@@ -22,7 +22,8 @@ use predicate::date_predicate;
 
 pub(crate) use parse::quote_filter_value;
 pub(crate) use predicate::{
-    entry_in_search_scope, feeling_predicate, location_predicate, metadata_predicate,
+    entry_in_search_scope, feeling_predicate, location_predicate, location_tokens,
+    metadata_predicate,
 };
 
 /// Boxed so segments with different predicate types share one `Vec`.
