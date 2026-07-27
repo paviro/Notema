@@ -40,7 +40,7 @@ fn main() {
     for size in [1_000, 10_000, 25_000] {
         let dir = tempfile::tempdir().unwrap();
         let mut app = app_with_corpus(dir.path(), size, BenchCorpus::Wide);
-        let iterations = if size < 10_000 { 3 } else { 1 };
+        let iterations = if size < 10_000 { 20 } else { 5 };
 
         // Opening the dialog: every tab's rows and counts, over all journals.
         let _ = black_box(open_filter(&mut app));
