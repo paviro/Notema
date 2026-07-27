@@ -575,10 +575,15 @@ fn confirm_delete(app: &mut AppModel) -> AppResult<()> {
         &app.overlay,
         Overlay::ConfirmDelete(crate::tui::state::DeleteContext::Journal { .. }, _)
     );
+    // Apply the removal now rather than waiting for the watcher to report the
+    // vacated path and reconcile it a debounce later — or never, on iSH.
     if is_journal {
-        delete_selected_journal(app)?;
-    } else {
-        delete_selected(app)?;
+        if let Some(journal) = delete_selected_journal(app)? {
+            app.reload_journal_list()?;
+            app.remove_journal_entries(&journal);
+        }
+    } else if let Some(path) = delete_selected(app)? {
+        app.refresh_paths(&[path])?;
     }
     app.close_overlay();
     app.nav.focus = if is_journal {
@@ -587,7 +592,7 @@ fn confirm_delete(app: &mut AppModel) -> AppResult<()> {
         Focus::Entries
     };
     app.nav.scroll.reset_reader();
-    app.refresh()
+    Ok(())
 }
 
 pub(crate) fn terminal_area<B: Backend>(terminal: &mut Terminal<B>) -> AppResult<Rect> {

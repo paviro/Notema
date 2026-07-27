@@ -25,7 +25,9 @@ pub(super) fn submit_new_journal(app: &mut AppModel) -> AppResult<()> {
     }
 
     let journal = app.services.store.create_journal(&value)?;
-    app.refresh()?;
+    // A new journal is empty, so the journal list is the only thing that moved.
+    // Applying it here also makes it appear at once rather than a debounce later.
+    app.reload_journal_list()?;
     app.select_journal_by_name(&journal.name);
     app.toast(
         ToastVariant::Success,
@@ -411,12 +413,14 @@ fn selected_entry_attachment_path(app: &AppModel, target: &str) -> AppResult<Opt
     notema_storage::resolve_entry_asset_path(&entry.path, &file_name)
 }
 
-pub(super) fn delete_selected(app: &mut AppModel) -> AppResult<()> {
+/// Trash the selected entry, returning the path it left behind so the caller can
+/// reconcile it. `None` when nothing was deleted.
+pub(super) fn delete_selected(app: &mut AppModel) -> AppResult<Option<PathBuf>> {
     if !app.reload_selected_entry_from_disk()? {
-        return Ok(());
+        return Ok(None);
     }
     let Some(target) = app.selected_entry_target() else {
-        return Ok(());
+        return Ok(None);
     };
     let has_body = app
         .library
@@ -433,12 +437,14 @@ pub(super) fn delete_selected(app: &mut AppModel) -> AppResult<()> {
         app.services.store.delete_empty_entry(&target.path)?;
         app.toast(ToastVariant::Success, "Deleted");
     }
-    Ok(())
+    Ok(Some(target.path))
 }
 
-pub(super) fn delete_selected_journal(app: &mut AppModel) -> AppResult<()> {
+/// Trash the selected journal, returning its name so the caller can drop its
+/// entries. `None` when nothing was deleted.
+pub(super) fn delete_selected_journal(app: &mut AppModel) -> AppResult<Option<String>> {
     let Some(journal) = app.selected_journal() else {
-        return Ok(());
+        return Ok(None);
     };
     let journal_name = journal.name.clone();
     let journal_path = journal.path.clone();
@@ -473,7 +479,7 @@ pub(super) fn delete_selected_journal(app: &mut AppModel) -> AppResult<()> {
         .store
         .delete_journal(&journal_name, &journal_path, &entries)?;
     app.toast(ToastVariant::Success, format!("Deleted journal {display}"));
-    Ok(())
+    Ok(Some(journal_name))
 }
 
 pub(super) fn toggle_archive_selected_journal(app: &mut AppModel) -> AppResult<()> {
@@ -503,7 +509,8 @@ pub(super) fn toggle_archive_selected_journal(app: &mut AppModel) -> AppResult<(
     // The rename changes the journal's folder name, so the name-keyed
     // `config.journal.default` would go stale. Retarget it before reloading.
     app.retarget_journal_in_config(&old_name, &new_journal.name)?;
-    app.refresh()?;
+    app.reload_journal_list()?;
+    app.rename_journal_entries(&old_name, &new_journal.name);
     app.select_journal_by_name(&new_journal.name);
     // Keep focus on the journals column so the user can keep managing journals.
     app.nav.focus = Focus::Journals;

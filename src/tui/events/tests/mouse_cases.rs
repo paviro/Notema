@@ -332,7 +332,8 @@ fn select_created_entry_path_opens_expanded_reader() {
         )
         .unwrap()
         .path;
-    app.refresh().unwrap();
+    // The same reconciliation a post-write reload does.
+    app.refresh_paths(std::slice::from_ref(&created)).unwrap();
     let created_id = notema_storage::entry_id(&created).unwrap();
     assert!(app.select_entry_by_id(&created_id, true));
     app.nav.focus = Focus::Reader;

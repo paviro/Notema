@@ -656,7 +656,8 @@ fn entry_rows_cache_is_reused_until_inputs_change() {
     // A different width rebuilds.
     assert!(!Rc::ptr_eq(&first, &app.entry_rows(20)));
     // Reloading the store rebuilds.
-    app.refresh().unwrap();
+    app.request_library_reload(ReloadReason::Automatic);
+    settle_library_reload(&mut app);
     assert!(!Rc::ptr_eq(&first, &app.entry_rows(30)));
 }
 
@@ -917,7 +918,8 @@ fn entry_body_cache_is_reused_until_entry_or_width_changes() {
     let narrower = app.cached_entry_body(path.as_deref(), 20, || body("z"));
     assert!(!Rc::ptr_eq(&first, &narrower));
     // Reloading the store bumps entries_version, invalidating the cache.
-    app.refresh().unwrap();
+    app.request_library_reload(ReloadReason::Automatic);
+    settle_library_reload(&mut app);
     let after = app.cached_entry_body(path.as_deref(), 40, || body("w"));
     assert!(!Rc::ptr_eq(&first, &after));
 }
@@ -1012,7 +1014,10 @@ fn archiving_journal_renames_reorders_and_keeps_entries_resolvable() {
         .store
         .set_journal_archived("personal", true)
         .unwrap();
-    app.refresh().unwrap();
+    // What `toggle_archive_selected_journal` does after the rename: the journal
+    // list is re-read and the entries follow the folder in memory.
+    app.reload_journal_list().unwrap();
+    app.rename_journal_entries("personal", "personal.archived");
 
     // The directory was renamed and the journal now sorts after active ones.
     assert!(dir.path().join("personal.archived").is_dir());
@@ -1044,7 +1049,12 @@ fn refresh_preserves_journal_pixel_scroll_offset() {
     // A pixel offset far above the 3-journal count — an index clamp would shrink it.
     *app.nav.journal_list.offset_mut() = 15;
 
-    app.refresh().unwrap();
+    // Both paths that replace the journal list normalize the selection.
+    app.reload_journal_list().unwrap();
+    assert_eq!(app.nav.journal_list.offset(), 15);
+
+    app.request_library_reload(ReloadReason::Automatic);
+    settle_library_reload(&mut app);
 
     assert_eq!(app.nav.journal_list.offset(), 15);
 }

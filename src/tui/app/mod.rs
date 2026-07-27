@@ -693,10 +693,49 @@ impl AppModel {
         }
     }
 
-    pub(crate) fn refresh(&mut self) -> AppResult<()> {
-        let snapshot = self.services.store.load_library(CachePolicy::Normal)?;
-        self.install_library_snapshot(snapshot);
+    /// Re-read the top-level journal list, without walking a single entry.
+    ///
+    /// The watcher does report a journal directory appearing, moving or being
+    /// removed, but only after the coalescing delay and only as a path
+    /// [`Self::refresh_paths`] cannot attribute — which costs a whole-corpus
+    /// walk to learn what the code that renamed the folder already knew. iSH has
+    /// no watcher at all, so there it is the only thing that reconciles.
+    pub(crate) fn reload_journal_list(&mut self) -> AppResult<()> {
+        self.library.journals = self.services.store.list_journals()?;
+        self.normalize_journal_selection();
         Ok(())
+    }
+
+    /// Follow an archive/unarchive rename in memory. The folder moved, so every
+    /// entry under it has a new journal name and path and identical content —
+    /// re-reading them would walk the corpus to rebuild what is already in hand.
+    pub(crate) fn rename_journal_entries(&mut self, old_name: &str, new_name: &str) {
+        let root = self.services.store.root().to_path_buf();
+        let old_dir = root.join(old_name);
+        let new_dir = root.join(new_name);
+        for entry in &mut self.library.entries {
+            if entry.journal != old_name {
+                continue;
+            }
+            if let Ok(below) = entry.path.strip_prefix(&old_dir) {
+                entry.path = new_dir.join(below);
+            }
+            entry.journal = new_name.to_string();
+        }
+        // `journal_ranges` needs each journal's entries contiguous, which the
+        // path-descending order provides — and these paths just moved.
+        self.library.entries.sort_by(|a, b| b.path.cmp(&a.path));
+        self.after_entries_changed();
+    }
+
+    /// Drop a deleted journal's entries. Deletion moves the folder into the
+    /// trash; the trash side is hidden, but the folder leaving its old place is
+    /// not, so this is about applying it now rather than a walk later.
+    pub(crate) fn remove_journal_entries(&mut self, journal: &str) {
+        self.library
+            .entries
+            .retain(|entry| entry.journal != journal);
+        self.after_entries_changed();
     }
 
     /// Ask for a whole-library reload on the worker. Asking again while one is
