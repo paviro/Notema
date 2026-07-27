@@ -20,7 +20,7 @@ use ratatui_textarea::CursorMove;
 pub(crate) use action::{
     Action, BackgroundAction, BrowserAction, EditorAction, FilterAction, ImageAction,
     InsightsAction, LocationAction, MetadataAction, OverlayAction, ReaderAction, SearchAction,
-    SettingsAction,
+    SettingsAction, WatchTarget,
 };
 use actions::{
     delete_selected, delete_selected_journal, open_reader_link, save_internal_editor,
@@ -311,6 +311,13 @@ fn apply_background_action(app: &mut AppModel, action: BackgroundAction) -> Disp
             app.toast(
                 ToastVariant::Error,
                 format!("Journal changes not loaded: {error}"),
+            );
+            true
+        }
+        BackgroundAction::WatcherUnavailable { target, error } => {
+            app.toast(
+                ToastVariant::Warning,
+                format!("Live {} reload unavailable: {error}", target.label()),
             );
             true
         }

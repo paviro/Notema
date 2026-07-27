@@ -125,11 +125,29 @@ pub(crate) enum EditMetadataFocusTarget {
     Input,
 }
 
+/// Which live reload a failed watcher registration costs the user. Named for
+/// the feature they lose, not the directory being watched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WatchTarget {
+    Journal,
+    Theme,
+}
+
+impl WatchTarget {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Journal => "journal",
+            Self::Theme => "theme",
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum BackgroundAction {
     LibraryValidated(Box<notema_storage::LibrarySnapshot>),
     LibraryValidationStale,
     LibraryValidationFailed(String),
+    WatcherUnavailable { target: WatchTarget, error: String },
     ExternalOpenCompleted(String),
     ExternalOpenFailed(String),
     PollImages,

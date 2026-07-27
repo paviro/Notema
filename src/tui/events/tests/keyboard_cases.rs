@@ -65,6 +65,32 @@ fn external_open_failures_become_error_toasts() {
 }
 
 #[test]
+fn a_failed_watcher_registration_names_the_reload_it_costs() {
+    for (target, expected) in [
+        (
+            WatchTarget::Journal,
+            "Live journal reload unavailable: oops",
+        ),
+        (WatchTarget::Theme, "Live theme reload unavailable: oops"),
+    ] {
+        let mut app = app_with_journals(&["work"]);
+
+        let outcome = apply_background_action(
+            &mut app,
+            BackgroundAction::WatcherUnavailable {
+                target,
+                error: "oops".to_string(),
+            },
+        );
+
+        assert!(outcome.redraw);
+        let toast = app.toasts.items().last().expect("warning toast");
+        assert_eq!(toast.variant, crate::tui::state::ToastVariant::Warning);
+        assert_eq!(toast.message, expected);
+    }
+}
+
+#[test]
 fn browse_r_maps_to_manual_library_refresh() {
     let dir = tempdir().unwrap();
     let app = new_app(Config::new(dir.path().to_path_buf()));

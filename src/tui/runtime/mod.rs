@@ -445,12 +445,20 @@ fn run_loop(
         // possible: the watcher is handed over before validation starts, so it
         // is always adoptable by the time a result arrives.
         let changed = watcher.poll();
-        if let Some(error) = changed.failure {
-            app.toast(
-                state::ToastVariant::Warning,
-                format!("Live journal reload unavailable: {error}"),
-            );
-        }
+        let journal_watch_failed = match changed.failure {
+            Some(error) => {
+                events::dispatch_action(
+                    terminal,
+                    &mut app,
+                    events::Action::Background(events::BackgroundAction::WatcherUnavailable {
+                        target: events::WatchTarget::Journal,
+                        error,
+                    }),
+                )?
+                .redraw
+            }
+            None => false,
+        };
         if !changed.paths.is_empty() {
             if !validation_finished {
                 validation_dirty = true;
@@ -659,12 +667,20 @@ fn run_loop(
         // active theme's file count (edits to other themes wait until they're
         // selected). A broken edit keeps the current theme and says so.
         let theme_changes = theme_watcher.poll();
-        if let Some(error) = theme_changes.failure {
-            app.toast(
-                state::ToastVariant::Warning,
-                format!("Live theme reload unavailable: {error}"),
-            );
-        }
+        let theme_watch_failed = match theme_changes.failure {
+            Some(error) => {
+                events::dispatch_action(
+                    terminal,
+                    &mut app,
+                    events::Action::Background(events::BackgroundAction::WatcherUnavailable {
+                        target: events::WatchTarget::Theme,
+                        error,
+                    }),
+                )?
+                .redraw
+            }
+            None => false,
+        };
         let active_theme = app.effective_theme_name();
         let active_theme_changed = theme_changes.paths.iter().any(|path| {
             path.extension().is_some_and(|ext| ext == "toml")
@@ -731,6 +747,8 @@ fn run_loop(
         let animate_toasts = !app.toasts.items().is_empty();
 
         if redraw
+            || journal_watch_failed
+            || theme_watch_failed
             || library_updated
             || refreshed
             || theme_reloaded
