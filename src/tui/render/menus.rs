@@ -165,6 +165,7 @@ const HELP_SECTIONS: [(&str, &[(&str, &str)]); 6] = [
             (",", "Settings"),
             ("h", "Toggle hints"),
             ("r", "Refresh"),
+            ("R", "Rebuild cache"),
             ("?", "This help"),
             ("q", "Quit"),
         ],

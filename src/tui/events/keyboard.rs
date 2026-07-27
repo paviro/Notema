@@ -425,6 +425,7 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
     match key.code {
         KeyCode::Char('q') => Some(Action::Quit),
         KeyCode::Char('r') => Some(Action::RefreshLibrary),
+        KeyCode::Char('R') => Some(Action::RebuildLibraryCache),
         // Search where its scope is clear: the journals column (all) and the
         // entries column (this journal).
         KeyCode::Char('/') if matches!(app.nav.focus, Focus::Journals | Focus::Entries) => {

@@ -39,6 +39,7 @@ pub(crate) const INLINE_READER_MIN_WIDTH: u16 = 125;
 
 const INITIAL_LIBRARY_LOADING_TOAST: &str = "Loading journals from disk…";
 const MANUAL_REFRESH_TOAST: &str = "Refreshing from disk…";
+const CACHE_REBUILD_TOAST: &str = "Rebuilding the entry cache…";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Focus {
@@ -578,13 +579,20 @@ impl AppModel {
         self.toasts.dismiss_message(INITIAL_LIBRARY_LOADING_TOAST);
     }
 
-    pub(crate) fn begin_manual_refresh(&mut self) {
-        self.toasts
-            .push_persistent(ToastVariant::Info, MANUAL_REFRESH_TOAST);
+    /// Show that a user-asked-for reload is running. A rebuild says so, because
+    /// it costs a full re-read of every entry rather than a stamp check.
+    pub(crate) fn begin_manual_refresh(&mut self, rebuild: bool) {
+        let message = if rebuild {
+            CACHE_REBUILD_TOAST
+        } else {
+            MANUAL_REFRESH_TOAST
+        };
+        self.toasts.push_persistent(ToastVariant::Info, message);
     }
 
     pub(crate) fn finish_manual_refresh(&mut self) {
         self.toasts.dismiss_message(MANUAL_REFRESH_TOAST);
+        self.toasts.dismiss_message(CACHE_REBUILD_TOAST);
     }
 
     /// A journal rename (archive/unarchive) changes its folder name, so the
@@ -742,8 +750,8 @@ impl AppModel {
     /// running folds into it: the walk in flight already reads the current tree,
     /// so a second one would duplicate it.
     pub(crate) fn request_library_reload(&mut self, reason: ReloadReason) {
-        if reason == ReloadReason::Manual {
-            self.begin_manual_refresh();
+        if reason.is_manual() {
+            self.begin_manual_refresh(reason.rebuilds());
         }
         if self.library_reload.has_pending() {
             self.queued_reload = Some(match self.queued_reload {
@@ -776,10 +784,18 @@ impl AppModel {
             }
             match result.snapshot {
                 Ok(snapshot) => {
+                    let entries = snapshot.entries.len();
+                    let rebuilt = result.reason.rebuilds();
                     self.install_library_snapshot(snapshot);
-                    if result.reason == ReloadReason::Manual {
+                    if result.reason.is_manual() {
                         self.finish_manual_refresh();
-                        self.toast(ToastVariant::Success, "Refreshed from disk");
+                        let message = if rebuilt {
+                            let noun = if entries == 1 { "entry" } else { "entries" };
+                            format!("Entry cache rebuilt from {entries} {noun}")
+                        } else {
+                            "Refreshed from disk".to_string()
+                        };
+                        self.toast(ToastVariant::Success, message);
                     }
                 }
                 Err(error) => {

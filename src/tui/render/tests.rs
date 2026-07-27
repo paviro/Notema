@@ -2952,6 +2952,10 @@ fn help_cheatsheet_lists_grouped_bindings() {
     assert!(text.contains("Settings"));
     assert!(text.contains("Quit"));
     assert!(text.contains("This help"));
+    // The cheatsheet is the only place the two reload gestures are told apart —
+    // neither is in the footer.
+    assert!(text.contains("Refresh"));
+    assert!(text.contains("Rebuild cache"));
 
     // The search prefixes are documented on the Search tab, nowhere else. Wide
     // enough for the two-column grid, so the whole tab sits above the fold —

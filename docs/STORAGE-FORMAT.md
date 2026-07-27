@@ -53,8 +53,8 @@ or borg all write the *backup's* timestamp, which differs from the one recorded
 for the newer content it replaces, so the entry is re-read.
 
 If it does happen, the entry on disk is still correct — only the cached copy is
-stale. Delete the cache file and start the app again to rebuild it from the
-entries.
+stale. Press `R` in the app to rebuild the cache from the entries; `r` refreshes
+against the same length-and-time check, so it would find nothing to do.
 
 A filesystem that records modification times only to the nearest second or two
 (FAT, exFAT, SMB shares) can't be trusted for an entry written moments before

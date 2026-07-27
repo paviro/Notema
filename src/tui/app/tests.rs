@@ -96,7 +96,7 @@ fn cache_miss_starts_with_live_journals_while_entries_validate() {
     app.finish_initial_library_loading();
     assert!(app.toasts.items().is_empty());
 
-    app.begin_manual_refresh();
+    app.begin_manual_refresh(false);
     assert_eq!(app.toasts.items()[0].message, "Refreshing from disk…");
     assert!(!app.expire_toasts());
     app.finish_manual_refresh();
@@ -805,11 +805,88 @@ fn refresh_paths_falls_back_to_full_reload_for_a_new_journal() {
     assert!(app.library.entry_by_id("z").is_some());
 }
 
+/// The hole the entry cache's stamp deliberately leaves open: a rewrite that
+/// keeps the length and puts the recorded mtime back is indistinguishable from
+/// no change at all. `R` is the way out of it without deleting the cache file.
+#[test]
+fn a_rebuild_recovers_an_entry_the_stamp_cannot_tell_changed() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("journals");
+    let config_path = dir.path().join("config/config.toml");
+    let config = Config::new(root.clone());
+    let store = JournalStore::for_config(&config_path, &root).unwrap();
+    // Without this there is no store id, so nothing the load produces is ever
+    // written to the cache and the whole test would measure a cold read twice.
+    store.ensure().unwrap();
+    store.create_journal("work").unwrap();
+
+    let entry_dir = root.join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    let path = write_entry(
+        &entry_dir,
+        "a.md",
+        "2026-07-01T10:00:00+02:00",
+        "# A\nalpha",
+    );
+    // Old enough to be trusted: a whole-second mtime within the coarse-filesystem
+    // window is refused outright, which would re-read the entry and prove nothing.
+    let stamp = std::time::SystemTime::now() - Duration::from_secs(3600);
+    let set_mtime = |at: std::time::SystemTime| {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
+    };
+    set_mtime(stamp);
+
+    let snapshot = store.load_library(CachePolicy::Normal).unwrap();
+    let mut app = AppModel::new_with_snapshot(
+        config_path,
+        config,
+        store,
+        snapshot,
+        crate::tui::theme::Mode::Dark,
+    )
+    .unwrap();
+    app.select_journal_by_name("work");
+    let id = app.library.entries[0].id.clone();
+    assert!(app.library.entry_by_id(&id).unwrap().body.contains("alpha"));
+
+    // Same length, same mtime, different content.
+    write_entry(
+        &entry_dir,
+        "a.md",
+        "2026-07-01T10:00:00+02:00",
+        "# A\nBRAVO",
+    );
+    set_mtime(stamp);
+
+    app.request_library_reload(ReloadReason::Manual { rebuild: false });
+    settle_library_reload(&mut app);
+    assert!(
+        app.library.entry_by_id(&id).unwrap().body.contains("alpha"),
+        "a stamp check cannot see this change; if it could, the test proves nothing"
+    );
+
+    app.request_library_reload(ReloadReason::Manual { rebuild: true });
+    settle_library_reload(&mut app);
+    assert!(app.library.entry_by_id(&id).unwrap().body.contains("BRAVO"));
+    assert_eq!(
+        app.toasts
+            .items()
+            .last()
+            .map(|toast| toast.message.as_str()),
+        Some("Entry cache rebuilt from 1 entry")
+    );
+}
+
 #[test]
 fn a_manual_refresh_shows_its_progress_until_the_walk_lands() {
     let mut app = app_with_journals(&["work"]);
 
-    app.request_library_reload(ReloadReason::Manual);
+    app.request_library_reload(ReloadReason::Manual { rebuild: false });
 
     assert!(app.library_reload.has_pending());
     assert_eq!(
@@ -854,9 +931,12 @@ fn a_second_refresh_folds_into_the_walk_already_running() {
     app.request_library_reload(ReloadReason::Automatic);
     // Pressing `r` while the quiet reload runs must not start a second walk,
     // but must still be reported when the running one lands.
-    app.request_library_reload(ReloadReason::Manual);
+    app.request_library_reload(ReloadReason::Manual { rebuild: false });
 
-    assert_eq!(app.queued_reload, Some(ReloadReason::Manual));
+    assert_eq!(
+        app.queued_reload,
+        Some(ReloadReason::Manual { rebuild: false })
+    );
 
     settle_library_reload(&mut app);
 

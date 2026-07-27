@@ -341,6 +341,9 @@ pub(crate) enum Action {
     // Global
     Quit,
     RefreshLibrary,
+    /// Reload ignoring the entry cache's stamps, re-reading every entry from
+    /// source. The recovery path when a cached entry has gone stale.
+    RebuildLibraryCache,
     Background(BackgroundAction),
     Browser(BrowserAction),
     Search(SearchAction),
