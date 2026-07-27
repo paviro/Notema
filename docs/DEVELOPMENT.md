@@ -82,7 +82,7 @@ performance regressions on the paths that scale with journal size.
 |---|---|---|
 | `analytics` | `notema-analytics` | Cadence/mood/correlation aggregation |
 | `scan` | `notema-storage` | Full journal scan: walk + parse + preview + haystack |
-| `tui` | root (`--features bench`) | Full-frame render, in-memory fuzzy search, filter browser |
+| `tui` | root (`--features bench`) | Full-frame render, in-memory fuzzy search, filter browser, metadata/location pickers |
 
 ```bash
 cargo bench -p notema-analytics --bench analytics
@@ -91,8 +91,8 @@ cargo bench --features bench --bench tui
 ```
 
 The `tui` bench reaches otherwise-private TUI paths through the `bench` feature,
-which exposes a small `notema::bench` module (a `BenchApp` handle plus
-`draw_frame`/`search`/`open_filter`/`filter_tab_rows`). The feature is dev-only
+which exposes a small `notema::bench` module (a `BenchApp` handle plus one entry
+point per benched path). The feature is dev-only
 and never compiled into the shipped binary. Because the `[[bench]]` entry sets
 `required-features`, a plain `cargo clippy --all-targets` *skips* this target —
 lint it with `cargo clippy --workspace --all-targets --features bench`.
@@ -108,7 +108,15 @@ Two corpus shapes, chosen per bench:
   actually exercised. The filter-browser lines use it and print their row count
   alongside the timing, since that row count is the vocabulary the timing is
   against. Feelings are the exception: the vocabulary is the fixed set of
-  canonical words, so that tab is bounded by construction.
+  canonical words, so that tab is bounded by construction — as is the picker's
+  Activities line, at 12 values in both corpora.
+
+The `filter_*` and `metadata_picker`/`location_picker` lines are two views of the
+same facets: the browser lists a facet to search by, the picker lists it to
+assign from, and neither is cached. `metadata_filter` is the picker's
+per-keystroke refilter with the value list already built. The picker's cost is
+dominated by the per-entry walk rather than the vocabulary — the 12-value
+Activities line is within a factor of two of the 1280-value Tags one.
 
 Reading the numbers: each line is the mean wall-clock time per iteration, e.g.
 `scan/25000: 1.1s`. There is no built-in baseline comparison — record the 25k

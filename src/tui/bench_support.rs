@@ -11,7 +11,7 @@ use ratatui::{Terminal, backend::TestBackend};
 
 use super::app::{AppModel, Focus};
 use super::search::search_loaded_entries;
-use super::state::FilterTab;
+use super::state::{FilterTab, MetadataKind};
 use crate::config::Config;
 
 /// An opaque, fully-loaded app handle for benchmarks. Wraps the private `AppModel` so
@@ -21,6 +21,18 @@ pub struct BenchApp(AppModel);
 /// Number of filter-browser tabs, so a bench can sweep them without naming the
 /// private `FilterTab`.
 pub const FILTER_TAB_COUNT: usize = FilterTab::COUNT;
+
+/// Number of metadata pickers, so a bench can sweep them without naming the
+/// private `MetadataKind`.
+pub const METADATA_KIND_COUNT: usize = 3;
+
+fn metadata_kind(index: usize) -> MetadataKind {
+    match index {
+        0 => MetadataKind::Tags,
+        1 => MetadataKind::People,
+        _ => MetadataKind::Activities,
+    }
+}
 
 /// Which corpus shape [`app_with_corpus`] writes.
 pub enum BenchCorpus {
@@ -125,6 +137,62 @@ pub fn filter_tab_rows(app: &BenchApp, tab: usize) -> (&'static str, usize) {
     let tab = FilterTab::ALL[tab];
     let rows = app.0.filter_rows(&SearchScope::AllJournals, tab);
     (tab.title(), rows.len())
+}
+
+/// Open the tag/people/activity picker — `metadata_partitioned` over every
+/// loaded entry, plus the casing fold and the sort — and return its title and
+/// the number of values it offers. Leaves the overlay open for
+/// [`filter_metadata_picker`]; pair it with [`close_picker`] to repeat the call.
+///
+/// Activities are bounded by construction: both corpora write 12 of them, the
+/// way feelings are bounded for the filter browser. That line is here to show
+/// the fixed-vocabulary shape next to the growing ones, not because it scales.
+pub fn open_metadata_picker(app: &mut BenchApp, kind: usize) -> (&'static str, usize) {
+    let kind = metadata_kind(kind);
+    match kind {
+        MetadataKind::Tags => app.0.begin_edit_tags(),
+        MetadataKind::People => app.0.begin_edit_people(),
+        MetadataKind::Activities => app.0.begin_edit_activities(),
+    }
+    let values = app
+        .0
+        .edit_metadata_state()
+        .map_or(0, |state| state.all_values.len());
+    (kind.title(), values)
+}
+
+/// Refilter an open metadata picker and return the number of matching rows —
+/// what one keystroke costs once the dialog is built, which is a fresh
+/// lowercased `String` per offered value. [`open_metadata_picker`] must have run.
+pub fn filter_metadata_picker(app: &mut BenchApp, query: &str) -> usize {
+    let Some(state) = app.0.edit_metadata_state_mut() else {
+        return 0;
+    };
+    state.input.set_text(query);
+    state.rebuild_filter();
+    state.filtered.len()
+}
+
+/// Dismiss the open picker, so an open/build call can be timed in a loop.
+pub fn close_picker(app: &mut BenchApp) {
+    app.0.close_overlay();
+}
+
+/// Open the location picker over all journals — `location_presets`, a whole-library
+/// walk plus two sorts over the distinct-place vocabulary — and return the number
+/// of presets offered. Closes the overlay again, so the call is repeatable.
+///
+/// The returned count is capped at 20 by `MAX_PRESETS` and so says nothing about
+/// the corpus; the vocabulary this is timed against is the distinct address
+/// labels, which the wide corpus grows as `count / 5`.
+pub fn open_location_picker(app: &mut BenchApp) -> usize {
+    app.0.begin_edit_location();
+    let presets = app
+        .0
+        .edit_location_state()
+        .map_or(0, |state| state.presets.len());
+    app.0.close_overlay();
+    presets
 }
 
 fn narrow_entry_text(index: usize) -> String {

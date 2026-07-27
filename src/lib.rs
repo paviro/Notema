@@ -23,8 +23,9 @@ pub fn run() -> anyhow::Result<()> {
 #[cfg(feature = "bench")]
 pub mod bench {
     pub use crate::tui::bench_support::{
-        BenchApp, BenchCorpus, FILTER_TAB_COUNT, app_with_corpus, app_with_entries, draw_frame,
-        filter_tab_rows, open_filter, search,
+        BenchApp, BenchCorpus, FILTER_TAB_COUNT, METADATA_KIND_COUNT, app_with_corpus,
+        app_with_entries, close_picker, draw_frame, filter_metadata_picker, filter_tab_rows,
+        open_filter, open_location_picker, open_metadata_picker, search,
     };
 }
 

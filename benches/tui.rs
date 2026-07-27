@@ -7,8 +7,9 @@
 use std::{hint::black_box, time::Instant};
 
 use notema::bench::{
-    BenchCorpus, FILTER_TAB_COUNT, app_with_corpus, app_with_entries, draw_frame, filter_tab_rows,
-    open_filter, search,
+    BenchCorpus, FILTER_TAB_COUNT, METADATA_KIND_COUNT, app_with_corpus, app_with_entries,
+    close_picker, draw_frame, filter_metadata_picker, filter_tab_rows, open_filter,
+    open_location_picker, open_metadata_picker, search,
 };
 
 fn main() {
@@ -64,5 +65,51 @@ fn main() {
                 started.elapsed() / iterations
             );
         }
+
+        // The pickers walk the whole library uncached, once per dialog open, and
+        // are the counterpart to the browser: the browser lists a facet to search
+        // by, the picker lists it to assign from.
+        for kind in 0..METADATA_KIND_COUNT {
+            let (title, values) = open_metadata_picker(&mut app, kind);
+            close_picker(&mut app);
+            let started = Instant::now();
+            for _ in 0..iterations {
+                black_box(open_metadata_picker(black_box(&mut app), black_box(kind)));
+                close_picker(&mut app);
+            }
+            println!(
+                "metadata_picker/{title}/{size}: {:?} ({values} values)",
+                started.elapsed() / iterations
+            );
+
+            // Typing into the open dialog: the refilter alone, with the value
+            // list already built.
+            open_metadata_picker(&mut app, kind);
+            let _ = black_box(filter_metadata_picker(&mut app, "topic-1"));
+            let started = Instant::now();
+            for _ in 0..iterations {
+                black_box(filter_metadata_picker(
+                    black_box(&mut app),
+                    black_box("topic-1"),
+                ));
+            }
+            println!(
+                "metadata_filter/{title}/{size}: {:?} ({values} values)",
+                started.elapsed() / iterations
+            );
+            close_picker(&mut app);
+        }
+
+        // Presets are capped at 20, so no count rides along — the vocabulary this
+        // is timed against is the distinct address labels, `count / 5` of them.
+        let _ = black_box(open_location_picker(&mut app));
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(open_location_picker(black_box(&mut app)));
+        }
+        println!(
+            "location_picker/{size}: {:?}",
+            started.elapsed() / iterations
+        );
     }
 }
