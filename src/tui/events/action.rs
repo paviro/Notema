@@ -147,7 +147,13 @@ pub(crate) enum BackgroundAction {
     LibraryValidated(Box<notema_storage::LibrarySnapshot>),
     LibraryValidationStale,
     LibraryValidationFailed(String),
-    WatcherUnavailable { target: WatchTarget, error: String },
+    WatcherUnavailable {
+        target: WatchTarget,
+        error: String,
+    },
+    /// The journal watcher missed changes and cannot say which. Only re-reading
+    /// the tree can reconcile it.
+    WatcherLostTrack,
     ExternalOpenCompleted(String),
     ExternalOpenFailed(String),
     PollImages,

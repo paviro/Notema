@@ -2,15 +2,40 @@ use notema_timing as timing;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
 };
 
 /// What one poll of a [`PendingWatcher`] found.
 pub(crate) struct WatcherPoll {
     pub(crate) paths: Vec<PathBuf>,
+    /// The backend lost track — its queue overflowed, or the tree moved under
+    /// it. Changes were missed, so `paths` is no longer a complete account of
+    /// what differs and only re-reading the tree can say.
+    pub(crate) rescan: bool,
     /// A registration that will never produce events. Reported on the single
     /// poll that observes it, then never again.
     pub(crate) failure: Option<String>,
+}
+
+impl WatcherPoll {
+    fn quiet() -> Self {
+        Self {
+            paths: Vec::new(),
+            rescan: false,
+            failure: None,
+        }
+    }
+
+    fn failed(error: String) -> Self {
+        Self {
+            failure: Some(error),
+            ..Self::quiet()
+        }
+    }
 }
 
 /// A watcher whose registration runs on a background thread.
@@ -71,44 +96,39 @@ impl PendingWatcher {
                 Ok(Ok(watcher)) => self.state = State::Watching(watcher),
                 Ok(Err(error)) => {
                     self.state = State::Off;
-                    return WatcherPoll {
-                        paths: Vec::new(),
-                        failure: Some(error),
-                    };
+                    return WatcherPoll::failed(error);
                 }
-                Err(mpsc::TryRecvError::Empty) => {
-                    return WatcherPoll {
-                        paths: Vec::new(),
-                        failure: None,
-                    };
-                }
+                Err(mpsc::TryRecvError::Empty) => return WatcherPoll::quiet(),
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.state = State::Off;
-                    return WatcherPoll {
-                        paths: Vec::new(),
-                        failure: Some("registration stopped unexpectedly".to_string()),
-                    };
+                    return WatcherPoll::failed("registration stopped unexpectedly".to_string());
                 }
             }
         }
-        WatcherPoll {
-            paths: match &self.state {
-                State::Watching(watcher) => watcher.poll_changes(),
-                _ => Vec::new(),
+        match &self.state {
+            State::Watching(watcher) => WatcherPoll {
+                paths: watcher.poll_changes(),
+                rescan: watcher.take_rescan(),
+                failure: None,
             },
-            failure: None,
+            _ => WatcherPoll::quiet(),
         }
     }
 }
 
 pub(crate) struct FileWatcher {
     rx: mpsc::Receiver<PathBuf>,
+    /// Set by the notify callback, cleared by the poll that reports it. Separate
+    /// from `rx` because a rescan notice can arrive carrying no paths at all.
+    rescan: Arc<AtomicBool>,
     _watcher: RecommendedWatcher,
 }
 
 impl FileWatcher {
     pub(crate) fn start(root: &Path) -> notify::Result<Self> {
         let (tx, rx) = mpsc::channel();
+        let rescan = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&rescan);
 
         let filter_root = root.to_path_buf();
         // FSEvents reports the resolved path (`/private/var/…` for a `/var/…`
@@ -119,6 +139,9 @@ impl FileWatcher {
         let mut watcher = RecommendedWatcher::new(
             move |res: notify::Result<Event>| {
                 if let Ok(event) = res {
+                    if event.need_rescan() {
+                        flag.store(true, Ordering::Relaxed);
+                    }
                     // Forward each changed path so the app can reload just the
                     // affected entries instead of re-reading the whole corpus.
                     for path in event
@@ -138,6 +161,7 @@ impl FileWatcher {
 
         Ok(Self {
             rx,
+            rescan,
             _watcher: watcher,
         })
     }
@@ -150,6 +174,11 @@ impl FileWatcher {
             paths.push(path);
         }
         paths
+    }
+
+    /// Whether a rescan notice arrived since the last poll, clearing it.
+    fn take_rescan(&self) -> bool {
+        self.rescan.swap(false, Ordering::Relaxed)
     }
 }
 
@@ -209,6 +238,24 @@ mod tests {
 
         assert!(watcher.poll().failure.is_some());
         assert!(watcher.poll().failure.is_none());
+    }
+
+    #[test]
+    fn a_rescan_notice_is_reported_once() {
+        let (tx, rx) = mpsc::channel();
+        let rescan = Arc::new(AtomicBool::new(false));
+        let watcher = FileWatcher {
+            rx,
+            rescan: Arc::clone(&rescan),
+            _watcher: RecommendedWatcher::new(|_| {}, Config::default()).unwrap(),
+        };
+        drop(tx);
+
+        assert!(!watcher.take_rescan());
+        rescan.store(true, Ordering::Relaxed);
+        assert!(watcher.take_rescan());
+        // Cleared by the poll that reported it, so one notice is one reload.
+        assert!(!watcher.take_rescan());
     }
 
     #[test]

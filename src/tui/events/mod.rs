@@ -304,6 +304,11 @@ fn apply_background_action(app: &mut AppModel, action: BackgroundAction) -> Disp
             );
             true
         }
+        BackgroundAction::WatcherLostTrack => {
+            // Nothing to show: the reload is quiet and repaints when it lands.
+            app.request_library_reload(crate::tui::runtime::reload::ReloadReason::Automatic);
+            false
+        }
         BackgroundAction::ExternalOpenCompleted(message) => {
             app.toast(ToastVariant::Info, message);
             true

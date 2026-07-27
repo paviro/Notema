@@ -91,6 +91,18 @@ fn a_failed_watcher_registration_names_the_reload_it_costs() {
 }
 
 #[test]
+fn a_watcher_that_lost_track_asks_for_a_quiet_reload() {
+    let mut app = app_with_journals(&["work"]);
+
+    let outcome = apply_background_action(&mut app, BackgroundAction::WatcherLostTrack);
+
+    assert!(app.library_reload.has_pending());
+    // Nothing for the user to read: the reload repaints when it lands.
+    assert!(!outcome.redraw);
+    assert!(app.toasts.items().is_empty());
+}
+
+#[test]
 fn browse_r_maps_to_manual_library_refresh() {
     let dir = tempdir().unwrap();
     let app = new_app(Config::new(dir.path().to_path_buf()));

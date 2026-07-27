@@ -467,6 +467,18 @@ fn run_loop(
             pending_paths.extend(changed.paths);
             pending_refresh_at = Some(Instant::now() + REFRESH_DEBOUNCE);
         }
+        // A rescan says changes were missed, so a startup snapshot taken across
+        // it can no longer be trusted either.
+        if changed.rescan {
+            if !validation_finished {
+                validation_dirty = true;
+            }
+            events::dispatch_action(
+                terminal,
+                &mut app,
+                events::Action::Background(events::BackgroundAction::WatcherLostTrack),
+            )?;
+        }
         let validation_result = validation_rx
             .as_ref()
             .and_then(|rx| poll_library_validation(rx, validation_finished));
@@ -691,12 +703,14 @@ fn run_loop(
             None => false,
         };
         let active_theme = app.effective_theme_name();
-        let active_theme_changed = theme_changes.paths.iter().any(|path| {
-            path.extension().is_some_and(|ext| ext == "toml")
-                && path
-                    .file_stem()
-                    .is_some_and(|stem| stem == active_theme.as_str())
-        });
+        // A rescan can't say which theme file moved, so assume the active one did.
+        let active_theme_changed = theme_changes.rescan
+            || theme_changes.paths.iter().any(|path| {
+                path.extension().is_some_and(|ext| ext == "toml")
+                    && path
+                        .file_stem()
+                        .is_some_and(|stem| stem == active_theme.as_str())
+            });
         if active_theme_changed {
             pending_theme_reload_at = Some(Instant::now() + REFRESH_DEBOUNCE);
         }
