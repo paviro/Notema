@@ -1,16 +1,28 @@
-use std::{borrow::Cow, time::Instant};
+//! Search mode: entering and leaving it, and running the query box against the
+//! library. The query grammar lives in [`parse`], the entry matchers in
+//! [`predicate`]; this module binds a segment's prefix to its predicate and
+//! drives the results.
+
+mod parse;
+mod predicate;
+
+use std::time::Instant;
 
 use chrono::{Local, NaiveDate};
-use notema_domain::{
-    DateBound, DateFilter, DateSpec, Entry, EntryEncryptionState, MOOD_RANGE, SearchHit,
-    entry_group_date, feeling_matches_search,
-};
+use notema_domain::{DateFilter, DateSpec, Entry, MOOD_RANGE, SearchHit};
 
 use crate::tui::{
     app::{AppModel, Focus, Mode, SearchScope},
-    features::metadata::metadata_values,
     search::search_loaded_entries_where,
     state::MetadataKind,
+};
+
+use parse::{parse_starred_value, split_unquoted, strip_date_prefix, unquote};
+use predicate::date_predicate;
+
+pub(crate) use parse::quote_filter_value;
+pub(crate) use predicate::{
+    entry_in_search_scope, feeling_predicate, location_predicate, metadata_predicate,
 };
 
 /// Boxed so segments with different predicate types share one `Vec`.
@@ -217,185 +229,10 @@ fn classify_segment(segment: &str, today: NaiveDate) -> Segment<'_> {
     }
 }
 
-/// Split a `date:`/`before:`/`after:` query into its bound and value.
-fn strip_date_prefix(query: &str) -> Option<(DateBound, Cow<'_, str>)> {
-    [
-        ("date:", DateBound::On),
-        ("before:", DateBound::Before),
-        ("after:", DateBound::After),
-    ]
-    .into_iter()
-    .find_map(|(prefix, bound)| {
-        query
-            .strip_prefix(prefix)
-            .map(|value| (bound, unquote(value.trim())))
-    })
-}
-
-/// Split `input` on `sep`, ignoring separators inside a `"…"` span — how a value
-/// carries a structural character (`;`, `+`, `|`) literally.
-fn split_unquoted(input: &str, sep: char) -> Vec<&str> {
-    let mut pieces = Vec::new();
-    let mut start = 0;
-    let mut quoted = false;
-    for (index, character) in input.char_indices() {
-        if character == '"' {
-            quoted = !quoted;
-        } else if character == sep && !quoted {
-            pieces.push(&input[start..index]);
-            start = index + character.len_utf8();
-        }
-    }
-    pieces.push(&input[start..]);
-    pieces
-}
-
-/// Strip one surrounding pair of quotes from a filter value, undoubling the
-/// quotes [`quote_filter_value`] doubled.
-fn unquote(value: &str) -> Cow<'_, str> {
-    match value
-        .strip_prefix('"')
-        .and_then(|rest| rest.strip_suffix('"'))
-    {
-        Some(inner) if inner.contains('"') => Cow::Owned(inner.replace("\"\"", "\"")),
-        Some(inner) => Cow::Borrowed(inner),
-        None => Cow::Borrowed(value),
-    }
-}
-
-/// Quote `value` if it holds a character the parser would read as structure.
-/// Everything building a query from a stored value — the chip searches, the
-/// filter browser's rows *and* its counts — goes through this, so what a row
-/// counts, launches, and displays stay the same set.
-///
-/// A `"` inside the value is doubled, so it can't close the wrapping pair early
-/// and expose a `;`/`+`/`|` after it to the splitters.
-pub(crate) fn quote_filter_value(value: &str) -> Cow<'_, str> {
-    if value.contains([';', '+', '|', '"']) {
-        Cow::Owned(format!("\"{}\"", value.replace('"', "\"\"")))
-    } else {
-        Cow::Borrowed(value)
-    }
-}
-
-/// Whether an entry's date satisfies `filter`. Entries with neither a creation
-/// timestamp nor a dated filename have no date to compare, so they never match.
-pub(crate) fn date_predicate(
-    filter: DateFilter,
-    today: NaiveDate,
-) -> impl Fn(&Entry) -> bool + use<> {
-    move |entry| entry_group_date(entry).is_some_and(|date| filter.matches(date, today))
-}
-
-/// Whether an entry matches a `tags:`/`people:`/`activities:` search: every
-/// `+`-group in `query` must match, where a group matches if *any* of its
-/// `|`-alternatives is contained (case-insensitively) in one of the entry's
-/// `kind` values. The filter browser's row counter and the launched search share
-/// this predicate (and the location/feeling ones below), so a row's count always
-/// equals the hits its search returns; the value split lives here, not in the
-/// parser, to keep that true.
-pub(crate) fn metadata_predicate(
-    kind: MetadataKind,
-    query: &str,
-) -> impl Fn(&Entry) -> bool + use<> {
-    let groups = split_values(query);
-    move |entry| {
-        let values = metadata_values(entry, kind);
-        !groups.is_empty()
-            && groups.iter().all(|alternatives| {
-                alternatives.iter().any(|needle| {
-                    values
-                        .iter()
-                        .any(|value| value.to_lowercase().contains(needle))
-                })
-            })
-    }
-}
-
-/// Split a filter value into AND-groups (on `+`) of OR-alternatives (on `|`),
-/// unquoted, lowercased and trimmed, dropping empties — so `alice+bob|rob` is
-/// alice AND (bob OR rob), and a quoted `"C++"` is one literal needle.
-fn split_values(query: &str) -> Vec<Vec<String>> {
-    split_unquoted(query, '+')
-        .into_iter()
-        .map(|group| {
-            split_unquoted(group, '|')
-                .into_iter()
-                .map(|value| unquote(value.trim()).trim().to_lowercase())
-                .filter(|value| !value.is_empty())
-                .collect::<Vec<_>>()
-        })
-        .filter(|group| !group.is_empty())
-        .collect()
-}
-
-/// Whether an entry matches a `location:` search: every word in `query` appears
-/// (case-insensitively, any order) somewhere in the location's
-/// [`search_haystack`](notema_domain::Location::search_haystack). Words split on any
-/// non-alphanumeric character, so `"Berlin, Germany"` and `"Berlin - Germany"`
-/// tokenize alike.
-pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<> {
-    let needles: Vec<String> = query
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(str::to_lowercase)
-        .collect();
-    move |entry| {
-        // An empty or punctuation-only query matches nothing.
-        !needles.is_empty()
-            && entry.location.as_ref().is_some_and(|location| {
-                let haystack = location.search_haystack();
-                needles.iter().all(|needle| haystack.contains(needle))
-            })
-    }
-}
-
-/// Whether an entry matches a `feelings:` search: the [`split_values`] groups
-/// applied to the entry's feelings through [`feeling_matches_search`], which is
-/// alias-aware and lowercases its own query.
-pub(crate) fn feeling_predicate(feeling: &str) -> impl Fn(&Entry) -> bool + use<> {
-    let groups = split_values(feeling);
-    move |entry| {
-        !groups.is_empty()
-            && groups.iter().all(|alternatives| {
-                alternatives.iter().any(|needle| {
-                    entry
-                        .feelings
-                        .iter()
-                        .any(|entry_feeling| feeling_matches_search(entry_feeling, needle))
-                })
-            })
-    }
-}
-
-/// Whether `entry` is visible to a search under `scope`: unlocked (locked and
-/// unreadable encrypted entries never match) and inside the scope.
-pub(crate) fn entry_in_search_scope(entry: &Entry, scope: &SearchScope) -> bool {
-    !matches!(
-        entry.encryption_state,
-        EntryEncryptionState::EncryptedLocked | EntryEncryptionState::EncryptedUnreadable
-    ) && match scope {
-        SearchScope::AllJournals => true,
-        SearchScope::Journal(journal) => entry.journal == *journal,
-    }
-}
-
-/// Parse the value of a `star:` query. An empty value is the friendlier
-/// `true` (the common intent when filtering for favorites); `true`/`1` and
-/// `false`/`0` are accepted case-insensitively; anything else is `None` (no
-/// match).
-fn parse_starred_value(value: &str) -> Option<bool> {
-    match value.trim().to_lowercase().as_str() {
-        "" | "true" | "1" => Some(true),
-        "false" | "0" => Some(false),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notema_domain::Location;
+    use notema_domain::{EntryEncryptionState, Location};
 
     fn located_entry(city: &str, country: &str, mood: Option<i8>) -> Entry {
         let mut entry = notema_domain::Entry {
@@ -726,19 +563,6 @@ mod tests {
         assert_eq!(run(&mut app, "tags:\"berlin; mitte\""), 1);
         // The quotes only shield what they wrap — chaining still works after them.
         assert_eq!(run(&mut app, "tags:\"berlin; mitte\"; tags:berlin"), 1);
-    }
-
-    #[test]
-    fn quote_filter_value_quotes_only_when_needed() {
-        assert_eq!(quote_filter_value("berlin"), "berlin");
-        assert_eq!(quote_filter_value("Berlin, Germany"), "Berlin, Germany");
-        assert_eq!(quote_filter_value("c++"), "\"c++\"");
-        assert_eq!(quote_filter_value("r&d|ops"), "\"r&d|ops\"");
-        assert_eq!(quote_filter_value("berlin; mitte"), "\"berlin; mitte\"");
-        // A quote is itself structural: it has to be doubled, so it can't close
-        // the wrapping pair and let a later separator split the value.
-        assert_eq!(quote_filter_value("say \"hi\""), "\"say \"\"hi\"\"\"");
-        assert_eq!(quote_filter_value("a\";b"), "\"a\"\";b\"");
     }
 
     #[test]
