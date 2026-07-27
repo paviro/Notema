@@ -12,9 +12,10 @@ use std::{
 use notema::bench::{
     BenchCorpus, FILTER_TAB_COUNT, METADATA_KIND_COUNT, app_with_corpus, app_with_entries,
     bench_terminal, close_picker, draw_frame, editor_highlight, editor_input,
-    filter_metadata_picker, filter_tab_rows, first_entry_path, install_snapshot, library_snapshot,
-    open_editor_with_body, open_filter, open_location_picker, open_metadata_picker, refresh_path,
-    reload_journal_list, rename_journal, search, search_query,
+    filter_metadata_picker, filter_tab_rows, first_entry_path, insights_analytics,
+    insights_drivers, install_snapshot, library_snapshot, open_editor_with_body, open_filter,
+    open_location_picker, open_metadata_picker, refresh_path, reload_journal_list, rename_journal,
+    search, search_query,
 };
 
 fn main() {
@@ -89,6 +90,28 @@ fn main() {
             elapsed += started.elapsed();
         }
         println!("install_snapshot/{size}: {:?}", elapsed / iterations);
+
+        // The insights memos on a redraw — cache hits, not cold builds. The cold
+        // side is `cargo bench -p notema-analytics --bench analytics`.
+        let _ = black_box(insights_analytics(&mut app));
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(insights_analytics(black_box(&mut app)));
+        }
+        println!(
+            "insights_analytics/{size}: {:?}",
+            started.elapsed() / iterations
+        );
+
+        let _ = black_box(insights_drivers(&mut app));
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(insights_drivers(black_box(&mut app)));
+        }
+        println!(
+            "insights_drivers/{size}: {:?}",
+            started.elapsed() / iterations
+        );
     }
 
     // The filter browser scales with the number of *distinct* values, so it gets

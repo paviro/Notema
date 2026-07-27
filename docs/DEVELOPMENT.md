@@ -84,7 +84,7 @@ instead, because that is the axis the editor scales on.
 |---|---|---|
 | `analytics` | `notema-analytics` | Cadence/mood/correlation aggregation |
 | `scan` | `notema-storage` | Full journal scan: walk + parse + preview + haystack |
-| `tui` | root (`--features bench`) | Full-frame render, in-memory search, filter browser, metadata/location pickers, incremental reloads, editor keystrokes |
+| `tui` | root (`--features bench`) | Full-frame render, in-memory search, filter browser, metadata/location pickers, incremental reloads, editor keystrokes, insights memos |
 
 ```bash
 cargo bench -p notema-analytics --bench analytics
@@ -119,6 +119,13 @@ assign from, and neither is cached. `metadata_filter` is the picker's
 per-keystroke refilter with the value list already built. The picker's cost is
 dominated by the per-entry walk rather than the vocabulary — the 12-value
 Activities line is within a factor of two of the 1280-value Tags one.
+
+`insights_analytics` and `insights_drivers` time cache *hits* — what a redraw
+with the insights pane open costs once the aggregate is built. The cold build is
+`cargo bench -p notema-analytics --bench analytics`; do not add it here as well.
+The two lines differ on purpose: the analytics memo is flat, while the drivers
+one gathers its entry references before consulting the cache and so grows with
+the corpus.
 
 `editor_input` is one keystroke reaching the buffer; `editor_highlight` is the
 whole-body re-scan the next frame pays for, which every keystroke makes a miss

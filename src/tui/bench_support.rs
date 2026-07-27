@@ -12,6 +12,7 @@ use ratatui::{Terminal, backend::TestBackend};
 
 use super::app::{AppModel, Focus};
 use super::events::{Action, EditorAction};
+use super::features::insights::InsightsScope;
 use super::search::search_loaded_entries;
 use super::state::{FilterTab, MetadataKind};
 use crate::config::Config;
@@ -195,6 +196,31 @@ pub fn open_location_picker(app: &mut BenchApp) -> usize {
         .map_or(0, |state| state.presets.len());
     app.0.close_overlay();
     presets
+}
+
+/// The memoized analytics over the whole library, on a cache *hit* — what a
+/// redraw with the insights pane open pays once the aggregate is built.
+///
+/// The cold build is `notema_analytics::analyze`, already timed by
+/// `cargo bench -p notema-analytics --bench analytics`; re-timing it here would
+/// measure the same code twice.
+pub fn insights_analytics(app: &mut BenchApp) -> usize {
+    app.0.nav.insights_scope = InsightsScope::All;
+    app.0
+        .cached_analytics()
+        .map_or(0, |analytics| analytics.correlations.tags.len())
+}
+
+/// The memoized windowed correlations behind the Drivers tab, likewise on a hit.
+///
+/// Unlike the analytics memo, this one gathers its `Vec<&Entry>` over the whole
+/// library *before* consulting the cache, so a hit is not free — which is the
+/// reason the line exists.
+pub fn insights_drivers(app: &mut BenchApp) -> usize {
+    app.0.nav.insights_scope = InsightsScope::All;
+    app.0
+        .cached_windowed_correlations()
+        .map_or(0, |correlations| correlations.tags.len())
 }
 
 /// A reusable `TestBackend` terminal for [`editor_input`], built once so a
