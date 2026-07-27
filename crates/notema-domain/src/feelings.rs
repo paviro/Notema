@@ -321,6 +321,21 @@ fn feeling_aliases() -> impl Iterator<Item = (&'static str, &'static str)> {
         })
 }
 
+/// The search aliases registered for the canonical `feeling`, or an empty slice
+/// when it names no feeling. An alias is never a canonical name, so passing one
+/// in also yields nothing.
+///
+/// Returns the first name match, which is only correct because canonical names
+/// are unique across every group. `feeling_groups_have_no_duplicate_leaves` is
+/// what guarantees that, so treat it as load-bearing rather than stylistic.
+pub fn feeling_aliases_of(feeling: &str) -> &'static [&'static str] {
+    FEELING_GROUPS
+        .iter()
+        .flat_map(|group| group.feelings)
+        .find(|candidate| candidate.name == feeling)
+        .map_or(&[], |candidate| candidate.search_aliases)
+}
+
 pub fn normalize_feeling(feeling: &str) -> Option<String> {
     let feeling = feeling.trim().to_lowercase();
     if feelings().any(|f| f == feeling) {
@@ -342,8 +357,9 @@ pub fn normalize_feeling(feeling: &str) -> Option<String> {
 pub fn feeling_matches_search(feeling: &str, query: &str) -> bool {
     let query = query.trim().to_lowercase();
     feeling.contains(&query)
-        || feeling_aliases()
-            .any(|(alias, canonical)| canonical == feeling && alias.contains(&query))
+        || feeling_aliases_of(feeling)
+            .iter()
+            .any(|alias| alias.contains(&query))
 }
 
 pub fn normalize_feelings<'a>(feelings: impl IntoIterator<Item = &'a str>) -> Vec<String> {
@@ -415,6 +431,19 @@ mod tests {
         assert_eq!(normalize_feeling("Joyous"), Some("happy".to_string()));
         assert_eq!(normalize_feeling("thankful"), Some("grateful".to_string()));
         assert_eq!(normalize_feeling("Worn Out"), Some("exhausted".to_string()));
+    }
+
+    #[test]
+    fn aliases_of_returns_only_that_feelings_aliases() {
+        assert_eq!(feeling_aliases_of("happy"), ["joyous", "cheerful"]);
+        assert_eq!(feeling_aliases_of("grateful"), ["thankful"]);
+        // A feeling with no aliases, an alias (never a canonical name), and a
+        // word that names nothing all come back empty.
+        assert!(feeling_aliases_of("unhappy").is_empty());
+        assert!(feeling_aliases_of("joyous").is_empty());
+        assert!(feeling_aliases_of("not-a-feeling").is_empty());
+        // Lookup is exact: the caller passes an already-normalized name.
+        assert!(feeling_aliases_of("Happy").is_empty());
     }
 
     #[test]
