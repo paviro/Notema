@@ -82,7 +82,7 @@ performance regressions on the paths that scale with journal size.
 |---|---|---|
 | `analytics` | `notema-analytics` | Cadence/mood/correlation aggregation |
 | `scan` | `notema-storage` | Full journal scan: walk + parse + preview + haystack |
-| `tui` | root (`--features bench`) | Full-frame render and in-memory fuzzy search |
+| `tui` | root (`--features bench`) | Full-frame render, in-memory fuzzy search, filter browser |
 
 ```bash
 cargo bench -p notema-analytics --bench analytics
@@ -92,8 +92,23 @@ cargo bench --features bench --bench tui
 
 The `tui` bench reaches otherwise-private TUI paths through the `bench` feature,
 which exposes a small `notema::bench` module (a `BenchApp` handle plus
-`draw_frame`/`search`). The feature is dev-only and never compiled into the
-shipped binary.
+`draw_frame`/`search`/`open_filter`/`filter_tab_rows`). The feature is dev-only
+and never compiled into the shipped binary. Because the `[[bench]]` entry sets
+`required-features`, a plain `cargo clippy --all-targets` *skips* this target —
+lint it with `cargo clippy --workspace --all-targets --features bench`.
+
+Two corpus shapes, chosen per bench:
+
+- **Narrow** (`app_with_entries`) holds the vocabulary fixed — 30 tags, 20
+  people, 12 activities, no feelings, no locations — however large the corpus
+  gets. `render_frame` and `search` use it, and must keep using it: changing the
+  corpus under them would silently rebase every number recorded so far.
+- **Wide** (`app_with_corpus(.., BenchCorpus::Wide)`) grows the vocabulary with
+  the corpus, so paths that scale with the number of *distinct* values are
+  actually exercised. The filter-browser lines use it and print their row count
+  alongside the timing, since that row count is the vocabulary the timing is
+  against. Feelings are the exception: the vocabulary is the fixed set of
+  canonical words, so that tab is bounded by construction.
 
 Reading the numbers: each line is the mean wall-clock time per iteration, e.g.
 `scan/25000: 1.1s`. There is no built-in baseline comparison — record the 25k

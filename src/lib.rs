@@ -18,10 +18,14 @@ pub fn run() -> anyhow::Result<()> {
 }
 
 /// Bench-only handles onto the otherwise-private TUI hot paths (search, full-frame
-/// render). Gated behind the `bench` feature so it never widens the shipped API.
+/// render, filter browser). Gated behind the `bench` feature so it never widens
+/// the shipped API.
 #[cfg(feature = "bench")]
 pub mod bench {
-    pub use crate::tui::bench_support::{BenchApp, app_with_entries, draw_frame, search};
+    pub use crate::tui::bench_support::{
+        BenchApp, BenchCorpus, FILTER_TAB_COUNT, app_with_corpus, app_with_entries, draw_frame,
+        filter_tab_rows, open_filter, search,
+    };
 }
 
 /// The command a device runs to request access to an already-encrypted store.
