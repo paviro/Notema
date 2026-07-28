@@ -17,7 +17,7 @@ use crate::tui::{
     state::{FilterTab, ListNav, SelectableList, SuggestionRow},
 };
 
-use super::offsets;
+use super::{offsets, parse::unquote};
 
 impl AppModel {
     /// Whether the suggestion list is on screen.
@@ -123,10 +123,9 @@ impl AppModel {
 /// when typing the fragment would already be narrowing toward it: a substring for
 /// the token facets, every word for a place.
 fn matching_rows(rows: &[FilterRow], tab: FilterTab, fragment: &str) -> Vec<SuggestionRow> {
-    // A half-typed chip is still a fragment: `tags:"app` has no closing quote, so
-    // the parser leaves the `"` in the needle and the results blank. Offering
-    // `apple` there is what closes the pair.
-    let fragment = fragment.trim().trim_start_matches('"').to_lowercase();
+    // Read through an unclosed quote the way the parser does, so a row is
+    // offered on the fragment the results below are already narrowing on.
+    let fragment = unquote(fragment.trim()).to_lowercase();
     let words: Vec<&str> = fragment.split_whitespace().collect();
     rows.iter()
         .filter(|row| match tab {
@@ -259,6 +258,10 @@ mod tests {
         let mut app = fixture();
         type_query(&mut app, "tags:\"app");
         assert_eq!(labels(&app), vec!["apple", "App"]);
+        // And the results underneath are narrowing on the same fragment: a list
+        // offering `apple` over an empty result list was two readings of one
+        // value.
+        assert_eq!(app.search_results().len(), 2);
         app.commit_first_suggestion();
         assert_eq!(app.search.query.as_str(), "tags:\"apple\"");
     }

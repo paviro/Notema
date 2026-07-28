@@ -23,7 +23,9 @@ pub(super) fn date_predicate(
 ///
 /// An alternative is a substring unless it was quoted, so `tags:app` keeps
 /// narrowing to `apple` as it is typed while `tags:"app"` — what a chip or a
-/// filter row commits — means that tag and no other.
+/// filter row commits — means that tag and no other. Quoting is the closed pair:
+/// `tags:"app` is the substring still, so a value narrows while it is typed
+/// whichever way it is being written.
 pub(crate) fn metadata_predicate(
     kind: MetadataKind,
     query: &str,

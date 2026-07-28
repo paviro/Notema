@@ -568,6 +568,20 @@ mod tests {
         assert_eq!(run(&mut app, "tags:work; date:garbage"), 0);
     }
 
+    /// A scalar has no exact mode, so quoting one is only ever structural — and
+    /// an unreadable value zeroes the whole query, so an unclosed quote used to
+    /// take the filters beside it down as it was typed.
+    #[test]
+    fn an_unclosed_quote_leaves_a_scalar_filter_readable() {
+        let mut app = app_with(vec![
+            rich_entry("", &["work"], &[], Some("2026-07-25")),
+            rich_entry("", &["home"], &[], Some("2026-07-25")),
+        ]);
+
+        assert_eq!(run(&mut app, "date:\"2026-07-25"), 2);
+        assert_eq!(run(&mut app, "tags:work; date:\"2026-07-25"), 1);
+    }
+
     #[test]
     fn a_bare_prefix_matches_nothing() {
         let mut app = app_with(vec![rich_entry("", &["work"], &[], None)]);
@@ -597,6 +611,11 @@ mod tests {
         assert_eq!(run(&mut app, "tags:\"app\""), 1);
         assert_eq!(run(&mut app, "tags:\"apple\""), 1);
         assert_eq!(run(&mut app, "tags:\"pineapple\""), 1);
+        // The opening quote is typed before the value it will wrap, so until it
+        // has a partner the value narrows exactly as the bare one does — the
+        // closing quote is what makes it exact.
+        assert_eq!(run(&mut app, "tags:\"app"), 3);
+        assert_eq!(run(&mut app, "tags:\"appl"), 2);
     }
 
     /// A quoted value means the bytes between the quotes, so a tag stored with

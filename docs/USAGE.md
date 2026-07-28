@@ -92,6 +92,10 @@ tags:"Berlin; Mitte"
 tags:"say ""hi"""   a quote inside a quoted value is written twice
 ```
 
+The pair is what makes a value exact, so an opening quote on its own is still the
+value you are typing: `tags:"app` finds the same entries `tags:app` does, and the
+closing quote narrows them to the one tag.
+
 `location:` is not exact either way: a place contains the places around it, so
 `location:Germany` finds every entry in it. It takes `|` but not `+` — an entry
 has one location, so `location:Berlin|Paris` is either city and a `+` is just a

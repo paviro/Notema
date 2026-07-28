@@ -112,14 +112,30 @@ pub(super) fn is_quoted(value: &str) -> bool {
     value.len() >= 2 && value.starts_with('"') && value.ends_with('"')
 }
 
-/// Strip one surrounding pair of quotes from a filter value, undoubling the
-/// quotes [`quote_filter_value`] doubled.
+/// Whether `value` opens a quote span that never closes — every quoted value
+/// part-way through being typed. An odd count is where the toggle in
+/// [`split_unquoted_ranges`] ends up, and a leading `"` is what makes the
+/// unclosed one the value's own.
+fn opens_unclosed_quote(value: &str) -> bool {
+    value.starts_with('"') && value.matches('"').count() % 2 == 1
+}
+
+/// Strip a filter value's surrounding quotes, undoubling the quotes
+/// [`quote_filter_value`] doubled.
+///
+/// A pair with no closing quote yet is closed here, so a value reads as the one
+/// it is growing into: `"app` is `app`. Exactness stays [`is_quoted`]'s alone,
+/// which is what makes typing that closing quote narrow a search rather than
+/// replace it.
 pub(super) fn unquote(value: &str) -> Cow<'_, str> {
-    if !is_quoted(value) {
+    // Both ends are a one-byte `"`, so these slice on character boundaries.
+    let inner = if is_quoted(value) {
+        &value[1..value.len() - 1]
+    } else if opens_unclosed_quote(value) {
+        &value[1..]
+    } else {
         return Cow::Borrowed(value);
-    }
-    // Both ends are a one-byte `"`, so this slices on character boundaries.
-    let inner = &value[1..value.len() - 1];
+    };
     if inner.contains('"') {
         Cow::Owned(inner.replace("\"\"", "\""))
     } else {
@@ -186,8 +202,9 @@ impl Needle {
 /// rob).
 ///
 /// Quotedness is per alternative, because the `|` split runs before unquoting:
-/// `"a"|b` is exactly-a or contains-b. Unbalanced quotes are not a pair, so a
-/// half-typed `"app` keeps its literal `"` and matches nothing.
+/// `"a"|b` is exactly-a or contains-b. An unclosed quote is no pair, so a
+/// half-typed `"app` is the substring `app` — the reading `app` already has, and
+/// one the closing quote narrows instead of discarding.
 pub(super) fn split_values(query: &str) -> Vec<Vec<Needle>> {
     split_unquoted(query, '+')
         .into_iter()
@@ -393,9 +410,32 @@ mod tests {
                 },
             ]]
         );
-        // Unbalanced quotes are not a pair, so the `"` stays in the needle and
-        // matches nothing — including while a value is half-typed.
+        // A pair wraps a value; `"a"b` wraps nothing, so its quotes stay in the
+        // needle as the characters they are.
         assert_eq!(only_needle("\"a\"b"), substring("\"a\"b"));
-        assert_eq!(only_needle("\"app"), substring("\"app"));
+    }
+
+    /// A quote with no partner is a value mid-typing, and reading it literally
+    /// left a dead query in the middle of typing every quoted value. It reads as
+    /// the value it is growing into instead.
+    #[test]
+    fn an_unclosed_quote_reads_as_the_value_it_is_growing_into() {
+        // The same substring `app` alone means, so closing the quote narrows the
+        // search rather than replacing it.
+        assert_eq!(only_needle("\"app"), substring("app"));
+        assert_eq!(only_needle("\"app\""), exact("app"));
+        // Doubling is undone before the pair closes too, so the value the
+        // fragment means does not change under it.
+        assert_eq!(only_needle("\"say \"\"hi"), substring("say \"hi"));
+        assert_eq!(only_needle("\"say \"\"hi\""), exact("say \"hi"));
+        // Not trimmed inside, exactly like the pair it is becoming.
+        assert_eq!(only_needle("\" wo"), substring(" wo"));
+        // Only a leading quote opens a value: elsewhere it is a character, and
+        // an even count closed whatever it opened.
+        assert_eq!(only_needle("app\""), substring("app\""));
+        assert_eq!(only_needle("\"\"app"), substring("\"\"app"));
+        // A quote and nothing else is no needle at all, rather than one every
+        // entry satisfies.
+        assert_eq!(split_values("\""), Vec::<Vec<Needle>>::new());
     }
 }
