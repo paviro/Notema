@@ -271,7 +271,10 @@ mod tests {
         // and cuts, the `+` is part of the place name.
         let segment = &scan("location:berlin|paris")[0];
         assert_eq!(segment.operators, vec![('|', 15)]);
-        assert_eq!(alternatives("location:berlin|paris"), vec!["berlin", "paris"]);
+        assert_eq!(
+            alternatives("location:berlin|paris"),
+            vec!["berlin", "paris"]
+        );
 
         let segment = &scan("location:Rock + Roll")[0];
         assert!(segment.operators.is_empty());
