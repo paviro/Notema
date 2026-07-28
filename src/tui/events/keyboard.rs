@@ -578,7 +578,7 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
         // Label every openable target in the entry — links, attachments, anchors
         // and image labels alike — so the keyboard reaches what the mouse can.
         // Inert on an entry with nothing to open, like `i` with no images.
-        KeyCode::Char('o') if app.nav.focus == Focus::Reader && app.reader_openable > 0 => {
+        KeyCode::Char('o') if app.nav.focus == Focus::Reader && app.reader_hints.has_openable() => {
             Some(Action::ReaderHint(ReaderHintAction::Begin))
         }
         KeyCode::Char('h') => Some(Action::Overlay(OverlayAction::ToggleHints)),
@@ -615,7 +615,7 @@ fn reader_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
         KeyCode::Char('i') if app.selected_entry_image_count() > 0 => {
             Some(Action::Images(ImageAction::OpenViewer(0)))
         }
-        KeyCode::Char('o') if app.reader_openable > 0 => {
+        KeyCode::Char('o') if app.reader_hints.has_openable() => {
             Some(Action::ReaderHint(ReaderHintAction::Begin))
         }
         _ => None,

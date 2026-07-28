@@ -548,7 +548,9 @@ fn image_hint(app: &AppModel) -> Option<Hint> {
 /// the focused reader — hence not in [`focused_entry_footer`], which the entries
 /// column shares.
 fn open_links_hint(app: &AppModel) -> Option<Hint> {
-    (app.reader_openable > 0).then_some(Hint::new("open link", "o", HintId::OpenReaderLinks))
+    app.reader_hints
+        .has_openable()
+        .then_some(Hint::new("open link", "o", HintId::OpenReaderLinks))
 }
 
 /// The cheatsheet pointer (`?`). The full binding set — the journals/settings/hints

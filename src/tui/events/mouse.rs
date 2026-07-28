@@ -1094,7 +1094,7 @@ pub(super) fn hint_id_to_action(app: &AppModel, id: render::HintId) -> Option<Ac
             Some(Action::Images(ImageAction::OpenViewer(0)))
         }
         render::HintId::OpenReaderLinks
-            if app.nav.focus == Focus::Reader && app.reader_openable > 0 =>
+            if app.nav.focus == Focus::Reader && app.reader_hints.has_openable() =>
         {
             Some(Action::ReaderHint(ReaderHintAction::Begin))
         }

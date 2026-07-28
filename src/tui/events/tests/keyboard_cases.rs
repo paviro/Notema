@@ -971,7 +971,7 @@ fn o_is_inert_with_nothing_to_open() {
     let mut app = app_reading("Just prose, no links at all.");
     render_and_sync(&mut app, 80, 24);
 
-    assert_eq!(app.reader_openable, 0);
+    assert!(!app.reader_hints.has_openable());
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Char('o')), true),
         None

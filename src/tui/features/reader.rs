@@ -28,6 +28,11 @@ pub(crate) enum ReaderHintMatch {
 /// reader can see.
 #[derive(Default)]
 pub(crate) struct ReaderHintState {
+    /// How many openable targets the last frame found, whether or not hints were
+    /// on — it is what gates the `o` key and its footer chip. Kept here rather
+    /// than beside it because one frame writes both, and two fields with one
+    /// writer are two chances to disagree.
+    openable: usize,
     active: bool,
     /// Label characters typed so far, always a proper prefix of some label.
     pending: String,
@@ -37,6 +42,11 @@ pub(crate) struct ReaderHintState {
 impl ReaderHintState {
     pub(crate) fn is_active(&self) -> bool {
         self.active
+    }
+
+    /// Whether the reader has anything `o` could open.
+    pub(crate) fn has_openable(&self) -> bool {
+        self.openable > 0
     }
 
     pub(crate) fn pending(&self) -> &str {
@@ -69,7 +79,8 @@ impl ReaderHintState {
     /// opening an overlay and losing focus all reach it by painting differently.
     /// A frame that paints none ends the mode, which is how every suspension is
     /// spelt.
-    pub(crate) fn sync(&mut self, labels: Vec<ReaderHint>) {
+    pub(crate) fn sync(&mut self, labels: Vec<ReaderHint>, openable: usize) {
+        self.openable = openable;
         if !self.active {
             return;
         }
@@ -163,7 +174,9 @@ mod reader_hint_tests {
     fn active(labels: &[(&str, &str)]) -> ReaderHintState {
         let mut state = ReaderHintState::default();
         state.begin();
-        state.sync(labels.iter().map(|(l, u)| hint(l, u)).collect());
+        let labels: Vec<_> = labels.iter().map(|(l, u)| hint(l, u)).collect();
+        let openable = labels.len();
+        state.sync(labels, openable);
         state
     }
 
@@ -191,10 +204,10 @@ mod reader_hint_tests {
     fn sync_resets_pending_when_the_label_set_changes() {
         let mut state = active(&[("aa", "https://one"), ("as", "https://two")]);
         state.push('a');
-        state.sync(vec![
-            hint("aa", "https://three"),
-            hint("as", "https://four"),
-        ]);
+        state.sync(
+            vec![hint("aa", "https://three"), hint("as", "https://four")],
+            2,
+        );
         assert!(state.pending().is_empty());
     }
 
@@ -202,7 +215,10 @@ mod reader_hint_tests {
     fn sync_keeps_pending_when_the_label_set_is_unchanged() {
         let mut state = active(&[("aa", "https://one"), ("as", "https://two")]);
         state.push('a');
-        state.sync(vec![hint("aa", "https://one"), hint("as", "https://two")]);
+        state.sync(
+            vec![hint("aa", "https://one"), hint("as", "https://two")],
+            2,
+        );
         assert_eq!(state.pending(), "a");
     }
 
@@ -211,14 +227,14 @@ mod reader_hint_tests {
     #[test]
     fn sync_with_no_labels_ends_the_mode() {
         let mut state = active(&[("a", "https://one")]);
-        state.sync(Vec::new());
+        state.sync(Vec::new(), 0);
         assert!(!state.is_active());
     }
 
     #[test]
     fn sync_is_inert_once_the_mode_is_down() {
         let mut state = ReaderHintState::default();
-        state.sync(vec![hint("a", "https://one")]);
+        state.sync(vec![hint("a", "https://one")], 1);
         assert!(!state.is_active());
         assert!(state.labels().is_empty());
     }

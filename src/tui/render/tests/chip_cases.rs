@@ -110,7 +110,8 @@ fn the_open_link_chip_follows_what_the_entry_holds() {
         let mut app = app_reading(body);
         let mut view = crate::tui::ui::ViewState::default();
         render_backend(120, 20, |frame| draw_app(frame, &mut app, &mut view));
-        app.reader_openable = view.reader.openable;
+        app.reader_hints
+            .sync(view.reader.hints.clone(), view.reader.openable);
         render_text(app, 120, 20)
     };
 

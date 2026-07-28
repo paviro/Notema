@@ -203,8 +203,7 @@ fn apply_action<B: Backend>(
             reader_hints,
             reader_openable,
         } => {
-            app.reader_hints.sync(reader_hints);
-            app.reader_openable = reader_openable;
+            app.reader_hints.sync(reader_hints, reader_openable);
             if let Some(scroll) = reader_scroll {
                 app.nav.scroll.reader = scroll;
             }

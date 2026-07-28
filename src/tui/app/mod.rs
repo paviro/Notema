@@ -392,7 +392,6 @@ pub(crate) struct AppModel {
     /// How many openable targets the last drawn reader held, gating the `o` key
     /// and its footer chip the way the image count gates `i`. Recorded from the
     /// frame rather than recomputed, since counting means rendering the body.
-    pub(crate) reader_openable: usize,
     pub(crate) scrollbar: ScrollbarDragState,
     /// The row/hint under the mouse cursor, for hover highlights. Set by mouse
     /// motion, cleared by any key event (see [`HoverTarget`]).
@@ -589,7 +588,6 @@ impl AppModel {
             next_geocode_id: 0,
             reader_anchor_flash: None,
             reader_hints: ReaderHintState::default(),
-            reader_openable: 0,
             scrollbar: ScrollbarDragState::default(),
             hover: HoverTarget::default(),
             caches: RenderCaches::default(),
