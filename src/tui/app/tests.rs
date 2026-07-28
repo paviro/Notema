@@ -1047,6 +1047,47 @@ fn search_recompute_keeps_body_and_analytics_caches_but_rebuilds_rows() {
     assert!(!Rc::ptr_eq(&rows, &rows_after));
 }
 
+/// Opening the filter browser walks every entry in scope, and the search box's
+/// suggestions read the same rows. Both have to share one walk per scope, and it
+/// has to be redone when the entries change.
+#[test]
+fn filter_rows_are_walked_once_per_scope_until_the_entries_change() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    write_entry(&entry_dir, "a.md", "2026-07-01T10:00:00+02:00", "# A\nbody");
+    let config = Config::new(dir.path().to_path_buf());
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+
+    let all = app.cached_filter_rows(&SearchScope::AllJournals);
+    assert!(Rc::ptr_eq(
+        &all,
+        &app.cached_filter_rows(&SearchScope::AllJournals)
+    ));
+
+    // The scope is part of the key: a journal's rows are a different set.
+    let journal = app.cached_filter_rows(&SearchScope::Journal("work".to_string()));
+    assert!(!Rc::ptr_eq(&all, &journal));
+    // …and the memo holds one scope at a time, so alternating rebuilds. Asserted
+    // so a later switch to a per-scope map is a deliberate change, not a silent one.
+    assert!(!Rc::ptr_eq(
+        &all,
+        &app.cached_filter_rows(&SearchScope::AllJournals)
+    ));
+
+    let before = app.cached_filter_rows(&SearchScope::AllJournals);
+    app.install_library_snapshot(LibrarySnapshot {
+        journals: app.library.journals.clone(),
+        entries: app.library.entries.clone(),
+        report: Default::default(),
+    });
+    assert!(!Rc::ptr_eq(
+        &before,
+        &app.cached_filter_rows(&SearchScope::AllJournals)
+    ));
+}
+
 #[test]
 fn metadata_partitioned_excludes_archived_and_isolates_archived_only() {
     let dir = tempdir().unwrap();

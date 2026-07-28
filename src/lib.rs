@@ -25,8 +25,8 @@ pub mod bench {
     pub use crate::tui::bench_support::{
         BenchApp, BenchCorpus, BenchSnapshot, BenchTerminal, FILTER_TAB_COUNT, METADATA_KIND_COUNT,
         app_with_corpus, app_with_entries, bench_terminal, close_picker, draw_frame,
-        editor_highlight, editor_input, filter_metadata_picker, filter_tab_rows, first_entry_path,
-        insights_analytics, insights_drivers, install_snapshot, library_snapshot,
+        editor_highlight, editor_input, filter_metadata_picker, filter_rows_cold, filter_tab_rows,
+        first_entry_path, insights_analytics, insights_drivers, install_snapshot, library_snapshot,
         open_editor_with_body, open_filter, open_location_picker, open_metadata_picker,
         refresh_path, reload_journal_list, rename_journal, search, search_query,
     };

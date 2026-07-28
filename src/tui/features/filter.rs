@@ -10,6 +10,8 @@
 //! exactly it, while a place row keeps containment and is counted by address,
 //! which the `location:` predicate is a pure function of.
 
+use std::rc::Rc;
+
 use notema_domain::Entry;
 
 use crate::tui::app::{AppModel, Focus, SearchScope};
@@ -27,19 +29,23 @@ pub(crate) struct FilterRow {
     pub(crate) count: usize,
 }
 
+/// Every tab's rows, indexed by [`FilterTab::index`].
+pub(crate) type FilterRows = [Vec<FilterRow>; FilterTab::COUNT];
+
 /// State for the filter overlay: the captured scope, the active tab, each
 /// tab's rows (built once at open), and the selection/scroll of the active tab.
 pub(crate) struct FilterState {
     /// Captured at open — drives the listed counts *and* the launched search.
     pub(crate) scope: SearchScope,
     pub(crate) tab: FilterTab,
-    /// One entry per [`FilterTab::ALL`], indexed by [`FilterTab::index`].
-    pub(crate) rows: [Vec<FilterRow>; FilterTab::COUNT],
+    /// Shared with the memo the dialog opened from, so reopening it neither
+    /// rebuilds nor copies the rows.
+    pub(crate) rows: Rc<FilterRows>,
     pub(crate) list: SelectableList,
 }
 
 impl FilterState {
-    fn new(scope: SearchScope, rows: [Vec<FilterRow>; FilterTab::COUNT]) -> Self {
+    fn new(scope: SearchScope, rows: Rc<FilterRows>) -> Self {
         // Open on the first tab that has anything to show, so the dialog never
         // greets the user with an empty list when other tabs are populated.
         let tab = FilterTab::ALL
@@ -144,13 +150,15 @@ impl AppModel {
         } else {
             self.current_journal_scope()
         };
-        let rows = self.all_filter_rows(&scope);
+        let rows = self.cached_filter_rows(&scope);
         self.overlay = Overlay::Filter(Box::new(FilterState::new(scope, rows)));
     }
 
-    /// Every tab's rows from one walk of the entries in scope, which is what the
-    /// dialog opens with.
-    fn all_filter_rows(&self, scope: &SearchScope) -> [Vec<FilterRow>; FilterTab::COUNT] {
+    /// Every tab's rows from one walk of the entries in scope.
+    ///
+    /// Reached through [`cached_filter_rows`](Self::cached_filter_rows), which is
+    /// what keeps the walk to once per scope per change to the entries.
+    pub(crate) fn all_filter_rows(&self, scope: &SearchScope) -> FilterRows {
         let mut tallies: [FacetTally; FilterTab::COUNT] = Default::default();
         let mut places = PlaceCounter::default();
         for entry in self.scoped_entries(scope) {
@@ -161,7 +169,7 @@ impl AppModel {
             }
             places.add_entry(entry.location.as_ref());
         }
-        let mut rows: [Vec<FilterRow>; FilterTab::COUNT] = Default::default();
+        let mut rows: FilterRows = Default::default();
         for (index, tally) in tallies.into_iter().enumerate() {
             rows[index] = facet_rows(tally);
         }

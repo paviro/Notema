@@ -4,9 +4,10 @@
 
 use super::{AppModel, Mode, RenderedEntryBody};
 use crate::tui::entry_rows::{EntryRowCache, build_entry_row_cache};
+use crate::tui::features::filter::FilterRows;
 use crate::tui::features::insights::{InsightsScope, InsightsTimeframe};
 use notema_analytics::{Analytics, Correlations, analyze, build_correlations};
-use notema_domain::{Entry, entry_group_date};
+use notema_domain::{Entry, SearchScope, entry_group_date};
 use std::{
     cell::RefCell,
     path::{Path, PathBuf},
@@ -82,6 +83,11 @@ pub(crate) struct RenderCaches {
     /// answers "what lifts/drains me *this week*"), and only when the Drivers tab
     /// needs it.
     windowed_cache: RefCell<WindowedCache>,
+    /// Memoized filter-browser rows for the `(entries_version, scope key)` they
+    /// were walked for. The walk is the whole cost of opening the browser, and
+    /// the search box's suggestions read the same rows, so both pay for it once
+    /// per change to the entries.
+    filter_rows_cache: RefCell<Option<(u64, String, Rc<FilterRows>)>>,
     entries_version: u64,
     rows_version: u64,
 }
@@ -89,6 +95,15 @@ pub(crate) struct RenderCaches {
 /// The windowed-correlations memo: `(entries_version, scope key, timeframe)` and
 /// the correlations built for them.
 type WindowedCache = Option<(u64, String, InsightsTimeframe, Rc<Correlations>)>;
+
+/// A search scope as a cache key. A NUL-prefixed sentinel can't collide with a
+/// journal name.
+fn scope_key(scope: &SearchScope) -> &str {
+    match scope {
+        SearchScope::AllJournals => "\u{0}all",
+        SearchScope::Journal(journal) => journal,
+    }
+}
 
 impl RenderCaches {
     /// The `entries` Vec changed: both the entries-keyed (body, analytics) and
@@ -179,6 +194,25 @@ impl RenderCaches {
             correlations.clone(),
         ));
         correlations
+    }
+
+    /// Return the memoized filter rows for `(version, scope_key)`, walking the
+    /// entries with `build` on a miss.
+    fn filter_rows(
+        &self,
+        version: u64,
+        scope_key: &str,
+        build: impl FnOnce() -> FilterRows,
+    ) -> Rc<FilterRows> {
+        if let Some((cached_version, key, rows)) = self.filter_rows_cache.borrow().as_ref()
+            && *cached_version == version
+            && key == scope_key
+        {
+            return rows.clone();
+        }
+        let rows = Rc::new(build());
+        *self.filter_rows_cache.borrow_mut() = Some((version, scope_key.to_string(), rows.clone()));
+        rows
     }
 }
 
@@ -286,5 +320,17 @@ impl AppModel {
                     build_correlations(&windowed)
                 }),
         )
+    }
+
+    /// The memoized filter-browser rows for `scope` — every distinct facet value
+    /// in it with the number of entries carrying it, ranked count-first.
+    ///
+    /// Two consumers, one walk: the browser opens on these, and the search box
+    /// suggests from them.
+    pub(crate) fn cached_filter_rows(&self, scope: &SearchScope) -> Rc<FilterRows> {
+        self.caches
+            .filter_rows(self.caches.entries_version, scope_key(scope), || {
+                self.all_filter_rows(scope)
+            })
     }
 }

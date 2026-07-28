@@ -12,10 +12,10 @@ use std::{
 use notema::bench::{
     BenchCorpus, FILTER_TAB_COUNT, METADATA_KIND_COUNT, app_with_corpus, app_with_entries,
     bench_terminal, close_picker, draw_frame, editor_highlight, editor_input,
-    filter_metadata_picker, filter_tab_rows, first_entry_path, insights_analytics,
-    insights_drivers, install_snapshot, library_snapshot, open_editor_with_body, open_filter,
-    open_location_picker, open_metadata_picker, refresh_path, reload_journal_list, rename_journal,
-    search, search_query,
+    filter_metadata_picker, filter_rows_cold, filter_tab_rows, first_entry_path,
+    insights_analytics, insights_drivers, install_snapshot, library_snapshot,
+    open_editor_with_body, open_filter, open_location_picker, open_metadata_picker, refresh_path,
+    reload_journal_list, rename_journal, search, search_query,
 };
 
 fn main() {
@@ -122,13 +122,23 @@ fn main() {
         let mut app = app_with_corpus(dir.path(), size, BenchCorpus::Wide);
         let iterations = if size < 10_000 { 20 } else { 5 };
 
-        // Opening the dialog: every tab's rows and counts, over all journals.
+        // The walk: every tab's rows and counts, over all journals. What the
+        // browser costs the first time it opens after the entries change.
+        let _ = black_box(filter_rows_cold(&app));
+        let started = Instant::now();
+        for _ in 0..iterations {
+            black_box(filter_rows_cold(black_box(&app)));
+        }
+        println!("filter_open/{size}: {:?}", started.elapsed() / iterations);
+
+        // Opening it again, off the memo — every later open, and every suggestion
+        // the search box offers.
         let _ = black_box(open_filter(&mut app));
         let started = Instant::now();
         for _ in 0..iterations {
             black_box(open_filter(black_box(&mut app)));
         }
-        println!("filter_open/{size}: {:?}", started.elapsed() / iterations);
+        println!("filter_reopen/{size}: {:?}", started.elapsed() / iterations);
 
         // Per tab, so a facet that scales badly is not hidden by the others. The
         // row count rides along: it is the vocabulary size the timing is against,

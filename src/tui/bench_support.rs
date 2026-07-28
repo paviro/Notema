@@ -116,9 +116,23 @@ pub fn search(app: &BenchApp, query: &str) -> usize {
     search_loaded_entries(&app.0.library.entries, query, &SearchScope::AllJournals).len()
 }
 
+/// Walk every entry over all journals and build every tab's rows, returning the
+/// total row count — the cost the browser pays the first time it opens after the
+/// entries change, with the memo bypassed.
+pub fn filter_rows_cold(app: &BenchApp) -> usize {
+    app.0
+        .all_filter_rows(&SearchScope::AllJournals)
+        .iter()
+        .map(Vec::len)
+        .sum()
+}
+
 /// Open the filter browser over all journals — what pressing the key costs, every
 /// tab built — and return the total row count. Closes the overlay again, so the
 /// call is repeatable.
+///
+/// Repeatable is now also *cached*: the rows are memoized against the entry
+/// version, so this measures reopening. [`filter_rows_cold`] is the walk.
 ///
 /// The focus is forced to the journals column because that is what widens the
 /// captured scope to all journals; `app_with_corpus` leaves the reader focused,
