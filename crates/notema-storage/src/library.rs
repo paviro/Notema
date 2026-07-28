@@ -235,14 +235,14 @@ pub(crate) struct DiscoveredEntry {
     /// Whether `stamp` was taken far enough past the file's own mtime to rule
     /// out a further write hiding inside the filesystem's mtime granularity.
     /// A property of the observation, not of the file, so it is decided during
-    /// the walk and never persisted.
+    /// the walk — and recorded with the stamp, since re-deciding it later would
+    /// call every racy observation trustworthy purely for having aged.
     pub stamp_trusted: bool,
 }
 
 impl DiscoveredEntry {
     /// Why `record` cannot be reused for this file, or `None` for a cache hit.
-    /// The one place a hit is decided, so the cause reported by
-    /// `NOTEMA_TIMING=2` can never disagree with what actually happened.
+    /// Cache hits are decided only here.
     ///
     /// The stamp fields are compared before the trust check so that `Racy` and
     /// `Unstamped` count only files that looked unchanged and were re-read
@@ -257,7 +257,10 @@ impl DiscoveredEntry {
         if record.stamp.modified != self.stamp.modified {
             return Some(MissCause::Mtime);
         }
-        if !self.stamp_trusted {
+        // Both observations must be trustworthy. A record written from a racy
+        // one describes bytes that a same-second, same-length rewrite could have
+        // replaced without moving the stamp at all.
+        if !self.stamp_trusted || !record.trusted {
             return Some(match self.stamp.modified {
                 Some(_) => MissCause::Racy,
                 None => MissCause::Unstamped,
@@ -272,6 +275,9 @@ impl DiscoveredEntry {
 
 pub(crate) struct CachedRecord {
     pub stamp: FileStamp,
+    /// Whether the observation that took `stamp` could rule out a later write
+    /// hiding inside the filesystem's mtime granularity.
+    pub trusted: bool,
     pub entry: Entry,
 }
 

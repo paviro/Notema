@@ -46,16 +46,30 @@ struct CacheFile {
 #[serde(deny_unknown_fields)]
 struct CacheRecordFile {
     stamp: FileStamp,
+    /// Whether `stamp` was taken far enough past the file's own mtime to rule
+    /// out a further write hiding inside the filesystem's granularity. Recorded
+    /// because trust does not accrue with age: re-judging a saved stamp against
+    /// a later launch would call every racy observation trustworthy, which is
+    /// exactly the one it must not be.
+    trusted: bool,
     entry: Entry,
 }
 
-/// Just enough of a cache file to tell one written by a different wire version
-/// apart from a damaged one. Must stay lenient — `deny_unknown_fields` here
-/// would defeat the whole point, since the fields it skips are exactly the ones
-/// that failed to decode.
+/// Just enough of a cache file to tell one written by a different build apart
+/// from a damaged one. Must stay lenient — `deny_unknown_fields` here would
+/// defeat the whole point, since the fields it skips are exactly the ones that
+/// failed to decode.
+///
+/// `app_version` matters as much as the wire version: `Entry` is embedded whole
+/// under `deny_unknown_fields`, so any release that changes its shape makes an
+/// old cache undecodable without the wire version moving.
 #[derive(Deserialize)]
 struct CacheVersion {
     wire_version: u32,
+    /// Optional so a future wire version that drops or renames it still reads as
+    /// an upgrade rather than as damage.
+    #[serde(default)]
+    app_version: Option<String>,
 }
 
 pub(super) fn read(
@@ -112,7 +126,10 @@ pub(super) fn read(
         // twice on the launches that succeed.
         Err(error) => {
             report.cache_status = match rmp_serde::from_slice::<CacheVersion>(bytes.as_ref()) {
-                Ok(header) if header.wire_version != CACHE_WIRE_VERSION => {
+                Ok(header)
+                    if header.wire_version != CACHE_WIRE_VERSION
+                        || header.app_version.as_deref() != Some(env!("CARGO_PKG_VERSION")) =>
+                {
                     CacheStatus::Incompatible
                 }
                 _ => {
@@ -155,6 +172,7 @@ pub(super) fn read(
                 .into_iter()
                 .map(|record| CachedRecord {
                     stamp: record.stamp,
+                    trusted: record.trusted,
                     entry: record.entry,
                 })
                 .collect(),
@@ -234,7 +252,10 @@ pub(super) fn validate_discovery(
     let mut subsecond_mtimes = 0usize;
     for discovered in discovered {
         subsecond_mtimes += usize::from(discovered.stamp.has_subsecond_mtime());
-        stamps.insert(discovered.source.path.clone(), discovered.stamp);
+        stamps.insert(
+            discovered.source.path.clone(),
+            (discovered.stamp, discovered.stamp_trusted),
+        );
         let record = records.remove(&discovered.source.path);
         let cause = discovered
             .miss_cause(record.as_ref())
@@ -415,13 +436,15 @@ fn save(
     encrypted: bool,
     journals: &[crate::Journal],
     entries: &[Entry],
-    stamps: &HashMap<PathBuf, FileStamp>,
+    stamps: &HashMap<PathBuf, (FileStamp, bool)>,
 ) -> AppResult<()> {
     let records = entries
         .iter()
         .filter_map(|entry| {
+            let (stamp, trusted) = *stamps.get(&entry.path)?;
             Some(CacheRecordFile {
-                stamp: *stamps.get(&entry.path)?,
+                stamp,
+                trusted,
                 entry: entry.clone(),
             })
         })
@@ -762,6 +785,50 @@ mod tests {
         assert_eq!(validated.report.cache_hits, 0);
         assert_eq!(validated.report.cache_misses, 1);
         assert_eq!(validated.entries[0].body, "body\n");
+    }
+
+    /// A record written from an untrusted observation stays untrusted however
+    /// long it sits in the cache. Trust is a property of the moment the stamp
+    /// was taken, and re-deciding it against a later launch would hand every
+    /// racy record a hit purely for having aged — which is precisely the write
+    /// the racy rule exists to catch.
+    #[test]
+    fn a_racy_observation_is_still_refused_on_the_next_launch() {
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["body"],
+        );
+        settle_all(&store);
+
+        // Save a cache from a walk that could not trust what it saw.
+        let cached = store
+            .read_cached_library(CachePolicy::Normal)
+            .unwrap()
+            .cached;
+        let mut discovery = store.discover_library_with_progress(&|_| {}).unwrap();
+        discovery.entries[0].stamp_trusted = false;
+        store
+            .validate_discovered_library(cached, CachePolicy::Normal, discovery)
+            .unwrap();
+
+        // A later launch sees the same file, and now trusts its own observation.
+        let cached = store
+            .read_cached_library(CachePolicy::Normal)
+            .unwrap()
+            .cached;
+        let discovery = store.discover_library_with_progress(&|_| {}).unwrap();
+        assert!(discovery.entries[0].stamp_trusted);
+
+        let validated = store
+            .validate_discovered_library(cached, CachePolicy::Normal, discovery)
+            .unwrap();
+        assert_eq!(
+            validated.report.cache_hits, 0,
+            "the recorded observation was racy, so the bytes it describes are unproven"
+        );
+        assert_eq!(validated.report.cache_misses, 1);
     }
 
     #[test]
