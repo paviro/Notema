@@ -369,7 +369,7 @@ fn set_dialog_scroll(app: &mut AppModel, dialog: DialogId, offset: usize) {
 /// `Enter`.
 fn scroll_suggestions(
     app: &mut AppModel,
-    scroll: impl FnOnce(&mut crate::tui::state::SuggestionState),
+    scroll: impl FnOnce(&mut crate::tui::features::search::suggest::SuggestionState),
 ) {
     app.search.suggestions.release_highlight();
     scroll(&mut app.search.suggestions);

@@ -12,8 +12,9 @@ use ratatui::{
 
 use crate::tui::app::SearchScope;
 use crate::tui::features::filter::FilterState;
+use crate::tui::features::filter::FilterTab;
 use crate::tui::render::tab_strip::{StripTab, full_strip_width, tab_strip_line};
-use crate::tui::state::{FilterTab, HoverTarget, ListNav};
+use crate::tui::state::{HoverTarget, ListNav};
 use crate::tui::theme::Theme;
 
 use super::super::chrome::{

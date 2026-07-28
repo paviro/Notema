@@ -12,9 +12,131 @@
 
 use std::rc::Rc;
 
+use std::borrow::Cow;
+
 use crate::tui::app::{AppModel, Focus, SearchScope};
 use crate::tui::features::facets::{FilterRow, FilterRows};
-use crate::tui::state::{FilterTab, ListNav, Overlay, SelectableList};
+use crate::tui::features::search::{Prefix, escape_filter_value, quote_filter_value};
+use crate::tui::state::{ListNav, Overlay, SelectableList};
+
+/// One facet of the filter dialog. Each tab lists that facet's distinct
+/// values with post counts and, when a value is chosen, launches the matching
+/// search (its [`search_prefix`](Self::search_prefix) + the row's value).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum FilterTab {
+    #[default]
+    Tags,
+    People,
+    Activities,
+    Feelings,
+    Locations,
+}
+
+impl FilterTab {
+    pub(crate) const ALL: [FilterTab; 5] = [
+        Self::Tags,
+        Self::People,
+        Self::Activities,
+        Self::Feelings,
+        Self::Locations,
+    ];
+
+    /// Number of tabs.
+    pub(crate) const COUNT: usize = Self::ALL.len();
+
+    /// This tab's slot in a `[_; COUNT]` keyed by tab — the facet arrays are
+    /// indexed by it, so it is spelt out here rather than found by scanning
+    /// `ALL` through a rendering trait whose miss would silently answer `Tags`.
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::Tags => 0,
+            Self::People => 1,
+            Self::Activities => 2,
+            Self::Feelings => 3,
+            Self::Locations => 4,
+        }
+    }
+
+    pub(crate) fn title(self) -> &'static str {
+        match self {
+            Self::Tags => "Tags",
+            Self::People => "People",
+            Self::Activities => "Activities",
+            Self::Feelings => "Feelings",
+            Self::Locations => "Locations",
+        }
+    }
+
+    /// A shorter label used when the full titles won't fit the tab strip.
+    pub(crate) fn short_title(self) -> &'static str {
+        match self {
+            Self::Tags => "Tags",
+            Self::People => "Ppl",
+            Self::Activities => "Acts",
+            Self::Feelings => "Feel",
+            Self::Locations => "Locs",
+        }
+    }
+
+    /// A single-letter label — the narrowest tab strip rung. Each is unique, so
+    /// every tab stays visible and clickable on the tightest layout.
+    pub(crate) fn initial(self) -> &'static str {
+        match self {
+            Self::Tags => "T",
+            Self::People => "P",
+            Self::Activities => "A",
+            Self::Feelings => "F",
+            Self::Locations => "L",
+        }
+    }
+
+    /// The search prefix a chosen row launches (`tags:`, `location:`, …).
+    /// The search prefix listing this tab's values, colon included.
+    pub(crate) fn search_prefix(self) -> &'static str {
+        match self {
+            Self::Tags => Prefix::Tags,
+            Self::People => Prefix::People,
+            Self::Activities => Prefix::Activities,
+            Self::Feelings => Prefix::Feelings,
+            Self::Locations => Prefix::Location,
+        }
+        .token()
+    }
+
+    /// The tab a search prefix lists the values of, or `None` for the prefixes
+    /// that have no vocabulary to list — a mood, a star or a date is written, not
+    /// chosen.
+    pub(crate) fn from_prefix(prefix: Prefix) -> Option<Self> {
+        match prefix {
+            Prefix::Tags => Some(Self::Tags),
+            Prefix::People => Some(Self::People),
+            Prefix::Activities => Some(Self::Activities),
+            Prefix::Feelings => Some(Self::Feelings),
+            Prefix::Location => Some(Self::Locations),
+            Prefix::Star | Prefix::Mood | Prefix::Date(_) => None,
+        }
+    }
+
+    /// `value` written the way this tab writes it into a query. Only the token
+    /// facets quote, since a quoted value is an exact one and `location:` matches
+    /// on words either way — a location quotes only to keep a structural
+    /// character literal.
+    ///
+    /// The one place a value is written, so the browser's rows and the search
+    /// box's suggestions cannot commit the same value two ways.
+    pub(crate) fn launch_value(self, value: &str) -> Cow<'_, str> {
+        match self {
+            Self::Locations => escape_filter_value(value),
+            _ => Cow::Owned(quote_filter_value(value)),
+        }
+    }
+
+    /// The whole query a chosen row launches: this tab's prefix, then
+    /// [`launch_value`](Self::launch_value).
+    pub(crate) fn launch_query(self, value: &str) -> String {
+        format!("{}{}", self.search_prefix(), self.launch_value(value))
+    }
+}
 
 /// State for the filter overlay: the captured scope, the active tab, each
 /// tab's rows (built once at open), and the selection/scroll of the active tab.

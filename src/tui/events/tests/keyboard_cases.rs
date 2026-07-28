@@ -767,7 +767,7 @@ fn the_suggestion_list_claims_no_key_until_it_is_arrowed_into() {
 
     // With rows to show but none highlighted, only `Down`, `Tab` and `Esc` are
     // claimed.
-    app.search.suggestions.rows = vec![crate::tui::state::SuggestionRow {
+    app.search.suggestions.rows = vec![crate::tui::features::search::suggest::SuggestionRow {
         label: "apple".to_string(),
         value: "apple".to_string(),
         count: 1,

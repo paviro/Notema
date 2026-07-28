@@ -284,7 +284,7 @@ mod tests {
     /// the quotes are escaping rather than a claim about the match.
     #[test]
     fn a_launched_filter_value_never_draws_a_raw_quote() {
-        use crate::tui::state::FilterTab;
+        use crate::tui::features::filter::FilterTab;
 
         let theme = bracket();
         for tab in FilterTab::ALL {

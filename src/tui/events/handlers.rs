@@ -1,7 +1,8 @@
 use super::*;
 use crate::tui::features::metadata::EditMetadataFocus;
+use crate::tui::features::reader::ReaderHintMatch;
 use crate::tui::render::tab_strip::StripTab;
-use crate::tui::state::{ListNav, ReaderHintMatch};
+use crate::tui::state::ListNav;
 
 /// Adjust the focused list's scroll offset so a selection moved by a handler
 /// stays on screen, using the live terminal geometry.

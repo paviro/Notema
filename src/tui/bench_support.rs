@@ -14,8 +14,9 @@ use super::app::{AppModel, Focus};
 use super::events::{Action, EditorAction};
 use super::features::insights::InsightsScope;
 use super::search::search_loaded_entries;
-use super::state::{FilterTab, MetadataKind};
+use super::state::MetadataKind;
 use crate::config::Config;
+use crate::tui::features::filter::FilterTab;
 
 /// An opaque, fully-loaded app handle for benchmarks. Wraps the private `AppModel` so
 /// the bench API stays public without exposing the TUI's internal types.

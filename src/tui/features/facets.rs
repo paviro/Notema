@@ -13,8 +13,9 @@ use std::collections::{BTreeSet, HashMap};
 use notema_domain::{Entry, Location, PlaceGroup};
 
 use crate::tui::app::{AppModel, SearchScope};
+use crate::tui::features::filter::FilterTab;
 use crate::tui::features::metadata::metadata_values;
-use crate::tui::state::{FilterTab, MetadataKind};
+use crate::tui::state::MetadataKind;
 
 /// One row of a facet: its display `label`, the search payload it launches
 /// (`search_value`, placed after the tab's prefix), and its post count.

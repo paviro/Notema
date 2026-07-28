@@ -6,7 +6,7 @@
 pub(crate) mod offsets;
 mod parse;
 mod predicate;
-mod suggest;
+pub(crate) mod suggest;
 
 use std::time::Instant;
 
@@ -17,15 +17,57 @@ use crate::tui::{
     app::{AppModel, Focus, Mode, SearchScope},
     search::search_loaded_entries_where,
     state::MetadataKind,
+    text_input::TextInput,
 };
 
 use parse::{parse_starred_value, split_unquoted, unquote};
 use predicate::{date_predicate, feeling_predicate, location_predicate, metadata_predicate};
 
 pub(crate) use parse::{Prefix, escape_filter_value, quote_filter_value, split_prefix};
+use suggest::SuggestionState;
 
 /// Boxed so segments with different predicate types share one `Vec`.
 type EntryPredicate = Box<dyn Fn(&Entry) -> bool>;
+
+/// Search query, scope and the hits it currently matches.
+pub(crate) struct SearchState {
+    pub(crate) query: TextInput,
+    pub(crate) scope: SearchScope,
+    pub(crate) hits: Vec<SearchHit>,
+    /// Set when the query changed but the (expensive) hit recompute has been
+    /// deferred; the event loop runs it once typing pauses (debounce).
+    pub(crate) dirty: bool,
+    /// Timestamp of the last search keystroke, for the debounce window.
+    pub(crate) last_edit: Option<Instant>,
+    pub(crate) suggestions: SuggestionState,
+}
+
+impl Default for SearchState {
+    fn default() -> Self {
+        let mut query = TextInput::default();
+        query.set_placeholder_text("type to search");
+        Self {
+            query,
+            scope: SearchScope::AllJournals,
+            hits: Vec::new(),
+            dirty: false,
+            last_edit: None,
+            suggestions: SuggestionState::default(),
+        }
+    }
+}
+
+impl MetadataKind {
+    /// The search prefix listing this facet's values, colon included.
+    pub(crate) fn search_prefix(self) -> &'static str {
+        match self {
+            MetadataKind::Tags => Prefix::Tags,
+            MetadataKind::People => Prefix::People,
+            MetadataKind::Activities => Prefix::Activities,
+        }
+        .token()
+    }
+}
 
 impl AppModel {
     pub(crate) fn begin_search(&mut self) {

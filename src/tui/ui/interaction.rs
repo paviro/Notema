@@ -84,7 +84,7 @@ pub(crate) enum InteractionKind {
         index: usize,
     },
     /// A tab header in the filter dialog.
-    FilterTab(crate::tui::state::FilterTab),
+    FilterTab(crate::tui::features::filter::FilterTab),
     /// A tab header in the help overlay.
     HelpTab(crate::tui::state::HelpTab),
     DialogInput(DialogInputId),

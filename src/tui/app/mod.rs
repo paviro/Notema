@@ -22,11 +22,11 @@ use ratatui::{
     widgets::ListState,
 };
 
-use super::state::{
-    HoverTarget, Overlay, ReaderHintState, ScrollState, SearchState, ToastVariant, Toasts,
-};
+use super::state::{HoverTarget, Overlay, ScrollState, ToastVariant, Toasts};
 use crate::tui::editor_state::EntryEditor;
 use crate::tui::features::insights::{InsightsScope, InsightsTab, InsightsTimeframe};
+use crate::tui::features::reader::ReaderHintState;
+use crate::tui::features::search::SearchState;
 use crate::tui::image::{ImageAsset, ImageRuntime};
 use crate::tui::runtime::reload::{self, ReloadReason, ReloadRequest};
 

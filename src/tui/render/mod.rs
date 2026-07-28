@@ -624,7 +624,9 @@ fn register_overlay_interactions(
         }
         Overlay::Filter(state) => {
             let layout = dialogs::filter_dialog_layout(context.theme, frame_area, state);
-            for (tab, rect) in tab_strip::tab_rects::<crate::tui::state::FilterTab>(layout.tabs) {
+            for (tab, rect) in
+                tab_strip::tab_rects::<crate::tui::features::filter::FilterTab>(layout.tabs)
+            {
                 context
                     .view
                     .interactions

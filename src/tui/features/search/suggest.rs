@@ -10,13 +10,108 @@
 //! preserves is the default reading of a fragment, and a list that guesses
 //! otherwise would take the key away from someone who meant it.
 
+use crate::tui::features::filter::FilterTab;
 use crate::tui::{
     app::AppModel,
     features::facets::FilterRow,
-    state::{FilterTab, SelectableList, SuggestionRow},
+    state::{ListNav, SelectableList},
 };
 
 use super::{offsets, parse::unquote};
+
+/// One value the search box offers for the prefix being typed.
+pub(crate) struct SuggestionRow {
+    /// What the row reads as — the value itself, or a place's display label.
+    pub(crate) label: String,
+    /// The raw value committing it searches for. Written into the query through
+    /// [`FilterTab::launch_value`] at that point rather than here, so a list of a
+    /// thousand candidates does not quote every one of them per keystroke.
+    pub(crate) value: String,
+    pub(crate) count: usize,
+}
+
+/// The values on offer for the filter value the caret is in, and which one is
+/// highlighted.
+///
+/// Nothing is highlighted until the list is arrowed into: a recompute follows a
+/// keystroke, and a keystroke means the typed fragment is still what was meant,
+/// so `Enter` has to keep opening the selected result until a row is chosen
+/// deliberately.
+#[derive(Default)]
+pub(crate) struct SuggestionState {
+    pub(crate) rows: Vec<SuggestionRow>,
+    pub(crate) list: SelectableList,
+    /// Where the value the list was dismissed for starts, if the caret is still
+    /// in it. An offset rather than a flag so dismissing survives typing more of
+    /// the same value — a flag cleared on the next keystroke would undo itself —
+    /// while moving to another filter brings the list back.
+    pub(crate) dismissed: Option<usize>,
+}
+
+impl SuggestionState {
+    /// Whether the list is on screen: it has rows and was not dismissed for the
+    /// fragment being typed.
+    pub(crate) fn is_open(&self) -> bool {
+        !self.rows.is_empty() && self.dismissed.is_none()
+    }
+
+    /// The highlighted row, or `None` while the list is only advisory.
+    pub(crate) fn highlighted(&self) -> Option<&SuggestionRow> {
+        self.highlighted_index()
+            .and_then(|index| self.rows.get(index))
+    }
+
+    /// The row a deliberate choice landed on. A dismissed list has none, whatever
+    /// was armed before it went down — it is no longer on screen to be meant.
+    pub(crate) fn highlighted_index(&self) -> Option<usize> {
+        self.is_open().then(|| self.selected_index()).flatten()
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.rows.clear();
+        self.list = SelectableList::default();
+        self.dismissed = None;
+    }
+
+    /// Step the highlight by `delta`, entering the list at its first row and
+    /// releasing off the top. Releasing is what hands `Up` back to the entry
+    /// list once the list has been stepped out of, so neither direction is a
+    /// one-way door.
+    pub(crate) fn move_highlight(&mut self, delta: isize) {
+        if self.rows.is_empty() {
+            return;
+        }
+        match self.selected_index() {
+            None if delta > 0 => self.select_index(0),
+            None => {}
+            Some(index) => match index as isize + delta {
+                next if next < 0 => self.list.select_none(),
+                next => self.select_index((next as usize).min(self.rows.len() - 1)),
+            },
+        }
+    }
+
+    /// Put the highlight down, leaving the list open but only advisory again.
+    /// Scrolling by hand does this: the highlight is how the list was arrowed
+    /// into, and a row scrolled out of sight must not stay armed on `Enter`.
+    pub(crate) fn release_highlight(&mut self) {
+        self.list.select_none();
+    }
+}
+
+impl ListNav for SuggestionState {
+    fn list(&self) -> &SelectableList {
+        &self.list
+    }
+
+    fn list_mut(&mut self) -> &mut SelectableList {
+        &mut self.list
+    }
+
+    fn item_count(&self) -> usize {
+        self.rows.len()
+    }
+}
 
 impl AppModel {
     /// Whether the suggestion list is taking keys — it stays open underneath an

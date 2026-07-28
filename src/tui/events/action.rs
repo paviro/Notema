@@ -1,8 +1,9 @@
 use crossterm::event::KeyEvent;
 
+use crate::tui::features::filter::FilterTab;
 use crate::tui::{
     features::{insights::InsightsTab, location::EditLocationFocus},
-    state::{FilterTab, HelpTab, HoverTarget, MetadataKind},
+    state::{HelpTab, HoverTarget, MetadataKind},
     ui::interaction::{PanelId, TextFieldId},
 };
 

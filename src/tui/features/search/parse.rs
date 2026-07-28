@@ -255,7 +255,8 @@ pub(super) fn parse_starred_value(value: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::state::{FilterTab, MetadataKind};
+    use crate::tui::features::filter::FilterTab;
+    use crate::tui::state::MetadataKind;
 
     /// The one needle a value must parse back to, or `None` if it produced no
     /// group at all.
