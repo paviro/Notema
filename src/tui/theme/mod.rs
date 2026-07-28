@@ -29,6 +29,12 @@ use serde::Deserialize;
 #[cfg(test)]
 use {loading::BUNDLED, std::fs};
 
+/// The names of every bundled theme, unsorted.
+#[cfg(test)]
+pub(crate) fn bundled_names() -> Vec<&'static str> {
+    BUNDLED.iter().map(|(name, _)| *name).collect()
+}
+
 /// The theme `load` falls back to when the configured one is missing or broken.
 pub(crate) const DEFAULT_THEME: &str = "journal";
 

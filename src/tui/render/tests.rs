@@ -126,6 +126,15 @@ fn render_pending_notice_text_with_theme(
     })
 }
 
+fn flat_theme() -> theme::Theme {
+    theme::test_flat_theme()
+}
+
+fn flat_app(mut app: AppModel) -> AppModel {
+    app.appearance.theme = flat_theme();
+    app
+}
+
 mod chip_cases;
 mod dialog_cases;
 mod editor_cases;
@@ -137,6 +146,8 @@ mod layout_cases;
 mod menus_cases;
 mod panel_cases;
 mod reader_cases;
+mod scrim_cases;
 mod scrollbar_cases;
 mod search_cases;
+mod toast_cases;
 mod unlock_cases;

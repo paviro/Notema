@@ -1,3 +1,6 @@
+//! Which `Action` a keystroke becomes in each context — browse, reader, search,
+//! link-hint mode, the editor and its prompts — and which keys stay unclaimed.
+
 use super::*;
 
 #[test]

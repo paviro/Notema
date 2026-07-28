@@ -1,3 +1,6 @@
+//! Clicks, drags and the wheel: which panel they activate, what they select,
+//! and how the overlays and the suggestion list win the hit test above them.
+
 use super::*;
 
 #[test]

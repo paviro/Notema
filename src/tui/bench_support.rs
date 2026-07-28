@@ -28,14 +28,10 @@ pub const FILTER_TAB_COUNT: usize = FilterTab::COUNT;
 
 /// Number of metadata pickers, so a bench can sweep them without naming the
 /// private `MetadataKind`.
-pub const METADATA_KIND_COUNT: usize = 3;
+pub const METADATA_KIND_COUNT: usize = MetadataKind::ALL.len();
 
 fn metadata_kind(index: usize) -> MetadataKind {
-    match index {
-        0 => MetadataKind::Tags,
-        1 => MetadataKind::People,
-        _ => MetadataKind::Activities,
-    }
+    MetadataKind::ALL[index]
 }
 
 /// Which corpus shape [`app_with_corpus`] writes.

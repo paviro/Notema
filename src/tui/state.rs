@@ -367,6 +367,8 @@ pub(crate) enum MetadataKind {
 }
 
 impl MetadataKind {
+    pub(crate) const ALL: [MetadataKind; 3] = [Self::Tags, Self::People, Self::Activities];
+
     pub(crate) fn title(self) -> &'static str {
         match self {
             MetadataKind::Tags => "Tags",

@@ -1,3 +1,6 @@
+//! Overlay keyboard and mouse routing: the metadata, feelings, location, filter
+//! and settings dialogs, and the theme picker.
+
 use super::*;
 use crate::tui::state::MetadataKind;
 

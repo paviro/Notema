@@ -115,37 +115,12 @@ fn theme_picker_opens_on_the_active_theme_with_bundled_entries() {
 
     let state = app.theme_picker_state().expect("picker open");
     let names: Vec<&str> = state.entries.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(
-        names,
-        vec![
-            "arcade",
-            "blossom",
-            "celadon",
-            "classic",
-            "crt",
-            "cyberpunk",
-            "deep-space",
-            "dungeon",
-            "eclipse",
-            "eldritch",
-            "fjord",
-            "gameboy",
-            "grove",
-            "hal",
-            "indigo",
-            "journal",
-            "lavender",
-            "maple",
-            "matcha",
-            "matrix",
-            "rose-pine",
-            "synthwave",
-            "tokyonight",
-            "tron",
-            "vaporwave",
-            "wasteland",
-        ]
-    );
+    // Every bundled theme, in sort order — asserted against the list itself so
+    // adding one does not break a test that is not about it.
+    let mut bundled = crate::tui::theme::bundled_names();
+    bundled.sort_unstable();
+    assert_eq!(names, bundled);
+    assert!(names.contains(&"eclipse") && names.contains(&"gameboy"));
     assert!(state.entries.iter().all(|entry| entry.theme.is_some()));
     // Selection seeds on the configured theme.
     assert_eq!(

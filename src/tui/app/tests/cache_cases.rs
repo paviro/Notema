@@ -184,3 +184,24 @@ fn filter_rows_are_walked_once_per_scope_until_the_entries_change() {
         &app.cached_filter_rows(&SearchScope::AllJournals)
     ));
 }
+
+#[test]
+fn entry_body_cache_rebuilds_when_the_theme_changes() {
+    // The rendered body bakes in markdown colors, glyphs, and syntax
+    // highlighting; the picker's live preview swaps themes without
+    // touching the entry, so the memo key must notice.
+    use crate::tui::theme;
+    let mut app = app_with_journals(&["alpha"]);
+    app.appearance.theme = theme::test_flat_theme();
+    let builds = std::cell::Cell::new(0);
+    let build = || {
+        builds.set(builds.get() + 1);
+        crate::tui::app::RenderedEntryBody::default()
+    };
+    app.cached_entry_body(None, 80, None, build);
+    app.cached_entry_body(None, 80, None, build);
+    assert_eq!(builds.get(), 1, "same theme must hit the cache");
+    app.appearance.theme = theme::test_eclipse_theme();
+    app.cached_entry_body(None, 80, None, build);
+    assert_eq!(builds.get(), 2, "a theme change must rebuild the body");
+}
