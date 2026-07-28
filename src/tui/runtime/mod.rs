@@ -405,10 +405,14 @@ fn run_loop(
     );
     // Watch the themes directory too: edits to the active theme's file repaint
     // live, no restart needed. (The directory exists — startup materialized it.)
+    //
+    // Rescanning, not ordered: `theme::load_startup` read these files before the
+    // unlock prompt, so the gap between that read and the watch arming is as long
+    // as the passphrase takes. The first poll re-reads the active theme.
     let mut theme_watcher = if is_ish {
         watcher::PendingWatcher::off()
     } else {
-        watcher::PendingWatcher::start(
+        watcher::PendingWatcher::start_rescanning(
             &theme::themes_dir(&app.services.config_path),
             "watch:themes",
         )

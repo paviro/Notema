@@ -48,7 +48,12 @@ pub(crate) struct PendingWatcher {
 }
 
 enum State {
-    Registering(mpsc::Receiver<Result<FileWatcher, String>>),
+    Registering {
+        rx: mpsc::Receiver<Result<FileWatcher, String>>,
+        /// Whether adopting the registration should report a rescan — set by
+        /// [`PendingWatcher::start_rescanning`].
+        rescan_on_adopt: bool,
+    },
     Watching(FileWatcher),
     Off,
 }
@@ -59,6 +64,22 @@ impl PendingWatcher {
         Self { state: State::Off }
     }
 
+    /// Registers `root` for a caller that has *already* read the tree, with no
+    /// ordering between the two. The first poll reports a rescan, because
+    /// anything written in the gap is reported by neither the read nor the
+    /// watch. Prefer [`Self::start_then`], which closes the gap instead.
+    pub(crate) fn start_rescanning(root: &Path, label: &'static str) -> Self {
+        let mut watcher = Self::start_then(root, label, || {});
+        if let State::Registering {
+            rescan_on_adopt, ..
+        } = &mut watcher.state
+        {
+            *rescan_on_adopt = true;
+        }
+        watcher
+    }
+
+    /// Registers `root` for a caller with nothing to reconcile against it.
     pub(crate) fn start(root: &Path, label: &'static str) -> Self {
         Self::start_then(root, label, || {})
     }
@@ -85,15 +106,28 @@ impl PendingWatcher {
             after();
         });
         Self {
-            state: State::Registering(rx),
+            state: State::Registering {
+                rx,
+                rescan_on_adopt: false,
+            },
         }
     }
 
     /// Adopts a finished registration, then drains whatever it has seen.
     pub(crate) fn poll(&mut self) -> WatcherPoll {
-        if let State::Registering(rx) = &self.state {
+        let mut adopted_unordered = false;
+        if let State::Registering { rx, .. } = &self.state {
             match rx.try_recv() {
-                Ok(Ok(watcher)) => self.state = State::Watching(watcher),
+                Ok(Ok(watcher)) => {
+                    adopted_unordered = matches!(
+                        self.state,
+                        State::Registering {
+                            rescan_on_adopt: true,
+                            ..
+                        }
+                    );
+                    self.state = State::Watching(watcher);
+                }
                 Ok(Err(error)) => {
                     self.state = State::Off;
                     return WatcherPoll::failed(error);
@@ -108,7 +142,7 @@ impl PendingWatcher {
         match &self.state {
             State::Watching(watcher) => WatcherPoll {
                 paths: watcher.poll_changes(),
-                rescan: watcher.take_rescan(),
+                rescan: watcher.take_rescan() || adopted_unordered,
                 failure: None,
             },
             _ => WatcherPoll::quiet(),
@@ -221,7 +255,10 @@ mod tests {
         (
             tx,
             PendingWatcher {
-                state: State::Registering(rx),
+                state: State::Registering {
+                    rx,
+                    rescan_on_adopt: false,
+                },
             },
         )
     }
@@ -262,6 +299,41 @@ mod tests {
         assert!(watcher.take_rescan());
         // Cleared by the poll that reported it, so one notice is one reload.
         assert!(!watcher.take_rescan());
+    }
+
+    /// `start` arms the watch with nothing sequenced behind it, so whatever the
+    /// caller read beforehand — the theme files, read before the unlock prompt —
+    /// may be older than the watch by an unbounded margin. Adopting it says so
+    /// once; `start_then` orders its own read and does not.
+    #[test]
+    fn an_unordered_registration_asks_for_a_rescan_when_it_lands() {
+        let make = || {
+            let (tx, rx) = mpsc::channel();
+            let watcher = FileWatcher {
+                rx: mpsc::channel().1,
+                rescan: Arc::new(AtomicBool::new(false)),
+                _watcher: RecommendedWatcher::new(|_| {}, Config::default()).unwrap(),
+            };
+            tx.send(Ok(watcher)).unwrap();
+            rx
+        };
+
+        let mut unordered = PendingWatcher {
+            state: State::Registering {
+                rx: make(),
+                rescan_on_adopt: true,
+            },
+        };
+        assert!(unordered.poll().rescan, "the read was never ordered");
+        assert!(!unordered.poll().rescan, "and it is said only once");
+
+        let mut ordered = PendingWatcher {
+            state: State::Registering {
+                rx: make(),
+                rescan_on_adopt: false,
+            },
+        };
+        assert!(!ordered.poll().rescan);
     }
 
     #[test]
