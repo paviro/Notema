@@ -100,6 +100,9 @@ pub(super) fn run(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<(
         io::stdin().read_to_string(&mut body)?;
         body
     };
+    // Its own phase: it blocks until the writer closes, so folding it into the
+    // next mark would report the pipe's latency as that mark's cost.
+    timing::mark("log:read-body");
 
     // A located entry adopts its place's timezone (config-gated) so its timestamp
     // and date-folder match where it was written, and captures the ambient

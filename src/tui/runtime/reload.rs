@@ -74,7 +74,7 @@ pub(crate) fn reload(request: ReloadRequest) -> ReloadResult {
     // Timestamped where the walk finished, not where the loop gets around to
     // reading it, and emitted even for a result later discarded as stale.
     if let Ok(snapshot) = &snapshot {
-        timing::event_with(|| snapshot.report.timing_summary());
+        timing::mark_with(|| snapshot.report.timing_summary());
     }
     ReloadResult {
         reason: request.reason,

@@ -78,7 +78,7 @@ impl PendingWatcher {
         let root = root.to_path_buf();
         std::thread::spawn(move || {
             let registered = FileWatcher::start(&root).map_err(|error| error.to_string());
-            timing::event(label);
+            timing::mark(label);
             // Hand the watcher over before `after` runs, so a caller polling both
             // sees the watcher no later than `after`'s result.
             let _ = tx.send(registered);

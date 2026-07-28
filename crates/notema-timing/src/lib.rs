@@ -69,7 +69,7 @@ pub fn init() {
 
 /// Whether timing is enabled.
 #[inline]
-pub fn enabled() -> bool {
+fn enabled() -> bool {
     LEVEL.load(Ordering::Relaxed) != 0
 }
 
@@ -79,11 +79,12 @@ pub fn detailed() -> bool {
     LEVEL.load(Ordering::Relaxed) >= 2
 }
 
-/// Record a main-thread phase boundary.
+/// Record a phase boundary. Off the main thread this is a background event
+/// instead — it cannot advance a phase delta it is not part of.
 #[inline]
 pub fn mark(label: &str) {
     if enabled() {
-        record(label, RecordKind::Phase);
+        record(label);
     }
 }
 
@@ -91,23 +92,7 @@ pub fn mark(label: &str) {
 #[inline]
 pub fn mark_with(label: impl FnOnce() -> String) {
     if enabled() {
-        record(&label(), RecordKind::Phase);
-    }
-}
-
-/// Record a background event without advancing the main-thread phase delta.
-#[inline]
-pub fn event(label: &str) {
-    if enabled() {
-        record(label, RecordKind::Background);
-    }
-}
-
-/// Record a lazy background event.
-#[inline]
-pub fn event_with(label: impl FnOnce() -> String) {
-    if enabled() {
-        record(&label(), RecordKind::Background);
+        record(&label());
     }
 }
 
@@ -175,15 +160,17 @@ enum RecordKind {
     Background,
 }
 
-fn record(label: &str, requested: RecordKind) {
+fn record(label: &str) {
     let Some(origin) = ORIGIN.get() else {
         return;
     };
+    // Only the main thread has a phase delta to advance; everything else is an
+    // event beside the timeline.
     let main = MAIN_THREAD
         .get()
         .is_some_and(|thread| *thread == std::thread::current().id());
     let kind = if main {
-        requested
+        RecordKind::Phase
     } else {
         RecordKind::Background
     };
@@ -270,7 +257,8 @@ fn parse_level(value: &str) -> u8 {
     match value.trim().to_ascii_lowercase().as_str() {
         "" | "0" | "no" | "off" | "false" => 0,
         "1" | "yes" | "on" | "true" => 1,
-        other => other.parse::<u8>().unwrap_or(1).max(1),
+        // An unrecognized word means on; a number means itself, zero included.
+        other => other.parse::<u8>().unwrap_or(1),
     }
 }
 
@@ -310,13 +298,16 @@ mod tests {
             assert_eq!(parse_level(value), 1);
         }
         assert_eq!(parse_level("2"), 2);
+        // A number means itself. Only a word nobody recognizes falls back to on,
+        // so a zero written any other way still reads as off.
+        assert_eq!(parse_level("00"), 0);
     }
 
     #[test]
     fn lazy_labels_are_not_built_when_disabled() {
         assert!(!enabled());
         mark_with(|| panic!("phase label evaluated"));
-        event_with(|| panic!("event label evaluated"));
+        note_with(|| panic!("note text evaluated"));
     }
 
     #[test]

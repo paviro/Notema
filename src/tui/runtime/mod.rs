@@ -46,9 +46,6 @@ pub(crate) fn run(
     store: JournalStore,
     discovery: Option<LibraryDiscovery>,
 ) -> AppResult<()> {
-    // Ensure the store exists before probing for a lock so identity checks
-    // reflect on-disk state.
-    store.ensure()?;
     // Before raw mode / the alternate screen: auto dark/light detection talks
     // OSC to the normal screen, and load warnings should print readably.
     let startup = theme::load_startup(&config_path, &config.ui);
@@ -865,7 +862,7 @@ fn run_library_validation(
     // around to reading it — and emitted even when the result is later
     // discarded as stale.
     if let Ok(snapshot) = &result {
-        timing::event_with(|| snapshot.report.timing_summary());
+        timing::mark_with(|| snapshot.report.timing_summary());
     }
     result
 }

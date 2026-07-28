@@ -169,12 +169,16 @@ keeps the phase timeline and aggregate library summaries without those details.
 
 ```bash
 NOTEMA_TIMING=1 notema log "probe" 2> timing.log
-NOTEMA_TIMING=1 notema 2> timing-tui.log   # lines flush after the TUI exits
+NOTEMA_TIMING=1 notema 2> timing-tui.log   # lines from the TUI flush on exit
 ```
 
 It's gated on the env var rather than a cargo feature on purpose: the build that
-needs measuring is the released one. With the variable unset each hook is one
-relaxed atomic load.
+needs measuring is the released one. With the variable unset each timing hook is
+one relaxed atomic load, and no label is built.
+
+Startup lines are written as they happen; only the ones raised once the
+alternate screen is up are held back, so `cli:parse` and the `startup:` phases
+reach stderr before the TUI takes the terminal.
 
 Reading it:
 
@@ -196,9 +200,12 @@ Reading it:
   that carries the real hit and miss counts, split across discovery walk, source
   read and cache write.
 - **`cache misses by cause:`** (level 2) attributes every miss to one of `len`,
-  `mtime`, `ctime`, `journal` (the entry moved between journals), `absent` (no
-  cached record) or `rebuild` (the policy forced a reload). A large `ctime`
-  bucket means something is touching inodes without changing content.
+  `mtime`, `racy` (the stamp matched but was taken too soon after a whole-second
+  mtime to rule out another write in the same tick), `unstamped` (the filesystem
+  reports no mtime, so only length distinguishes revisions), `journal` (the entry
+  moved between journals), `absent` (no cached record) or `rebuild` (the policy
+  forced a reload). `racy` and `unstamped` are the two the line below explains,
+  and the only two a different filesystem would change.
 - **`cache mtime precision:`** (level 2) counts how many stamps carry a
   sub-second mtime. A count of zero means the filesystem resolves mtime no finer
   than a second, which limits what the cache can tell apart.
