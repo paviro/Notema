@@ -81,7 +81,9 @@ number      = "screen"
 constant    = "screen"
 function    = "ink"
 type        = "screen"
+variable    = "ink"
 property    = "screen"
+operator    = { dark = "#6b8c14", light = "#4a6b1a" }
 punctuation = { dark = "#6b8c14", light = "#4a6b1a" }
 attribute   = "screen"
 tag         = "ink"

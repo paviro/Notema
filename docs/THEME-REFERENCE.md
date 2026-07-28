@@ -184,8 +184,10 @@ background chip). `highlight` styles `==marked==` text.
 **`[markdown.syntax]`** — fenced-code highlighting. Sixteen keys: `comment`,
 `keyword`, `string`, `string_escape`, `number`, `constant`, `function`, `type`,
 `variable`, `property`, `operator`, `punctuation`, `attribute`, `tag`, `label`,
-`error`. An omitted key renders that category as plain code; omitting the table
-disables highlighting.
+`error`. An omitted key renders that category as plain `code` — background and
+emphasis included, so it's a true inheritance rather than a reset. Omitting the
+table disables highlighting altogether. `keyword`, `operator` and `punctuation`
+also colour the search field's own grammar.
 
 **`[markdown.glyphs]`** — the reader's structural chrome. Short strings (not single
 glyphs): `quote_rail` (`│ `, the blockquote rail), `code_rail` (`│ `, the fenced-code

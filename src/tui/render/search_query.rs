@@ -14,10 +14,10 @@
 //! Output is `(start_byte, end_byte, Style)` for `TextArea::set_syntax_spans`
 //! plus `(byte_offset, replacement)` for `TextArea::set_glyph_substitutions`.
 
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 
 use crate::tui::features::search::{Prefix, offsets};
-use crate::tui::theme::{PillCategory, PillStyle, Theme};
+use crate::tui::theme::{Category, PillCategory, PillStyle, Theme};
 
 /// How the query field draws itself: styled ranges, and the delimiters that
 /// render as something else.
@@ -36,21 +36,29 @@ pub(super) fn query_styling(theme: &Theme, query: &str) -> QueryStyling {
     // what keeps them monochrome throughout. Pills still apply — theirs is the
     // reversed look those themes already use for a chip in the reader.
     let colours = syntax.any_color();
-    let keyword = Style::new().fg(syntax.keyword).add_modifier(Modifier::BOLD);
-    let operator = Style::new().fg(syntax.operator);
-    let punctuation = Style::new().fg(syntax.punctuation);
+    // A category the theme leaves unset gets no span at all, so the field's own
+    // ink shows through instead of an explicit `Color::Reset` overriding it.
+    let styled = |category: Category, modifier: Modifier| {
+        let colour = category.color(syntax);
+        (colour != Color::Reset).then(|| Style::new().fg(colour).add_modifier(modifier))
+    };
+    let keyword = styled(Category::Keyword, Modifier::BOLD);
+    let operator = styled(Category::Operator, Modifier::empty());
+    let punctuation = styled(Category::Punctuation, Modifier::empty());
 
     let mut styling = QueryStyling::default();
     for segment in offsets::scan(query) {
         if colours {
-            if let Some((_, range)) = &segment.prefix {
+            if let (Some((_, range)), Some(keyword)) = (&segment.prefix, keyword) {
                 styling.spans.push((range.start, range.end, keyword));
             }
             // Every separator in the grammar is a one-byte ASCII character.
-            for &(_, at) in &segment.operators {
-                styling.spans.push((at, at + 1, operator));
+            if let Some(operator) = operator {
+                for &(_, at) in &segment.operators {
+                    styling.spans.push((at, at + 1, operator));
+                }
             }
-            if let Some(at) = segment.separator {
+            if let (Some(at), Some(punctuation)) = (segment.separator, punctuation) {
                 styling.spans.push((at, at + 1, punctuation));
             }
         }

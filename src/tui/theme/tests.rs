@@ -1,19 +1,7 @@
+use super::parse_theme as parse;
 use super::*;
 use schema::parse_color;
 use tempfile::tempdir;
-
-fn parse(text: &str, mode: Mode) -> anyhow::Result<Theme> {
-    // Bundled themes carry their own `schema_version` (below the file's lead
-    // comment); bare inline snippets don't, so prepend one for them.
-    if text
-        .lines()
-        .any(|line| line.starts_with("schema_version = "))
-    {
-        super::parse(text, mode)
-    } else {
-        super::parse(&format!("schema_version = 1\n{text}"), mode)
-    }
-}
 
 fn bundled(name: &str) -> &'static str {
     BUNDLED
@@ -746,11 +734,83 @@ fn syntax_colors_resolve_and_default_to_reset() {
         Mode::Dark,
     )
     .unwrap();
-    assert_eq!(theme.syntax().keyword, Color::Rgb(0xfa, 0xb2, 0x83));
-    assert_eq!(theme.syntax().string, Color::Green);
+    assert_eq!(
+        Category::Keyword.color(theme.syntax()),
+        Color::Rgb(0xfa, 0xb2, 0x83)
+    );
+    assert_eq!(Category::Str.color(theme.syntax()), Color::Green);
     // Unset categories stay plain, so classic code blocks don't change.
-    assert_eq!(theme.syntax().comment, Color::Reset);
-    assert_eq!(Theme::terminal_default().syntax().keyword, Color::Reset);
+    assert_eq!(Category::Comment.color(theme.syntax()), Color::Reset);
+    assert_eq!(
+        Category::Keyword.color(Theme::terminal_default().syntax()),
+        Color::Reset
+    );
+}
+
+#[test]
+fn every_syntax_category_maps_to_its_theme_key() {
+    // One distinct color per key, so a category wired to the wrong `Syntax`
+    // field reads back as a neighbour's. `deny_unknown_fields` turns a category
+    // whose key the schema doesn't know into a parse failure.
+    let table: String = Category::ALL
+        .iter()
+        .enumerate()
+        .map(|(index, category)| format!("{} = \"#{index:02x}0000\"\n", category.key()))
+        .collect();
+    let theme = parse(&format!("[markdown.syntax]\n{table}"), Mode::Dark).unwrap();
+    for (index, category) in Category::ALL.iter().enumerate() {
+        assert_eq!(
+            category.color(theme.syntax()),
+            Color::Rgb(index as u8, 0, 0),
+            "{} reads the wrong field",
+            category.key()
+        );
+    }
+}
+
+#[test]
+fn any_color_notices_every_category() {
+    for category in Category::ALL {
+        let theme = parse(
+            &format!("[markdown.syntax]\n{} = \"red\"", category.key()),
+            Mode::Dark,
+        )
+        .unwrap();
+        assert!(
+            theme.syntax().any_color(),
+            "{} alone doesn't count as colored",
+            category.key()
+        );
+    }
+    assert!(
+        !parse("[markdown.syntax]", Mode::Dark)
+            .unwrap()
+            .syntax()
+            .any_color()
+    );
+}
+
+#[test]
+fn bundled_themes_agree_on_their_syntax_keys() {
+    let colored = |text: &str| -> Vec<&'static str> {
+        let syntax = parse(text, Mode::Dark).unwrap().syntax();
+        Category::ALL
+            .iter()
+            .filter(|category| category.color(syntax) != Color::Reset)
+            .map(|category| category.key())
+            .collect()
+    };
+    // `variable` and `operator` were missing from every theme for a while, which
+    // left identifiers and operators painted in raw terminal ink.
+    let reference = colored(bundled(DEFAULT_THEME));
+    assert_eq!(reference.len(), Category::ALL.len(), "{reference:?}");
+    for (name, text) in BUNDLED {
+        let keys = colored(text);
+        assert!(
+            keys.is_empty() || keys == reference,
+            "bundled theme '{name}' colors a different key set: {keys:?}"
+        );
+    }
 }
 
 #[test]

@@ -99,7 +99,9 @@ number      = { dark = "#e6a25a", light = "#9a5f00" }
 constant    = { dark = "#e6a25a", light = "#9a5f00" }
 function    = { dark = "#33e1d1", light = "#0a8a80" }
 type        = { dark = "#4fa9ff", light = "#1f5fd0" }
+variable    = { dark = "#eeeeee", light = "#1c1c1c" }
 property    = { dark = "#8ab4ff", light = "#1f5fd0" }
+operator    = { dark = "#737b8c", light = "#828699" }
 punctuation = { dark = "#737b8c", light = "#828699" }
 attribute   = { dark = "#f5b13d", light = "#9a5f00" }
 tag         = { dark = "#ff77a8", light = "#c02356" }

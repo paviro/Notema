@@ -32,6 +32,21 @@ use {loading::BUNDLED, std::fs};
 /// The theme `load` falls back to when the configured one is missing or broken.
 pub(crate) const DEFAULT_THEME: &str = "journal";
 
+/// Resolve a theme from inline TOML. Bundled themes carry their own
+/// `schema_version` below the file's lead comment; bare test snippets don't, so
+/// one is prepended for them.
+#[cfg(test)]
+pub(crate) fn parse_theme(text: &str, mode: Mode) -> anyhow::Result<Theme> {
+    if text
+        .lines()
+        .any(|line| line.starts_with("schema_version = "))
+    {
+        parse(text, mode)
+    } else {
+        parse(&format!("schema_version = 1\n{text}"), mode)
+    }
+}
+
 /// Which variant of a `{ dark, light }` color a load resolves to. Detected from
 /// the terminal background once at startup and cached for the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,53 +297,75 @@ impl BorderGlyphs {
     }
 }
 
-/// Resolved syntax-highlight colors for fenced code blocks. `Reset` means the
-/// category renders in the plain code style.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Syntax {
-    pub(crate) comment: Color,
-    pub(crate) keyword: Color,
-    pub(crate) string: Color,
-    pub(crate) string_escape: Color,
-    pub(crate) number: Color,
-    pub(crate) constant: Color,
-    pub(crate) function: Color,
-    pub(crate) r#type: Color,
-    pub(crate) variable: Color,
-    pub(crate) property: Color,
-    pub(crate) operator: Color,
-    pub(crate) punctuation: Color,
-    pub(crate) attribute: Color,
-    pub(crate) tag: Color,
-    pub(crate) label: Color,
-    pub(crate) error: Color,
+/// Declares the syntax categories once, deriving [`Category`], the resolved
+/// [`Syntax`] struct, and the lookup between them from the same list. The
+/// `[markdown.syntax]` key is spelled out rather than derived from the field
+/// name because `stringify!(r#type)` keeps the raw-identifier prefix.
+macro_rules! syntax_categories {
+    ($($variant:ident => $field:ident, $key:literal;)+) => {
+        /// One highlightable category of code. The highlighter maps every
+        /// tree-sitter capture it recognizes onto one of these.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub(crate) enum Category {
+            $($variant,)+
+        }
+
+        /// Resolved syntax-highlight colors for fenced code blocks. `Reset`
+        /// means the theme left the key unset, and the category keeps the plain
+        /// code style. Read these through [`Category::color`].
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub(crate) struct Syntax {
+            $(pub(in crate::tui::theme) $field: Color,)+
+        }
+
+        impl Category {
+            /// Every category, in `[markdown.syntax]` key order.
+            pub(crate) const ALL: &'static [Category] = &[$(Category::$variant,)+];
+
+            /// The theme color for this category, or `Reset` when unset.
+            pub(crate) const fn color(self, syntax: Syntax) -> Color {
+                match self {
+                    $(Category::$variant => syntax.$field,)+
+                }
+            }
+
+            /// The `[markdown.syntax]` key this category reads.
+            #[cfg(test)]
+            pub(crate) const fn key(self) -> &'static str {
+                match self {
+                    $(Category::$variant => $key,)+
+                }
+            }
+        }
+    };
+}
+
+syntax_categories! {
+    Comment      => comment,       "comment";
+    Keyword      => keyword,       "keyword";
+    Str          => string,        "string";
+    StringEscape => string_escape, "string_escape";
+    Number       => number,        "number";
+    Constant     => constant,      "constant";
+    Function     => function,      "function";
+    Type         => r#type,        "type";
+    Variable     => variable,      "variable";
+    Property     => property,      "property";
+    Operator     => operator,      "operator";
+    Punctuation  => punctuation,   "punctuation";
+    Attribute    => attribute,     "attribute";
+    Tag          => tag,           "tag";
+    Label        => label,         "label";
+    Error        => error,         "error";
 }
 
 impl Syntax {
     /// Whether the theme colors any category at all. Plain themes skip the
     /// highlighter entirely, keeping their classic un-highlighted code blocks.
     pub(crate) fn any_color(self) -> bool {
-        // Keep this list in sync with the struct fields.
-        [
-            self.comment,
-            self.keyword,
-            self.string,
-            self.string_escape,
-            self.number,
-            self.constant,
-            self.function,
-            self.r#type,
-            self.variable,
-            self.property,
-            self.operator,
-            self.punctuation,
-            self.attribute,
-            self.tag,
-            self.label,
-            self.error,
-        ]
-        .into_iter()
-        .any(|color| color != Color::Reset)
+        Category::ALL
+            .iter()
+            .any(|category| category.color(self) != Color::Reset)
     }
 }
 
