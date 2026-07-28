@@ -108,6 +108,24 @@ you clicked and only that one. A launched `location:` does not — quoting would
 not narrow it — so it arrives as plain text (`location:Berlin, Germany`), quoted
 only if the place name itself holds a `;` or a `|`.
 
+### Suggestions
+
+Finishing a prefix lists that facet's values under the query box, most-used
+first, with the number of entries each returns. The list narrows as you type the
+value, and it writes the value quoted for you, so you never have to spell one out
+or remember which needs quoting.
+
+| Key | |
+|---|---|
+| `Tab` | insert the first value — or the highlighted one |
+| `↓` | move into the list; `↑` off the top leaves it again |
+| `Enter` | insert the highlighted value |
+| `Esc` | put the list away for the value you are typing |
+
+Nothing is highlighted until you press `↓`, so `Enter` keeps opening the selected
+result and a query typed to narrow by substring behaves as it always did. After a
+value is inserted, type `+`, `|` or `;` to add another.
+
 ## Location
 
 Open the location dialog on an entry (`l`) to set where it was written: type a
