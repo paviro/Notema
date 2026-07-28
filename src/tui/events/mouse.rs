@@ -595,23 +595,27 @@ pub(super) fn apply_mouse_action(
                 input.begin_mouse_selection(column);
                 app.nav.input_selecting = true;
             }
+            app.text_input_caret_moved();
         }
         MouseAction::TextFieldSelectWord { target, column } => {
             focus_text_field(app, target);
             if let Some(input) = text_field_mut(app, target) {
                 input.select_word_at(column);
             }
+            app.text_input_caret_moved();
         }
         MouseAction::TextFieldDrag { column, overshoot } => {
             if let Some(input) = app.focused_text_input_mut() {
                 input.drag_mouse_selection(column, overshoot);
             }
+            app.text_input_caret_moved();
         }
         MouseAction::TextFieldRelease => {
             app.nav.input_selecting = false;
             if let Some(input) = app.focused_text_input_mut() {
                 input.end_mouse_selection();
             }
+            app.text_input_caret_moved();
         }
         MouseAction::JournalClick { index, compact } => {
             app.focus_journals_from_click(compact);

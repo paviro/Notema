@@ -53,6 +53,22 @@ impl AppModel {
         }
     }
 
+    /// After-hook for a caret move that did not go through
+    /// [`Self::handle_text_input_key`] — a click, a drag, a select-all. The
+    /// search suggestions are keyed to the value under the caret, so a move that
+    /// skips this leaves another filter's rows on screen and `Tab` commits one
+    /// of them. Routed like the key and paste paths so a new field is handled
+    /// the same way in all three.
+    pub(crate) fn text_input_caret_moved(&mut self) {
+        match &self.overlay {
+            Overlay::NewJournal(_)
+            | Overlay::EditMetadata(_)
+            | Overlay::EditFeelings(_)
+            | Overlay::EditLocation(_) => {}
+            _ => self.refresh_search_suggestions(),
+        }
+    }
+
     /// The text field that currently owns the caret, if any: an overlay's
     /// focused input, or the search box while typing in it. Selection and
     /// caret commands route through here so every field shares one binding.

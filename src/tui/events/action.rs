@@ -338,6 +338,7 @@ pub(crate) enum OverlayAction {
     HelpPrevTab,
     HelpSelectTab(HelpTab),
     InputKey(KeyEvent),
+    InputPaste(String),
     InputSelectAll,
     ToggleHints,
     ToggleJournals,

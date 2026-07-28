@@ -85,7 +85,11 @@ pub(crate) fn handle_paste<B: ratatui::backend::Backend>(
         );
     }
     if app.focused_text_input_mut().is_some() {
-        app.handle_text_input_paste(&text);
+        return super::dispatch_action(
+            terminal,
+            app,
+            Action::Overlay(OverlayAction::InputPaste(text.into_owned())),
+        );
     }
     Ok(DispatchOutcome::Continue)
 }

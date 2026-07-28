@@ -867,6 +867,49 @@ fn fold_leading_wheel_edge_cases() {
     assert_eq!(fold_leading_wheel(&click), (0, 0));
 }
 
+/// The suggestions describe the value under the caret, so a click that moves the
+/// caret to another filter has to re-target them. Left stale, the rows on screen
+/// belong to one filter while `Tab` writes into another.
+#[test]
+fn clicking_into_an_earlier_filter_retargets_the_suggestions() {
+    let mut app = crate::tui::test_support::app_in_temp(|root| {
+        let dir = root.join("work").join("2026-07-01");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("a.md"),
+            "+++\nschema_version = 1\n\n[entry]\ntags = [\"apple\"]\npeople = [\"Bob\"]\n\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\nbody\n",
+        )
+        .unwrap();
+    });
+    app.begin_search();
+    for ch in "tags:app; people:bo".chars() {
+        app.search_input_key(key(KeyCode::Char(ch)));
+    }
+    assert_eq!(
+        app.search.suggestions.rows[0].value, "Bob",
+        "the caret is in the people value"
+    );
+
+    // Click back into the `app` fragment: `tags:app` puts it at columns 5..8.
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+    dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::Mouse(action::MouseAction::TextFieldPress {
+            target: action::TextFieldTarget::Search,
+            column: 6,
+        }),
+    )
+    .unwrap();
+
+    assert_eq!(
+        app.search.suggestions.rows[0].value, "apple",
+        "the rows follow the caret into the tags value"
+    );
+    app.commit_suggestion(0);
+    assert_eq!(app.search.query.as_str(), "tags:\"apple\"; people:bo");
+}
+
 /// The suggestion list hangs over the entry rows and is not an overlay, so it has
 /// to win the hit test on its own. A click that fell through would select an
 /// entry the list was covering.

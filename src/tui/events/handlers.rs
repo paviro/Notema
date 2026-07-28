@@ -588,10 +588,12 @@ pub(super) fn overlay(app: &mut AppModel, action: OverlayAction) -> AppResult<()
         OverlayAction::HelpPrevTab => move_help_tab(app, |tab| tab.prev()),
         OverlayAction::HelpSelectTab(tab) => move_help_tab(app, |_| tab),
         OverlayAction::InputKey(key) => app.handle_text_input_key(key),
+        OverlayAction::InputPaste(text) => app.handle_text_input_paste(&text),
         OverlayAction::InputSelectAll => {
             if let Some(input) = app.focused_text_input_mut() {
                 input.select_all();
             }
+            app.text_input_caret_moved();
         }
         OverlayAction::ToggleHints => {
             app.state.ui.show_hints = !app.state.ui.show_hints;
