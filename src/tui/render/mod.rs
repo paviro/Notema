@@ -13,6 +13,7 @@ mod menus;
 mod metadata;
 mod pending;
 mod reader;
+mod search_query;
 pub(crate) mod tab_strip;
 mod table;
 mod toasts;

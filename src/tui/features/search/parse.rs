@@ -2,6 +2,7 @@
 //! alternatives, and building a query string back out of a stored value.
 
 use std::borrow::Cow;
+use std::ops::Range;
 
 use notema_domain::DateBound;
 
@@ -43,9 +44,14 @@ pub(crate) fn split_prefix(segment: &str) -> Option<(Prefix, &str)> {
         .find_map(|(token, prefix)| segment.strip_prefix(token).map(|rest| (*prefix, rest)))
 }
 
-/// Split `input` on `sep`, ignoring separators inside a `"…"` span — how a value
-/// carries a structural character (`;`, `+`, `|`) literally.
-pub(super) fn split_unquoted(input: &str, sep: char) -> Vec<&str> {
+/// Where [`split_unquoted`] cuts. Each range excludes the separator that ended
+/// it, so a piece's `end` is that separator's offset — except the last piece,
+/// which ends at `input.len()`.
+///
+/// The quote toggle lives here alone: the query field locates the same pieces to
+/// draw them, and a second implementation of the toggle would let the pill it
+/// draws disagree with the value the parser matched.
+pub(super) fn split_unquoted_ranges(input: &str, sep: char) -> Vec<Range<usize>> {
     let mut pieces = Vec::new();
     let mut start = 0;
     let mut quoted = false;
@@ -53,18 +59,27 @@ pub(super) fn split_unquoted(input: &str, sep: char) -> Vec<&str> {
         if character == '"' {
             quoted = !quoted;
         } else if character == sep && !quoted {
-            pieces.push(&input[start..index]);
+            pieces.push(start..index);
             start = index + character.len_utf8();
         }
     }
-    pieces.push(&input[start..]);
+    pieces.push(start..input.len());
     pieces
+}
+
+/// Split `input` on `sep`, ignoring separators inside a `"…"` span — how a value
+/// carries a structural character (`;`, `+`, `|`) literally.
+pub(super) fn split_unquoted(input: &str, sep: char) -> Vec<&str> {
+    split_unquoted_ranges(input, sep)
+        .into_iter()
+        .map(|piece| &input[piece])
+        .collect()
 }
 
 /// Whether `value` is wrapped in a quote pair — the parser's one signal that a
 /// value is meant whole rather than as a fragment to grow. A lone `"` is not a
 /// pair.
-fn is_quoted(value: &str) -> bool {
+pub(super) fn is_quoted(value: &str) -> bool {
     value.len() >= 2 && value.starts_with('"') && value.ends_with('"')
 }
 

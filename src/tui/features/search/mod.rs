@@ -3,6 +3,7 @@
 //! [`predicate`]; this module binds a segment's prefix to its predicate and
 //! drives the results.
 
+pub(crate) mod offsets;
 mod parse;
 mod predicate;
 

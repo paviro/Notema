@@ -2135,6 +2135,43 @@ fn entries_footer_omits_entry_actions_without_a_selection() {
     assert!(!text.contains("d  del"));
 }
 
+/// The cells of a rendered search field carrying `color` as their foreground.
+fn field_cells_coloured(app: AppModel, color: ratatui::style::Color) -> String {
+    render_app(app, 120, 24)
+        .buffer()
+        .content()
+        .iter()
+        .filter(|cell| cell.fg == color)
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
+#[test]
+fn the_search_field_colours_the_prefix_the_parser_recognised() {
+    let keyword = ratatui::style::Color::Rgb(0xff, 0x00, 0x00);
+    let syntax_theme = || theme::test_theme_from_toml("[markdown.syntax]\nkeyword = \"#ff0000\"");
+    let searching = |query: &str| {
+        let mut app = app_with_entry();
+        app.nav.mode = Mode::Search;
+        app.nav.focus = Focus::Entries;
+        app.appearance.theme = syntax_theme();
+        app.search.query = query.into();
+        app
+    };
+
+    assert_eq!(
+        field_cells_coloured(searching("tags:work"), keyword),
+        "tags:"
+    );
+    // One `s` short of a filter, and nothing on screen says so today. This is
+    // the case the colouring exists for.
+    assert_eq!(field_cells_coloured(searching("tag:work"), keyword), "");
+    // A theme with no syntax palette stays monochrome, like the code highlighter.
+    let mut plain = searching("tags:work");
+    plain.appearance.theme = theme::Theme::terminal_default();
+    assert_eq!(field_cells_coloured(plain, keyword), "");
+}
+
 #[test]
 fn search_results_footer_shows_escape_and_entry_actions() {
     let mut app = app_with_entry();
