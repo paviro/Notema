@@ -867,6 +867,34 @@ fn fold_leading_wheel_edge_cases() {
     assert_eq!(fold_leading_wheel(&click), (0, 0));
 }
 
+/// Every footer chip the suggestion list puts up is hoverable, so the two that
+/// name a single unambiguous key have to act on a click. `MoveSuggestion` names
+/// two keys with opposite effects and stays inert by design.
+#[test]
+fn the_suggestion_footer_chips_act_on_a_click() {
+    let mut app = app_offering_suggestions(3);
+
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::CommitSuggestion),
+        Some(Action::Search(SearchAction::CommitSuggestion))
+    );
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::DismissSuggestions),
+        Some(Action::Search(SearchAction::DismissSuggestions))
+    );
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::MoveSuggestion),
+        None
+    );
+
+    // And with no list up, the chips are not on screen to be clicked.
+    app.dismiss_suggestions();
+    assert_eq!(
+        mouse::hint_id_to_action(&app, render::HintId::CommitSuggestion),
+        None
+    );
+}
+
 /// The suggestions describe the value under the caret, so a click that moves the
 /// caret to another filter has to re-target them. Left stale, the rows on screen
 /// belong to one filter while `Tab` writes into another.

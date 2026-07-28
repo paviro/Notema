@@ -139,13 +139,13 @@ fn browse_r_maps_to_manual_library_refresh() {
 
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Char('r')), true),
-        Some(Action::RefreshLibrary)
+        Some(Action::ReloadLibrary { rebuild: false })
     );
     // Shifted, the expensive one: the cache rebuild is a separate gesture so the
     // routine refresh never pays a full re-read.
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Char('R')), true),
-        Some(Action::RebuildLibraryCache)
+        Some(Action::ReloadLibrary { rebuild: true })
     );
 }
 

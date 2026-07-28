@@ -102,6 +102,7 @@ pub(super) fn search<B: Backend>(
             app.search.suggestions.ensure_selected_visible(height);
         }
         SearchAction::CommitSuggestion => app.commit_first_suggestion(),
+        SearchAction::CommitSuggestionAt(index) => app.commit_suggestion(index),
         SearchAction::DismissSuggestions => app.dismiss_suggestions(),
     }
     Ok(())

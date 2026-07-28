@@ -78,7 +78,8 @@ pub(crate) enum HintId {
     FilterNextTab,
     FilterLaunch,
     HelpSwitchTab,
-    /// Step the suggestion highlight — keyboard-only, so no click action.
+    /// Step the suggestion highlight. Inert: it names two keys with opposite
+    /// effects, and a click cannot say which was meant.
     MoveSuggestion,
     CommitSuggestion,
     DismissSuggestions,

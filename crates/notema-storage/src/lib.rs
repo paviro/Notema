@@ -759,14 +759,7 @@ impl JournalStore {
     pub fn load_library(&self, policy: CachePolicy) -> AppResult<LibrarySnapshot> {
         let cache = self.read_cached_library(policy)?;
         let mut snapshot = self.validate_library(cache.cached, policy)?;
-        snapshot.report.cache_read = cache.report.cache_read;
-        snapshot.report.total = snapshot
-            .report
-            .total
-            .saturating_add(cache.report.cache_read);
-        if snapshot.report.cache_warning.is_none() {
-            snapshot.report.cache_warning = cache.report.cache_warning;
-        }
+        fold_cache_read(&mut snapshot.report, cache.report);
         Ok(snapshot)
     }
 
@@ -785,14 +778,7 @@ impl JournalStore {
             policy,
             Some(progress),
         )?;
-        snapshot.report.cache_read = cache.report.cache_read;
-        snapshot.report.total = snapshot
-            .report
-            .total
-            .saturating_add(cache.report.cache_read);
-        if snapshot.report.cache_warning.is_none() {
-            snapshot.report.cache_warning = cache.report.cache_warning;
-        }
+        fold_cache_read(&mut snapshot.report, cache.report);
         Ok(snapshot)
     }
 
@@ -813,14 +799,7 @@ impl JournalStore {
             discovery,
             Some(progress),
         )?;
-        snapshot.report.cache_read = cache.report.cache_read;
-        snapshot.report.total = snapshot
-            .report
-            .total
-            .saturating_add(cache.report.cache_read);
-        if snapshot.report.cache_warning.is_none() {
-            snapshot.report.cache_warning = cache.report.cache_warning;
-        }
+        fold_cache_read(&mut snapshot.report, cache.report);
         Ok(snapshot)
     }
 
@@ -1078,5 +1057,17 @@ fn read_optional_file(path: &Path) -> AppResult<Option<Vec<u8>>> {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
+    }
+}
+
+/// Fold the cache-decode half of a load into the validation report. The decode
+/// happens before validation and is timed separately, so its duration has to be
+/// added to the total rather than replacing it — and its warning only stands
+/// where validation raised none of its own.
+fn fold_cache_read(report: &mut LibraryLoadReport, cache: LibraryLoadReport) {
+    report.cache_read = cache.cache_read;
+    report.total = report.total.saturating_add(cache.cache_read);
+    if report.cache_warning.is_none() {
+        report.cache_warning = cache.cache_warning;
     }
 }

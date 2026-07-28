@@ -350,8 +350,7 @@ fn set_dialog_scroll(app: &mut AppModel, dialog: DialogId, offset: usize) {
         }
         // Not an overlay, so `open_dialog_list_mut` cannot reach it.
         DialogId::SearchSuggestions => {
-            app.search.suggestions.release_highlight();
-            app.search.suggestions.list_mut().set_offset(offset);
+            scroll_suggestions(app, |list| list.list_mut().set_offset(offset))
         }
         // The list dialogs all navigate through one handle; the menus never
         // scroll, so they register no bar to drag.
@@ -361,6 +360,19 @@ fn set_dialog_scroll(app: &mut AppModel, dialog: DialogId, offset: usize) {
             }
         }
     }
+}
+
+/// Scroll the suggestion list, releasing the highlight first.
+///
+/// The list is not an overlay, so `open_dialog_list_mut` cannot reach it. The
+/// release is what keeps a row scrolled out of sight from staying armed on
+/// `Enter`.
+fn scroll_suggestions(
+    app: &mut AppModel,
+    scroll: impl FnOnce(&mut crate::tui::state::SuggestionState),
+) {
+    app.search.suggestions.release_highlight();
+    scroll(&mut app.search.suggestions);
 }
 
 /// Step a pane's scroll by one line, reusing the same setters the wheel uses.
@@ -392,8 +404,7 @@ fn step_dialog_scroll(app: &mut AppModel, dialog: DialogId, delta: i16, viewport
         DialogId::Help => super::scroll_help(app, delta),
         DialogId::EditorHelp => super::scroll_editor_help(app, delta),
         DialogId::SearchSuggestions => {
-            app.search.suggestions.release_highlight();
-            app.search.suggestions.scroll_by(delta, viewport);
+            scroll_suggestions(app, |list| list.scroll_by(delta, viewport))
         }
         _ => {
             if let Some(list) = super::open_dialog_list_mut(app) {
@@ -716,8 +727,9 @@ pub(super) fn apply_mouse_action(
             // Clicking a row is choosing it, so it commits — the same "select
             // and act" a filter row's click makes.
             DialogListTarget::SearchSuggestions => {
-                app.search.suggestions.select_index(index);
-                app.commit_suggestion(index);
+                return Ok(Some(Action::Search(SearchAction::CommitSuggestionAt(
+                    index,
+                ))));
             }
         },
         MouseAction::DialogFocusMetadata(focus) => {
@@ -757,8 +769,7 @@ pub(super) fn apply_mouse_action(
                 }
             }
             DialogListTarget::SearchSuggestions => {
-                app.search.suggestions.release_highlight();
-                app.search.suggestions.scroll_by(delta, viewport);
+                scroll_suggestions(app, |list| list.scroll_by(delta, viewport))
             }
             DialogListTarget::ThemePicker => {
                 if let Some(state) = app.theme_picker_state_mut() {
@@ -1156,6 +1167,12 @@ pub(super) fn hint_id_to_action(app: &AppModel, id: render::HintId) -> Option<Ac
         }
         render::HintId::FilterLaunch if app.filter_state().is_some() => {
             Some(Action::Filter(FilterAction::Launch))
+        }
+        render::HintId::CommitSuggestion if app.suggestions_visible() => {
+            Some(Action::Search(SearchAction::CommitSuggestion))
+        }
+        render::HintId::DismissSuggestions if app.suggestions_visible() => {
+            Some(Action::Search(SearchAction::DismissSuggestions))
         }
         _ => None,
     }

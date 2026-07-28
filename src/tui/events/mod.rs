@@ -224,14 +224,9 @@ fn apply_action<B: Backend>(
             }
         }
         Action::Quit => return Ok(DispatchOutcome::Quit),
-        Action::RefreshLibrary => {
+        Action::ReloadLibrary { rebuild } => {
             app.request_library_reload(crate::tui::runtime::reload::ReloadReason::Manual {
-                rebuild: false,
-            });
-        }
-        Action::RebuildLibraryCache => {
-            app.request_library_reload(crate::tui::runtime::reload::ReloadReason::Manual {
-                rebuild: true,
+                rebuild,
             });
         }
         Action::Background(action) => {

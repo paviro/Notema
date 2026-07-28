@@ -196,6 +196,8 @@ pub(crate) enum SearchAction {
     /// Write the highlighted value into the query — or the first one, which is
     /// what `Tab` means when the list has not been arrowed into.
     CommitSuggestion,
+    /// Write a row chosen outright, as a click on it does.
+    CommitSuggestionAt(usize),
     DismissSuggestions,
 }
 
@@ -362,10 +364,12 @@ pub(crate) enum Action {
     SyncImages(ratatui::layout::Size),
     // Global
     Quit,
-    RefreshLibrary,
-    /// Reload ignoring the entry cache's stamps, re-reading every entry from
-    /// source. The recovery path when a cached entry has gone stale.
-    RebuildLibraryCache,
+    /// Reload the whole library. `rebuild` ignores the entry cache's stamps and
+    /// re-reads every entry from source — the recovery path when a cached entry
+    /// has gone stale.
+    ReloadLibrary {
+        rebuild: bool,
+    },
     Background(BackgroundAction),
     Browser(BrowserAction),
     Search(SearchAction),
