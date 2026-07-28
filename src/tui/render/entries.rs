@@ -160,8 +160,11 @@ fn draw_search_field(active_theme: &Theme, frame: &mut Frame<'_>, area: Rect, ap
     // through the deref, so anything stored here would have to be reapplied by
     // every caller that replaces the query. A query is a line long — recomputing
     // it costs less than the bookkeeping would.
-    let spans = super::search_query::query_syntax_spans(active_theme, app.search.query.as_str());
-    app.search.query.set_syntax_spans(vec![spans]);
+    let styling = super::search_query::query_styling(active_theme, app.search.query.as_str());
+    app.search.query.set_syntax_spans(vec![styling.spans]);
+    app.search
+        .query
+        .set_glyph_substitutions(vec![styling.substitutions]);
     app.search
         .query
         .render_in(active_theme, frame, rect, focused, hovered);

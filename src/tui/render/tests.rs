@@ -2172,6 +2172,67 @@ fn the_search_field_colours_the_prefix_the_parser_recognised() {
     assert_eq!(field_cells_coloured(plain, keyword), "");
 }
 
+/// The rendered search field's row, trimmed — the query as a person sees it.
+fn search_field_row(theme: &theme::Theme, query: &str) -> String {
+    let mut app = app_with_entry();
+    app.nav.mode = Mode::Search;
+    app.nav.focus = Focus::Entries;
+    app.appearance.theme = theme.clone();
+    app.search.query = query.into();
+    render_to_rows(120, 24, |frame| {
+        let mut view = crate::tui::ui::ViewState::default();
+        draw_app(frame, &mut app, &mut view)
+    })
+    .into_iter()
+    .find_map(|row| {
+        let start = row.find("tags:")?;
+        let drawn = &row[start..];
+        // The field pads to its width, so the query ends at the first run of two
+        // spaces. A reversed pill's own trailing blank falls inside that run and
+        // is invisible either way.
+        let end = drawn.find("  ").unwrap_or(drawn.len());
+        Some(drawn[..end].trim_end().to_string())
+    })
+    .expect("the query renders somewhere")
+}
+
+#[test]
+fn a_quoted_facet_value_draws_as_a_pill_in_every_pill_style() {
+    let bracket = theme::test_theme_from_toml("[metadata.pills]\nstyle = \"bracket\"");
+    let bg = theme::test_theme_from_toml(
+        "[metadata.pills]\nstyle = \"bg\"\ntags = { fg = \"#101010\", bg = \"#aabbcc\" }",
+    );
+    let reversed = theme::Theme::terminal_default();
+
+    // The buffer text is byte-for-byte the same in all three; only the two
+    // delimiter cells differ, so the geometry cannot drift between them.
+    assert_eq!(search_field_row(&bracket, "tags:\"apple\""), "tags:[apple]");
+    assert_eq!(search_field_row(&bg, "tags:\"apple\""), "tags: apple");
+    assert_eq!(search_field_row(&reversed, "tags:\"apple\""), "tags: apple");
+
+    // Two pills keep the operator between them visible.
+    assert_eq!(
+        search_field_row(&bracket, "tags:\"apple\"+\"pear\""),
+        "tags:[apple]+[pear]"
+    );
+    // Break one delimiter and the surviving quote reappears in the cell it
+    // occupied — the failure explains itself.
+    assert_eq!(search_field_row(&bracket, "tags:\"apple"), "tags:\"apple");
+}
+
+/// The caret arithmetic is untouched only because a chip occupies exactly the
+/// columns its quotes did. Pin that against the styles that draw it differently.
+#[test]
+fn a_pill_occupies_the_same_columns_as_the_quotes_it_replaces() {
+    let bracket = theme::test_theme_from_toml("[metadata.pills]\nstyle = \"bracket\"");
+    let plain = theme::test_theme_from_toml("[metadata.pills]\nstyle = \"bracket\"");
+    // `location:` gets no pill, so its quotes render literally — same width.
+    assert_eq!(
+        search_field_row(&bracket, "tags:\"apple\"").chars().count(),
+        search_field_row(&plain, "tags:apple\"\"").chars().count()
+    );
+}
+
 #[test]
 fn search_results_footer_shows_escape_and_entry_actions() {
     let mut app = app_with_entry();
