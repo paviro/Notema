@@ -1090,8 +1090,7 @@ mod hit_span_tests {
             Some(""),
         );
 
-        let targets: Vec<&ReaderLinkTarget> =
-            body.hints.iter().map(|(_, target)| target).collect();
+        let targets: Vec<&ReaderLinkTarget> = body.hints.iter().map(|(_, target)| target).collect();
         assert_eq!(
             targets,
             vec![
