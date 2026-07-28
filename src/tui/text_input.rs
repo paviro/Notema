@@ -128,6 +128,29 @@ impl TextInput {
         self.textarea.cursor().1 >= self.as_str().chars().count()
     }
 
+    /// The caret as a byte offset into the text. The textarea counts the column
+    /// in characters; everything that indexes the query — spans, substitutions,
+    /// the offsets scanner — counts bytes.
+    pub(crate) fn cursor_byte(&self) -> usize {
+        let text = self.as_str();
+        let column = self.textarea.cursor().1;
+        text.char_indices()
+            .nth(column)
+            .map_or(text.len(), |(offset, _)| offset)
+    }
+
+    /// Place the caret `offset` bytes into the text, clamped to its length and
+    /// rounded down to a char boundary.
+    pub(crate) fn set_cursor_byte(&mut self, offset: usize) {
+        let column = self
+            .as_str()
+            .char_indices()
+            .take_while(|(at, _)| *at < offset)
+            .count();
+        self.textarea
+            .move_cursor(CursorMove::Jump(0, column as u16));
+    }
+
     /// Viewport-relative caret column after the last render, for placing the
     /// native cursor. The widget scrolls a single-line field horizontally when
     /// its text overflows, drawing the caret at `absolute_col - scroll_offset`;

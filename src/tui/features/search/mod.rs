@@ -6,6 +6,7 @@
 pub(crate) mod offsets;
 mod parse;
 mod predicate;
+mod suggest;
 
 use std::time::Instant;
 
@@ -48,6 +49,7 @@ impl AppModel {
         self.nav.focus = Focus::Entries;
         self.search.query.set_text(&query);
         self.search.hits = hits;
+        self.search.suggestions.clear();
         self.commit_search_selection();
         // An all-journals search follows the global theme (see context_journal).
         self.apply_effective_theme();
@@ -58,6 +60,7 @@ impl AppModel {
         self.search.scope = SearchScope::AllJournals;
         self.search.query.clear();
         self.search.hits.clear();
+        self.search.suggestions.clear();
         self.commit_search_selection();
         self.apply_effective_theme();
     }
@@ -100,10 +103,15 @@ impl AppModel {
 
     /// Feed a key press to the search field, deferring the hit recompute when
     /// it changed the query (debounce).
+    ///
+    /// The suggestions refresh either way, and are not on the debounce: a caret
+    /// move changes which value is being completed without changing the text, and
+    /// the candidates come from a memo rather than a walk.
     pub(crate) fn search_input_key(&mut self, key: crossterm::event::KeyEvent) {
         if self.search.query.input(key) {
             self.mark_search_dirty();
         }
+        self.refresh_search_suggestions();
     }
 
     /// Insert a pasted block into the search field, deferring the hit recompute
@@ -112,6 +120,7 @@ impl AppModel {
         if self.search.query.paste_str(text) {
             self.mark_search_dirty();
         }
+        self.refresh_search_suggestions();
     }
 
     /// Run the search query. Filters chain on `;` and all must match; a segment

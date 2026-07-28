@@ -742,3 +742,124 @@ fn arrows_in_metadata_input_move_the_caret_for_mid_string_edits() {
         "insert lands at the caret, not the end"
     );
 }
+
+/// The suggestion list draws over the results, so it has to be scrupulous about
+/// which keys it takes. With nothing highlighted it takes none of the ones that
+/// already meant something: `Enter` opens the selected result and `Up` moves the
+/// entry list, so a query typed to narrow by substring behaves as it always did.
+#[test]
+fn the_suggestion_list_claims_no_key_until_it_is_arrowed_into() {
+    let mut app = app_with_entries(1);
+    app.begin_search();
+    for ch in "tags:".chars() {
+        app.search_input_key(key(KeyCode::Char(ch)));
+    }
+
+    // Nothing to suggest in this fixture, so the list is not up. Whatever the
+    // keys mean here is the baseline the list must not disturb.
+    assert!(!app.suggestions_open());
+    let without_list = |code| keyboard::key_to_action(&app, key(code), true);
+    let (enter, up) = (without_list(KeyCode::Enter), without_list(KeyCode::Up));
+    assert_eq!(
+        without_list(KeyCode::Esc),
+        Some(Action::Search(SearchAction::Exit))
+    );
+
+    // With rows to show but none highlighted, only `Down`, `Tab` and `Esc` are
+    // claimed.
+    app.search.suggestions.rows = vec![crate::tui::state::SuggestionRow {
+        label: "apple".to_string(),
+        value: "apple".to_string(),
+        count: 1,
+    }];
+    assert!(app.suggestions_open());
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Up), true),
+        up,
+        "Up is the entry list's until a row is highlighted"
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        enter,
+        "Enter still means what it meant"
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Down), true),
+        Some(Action::Search(SearchAction::MoveSuggestion(1)))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Tab), true),
+        Some(Action::Search(SearchAction::CommitSuggestion))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::Search(SearchAction::DismissSuggestions)),
+        "the first Esc closes the list, not search"
+    );
+
+    // Arrowed into, `Enter` and `Up` become the list's — deliberately entered.
+    app.move_suggestion_highlight(1);
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::Search(SearchAction::CommitSuggestion))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Up), true),
+        Some(Action::Search(SearchAction::MoveSuggestion(-1)))
+    );
+
+    // And `Up` off the first row hands both back.
+    app.move_suggestion_highlight(-1);
+    assert!(app.search.suggestions.highlighted().is_none());
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        enter
+    );
+    assert_eq!(keyboard::key_to_action(&app, key(KeyCode::Up), true), up);
+
+    // Dismissed, the list is down and Esc exits search again — but `Tab` brings
+    // it back, so Esc is not a trap.
+    app.dismiss_suggestions();
+    assert!(!app.suggestions_open());
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::Search(SearchAction::Exit))
+    );
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Tab), true),
+        Some(Action::Search(SearchAction::CommitSuggestion))
+    );
+}
+
+/// The commit has to be reachable by key, for every facet the list offers —
+/// `Tab` under a `location:` prefix is the one that differs, because its value
+/// arrives unquoted.
+#[test]
+fn tab_commits_a_suggestion_for_every_facet() {
+    for (typed, expected) in [
+        ("tags:apr", "tags:\"apricot\""),
+        ("location:berl", "location:Berlin, Germany"),
+    ] {
+        let mut app = crate::tui::test_support::app_in_temp(|root| {
+            let dir = root.join("work").join("2026-07-01");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("a.md"),
+                "+++\nschema_version = 1\n\n[entry]\ntags = [\"apricot\"]\n\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n\n[location]\ncity = \"Berlin\"\ncountry = \"Germany\"\n+++\n\nbody\n",
+            )
+            .unwrap();
+        });
+        app.begin_search();
+        for ch in typed.chars() {
+            app.search_input_key(key(KeyCode::Char(ch)));
+        }
+
+        assert_eq!(
+            keyboard::key_to_action(&app, key(KeyCode::Tab), true),
+            Some(Action::Search(SearchAction::CommitSuggestion)),
+            "{typed}"
+        );
+        app.commit_first_suggestion();
+        assert_eq!(app.search.query.as_str(), expected);
+    }
+}

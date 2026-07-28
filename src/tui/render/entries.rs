@@ -2,17 +2,20 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::Style,
-    text::Line,
-    widgets::{Clear, HighlightSpacing, List},
+    text::{Line, Span},
+    widgets::{Clear, HighlightSpacing, List, ListItem},
 };
 
 use crate::tui::{
     app::{AppModel, Focus, Mode},
     entry_rows::visible_box_items,
     render::{
-        EntryListGeometry, clamp_scroll, count_label, list_state_for_render, panel_block,
-        render_centered_notice, render_scrollbar_if_needed,
+        EntryListGeometry,
+        chrome::{clear_surface, dot_leader_line, render_dialog_list_scrollbar},
+        clamp_scroll, count_label, list_state_for_render, panel_block, render_centered_notice,
+        render_scrollbar_if_needed,
     },
+    state::ListNav,
     surface::{panel_inner, surface_content_inner},
     theme::Theme,
 };
@@ -130,6 +133,9 @@ pub(crate) fn draw_entry_list(
         };
         render_centered_notice(active_theme, frame, geometry.panel.content, message);
     }
+    // Last, so the list hangs over the results and the notice rather than under
+    // them. It is not modal and does not scrim.
+    draw_search_suggestions(active_theme, frame, geometry.panel.area, app);
     pixel_offset
 }
 
@@ -168,6 +174,95 @@ fn draw_search_field(active_theme: &Theme, frame: &mut Frame<'_>, area: Rect, ap
     app.search
         .query
         .render_in(active_theme, frame, rect, focused, hovered);
+}
+
+/// The most suggestion rows on screen at once. Past this the list scrolls: it
+/// hangs over the results, and one that covered them would trade the narrowing it
+/// is there to help with.
+const SUGGESTION_MAX_ROWS: u16 = 8;
+
+/// The suggestion list's rect, hanging off the search field's left edge and
+/// down over the entry list. `None` when there is nothing to show or no room.
+///
+/// The one geometry source, shared by the draw and the hit-test registration so
+/// the click map cannot drift from the pixels.
+pub(super) fn search_suggestions_rect(theme: &Theme, area: Rect, rows: usize) -> Option<Rect> {
+    let field = search_field_rect(theme, area)?;
+    let content = surface_content_inner(theme, panel_inner(area));
+    if rows == 0 {
+        return None;
+    }
+    // Wider than the field when it can be: 16 cells carrying a value, a leader
+    // and a count is not readable, and the list is free of the field's constraint
+    // to leave the panel title room.
+    let width = field.width.max(28).min(content.width);
+    let right_edge = field.x + field.width;
+    let below = (area.y + area.height).saturating_sub(field.y + 1);
+    let height = (rows as u16).min(SUGGESTION_MAX_ROWS).min(below);
+    if height == 0 {
+        return None;
+    }
+    Some(Rect {
+        x: right_edge.saturating_sub(width).max(content.x),
+        y: field.y + 1,
+        width,
+        height,
+    })
+}
+
+/// The values on offer for the filter value being typed, listed under the query
+/// field with the number of entries each would return.
+fn draw_search_suggestions(
+    active_theme: &Theme,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &mut AppModel,
+) {
+    if !app.suggestions_open() || app.has_overlay() || app.editor.is_some() {
+        return;
+    }
+    let rows = app.search.suggestions.rows.len();
+    let Some(rect) = search_suggestions_rect(active_theme, area, rows) else {
+        return;
+    };
+
+    let hovered = super::dialogs::hovered_dialog_row(app.hover);
+    let selected = app.search.suggestions.selected_index();
+    app.search.suggestions.ensure_selected_visible(rect.height);
+    let scroll = app
+        .search
+        .suggestions
+        .offset()
+        .min(rows.saturating_sub(rect.height as usize));
+    app.search.suggestions.list.set_offset(scroll);
+
+    let items: Vec<ListItem<'_>> = app
+        .search
+        .suggestions
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let item = ListItem::new(dot_leader_line(
+                active_theme,
+                Span::raw(row.label.clone()),
+                Span::styled(row.count.to_string(), active_theme.muted()),
+                rect.width,
+                Some(index) == selected,
+            ));
+            if Some(index) == hovered && Some(index) != selected {
+                item.style(active_theme.hover())
+            } else {
+                item
+            }
+        })
+        .collect();
+
+    clear_surface(active_theme, frame, rect, active_theme.dialog_bg());
+    let list = List::new(items).highlight_style(active_theme.selection());
+    let mut state = list_state_for_render(selected, scroll, rect.height, true);
+    frame.render_stateful_widget(list, rect, &mut state);
+    render_dialog_list_scrollbar(active_theme, frame, rect, rows, scroll, true);
 }
 
 pub(super) fn search_field_rect(theme: &Theme, area: Rect) -> Option<Rect> {

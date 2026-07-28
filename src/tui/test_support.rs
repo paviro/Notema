@@ -28,7 +28,7 @@ pub(crate) fn new_app_with_state(config: Config, state: State) -> AppModel {
 
 /// Build an `AppModel` over a fresh temp root, running `setup` to populate it first.
 /// The temp dir is leaked so it outlives the returned `AppModel`.
-fn app_in_temp(setup: impl FnOnce(&Path)) -> AppModel {
+pub(crate) fn app_in_temp(setup: impl FnOnce(&Path)) -> AppModel {
     let dir = tempdir().unwrap();
     setup(dir.path());
     let config = Config::new(dir.path().to_path_buf());

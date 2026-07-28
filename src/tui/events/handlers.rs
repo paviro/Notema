@@ -72,6 +72,9 @@ pub(super) fn search(app: &mut AppModel, action: SearchAction) {
     match action {
         SearchAction::Begin => app.begin_search(),
         SearchAction::Exit => app.exit_search(),
+        SearchAction::MoveSuggestion(delta) => app.move_suggestion_highlight(delta),
+        SearchAction::CommitSuggestion => app.commit_first_suggestion(),
+        SearchAction::DismissSuggestions => app.dismiss_suggestions(),
     }
 }
 

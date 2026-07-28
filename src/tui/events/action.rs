@@ -187,6 +187,12 @@ pub(crate) enum BrowserAction {
 pub(crate) enum SearchAction {
     Begin,
     Exit,
+    /// Step the suggestion highlight, entering the list on the first `Down`.
+    MoveSuggestion(isize),
+    /// Write the highlighted value into the query — or the first one, which is
+    /// what `Tab` means when the list has not been arrowed into.
+    CommitSuggestion,
+    DismissSuggestions,
 }
 
 #[derive(Debug, PartialEq)]

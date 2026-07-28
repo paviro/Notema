@@ -4440,3 +4440,65 @@ mod scrim_tests {
         assert!(buf[(0u16, 0u16)].modifier.contains(Modifier::DIM));
     }
 }
+
+/// The suggestion list hangs under the query field and over the results, and it
+/// is the only place the counts and the values appear together — so this covers
+/// the rows arriving, narrowing, and going away when there is nothing to offer.
+#[test]
+fn the_suggestion_list_draws_under_the_query_field() {
+    use crate::tui::test_support::app_in_temp;
+
+    let mut app = app_in_temp(|root| {
+        let dir = root.join("work").join("2026-07-01");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, tags) in [("a", "\"apple\", \"apricot\""), ("b", "\"apple\"")] {
+            std::fs::write(
+                dir.join(format!("{name}.md")),
+                format!(
+                    "+++\nschema_version = 1\n\n[entry]\ntags = [{tags}]\n\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\nbody\n"
+                ),
+            )
+            .unwrap();
+        }
+    });
+    app.begin_search();
+
+    let drawn = |app: &mut AppModel| {
+        let mut view = crate::tui::ui::ViewState::default();
+        render_to_rows(120, 24, |frame| draw_app(frame, app, &mut view)).join("\n")
+    };
+
+    for ch in "tags:".chars() {
+        app.search_input_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(ch),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+    }
+    let screen = drawn(&mut app);
+    // Value left, count right, ranked by count — `apple` is on both entries.
+    assert!(screen.contains("apple"), "{screen}");
+    assert!(screen.contains("apricot"), "{screen}");
+    let apple = screen.find("apple").unwrap();
+    let apricot = screen.find("apricot").unwrap();
+    assert!(apple < apricot, "the more common value ranks first");
+
+    // Typing narrows the list.
+    for ch in "apr".chars() {
+        app.search_input_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(ch),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+    }
+    let screen = drawn(&mut app);
+    assert!(screen.contains("apricot"), "{screen}");
+    assert!(
+        !screen.contains("apple"),
+        "`apple` no longer matches the fragment: {screen}"
+    );
+
+    // Esc takes the list down without leaving search.
+    app.dismiss_suggestions();
+    let screen = drawn(&mut app);
+    assert!(!screen.contains("apricot"), "{screen}");
+    assert_eq!(app.nav.mode, Mode::Search);
+}

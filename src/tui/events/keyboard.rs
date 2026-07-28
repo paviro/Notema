@@ -595,6 +595,32 @@ fn reader_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
     }
 }
 
+/// The keys the suggestion list claims from the search field, and only those.
+///
+/// It never takes a key from someone who meant the fragment they typed: with no
+/// row highlighted, `Enter` still opens the selected result and `Up` still moves
+/// the entry list. `Down` enters the list, `Up` off its first row leaves again,
+/// and `Tab` — dead in this field otherwise — completes without ever having been
+/// anything else.
+fn suggestion_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
+    if app.nav.focus != Focus::Entries {
+        return None;
+    }
+    let highlighted = app.search.suggestions.highlighted().is_some();
+    match key.code {
+        // Tab claims itself even from a dismissed list: it is how one comes back.
+        KeyCode::Tab if !app.search.suggestions.rows.is_empty() => {
+            Some(Action::Search(SearchAction::CommitSuggestion))
+        }
+        _ if !app.suggestions_open() => None,
+        KeyCode::Down => Some(Action::Search(SearchAction::MoveSuggestion(1))),
+        KeyCode::Up if highlighted => Some(Action::Search(SearchAction::MoveSuggestion(-1))),
+        KeyCode::Enter if highlighted => Some(Action::Search(SearchAction::CommitSuggestion)),
+        KeyCode::Esc => Some(Action::Search(SearchAction::DismissSuggestions)),
+        _ => None,
+    }
+}
+
 fn search_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -> Option<Action> {
     if app.nav.focus == Focus::Reader {
         if let Some(action) = scroll_key_to_action(key.code) {
@@ -605,6 +631,9 @@ fn search_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
         {
             return Some(action);
         }
+    }
+    if let Some(action) = suggestion_key_to_action(app, key) {
+        return Some(action);
     }
     match key.code {
         // Second Enter on the focused viewer expands it to full screen (multi-column).

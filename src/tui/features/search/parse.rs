@@ -294,8 +294,13 @@ mod tests {
             // The whole launched query, not just the prefix: a tab that quotes
             // its value has to leave the prefix reachable in front of it.
             let segment = tab.launch_query("x");
-            assert!(
-                split_prefix(&segment).is_some(),
+            let parsed = split_prefix(&segment);
+            assert!(parsed.is_some(), "FilterTab::{tab:?} produces {segment:?}");
+            // And back to the tab, which is how the search box knows whose
+            // values to suggest for the prefix being typed.
+            assert_eq!(
+                parsed.and_then(|(prefix, _)| FilterTab::from_prefix(prefix)),
+                Some(tab),
                 "FilterTab::{tab:?} produces {segment:?}"
             );
         }

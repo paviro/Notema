@@ -627,7 +627,7 @@ fn render_lines_in_area<'a>(
 }
 
 /// The dialog list/menu row a hover targets, if any.
-fn hovered_dialog_row(hover: HoverTarget) -> Option<usize> {
+pub(super) fn hovered_dialog_row(hover: HoverTarget) -> Option<usize> {
     match hover {
         HoverTarget::DialogRow(index) => Some(index),
         _ => None,

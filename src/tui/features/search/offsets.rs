@@ -111,6 +111,40 @@ fn scan_segment(query: &str, piece: Range<usize>, separator: Option<usize>) -> S
     }
 }
 
+/// The filter value the caret is inside: which prefix it is under, where the
+/// value sits, and whether it is already a balanced quoted pair.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Caret {
+    pub(crate) prefix: Prefix,
+    /// The alternative's trimmed range — what completing it would replace.
+    pub(crate) value: Range<usize>,
+    pub(crate) quoted: bool,
+}
+
+/// The filter value at byte offset `at`, or `None` when the caret is in a
+/// full-text segment or under an unrecognised prefix.
+///
+/// A range is matched inclusively at both ends, so a caret sitting just past the
+/// last character still belongs to the value it is extending — which is where it
+/// is for all of typing. Under a prefix there is always at least one alternative
+/// (a bare `tags:` yields an empty one at the value start), so an empty value
+/// needs no special case.
+pub(crate) fn caret_context(query: &str, at: usize) -> Option<Caret> {
+    let segment = scan(query)
+        .into_iter()
+        .find(|segment| segment.range.contains(&at) || segment.range.end == at)?;
+    let (prefix, _) = segment.prefix?;
+    let alternative = segment
+        .alternatives
+        .into_iter()
+        .find(|alt| alt.range.contains(&at) || alt.range.end == at)?;
+    Some(Caret {
+        prefix,
+        value: alternative.range,
+        quoted: alternative.quoted,
+    })
+}
+
 fn shift(range: Range<usize>, by: usize) -> Range<usize> {
     range.start + by..range.end + by
 }
@@ -289,6 +323,45 @@ mod tests {
         // The token facets are unchanged: `+` groups, `|` alternates.
         let segment = &scan("tags:a+b|c")[0];
         assert_eq!(segment.operators, vec![('+', 6), ('|', 8)]);
+    }
+
+    /// The value the caret is in, as `(text, quoted)`.
+    fn at(query: &str, caret: usize) -> Option<(&str, bool)> {
+        caret_context(query, caret).map(|found| (&query[found.value], found.quoted))
+    }
+
+    /// What the suggestion list completes is the value the caret is inside, so
+    /// the caret has to find it from every position typing puts it in.
+    #[test]
+    fn the_caret_finds_the_value_it_is_extending() {
+        // Just after the prefix: an empty value, which is what opens the list on
+        // the whole vocabulary.
+        assert_eq!(at("tags:", 5), Some(("", false)));
+        // Mid-value and at its end — the position for all of typing.
+        assert_eq!(at("tags:app", 6), Some(("app", false)));
+        assert_eq!(at("tags:app", 8), Some(("app", false)));
+        // Whitespace after the prefix is not part of the value.
+        assert_eq!(at("tags: app", 9), Some(("app", false)));
+
+        // A committed value: the caret lands past the closing quote and the pair
+        // is balanced, which is what tells the list to stay shut.
+        assert_eq!(at("tags:\"apple\"", 12), Some(("\"apple\"", true)));
+        // Break the pair and it is an ordinary fragment again.
+        assert_eq!(at("tags:\"apple", 11), Some(("\"apple", false)));
+
+        // Between two alternatives, each side belongs to the value it touches.
+        assert_eq!(at("tags:a|b", 6), Some(("a", false)));
+        assert_eq!(at("tags:a|b", 7), Some(("b", false)));
+        // And across a `;`, the second filter is its own value.
+        assert_eq!(at("tags:a; people:bo", 17), Some(("bo", false)));
+
+        // `location:` takes `|` but not `+`, so a place keeps its plus.
+        assert_eq!(at("location:Rock + Roll", 20), Some(("Rock + Roll", false)));
+        assert_eq!(at("location:berlin|par", 19), Some(("par", false)));
+
+        // Nothing to complete: full text, and a prefix the parser does not know.
+        assert_eq!(at("apple", 5), None);
+        assert_eq!(at("tag:apple", 9), None);
     }
 
     /// The trimmed text of each alternative, in order.

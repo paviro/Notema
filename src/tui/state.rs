@@ -8,7 +8,7 @@ use notema_domain::SearchHit;
 use ratatui::widgets::ListState;
 
 use super::app::SearchScope;
-use super::features::search::{escape_filter_value, quote_filter_value};
+use super::features::search::{Prefix, escape_filter_value, quote_filter_value};
 use super::features::{
     feelings::EditFeelingState, filter::FilterState, location::EditLocationState,
     metadata::EditMetadataState,
@@ -273,6 +273,7 @@ pub(crate) struct SearchState {
     pub(crate) dirty: bool,
     /// Timestamp of the last search keystroke, for the debounce window.
     pub(crate) last_edit: Option<Instant>,
+    pub(crate) suggestions: SuggestionState,
 }
 
 impl Default for SearchState {
@@ -285,7 +286,90 @@ impl Default for SearchState {
             hits: Vec::new(),
             dirty: false,
             last_edit: None,
+            suggestions: SuggestionState::default(),
         }
+    }
+}
+
+/// One value the search box offers for the prefix being typed.
+pub(crate) struct SuggestionRow {
+    /// What the row reads as — the value itself, or a place's display label.
+    pub(crate) label: String,
+    /// The raw value committing it searches for. Written into the query through
+    /// [`FilterTab::launch_value`] at that point rather than here, so a list of a
+    /// thousand candidates does not quote every one of them per keystroke.
+    pub(crate) value: String,
+    pub(crate) count: usize,
+}
+
+/// The values on offer for the filter value the caret is in, and which one is
+/// highlighted.
+///
+/// Nothing is highlighted until the list is arrowed into: a recompute follows a
+/// keystroke, and a keystroke means the typed fragment is still what was meant,
+/// so `Enter` has to keep opening the selected result until a row is chosen
+/// deliberately.
+#[derive(Default)]
+pub(crate) struct SuggestionState {
+    pub(crate) rows: Vec<SuggestionRow>,
+    pub(crate) list: SelectableList,
+    /// Where the value the list was dismissed for starts, if the caret is still
+    /// in it. An offset rather than a flag so dismissing survives typing more of
+    /// the same value — a flag cleared on the next keystroke would undo itself —
+    /// while moving to another filter brings the list back.
+    pub(crate) dismissed: Option<usize>,
+}
+
+impl SuggestionState {
+    /// Whether the list is on screen: it has rows and was not dismissed for the
+    /// fragment being typed.
+    pub(crate) fn is_open(&self) -> bool {
+        !self.rows.is_empty() && self.dismissed.is_none()
+    }
+
+    /// The highlighted row, or `None` while the list is only advisory.
+    pub(crate) fn highlighted(&self) -> Option<&SuggestionRow> {
+        self.is_open()
+            .then(|| self.selected_index().and_then(|index| self.rows.get(index)))
+            .flatten()
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.rows.clear();
+        self.list = SelectableList::default();
+        self.dismissed = None;
+    }
+
+    /// Step the highlight by `delta`, entering the list at its first row and
+    /// releasing off the top. Releasing is what hands `Up` back to the entry
+    /// list once the list has been stepped out of, so neither direction is a
+    /// one-way door.
+    pub(crate) fn move_highlight(&mut self, delta: isize) {
+        if self.rows.is_empty() {
+            return;
+        }
+        match self.selected_index() {
+            None if delta > 0 => self.select_index(0),
+            None => {}
+            Some(index) => match index as isize + delta {
+                next if next < 0 => self.list.select_none(),
+                next => self.select_index((next as usize).min(self.rows.len() - 1)),
+            },
+        }
+    }
+}
+
+impl ListNav for SuggestionState {
+    fn list(&self) -> &SelectableList {
+        &self.list
+    }
+
+    fn list_mut(&mut self) -> &mut SelectableList {
+        &mut self.list
+    }
+
+    fn item_count(&self) -> usize {
+        self.rows.len()
     }
 }
 
@@ -319,6 +403,12 @@ impl SelectableList {
         if index < len {
             self.state.select(Some(index));
         }
+    }
+
+    /// Leave the list with nothing highlighted — a list that is on screen but
+    /// has not been chosen from.
+    pub(crate) fn select_none(&mut self) {
+        self.state.select(None);
     }
 
     pub(crate) fn move_by(&mut self, len: usize, delta: isize) {
@@ -476,18 +566,38 @@ impl FilterTab {
         }
     }
 
-    /// The whole query a chosen row launches. Only the token facets quote, since
-    /// a quoted value is an exact one and `location:` matches on words either
-    /// way — a location quotes only to keep a structural character literal.
+    /// The tab a search prefix lists the values of, or `None` for the prefixes
+    /// that have no vocabulary to list — a mood, a star or a date is written, not
+    /// chosen.
+    pub(crate) fn from_prefix(prefix: Prefix) -> Option<Self> {
+        match prefix {
+            Prefix::Tags => Some(Self::Tags),
+            Prefix::People => Some(Self::People),
+            Prefix::Activities => Some(Self::Activities),
+            Prefix::Feelings => Some(Self::Feelings),
+            Prefix::Location => Some(Self::Locations),
+            Prefix::Star | Prefix::Mood | Prefix::Date(_) => None,
+        }
+    }
+
+    /// `value` written the way this tab writes it into a query. Only the token
+    /// facets quote, since a quoted value is an exact one and `location:` matches
+    /// on words either way — a location quotes only to keep a structural
+    /// character literal.
     ///
-    /// The one builder, so what the browser launches and what its counts are
-    /// measured against cannot drift.
-    pub(crate) fn launch_query(self, value: &str) -> String {
-        let value = match self {
+    /// The one place a value is written, so the browser's rows and the search
+    /// box's suggestions cannot commit the same value two ways.
+    pub(crate) fn launch_value(self, value: &str) -> Cow<'_, str> {
+        match self {
             Self::Locations => escape_filter_value(value),
             _ => Cow::Owned(quote_filter_value(value)),
-        };
-        format!("{}:{value}", self.search_prefix())
+        }
+    }
+
+    /// The whole query a chosen row launches: this tab's prefix, then
+    /// [`launch_value`](Self::launch_value).
+    pub(crate) fn launch_query(self, value: &str) -> String {
+        format!("{}:{}", self.search_prefix(), self.launch_value(value))
     }
 }
 

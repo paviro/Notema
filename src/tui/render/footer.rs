@@ -73,6 +73,10 @@ pub(crate) enum HintId {
     FilterNextTab,
     FilterLaunch,
     HelpSwitchTab,
+    /// Step the suggestion highlight — keyboard-only, so no click action.
+    MoveSuggestion,
+    CommitSuggestion,
+    DismissSuggestions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -467,6 +471,27 @@ impl HintLine {
 }
 
 fn search_footer_line(app: &AppModel) -> HintLine {
+    // With the suggestion list up, the footer teaches the one thing that is not
+    // guessable: nothing is highlighted yet, so `enter` still opens the result
+    // and `tab` is what takes the value.
+    if app.suggestions_open() {
+        let mut hints = vec![Hint::new(
+            "choose",
+            if app.search.suggestions.highlighted().is_some() {
+                "↑↓"
+            } else {
+                "↓"
+            },
+            HintId::MoveSuggestion,
+        )];
+        if app.search.suggestions.highlighted().is_some() {
+            hints.push(Hint::new("insert", "enter", HintId::CommitSuggestion));
+        } else {
+            hints.push(Hint::new("insert", "tab", HintId::CommitSuggestion));
+        }
+        hints.push(Hint::new("close", "esc", HintId::DismissSuggestions));
+        return HintLine { hints };
+    }
     // The query lives on the entry panel's top-right border (see
     // `draw_entry_list`), so the footer only carries the action hints.
     let hints = match app.nav.focus {
