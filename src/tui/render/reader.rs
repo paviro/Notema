@@ -1047,8 +1047,13 @@ mod hit_span_tests {
         std::fs::write(entry_dir.join("a.assets/notes.pdf"), b"x").unwrap();
         let entry = entry_dir.join("a.md");
 
+        // The badge idiom nests an image inside a link, so the image's own chip
+        // is written while the outer link is still open — and since the alt text
+        // is tagged with the image, that chip is the only run the outer link
+        // could claim.
         let content = "See [one](https://example.com) and [notes](a.assets/notes.pdf).\n\n\
                        ![a shot](a.assets/pic.png)\n\n\
+                       [![badge](https://example.org/b.svg)](https://example.org)\n\n\
                        Jump to [details](#details).\n\n## Details\n\ntail";
         let body = build_reader_body(
             &Theme::terminal_default(),
@@ -1060,7 +1065,11 @@ mod hit_span_tests {
             Some(""),
         );
 
-        assert_eq!(body.hints.len(), 4, "url, attachment, image and anchor");
+        assert_eq!(
+            body.hints.len(),
+            6,
+            "url, attachment, image, nested badge, its link, and anchor"
+        );
         for hit in &body.links {
             let covered = columns(&body.lines[hit.line], hit.start, hit.end);
             assert!(

@@ -409,14 +409,13 @@ impl<'a> MarkdownTerminalRenderer<'a> {
                     // region) stays `md_link`; the untagged target trails it in the
                     // faint secondary style. When URLs are hidden the trailer is
                     // skipped entirely, so wrapping never accounts for it.
-                    self.push_span(" (", self.theme.muted());
-                    self.push_span(&target, self.theme.muted());
-                    self.push_span(")", self.theme.muted());
+                    self.push_untagged_span(" (", self.theme.muted());
+                    self.push_untagged_span(&target, self.theme.muted());
+                    self.push_untagged_span(")", self.theme.muted());
                 }
-                // The hint chip trails the name it labels. The link is already
-                // popped, so these runs carry no link id and stay outside the
-                // clickable region — and being real text, wrapping makes room
-                // for them instead of anything being painted over.
+                // The hint chip trails the name it labels, outside the clickable
+                // region — and being real text, wrapping makes room for it
+                // instead of anything being painted over.
                 let openable = self.is_openable(&target, self.link_targets[id].is_image);
                 let chip = openable
                     .then_some(self.hints.as_mut())
@@ -424,7 +423,7 @@ impl<'a> MarkdownTerminalRenderer<'a> {
                     .and_then(|labeller| labeller.take(ReaderLinkTarget::Uri(target.clone())));
                 if let Some(chip) = chip {
                     for (text, style) in chip.runs(self.theme) {
-                        self.push_span(&text, style);
+                        self.push_untagged_span(&text, style);
                     }
                 }
             }
@@ -519,6 +518,19 @@ impl<'a> MarkdownTerminalRenderer<'a> {
     }
 
     fn push_span(&mut self, text: &str, style: Style) {
+        self.push_span_tagged(text, style, self.current_link());
+    }
+
+    /// Emit text that belongs to no link, whatever is still open around it. The
+    /// chip and the URL trailer are decoration rather than part of any name, and
+    /// a nested `[![badge](img)](href)` leaves the outer link open when they are
+    /// written — tagging them would make the chip the outer link's only
+    /// clickable run.
+    fn push_untagged_span(&mut self, text: &str, style: Style) {
+        self.push_span_tagged(text, style, None);
+    }
+
+    fn push_span_tagged(&mut self, text: &str, style: Style, link: Option<usize>) {
         if text.is_empty() {
             return;
         }
@@ -533,7 +545,6 @@ impl<'a> MarkdownTerminalRenderer<'a> {
             }
             return;
         }
-        let link = self.current_link();
         if let Some(span) = self.current.last_mut()
             && span.style == style
             && span.link == link
