@@ -184,6 +184,54 @@ fn theme_picker_confirm_saves_the_config_and_closes() {
     );
 }
 
+/// A journal that follows the global theme has no override to clear, so the
+/// global scope never writes its sidecar. Writing one anyway churns its mtime on
+/// a synced folder, and — when the sidecar cannot be written — rolls the global
+/// theme back over an override that was never there.
+#[test]
+fn a_global_theme_leaves_an_unwritable_sidecar_alone() {
+    let mut app = app_with_journals(&["work"]);
+    app.select_journal(0);
+
+    // Nothing can be renamed over a directory, so any write to the sidecar fails.
+    let sidecar = app.services.store.root().join("work/.journal.toml");
+    let _ = fs::remove_file(&sidecar);
+    fs::create_dir(&sidecar).unwrap();
+
+    app.open_theme_picker();
+    let fjord = app
+        .theme_picker_state()
+        .unwrap()
+        .entries
+        .iter()
+        .position(|entry| entry.name == "fjord")
+        .unwrap();
+    app.theme_picker_select(fjord);
+    app.theme_picker_confirm();
+
+    assert_eq!(app.services.config.ui.theme, "fjord");
+    assert_eq!(
+        crate::config::load_config(&app.services.config_path)
+            .unwrap()
+            .ui
+            .theme,
+        "fjord"
+    );
+    assert!(
+        !app.toasts
+            .items()
+            .iter()
+            .any(|toast| toast.message.contains("Couldn't clear theme")),
+        "there was no override to clear"
+    );
+    assert!(
+        app.toasts
+            .items()
+            .iter()
+            .any(|toast| toast.message == "Global theme set to fjord")
+    );
+}
+
 #[test]
 fn theme_picker_journal_scope_writes_the_sidecar_not_the_global_theme() {
     let mut app = app_with_journals(&["work"]);

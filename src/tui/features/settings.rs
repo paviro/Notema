@@ -700,10 +700,16 @@ impl AppModel {
             return;
         }
 
-        let (scope, journal) = self
+        let (scope, journal, overridden) = self
             .theme_picker_state()
-            .map(|state| (state.scope, state.journal.clone()))
-            .unwrap_or((ThemePickerScope::Global, None));
+            .map(|state| {
+                (
+                    state.scope,
+                    state.journal.clone(),
+                    state.journal_theme.is_some(),
+                )
+            })
+            .unwrap_or((ThemePickerScope::Global, None, false));
 
         // The scope only ever becomes Journal with a journal in context, so the
         // catch-all arm is the Global scope.
@@ -756,8 +762,11 @@ impl AppModel {
                     return;
                 }
                 // Switching a journal to Global removes its own override so it
-                // follows the (possibly just-changed) global theme.
-                if let Some(journal_name) = journal {
+                // follows the (possibly just-changed) global theme. Only when it
+                // has one: clearing an override that was never set still rewrites
+                // the sidecar, churning its mtime on a synced folder and re-minting
+                // the journal id if the file turns out to be unreadable.
+                if let Some(journal_name) = journal.filter(|_| overridden) {
                     if let Err(err) = self.services.store.set_journal_theme(&journal_name, None) {
                         self.services.config.ui = previous_ui;
                         let rollback = crate::config::save_config(
