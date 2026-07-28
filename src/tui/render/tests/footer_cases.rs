@@ -191,6 +191,35 @@ fn footer_hint_routing_uses_typed_ids() {
     );
 }
 
+/// Hint mode replaces the whole footer, so a click on it can only ever resolve
+/// to a key hint mode still honours — never to the browse chip that column
+/// carried a frame ago.
+#[test]
+fn hint_mode_footer_routes_only_its_own_hints() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    let width = 200;
+    let browse_text = footer_text(&app, width);
+    let delete_col = browse_text
+        .find("d  del")
+        .expect("browse footer offers delete") as u16;
+
+    app.reader_hints.begin();
+    let text = footer_text(&app, width);
+
+    assert!(text.contains("esc  cancel"));
+    assert_eq!(footer_hint_id_at(&app, 0, width, delete_col), None);
+    assert_eq!(
+        footer_hint_id_at(
+            &app,
+            0,
+            width,
+            text.find("esc  cancel").expect("cancel hint present") as u16
+        ),
+        Some(HintId::CancelReaderHints)
+    );
+    assert_eq!(footer_height(&app, width), 1);
+}
+
 #[test]
 fn fullscreen_reader_footer_routes_via_the_shared_hit_test() {
     let mut app = app_with_entry();

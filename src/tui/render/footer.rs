@@ -305,17 +305,8 @@ fn build_grid_row(col_x: &[u16], hints: &[Hint]) -> RenderedHintLine {
 /// The footer's justified rows joined by newlines, for tests to inspect.
 #[cfg(test)]
 pub(crate) fn footer_text(app: &AppModel, width: u16) -> String {
-    if app.editor.is_some() {
-        return editor_footer_line()
-            .rendered_lines(width)
-            .iter()
-            .map(|row| row.text.clone())
-            .collect::<Vec<_>>()
-            .join("\n");
-    }
-    let line = match app.nav.mode {
-        Mode::Search => search_footer_line(app),
-        Mode::Browse => browse_footer_line(app),
+    let Some(line) = active_footer_line(app) else {
+        return String::new();
     };
     line.rendered_lines(width)
         .iter()
@@ -338,49 +329,37 @@ fn editor_footer_line() -> HintLine {
     }
 }
 
-pub(crate) fn footer_lines(theme: &Theme, app: &AppModel, width: u16) -> Text<'static> {
-    let hovered = app.hovered_footer_hint();
+/// The footer in force, or `None` when the hints are hidden. Every reader of
+/// the footer goes through here, so what is drawn, what is clickable and the
+/// height reserved for it cannot describe different lines.
+fn active_footer_line(app: &AppModel) -> Option<HintLine> {
     if !app.state.ui.show_hints {
-        return Text::default();
+        return None;
     }
     if app.editor.is_some() {
-        return Text::from(editor_footer_line().lines(theme, width, hovered));
+        return Some(editor_footer_line());
     }
     // Link-hint mode claims every letter for its labels, so the usual chips
-    // would advertise keys that do nothing while it is up. Show only what still
-    // works. Ahead of the mode split because the hints span browse and search
-    // alike.
+    // would advertise keys that do nothing while it is up. Ahead of the mode
+    // split because the hints span browse and search alike.
     if app.reader_hints.is_active() {
-        return Text::from(
-            HintLine {
-                hints: vec![
-                    Hint::new("open", "a–z", HintId::ReaderHintKeys),
-                    Hint::new("cancel", "esc", HintId::CancelReaderHints),
-                ],
-            }
-            .lines(theme, width, hovered),
-        );
+        return Some(reader_hint_footer_line());
     }
+    Some(match app.nav.mode {
+        Mode::Search => search_footer_line(app),
+        Mode::Browse => browse_footer_line(app),
+    })
+}
 
-    let lines = match app.nav.mode {
-        Mode::Search => search_footer_line(app).lines(theme, width, hovered),
-        Mode::Browse => browse_footer_line(app).lines(theme, width, hovered),
+pub(crate) fn footer_lines(theme: &Theme, app: &AppModel, width: u16) -> Text<'static> {
+    let Some(line) = active_footer_line(app) else {
+        return Text::default();
     };
-    Text::from(lines)
+    Text::from(line.lines(theme, width, app.hovered_footer_hint()))
 }
 
 pub(crate) fn footer_height(app: &AppModel, width: u16) -> u16 {
-    if !app.state.ui.show_hints {
-        return 0;
-    }
-    if app.editor.is_some() {
-        return editor_footer_line().height(width);
-    }
-
-    match app.nav.mode {
-        Mode::Search => search_footer_line(app).height(width),
-        Mode::Browse => browse_footer_line(app).height(width),
-    }
+    active_footer_line(app).map_or(0, |line| line.height(width))
 }
 
 #[cfg(test)]
@@ -390,17 +369,8 @@ pub(crate) fn footer_hint_id_at(
     width: u16,
     col: u16,
 ) -> Option<HintId> {
-    if app.editor.is_some() {
-        return editor_footer_line()
-            .rendered_lines(width)
-            .first()
-            .and_then(|row| placement_at(&row.placements, origin_x, col));
-    }
-    let line = match app.nav.mode {
-        Mode::Search => search_footer_line(app),
-        Mode::Browse => browse_footer_line(app),
-    };
-    line.rendered_lines(width)
+    active_footer_line(app)?
+        .rendered_lines(width)
         .first()
         .and_then(|row| placement_at(&row.placements, origin_x, col))
 }
@@ -413,34 +383,12 @@ pub(crate) fn footer_hint_id_at_point(
     col: u16,
     row: u16,
 ) -> Option<HintId> {
-    if !app.state.ui.show_hints {
-        return None;
-    }
-    if app.editor.is_some() {
-        return editor_footer_line().hint_id_at_point(origin_x, origin_y, width, col, row);
-    }
-
-    match app.nav.mode {
-        Mode::Search => {
-            search_footer_line(app).hint_id_at_point(origin_x, origin_y, width, col, row)
-        }
-        Mode::Browse => {
-            browse_footer_line(app).hint_id_at_point(origin_x, origin_y, width, col, row)
-        }
-    }
+    active_footer_line(app)?.hint_id_at_point(origin_x, origin_y, width, col, row)
 }
 
 pub(crate) fn footer_hint_regions(app: &AppModel, width: u16) -> Vec<(u16, u16, u16, HintId)> {
-    if !app.state.ui.show_hints {
+    let Some(line) = active_footer_line(app) else {
         return Vec::new();
-    }
-    let line = if app.editor.is_some() {
-        editor_footer_line()
-    } else {
-        match app.nav.mode {
-            Mode::Search => search_footer_line(app),
-            Mode::Browse => browse_footer_line(app),
-        }
     };
     line.rendered_lines(width)
         .into_iter()
@@ -487,6 +435,15 @@ impl HintLine {
         let lines = self.rendered_lines(width);
         let line = lines.get(relative_row)?;
         placement_at(&line.placements, origin_x, col)
+    }
+}
+
+fn reader_hint_footer_line() -> HintLine {
+    HintLine {
+        hints: vec![
+            Hint::new("open", "a–z", HintId::ReaderHintKeys),
+            Hint::new("cancel", "esc", HintId::CancelReaderHints),
+        ],
     }
 }
 
