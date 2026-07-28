@@ -122,11 +122,8 @@ impl AppModel {
 
     fn begin_metadata_search(&mut self, kind: MetadataKind, value: &str) {
         let scope = self.current_journal_scope();
-        // One quoted value for both the hits and the query box, so re-running the
-        // visible query reproduces them.
         let value = quote_filter_value(value);
-        let hits = self.search_results_by_metadata(kind, &value);
-        self.enter_search(scope, format!("{}:{value}", kind.search_prefix()), hits);
+        self.enter_search(scope, format!("{}:{value}", kind.search_prefix()));
     }
 
     pub(crate) fn edit_metadata_state(&self) -> Option<&EditMetadataState> {

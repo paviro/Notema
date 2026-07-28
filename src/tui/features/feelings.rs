@@ -19,8 +19,7 @@ impl AppModel {
     pub(crate) fn begin_feeling_search(&mut self, feeling: &str) {
         let scope = self.current_journal_scope();
         let feeling = quote_filter_value(feeling);
-        let hits = self.search_results_by_feeling(&feeling);
-        self.enter_search(scope, format!("feelings:{feeling}"), hits);
+        self.enter_search(scope, format!("feelings:{feeling}"));
     }
 
     pub(crate) fn edit_feeling_state(&self) -> Option<&EditFeelingState> {

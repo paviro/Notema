@@ -237,13 +237,7 @@ impl AppModel {
         let scope = state.scope.clone();
         let query = state.tab.launch_query(&row.search_value);
         self.close_overlay();
-        // `search_results` parses the query box and reads `self.search.scope`, so
-        // set both to the captured values before computing hits; `enter_search`
-        // then re-sets them (idempotent) and finishes entering search mode.
-        self.search.scope = scope.clone();
-        self.search.query.set_text(&query);
-        let hits = self.search_results();
-        self.enter_search(scope, query, hits);
+        self.enter_search(scope, query);
     }
 }
 

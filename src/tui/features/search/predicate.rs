@@ -26,7 +26,7 @@ pub(super) fn date_predicate(
 /// filter row commits — means that tag and no other. Quoting is the closed pair:
 /// `tags:"app` is the substring still, so a value narrows while it is typed
 /// whichever way it is being written.
-pub(crate) fn metadata_predicate(
+pub(super) fn metadata_predicate(
     kind: MetadataKind,
     query: &str,
 ) -> impl Fn(&Entry) -> bool + use<> {
@@ -64,7 +64,7 @@ pub(crate) fn location_tokens(query: &str) -> Vec<String> {
 /// Quotedness is not exactness here (a place still contains the places around
 /// it); it only keeps a `;` or `|` in a name from cutting the value, so the
 /// unquoting is per alternative, after the split.
-pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<> {
+pub(super) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<> {
     let alternatives: Vec<Vec<String>> = split_unquoted(query, '|')
         .into_iter()
         .map(|alternative| location_tokens(&unquote(alternative.trim())))
@@ -90,7 +90,7 @@ pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<>
 /// Exactness matters more here than elsewhere, because `happy`/`unhappy` and
 /// `interested`/`uninterested` are each two canonical feelings, one holding the
 /// other's name.
-pub(crate) fn feeling_predicate(feeling: &str) -> impl Fn(&Entry) -> bool + use<> {
+pub(super) fn feeling_predicate(feeling: &str) -> impl Fn(&Entry) -> bool + use<> {
     // The mode is a property of the needle, so resolve it once rather than once
     // per entry per feeling.
     let groups: Vec<Vec<(String, FeelingMatch)>> = split_values(feeling)

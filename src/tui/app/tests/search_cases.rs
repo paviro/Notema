@@ -27,6 +27,36 @@ fn search_from_entries_focus_is_scoped_to_selected_journal() {
     assert_eq!(app.search.scope, SearchScope::Journal("work".to_string()));
 }
 
+/// Drilling into a tag runs it under the journal it was clicked in, not under
+/// whatever scope the last search left on the app. The hits and the query box
+/// have to agree — otherwise the first keystroke re-runs the visible query and
+/// the list silently shrinks.
+#[test]
+fn a_tag_drill_down_is_scoped_to_the_journal_it_came_from() {
+    let dir = tempdir().unwrap();
+    for journal in ["work", "home"] {
+        let entry_dir = dir.path().join(journal).join("2026-07-01");
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join("a.md"),
+            "+++\nschema_version = 1\n\n[entry]\ntags = [\"admin\"]\n+++\n\n# A\n",
+        )
+        .unwrap();
+    }
+    let config = Config::new(dir.path().to_path_buf());
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    app.nav.focus = Focus::Entries;
+
+    app.begin_tag_search("admin");
+
+    assert_eq!(app.search.scope, SearchScope::Journal("work".to_string()));
+    assert_eq!(app.search.hits.len(), 1);
+    assert!(app.search.hits.iter().all(|hit| hit.journal == "work"));
+    // Re-running the query the user can see reproduces exactly these hits.
+    assert_eq!(app.search_results().len(), app.search.hits.len());
+}
+
 #[test]
 fn empty_search_has_no_selected_entry() {
     let config = Config::new(tempdir().unwrap().path().to_path_buf());

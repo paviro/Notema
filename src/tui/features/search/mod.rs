@@ -20,13 +20,10 @@ use crate::tui::{
 };
 
 use parse::{parse_starred_value, split_unquoted, unquote};
-use predicate::date_predicate;
+use predicate::{date_predicate, feeling_predicate, location_predicate, metadata_predicate};
 
 pub(crate) use parse::{Prefix, escape_filter_value, quote_filter_value, split_prefix};
-pub(crate) use predicate::{
-    entry_in_search_scope, feeling_predicate, location_predicate, location_tokens,
-    metadata_predicate,
-};
+pub(crate) use predicate::{entry_in_search_scope, location_tokens};
 
 /// Boxed so segments with different predicate types share one `Vec`.
 type EntryPredicate = Box<dyn Fn(&Entry) -> bool>;
@@ -38,17 +35,21 @@ impl AppModel {
         } else {
             self.current_journal_scope()
         };
-        self.enter_search(scope, String::new(), Vec::new());
+        self.enter_search(scope, String::new());
     }
 
-    /// Enter search mode with a prepared `query`/`hits`, focusing the entry list
+    /// Enter search mode running `query` under `scope`, focusing the entry list
     /// and selecting the first hit.
-    pub(crate) fn enter_search(&mut self, scope: SearchScope, query: String, hits: Vec<SearchHit>) {
+    ///
+    /// The hits are computed here rather than passed in: `search_results` reads
+    /// the scope off `self`, so a caller preparing them beforehand runs its query
+    /// under whatever scope the last search left behind.
+    pub(crate) fn enter_search(&mut self, scope: SearchScope, query: String) {
         self.search.scope = scope;
         self.nav.mode = Mode::Search;
         self.nav.focus = Focus::Entries;
         self.search.query.set_text(&query);
-        self.search.hits = hits;
+        self.search.hits = self.search_results();
         self.search.suggestions.clear();
         self.commit_search_selection();
         // An all-journals search follows the global theme (see context_journal).
@@ -172,18 +173,6 @@ impl AppModel {
             .filter(|entry| entry_in_search_scope(entry, &self.search.scope) && predicate(entry))
             .map(SearchHit::from_entry)
             .collect()
-    }
-
-    pub(crate) fn search_results_by_metadata(
-        &self,
-        kind: MetadataKind,
-        query: &str,
-    ) -> Vec<SearchHit> {
-        self.search_results_matching(metadata_predicate(kind, query))
-    }
-
-    pub(crate) fn search_results_by_feeling(&self, feeling: &str) -> Vec<SearchHit> {
-        self.search_results_matching(feeling_predicate(feeling))
     }
 }
 
