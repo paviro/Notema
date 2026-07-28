@@ -28,6 +28,8 @@ pub(super) fn draw(
             insights_scroll: (view.insights.total > 0).then_some(view.insights.scroll),
             journal_offset: view.journal_offset,
             entry_offset: view.entry_offset,
+            reader_hints: std::mem::take(&mut view.reader.hints),
+            reader_openable: view.reader.openable,
         },
     )?;
     Ok(())

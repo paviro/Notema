@@ -25,14 +25,13 @@ use crate::tui::{
     app::{AppModel, Focus, Mode, reader_is_available},
     editor_state::EditorPrompt,
     features::{location::EditLocationFocus, metadata::EditMetadataFocus},
-    image::image_for_digit,
     state::{MetadataKind, Overlay},
 };
 
 use super::DispatchOutcome;
 use super::action::{
     Action, BrowserAction, EditorAction, FilterAction, ImageAction, InsightsAction, LocationAction,
-    MetadataAction, OverlayAction, ReaderAction, SearchAction, SettingsAction,
+    MetadataAction, OverlayAction, ReaderAction, ReaderHintAction, SearchAction, SettingsAction,
 };
 
 pub(crate) fn handle_key(
@@ -369,17 +368,22 @@ fn theme_picker_key_to_action(key: KeyEvent) -> Option<Action> {
     }
 }
 
-/// Map a digit key to the image index it opens (`0`–`9`), gated on that image
-/// existing. Shared by browse and the search entry view.
-fn image_shortcut(app: &AppModel, key: KeyEvent) -> Option<Action> {
+/// The keys link-hint mode claims while it is up, and only those. Scroll keys
+/// are deliberately left alone: the chips scroll with the text they sit in, so
+/// the labels stay valid wherever the reader is parked.
+fn reader_hint_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
+    if !app.reader_hints.is_active() || app.nav.focus != Focus::Reader {
+        return None;
+    }
     match key.code {
-        KeyCode::Char('i') if app.selected_entry_image_count() > 0 => {
-            Some(Action::Images(ImageAction::OpenViewer(0)))
-        }
-        KeyCode::Char(ch) => {
-            let index = image_for_digit(ch)?;
-            (index < app.selected_entry_image_count())
-                .then_some(Action::Images(ImageAction::OpenViewer(index)))
+        KeyCode::Esc => Some(Action::ReaderHint(ReaderHintAction::Cancel)),
+        KeyCode::Backspace => Some(Action::ReaderHint(ReaderHintAction::Pop)),
+        KeyCode::Char(ch)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+        {
+            Some(Action::ReaderHint(ReaderHintAction::Push(ch)))
         }
         _ => None,
     }
@@ -412,6 +416,11 @@ fn insights_scroll_key_to_action(key: KeyCode) -> Option<Action> {
 }
 
 fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -> Option<Action> {
+    // Ahead of everything else, so the first Esc closes the chips and only the
+    // second reaches the fullscreen collapse below.
+    if let Some(action) = reader_hint_key_to_action(app, key) {
+        return Some(action);
+    }
     if app.nav.focus == Focus::Reader
         && let Some(action) = scroll_key_to_action(key.code)
     {
@@ -556,11 +565,17 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
             Some(Action::Browser(BrowserAction::ToggleStarred))
         }
         // Images open from the reader or the entries list.
-        KeyCode::Char('i' | '0'..='9')
+        KeyCode::Char('i')
             if matches!(app.nav.focus, Focus::Reader | Focus::Entries)
-                && app.has_selected_entry_target() =>
+                && app.selected_entry_image_count() > 0 =>
         {
-            image_shortcut(app, key)
+            Some(Action::Images(ImageAction::OpenViewer(0)))
+        }
+        // Label every openable target in the entry — links, attachments, anchors
+        // and image labels alike — so the keyboard reaches what the mouse can.
+        // Inert on an entry with nothing to open, like `i` with no images.
+        KeyCode::Char('o') if app.nav.focus == Focus::Reader && app.reader_openable > 0 => {
+            Some(Action::ReaderHint(ReaderHintAction::Begin))
         }
         KeyCode::Char('h') => Some(Action::Overlay(OverlayAction::ToggleHints)),
         KeyCode::Char('j') => Some(Action::Overlay(OverlayAction::ToggleJournals)),
@@ -593,7 +608,12 @@ fn reader_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
         KeyCode::Char('m') => Some(Action::Metadata(MetadataAction::BeginMood)),
         KeyCode::Char('l') => Some(Action::Location(LocationAction::BeginEdit)),
         KeyCode::Char('s') => Some(Action::Browser(BrowserAction::ToggleStarred)),
-        KeyCode::Char('i' | '0'..='9') => image_shortcut(app, key),
+        KeyCode::Char('i') if app.selected_entry_image_count() > 0 => {
+            Some(Action::Images(ImageAction::OpenViewer(0)))
+        }
+        KeyCode::Char('o') if app.reader_openable > 0 => {
+            Some(Action::ReaderHint(ReaderHintAction::Begin))
+        }
         _ => None,
     }
 }
@@ -626,6 +646,12 @@ fn suggestion_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
 
 fn search_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -> Option<Action> {
     if app.nav.focus == Focus::Reader {
+        // Ahead of the scroll and reader keys for the same reason as in browse:
+        // the chips claim the first Esc, and label letters outrank the shortcuts
+        // that share them.
+        if let Some(action) = reader_hint_key_to_action(app, key) {
+            return Some(action);
+        }
         if let Some(action) = scroll_key_to_action(key.code) {
             return Some(action);
         }

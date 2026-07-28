@@ -256,6 +256,8 @@ mod tests {
                     group: 0,
                 }],
                 headings: Vec::new(),
+                openable: 0,
+                hints: Vec::new(),
             },
             ..ViewState::default()
         };
@@ -270,5 +272,43 @@ mod tests {
             "same row, far right"
         );
         assert_eq!(view.reader_link_hit_at(10, row + 1), None, "other row");
+    }
+
+    /// Every clickable region in the reader is placed through `visible_links`,
+    /// so the body-line-to-screen-row mapping it applies has to stay exact — and
+    /// a hit scrolled past either edge has to drop out rather than wrap.
+    #[test]
+    fn visible_links_map_body_lines_to_screen_rows() {
+        let hits = crate::tui::app::ReaderHits {
+            content_rect: Rect::new(10, 5, 40, 3),
+            scroll: 4,
+            line_count: 20,
+            links: vec![
+                link_hit(1, 0, 8),
+                link_hit(4, 2, 9),
+                link_hit(6, 0, 4),
+                link_hit(7, 0, 4),
+            ],
+            headings: Vec::new(),
+            openable: 0,
+            hints: Vec::new(),
+        };
+
+        let visible: Vec<_> = hits.visible_links().map(|(_, rect)| rect).collect();
+        assert_eq!(
+            visible,
+            vec![Rect::new(12, 5, 7, 1), Rect::new(10, 7, 4, 1)],
+            "lines 4 and 6 are on screen; 1 is above and 7 is past the last row"
+        );
+    }
+
+    fn link_hit(line: usize, start: usize, end: usize) -> crate::tui::app::ReaderLinkHit {
+        crate::tui::app::ReaderLinkHit {
+            line,
+            start,
+            end,
+            target: crate::tui::app::ReaderLinkTarget::Uri("https://example.com".to_string()),
+            group: line,
+        }
     }
 }

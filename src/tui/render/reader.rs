@@ -8,14 +8,15 @@ use ratatui::{
 
 use notema_domain::{Entry, EntryEncryptionState};
 use std::path::Path;
+use unicode_width::UnicodeWidthStr;
 
 use crate::tui::{
     app::{
-        AppModel, Focus, ReaderHeading, ReaderHits, ReaderLinkHit, ReaderLinkTarget,
+        AppModel, Focus, ReaderHeading, ReaderHint, ReaderHits, ReaderLinkHit, ReaderLinkTarget,
         RenderedEntryBody,
     },
     env_strip::EnvironmentRef,
-    image::{digit_for_image, sole_image_ref},
+    image::sole_image_ref,
     render::{
         count_label, layout::EntryBodyFrame, panel_block, render_centered_notice,
         render_scrollbar_if_needed, viewer_scroll,
@@ -25,6 +26,7 @@ use crate::tui::{
     theme::Theme,
 };
 
+use super::hints::HintLabeller;
 use super::markdown::render_text_chunk;
 use super::metadata::{EntryMetadata, draw_metadata_section, metadata_section_lines};
 
@@ -55,7 +57,7 @@ pub(crate) fn draw_selected_reader(
             .unwrap_or_default();
         let entry_metadata = EntryMetadata::for_entry(active_theme, &metadata, environment);
 
-        let (scroll, hits, content_rect, line_count) = draw_markdown_panel(
+        *reader_view = draw_markdown_panel(
             active_theme,
             frame,
             app,
@@ -73,13 +75,6 @@ pub(crate) fn draw_selected_reader(
                 entry_path: entry_path.as_deref(),
             },
         );
-        *reader_view = ReaderHits {
-            content_rect,
-            scroll,
-            line_count,
-            links: hits.links,
-            headings: hits.headings,
-        };
     } else {
         let block = panel_block(active_theme, "Entry", app.nav.focus == Focus::Reader, None);
         let content = PanelGeometry::new(active_theme, area).content;
@@ -108,17 +103,18 @@ struct PanelPlacement<'a> {
     entry_path: Option<&'a Path>,
 }
 
-/// Draw the entry body and metadata, returning the applied scroll, the clickable
-/// link hits, the body rect (for mapping clicks back to hits), and the total
-/// rendered line count (for scrollbar
-/// drag mapping).
+/// Draw the entry body and metadata, returning the frame's reader geometry: the
+/// applied scroll, the clickable link hits, the body rect they map through, the
+/// total line count (for scrollbar drag mapping), and any link-hint labels
+/// painted. Both reader call sites — fullscreen and split-pane — come through
+/// here.
 fn draw_markdown_panel(
     active_theme: &crate::tui::theme::Theme,
     frame: &mut Frame<'_>,
     app: &AppModel,
     entry: PanelEntry<'_>,
     placement: PanelPlacement<'_>,
-) -> (u16, RenderedEntryBody, Rect, usize) {
+) -> ReaderHits {
     let PanelEntry {
         title,
         content,
@@ -151,14 +147,16 @@ fn draw_markdown_panel(
     // highlight + render is the reader's dominant per-frame cost, so a frame that
     // only scrolled, blinked, or ticked images reuses the rendered lines.
     let show_link_urls = app.services.config.ui.layout.reader.show_link_urls;
-    let body = app.cached_entry_body(entry_path, width, || {
-        build_body_lines(
+    let hints = hint_labels_shown(app).then(|| app.reader_hints.pending());
+    let body = app.cached_entry_body(entry_path, width, hints, || {
+        build_reader_body(
             active_theme,
             content,
             width,
             entry_path,
             show_link_urls,
             attachments_openable,
+            hints,
         )
     });
     let mut lines = body.lines.clone();
@@ -217,11 +215,6 @@ fn draw_markdown_panel(
             }
         }
     }
-    let hits = RenderedEntryBody {
-        lines: Vec::new(),
-        links,
-        headings,
-    };
     if frame_layout.metadata_scrolls() {
         let meta_lines = metadata_section_lines(active_theme, body_rect.width, &metadata);
         if !meta_lines.is_empty() {
@@ -251,6 +244,27 @@ fn draw_markdown_panel(
         body_rect,
     );
 
+    let mut hits = ReaderHits {
+        content_rect: body_rect,
+        scroll,
+        line_count,
+        links,
+        headings,
+        hints: Vec::new(),
+        openable: body.openable,
+    };
+    // The chips are already drawn — they are text in the body. All that is left
+    // is telling the model which label opens what.
+    hits.hints = body
+        .hints
+        .iter()
+        .map(|(label, target)| ReaderHint {
+            label: label.clone(),
+            target: target.clone(),
+            heading_line: hits.heading_line_for(target),
+        })
+        .collect();
+
     if let Some(layout) = frame_layout.metadata {
         draw_metadata_section(active_theme, frame, layout, &metadata, app.hover);
     }
@@ -265,7 +279,17 @@ fn draw_markdown_panel(
         focused,
     );
 
-    (scroll, hits, body_rect, line_count)
+    hits
+}
+
+/// Whether this frame lays link-hint chips into the body. Every condition that
+/// suspends the mode lands here: a frame that lays none reports no labels, which
+/// is what takes the mode down.
+fn hint_labels_shown(app: &AppModel) -> bool {
+    app.reader_hints.is_active()
+        && app.nav.focus == Focus::Reader
+        && app.editor.is_none()
+        && !app.has_overlay()
 }
 
 /// Build the entry-body lines, replacing each lone in-folder image with a
@@ -279,6 +303,7 @@ fn build_body_lines(
     entry_path: Option<&Path>,
     show_urls: bool,
     attachments_openable: bool,
+    mut hints: Option<&mut HintLabeller>,
 ) -> RenderedEntryBody {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut links: Vec<ReaderLinkHit> = Vec::new();
@@ -294,13 +319,16 @@ fn build_body_lines(
             &mut links,
             &mut headings,
             &mut group_base,
-            render_text_chunk(theme, content, width, show_urls, None, false),
+            render_text_chunk(theme, content, width, show_urls, None, false, hints),
         );
         dedupe_heading_anchors(&mut headings);
+        // `hints`/`openable` belong to the labeller, so `build_reader_body` fills
+        // them in once for both walks.
         return RenderedEntryBody {
             lines,
             links,
             headings,
+            ..RenderedEntryBody::default()
         };
     };
 
@@ -344,6 +372,7 @@ fn build_body_lines(
                     show_urls,
                     Some(entry_path),
                     attachments_openable,
+                    hints.as_deref_mut(),
                 ),
             );
             if had_gap {
@@ -353,11 +382,14 @@ fn build_body_lines(
         }
         after_image = true;
 
-        let label = image_label_line(theme, image_index, &alt);
+        let chip = hints
+            .as_mut()
+            .and_then(|labeller| labeller.take(ReaderLinkTarget::Image(image_index)));
+        let (label, click_width) = image_label_line(theme, image_index, &alt, chip);
         links.push(ReaderLinkHit {
             line: lines.len(),
             start: 0,
-            end: label.width(),
+            end: click_width,
             target: ReaderLinkTarget::Image(image_index),
             group: group_base,
         });
@@ -379,6 +411,7 @@ fn build_body_lines(
                 show_urls,
                 Some(entry_path),
                 attachments_openable,
+                hints,
             ),
         );
     }
@@ -388,7 +421,54 @@ fn build_body_lines(
         lines,
         links,
         headings,
+        ..RenderedEntryBody::default()
     }
+}
+
+/// The reader body, with link-hint chips laid in when `hints` is set.
+///
+/// Two walks: a counting labeller tallies the targets, fixing the label width;
+/// a sized one then lays the chips into the text so wrapping makes room. The
+/// counting walk hands out nothing, so it doubles as the unhinted body, and its
+/// tally is `openable` either way. Memoized per (entry, width, hints), so the
+/// double build is paid once per entry rather than once per frame.
+fn build_reader_body(
+    theme: &Theme,
+    content: &str,
+    width: usize,
+    entry_path: Option<&Path>,
+    show_urls: bool,
+    attachments_openable: bool,
+    hints: Option<&str>,
+) -> RenderedEntryBody {
+    let mut counter = HintLabeller::counting();
+    let mut plain = build_body_lines(
+        theme,
+        content,
+        width,
+        entry_path,
+        show_urls,
+        attachments_openable,
+        Some(&mut counter),
+    );
+    let openable = counter.requested();
+    plain.openable = openable;
+    let Some(pending) = hints else {
+        return plain;
+    };
+    let mut labeller = HintLabeller::new(openable, pending);
+    let mut body = build_body_lines(
+        theme,
+        content,
+        width,
+        entry_path,
+        show_urls,
+        attachments_openable,
+        Some(&mut labeller),
+    );
+    body.openable = openable;
+    body.hints = labeller.into_assigned();
+    body
 }
 
 /// Append a rendered chunk, shifting its link/heading line indices (chunk-local)
@@ -443,10 +523,15 @@ fn patch_line_range(line: &mut Line<'static>, start: usize, end: usize, style: S
     }
 }
 
-/// A clickable `[Image N: alt - click here or press K]` label. The number is
-/// 1-based; images 1-9 bind to their digit, the tenth to `0`, and later images
-/// drop the `press K` hint (no digit left to bind).
-fn image_label_line(theme: &Theme, index: usize, alt: &str) -> Line<'static> {
+/// A clickable `[Image N: alt]` label, numbered 1-based. The keyboard reaches it
+/// through link-hint mode like any other target, so the label advertises only
+/// the click.
+fn image_label_line(
+    theme: &Theme,
+    index: usize,
+    alt: &str,
+    chip: Option<super::hints::Chip>,
+) -> (Line<'static>, usize) {
     let alt = alt.trim();
     let number = index + 1;
     let head = if alt.is_empty() {
@@ -454,11 +539,22 @@ fn image_label_line(theme: &Theme, index: usize, alt: &str) -> Line<'static> {
     } else {
         format!("Image {number}: {alt}")
     };
-    let text = match digit_for_image(index) {
-        Some(key) => format!("[{head} - click here or press {key}]"),
-        None => format!("[{head} - click here]"),
-    };
-    Line::from(Span::styled(text, theme.md_link()))
+    let label = format!("[{head}]");
+    // The clickable span is the label alone. Any hint chip trails it as separate
+    // runs, exactly as it does for a markdown link — where the chip is emitted
+    // after the link is popped and so carries no link id. Measuring the whole
+    // line here instead would drag the chip into the hit, and hovering the image
+    // would light the chip up too.
+    let width = UnicodeWidthStr::width(label.as_str());
+    let mut spans = vec![Span::styled(label, theme.md_link())];
+    if let Some(chip) = chip {
+        spans.extend(
+            chip.runs(theme)
+                .into_iter()
+                .map(|(text, style)| Span::styled(text, style)),
+        );
+    }
+    (Line::from(spans), width)
 }
 
 #[cfg(test)]
@@ -490,31 +586,31 @@ mod image_tests {
         }
     }
 
+    /// Numbering is 1-based and unbounded — the eleventh image reads the same as
+    /// the first, since no label advertises a key of its own any more.
     #[test]
-    fn image_label_includes_alt_and_press_hint_and_is_one_based() {
-        assert_eq!(
-            line_text(&image_label_line(&Theme::terminal_default(), 0, "sunset")),
-            "[Image 1: sunset - click here or press 1]"
-        );
-        assert_eq!(
-            line_text(&image_label_line(&Theme::terminal_default(), 3, "")),
-            "[Image 4 - click here or press 4]"
-        );
+    fn image_label_is_its_number_and_alt_and_nothing_else() {
+        let label = |index, alt| {
+            line_text(&image_label_line(&Theme::terminal_default(), index, alt, None).0)
+        };
+        assert_eq!(label(0, "sunset"), "[Image 1: sunset]");
+        assert_eq!(label(3, ""), "[Image 4]");
+        assert_eq!(label(10, "late"), "[Image 11: late]");
     }
 
+    /// The clickable span stops at the label, so hovering an image lights the
+    /// label alone — the same as a markdown link, whose chip is emitted after the
+    /// link is popped and so never joins the hit.
     #[test]
-    fn tenth_image_binds_to_zero_key() {
-        assert_eq!(
-            line_text(&image_label_line(&Theme::terminal_default(), 9, "")),
-            "[Image 10 - click here or press 0]"
-        );
-    }
+    fn an_image_hint_chip_is_outside_the_clickable_span() {
+        let mut labeller = HintLabeller::new(1, "");
+        let chip = labeller.take(ReaderLinkTarget::Image(0));
+        let (line, click_width) = image_label_line(&Theme::terminal_default(), 0, "sunset", chip);
 
-    #[test]
-    fn image_label_past_ten_drops_press_hint() {
-        assert_eq!(
-            line_text(&image_label_line(&Theme::terminal_default(), 10, "late")),
-            "[Image 11: late - click here]"
+        assert_eq!(click_width, "[Image 1: sunset]".len());
+        assert!(
+            line.width() > click_width,
+            "the chip widens the line past the clickable span"
         );
     }
 
@@ -540,6 +636,7 @@ mod image_tests {
             Some(&entry_path),
             true,
             false,
+            None,
         );
 
         let rendered: Vec<String> = body.lines.iter().map(line_text).collect();
@@ -549,9 +646,9 @@ mod image_tests {
                 String::new(),
                 "Text above".to_string(),
                 String::new(),
-                "[Image 1: a shot - click here or press 1]".to_string(),
+                "[Image 1: a shot]".to_string(),
                 String::new(),
-                "[Image 2 - click here or press 2]".to_string(),
+                "[Image 2]".to_string(),
                 String::new(),
                 "Text below".to_string(),
             ],
@@ -583,6 +680,7 @@ mod image_tests {
             None,
             true,
             false,
+            None,
         );
         let plain = body
             .lines
@@ -608,6 +706,7 @@ mod image_tests {
             None,
             true,
             false,
+            None,
         );
         assert!(body.links.is_empty());
     }
@@ -621,6 +720,7 @@ mod image_tests {
             None,
             true,
             false,
+            None,
         );
 
         assert_eq!(
@@ -662,6 +762,7 @@ mod image_tests {
             None,
             true,
             false,
+            None,
         );
 
         assert_eq!(body.links.len(), 1);
@@ -684,6 +785,7 @@ mod image_tests {
             None,
             false,
             false,
+            None,
         );
 
         let link_line = &body.lines[body.links[0].line];
@@ -704,6 +806,7 @@ mod image_tests {
             None,
             true,
             false,
+            None,
         );
         assert!(line_text(&shown.lines[shown.links[0].line]).contains("(https://example.com)"));
     }
@@ -727,7 +830,15 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             "http://ettext.taint.org/doc/",
         ];
 
-        let shown = build_body_lines(&Theme::terminal_default(), source, 80, None, true, false);
+        let shown = build_body_lines(
+            &Theme::terminal_default(),
+            source,
+            80,
+            None,
+            true,
+            false,
+            None,
+        );
         let targets: Vec<&str> = shown.links.iter().map(target_uri).collect();
         assert_eq!(targets, expected);
         for hit in &shown.links {
@@ -737,7 +848,15 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
 
         // Hidden URLs: still all six, wrap now computed against the shorter text,
         // and no URL leaks into any rendered line.
-        let hidden = build_body_lines(&Theme::terminal_default(), source, 80, None, false, false);
+        let hidden = build_body_lines(
+            &Theme::terminal_default(),
+            source,
+            80,
+            None,
+            false,
+            false,
+            None,
+        );
         let hidden_targets: Vec<&str> = hidden.links.iter().map(target_uri).collect();
         assert_eq!(hidden_targets, expected);
         assert!(
@@ -759,6 +878,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             None,
             false,
             false,
+            None,
         );
 
         assert!(body.links.len() >= 2);
@@ -783,6 +903,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             None,
             true,
             false,
+            None,
         );
 
         assert_eq!(body.links.len(), 2);
@@ -800,6 +921,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             None,
             true,
             false,
+            None,
         );
 
         assert_eq!(
@@ -821,6 +943,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             None,
             true,
             false,
+            None,
         );
 
         assert!(body.links.is_empty());
@@ -845,6 +968,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             Some(&entry_path),
             true,
             true,
+            None,
         );
         assert_eq!(openable.links.len(), 1);
         assert_eq!(
@@ -859,6 +983,7 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             Some(&entry_path),
             true,
             false,
+            None,
         );
         assert!(inert.links.is_empty());
         // Even inert, the link name keeps its styling.
@@ -880,8 +1005,112 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
             Some(&entry_path),
             true,
             true,
+            None,
         );
 
         assert!(body.links.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod hit_span_tests {
+    use super::*;
+
+    /// The display-column slice of `line` covered by `[start, end)`.
+    fn columns(line: &Line<'static>, start: usize, end: usize) -> String {
+        let mut column = 0usize;
+        let mut taken = String::new();
+        for span in &line.spans {
+            for ch in span.content.chars() {
+                if column >= start && column < end {
+                    taken.push(ch);
+                }
+                column += UnicodeWidthStr::width(ch.to_string().as_str());
+            }
+        }
+        taken
+    }
+
+    /// Whatever produced a hit, its span must cover the target's own text and
+    /// nothing else — a hint chip must never fall inside it, or hovering the
+    /// target would light the chip up with it.
+    ///
+    /// Blind to which path built the hit: image labels are assembled by hand in
+    /// `build_body_lines`, every other kind derived in `markdown.rs`, and only a
+    /// check treating them alike catches one drifting from the other.
+    #[test]
+    fn no_hint_chip_falls_inside_a_clickable_span() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry_dir = dir.path().join("work").join("2026-07-01");
+        std::fs::create_dir_all(entry_dir.join("a.assets")).unwrap();
+        std::fs::write(entry_dir.join("a.assets/pic.png"), []).unwrap();
+        std::fs::write(entry_dir.join("a.assets/notes.pdf"), b"x").unwrap();
+        let entry = entry_dir.join("a.md");
+
+        let content = "See [one](https://example.com) and [notes](a.assets/notes.pdf).\n\n\
+                       ![a shot](a.assets/pic.png)\n\n\
+                       Jump to [details](#details).\n\n## Details\n\ntail";
+        let body = build_reader_body(
+            &Theme::terminal_default(),
+            content,
+            80,
+            Some(&entry),
+            false,
+            true,
+            Some(""),
+        );
+
+        assert_eq!(body.hints.len(), 4, "url, attachment, image and anchor");
+        for hit in &body.links {
+            let covered = columns(&body.lines[hit.line], hit.start, hit.end);
+            assert!(
+                !covered.contains('│') && !covered.contains("press"),
+                "hit {:?} covers chip text: {covered:?}",
+                hit.target
+            );
+        }
+    }
+
+    /// Every openable target gets a chip, including those that leave no hit: an
+    /// empty link name, and the clickable-image idiom, whose alt text is tagged
+    /// with the image rather than the link. Both still ask for a label, so a
+    /// count taken from the hits leaves the last target without one.
+    #[test]
+    fn a_link_that_leaves_no_hit_still_consumes_a_label() {
+        let content = "[](https://example.com)\n\n\
+                       [![badge](https://example.org/b.svg)](https://example.org)\n\n\
+                       And [a plain one](https://example.net) last.";
+        let body = build_reader_body(
+            &Theme::terminal_default(),
+            content,
+            80,
+            None,
+            false,
+            false,
+            Some(""),
+        );
+
+        let targets: Vec<&ReaderLinkTarget> =
+            body.hints.iter().map(|(_, target)| target).collect();
+        assert_eq!(
+            targets,
+            vec![
+                &ReaderLinkTarget::Uri("https://example.com".to_string()),
+                &ReaderLinkTarget::Uri("https://example.org/b.svg".to_string()),
+                &ReaderLinkTarget::Uri("https://example.org".to_string()),
+                &ReaderLinkTarget::Uri("https://example.net".to_string()),
+            ]
+        );
+        let chips = body
+            .lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .filter(|span| span.content == "│ press ")
+            .count();
+        assert_eq!(
+            chips,
+            targets.len(),
+            "every label was laid in, the last one included"
+        );
     }
 }

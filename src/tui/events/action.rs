@@ -352,6 +352,11 @@ pub(crate) enum Action {
         insights_scroll: Option<u16>,
         journal_offset: Option<usize>,
         entry_offset: Option<usize>,
+        /// The link-hint labels this frame painted. Always sent, so a frame that
+        /// painted none is what ends the mode.
+        reader_hints: Vec<crate::tui::app::ReaderHint>,
+        /// How many openable targets the drawn entry holds, gating the `o` key.
+        reader_openable: usize,
     },
     SyncImages(ratatui::layout::Size),
     // Global
@@ -370,6 +375,19 @@ pub(crate) enum Action {
     Images(ImageAction),
     Overlay(OverlayAction),
     Reader(ReaderAction),
+    ReaderHint(ReaderHintAction),
     Insights(InsightsAction),
     Filter(FilterAction),
+}
+
+/// Driving link-hint mode: the reader's keyboard route to everything the mouse
+/// can already click.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ReaderHintAction {
+    Begin,
+    Cancel,
+    /// Type one label character; the handler decides prefix, match, or miss.
+    Push(char),
+    /// Undo one typed character, leaving the mode when none is left.
+    Pop,
 }

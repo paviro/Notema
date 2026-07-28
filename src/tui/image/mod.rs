@@ -17,7 +17,7 @@ mod graphics;
 mod refs;
 mod worker;
 
-pub(crate) use refs::{digit_for_image, entry_images, image_for_digit, sole_image_ref};
+pub(crate) use refs::{entry_images, sole_image_ref};
 
 use std::{cell::RefCell, collections::HashMap, path::PathBuf, rc::Rc};
 

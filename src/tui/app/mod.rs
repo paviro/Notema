@@ -22,7 +22,9 @@ use ratatui::{
     widgets::ListState,
 };
 
-use super::state::{HoverTarget, Overlay, ScrollState, SearchState, ToastVariant, Toasts};
+use super::state::{
+    HoverTarget, Overlay, ReaderHintState, ScrollState, SearchState, ToastVariant, Toasts,
+};
 use crate::tui::editor_state::EntryEditor;
 use crate::tui::features::insights::{InsightsScope, InsightsTab, InsightsTimeframe};
 use crate::tui::image::{ImageAsset, ImageRuntime};
@@ -84,6 +86,14 @@ pub(crate) struct RenderedEntryBody {
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) links: Vec<ReaderLinkHit>,
     pub(crate) headings: Vec<ReaderHeading>,
+    /// Link-hint labels laid into `lines`, in document order — empty unless the
+    /// body was built for hint mode.
+    pub(crate) hints: Vec<(String, ReaderLinkTarget)>,
+    /// How many openable targets the entry holds, counted whether or not hints
+    /// are on — it is what gates the `o` key and its footer chip. Not
+    /// `links.len()`: a wrapped name is several hits, and a target can be
+    /// openable without leaving a hit at all.
+    pub(crate) openable: usize,
 }
 
 /// What a clickable region in the reader body opens.
@@ -112,6 +122,19 @@ pub(crate) struct ReaderLinkHit {
 pub(crate) struct ReaderHeading {
     pub(crate) anchor: String,
     pub(crate) line: usize,
+}
+
+/// One labelled openable target in link-hint mode: a link, image label, or
+/// attachment in the entry, and the label typed to open it.
+///
+/// Labels cover the whole entry, not just the viewport — the chips are part of
+/// the body text, so one that has scrolled out of sight still opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReaderHint {
+    pub(crate) label: String,
+    pub(crate) target: ReaderLinkTarget,
+    /// Pre-resolved for `#anchor` targets, matching [`super::ui::InteractionKind::Link`].
+    pub(crate) heading_line: Option<usize>,
 }
 
 pub(crate) struct ReaderAnchorFlash {
@@ -363,6 +386,13 @@ pub(crate) struct AppModel {
     /// reopened while an earlier lookup is still in flight must not reuse its id.
     pub(crate) next_geocode_id: u64,
     pub(crate) reader_anchor_flash: Option<ReaderAnchorFlash>,
+    /// Link-hint mode over the reader's openable targets. Named for the reader
+    /// because `hints` alone already means the footer hint bar.
+    pub(crate) reader_hints: ReaderHintState,
+    /// How many openable targets the last drawn reader held, gating the `o` key
+    /// and its footer chip the way the image count gates `i`. Recorded from the
+    /// frame rather than recomputed, since counting means rendering the body.
+    pub(crate) reader_openable: usize,
     pub(crate) scrollbar: ScrollbarDragState,
     /// The row/hint under the mouse cursor, for hover highlights. Set by mouse
     /// motion, cleared by any key event (see [`HoverTarget`]).
@@ -382,6 +412,50 @@ pub(crate) struct ReaderHits {
     pub(crate) line_count: usize,
     pub(crate) links: Vec<ReaderLinkHit>,
     pub(crate) headings: Vec<ReaderHeading>,
+    /// Link-hint labels this frame painted, taken by [`crate::tui::runtime`] and
+    /// handed to the model so the keyboard can only ever match what is on screen.
+    pub(crate) hints: Vec<ReaderHint>,
+    /// How many openable targets the drawn entry holds — see
+    /// [`RenderedEntryBody::openable`]. Rides to the model with `hints`.
+    pub(crate) openable: usize,
+}
+
+impl ReaderHits {
+    /// The screen rect a hit occupies, or `None` when it is scrolled out of
+    /// view. The single home of the body-line-to-screen-row mapping, so the
+    /// click map is built in one place rather than inline where it is consumed.
+    fn hit_rect(&self, hit: &ReaderLinkHit) -> Option<Rect> {
+        let top = self.scroll as usize;
+        let row = hit.line.checked_sub(top)?;
+        if row >= self.content_rect.height as usize {
+            return None;
+        }
+        Some(Rect::new(
+            self.content_rect.x.saturating_add(hit.start as u16),
+            self.content_rect.y.saturating_add(row as u16),
+            hit.end.saturating_sub(hit.start) as u16,
+            1,
+        ))
+    }
+
+    /// Every hit currently on screen, paired with its rect, in document order.
+    pub(crate) fn visible_links(&self) -> impl Iterator<Item = (&ReaderLinkHit, Rect)> {
+        self.links
+            .iter()
+            .filter_map(|hit| self.hit_rect(hit).map(|rect| (hit, rect)))
+    }
+
+    /// The body line an in-entry `#anchor` jumps to; `None` for every other target.
+    pub(crate) fn heading_line_for(&self, target: &ReaderLinkTarget) -> Option<usize> {
+        let ReaderLinkTarget::Uri(uri) = target else {
+            return None;
+        };
+        let anchor = uri.strip_prefix('#')?;
+        self.headings
+            .iter()
+            .find(|heading| heading.anchor == anchor)
+            .map(|heading| heading.line)
+    }
 }
 
 /// The insights list scrollbar geometry captured at render time, so the mouse
@@ -514,6 +588,8 @@ impl AppModel {
             next_environment_id: 0,
             next_geocode_id: 0,
             reader_anchor_flash: None,
+            reader_hints: ReaderHintState::default(),
+            reader_openable: 0,
             scrollbar: ScrollbarDragState::default(),
             hover: HoverTarget::default(),
             caches: RenderCaches::default(),

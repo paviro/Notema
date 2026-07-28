@@ -19,8 +19,8 @@ use ratatui_textarea::CursorMove;
 
 pub(crate) use action::{
     Action, BackgroundAction, BrowserAction, EditorAction, FilterAction, ImageAction,
-    InsightsAction, LocationAction, MetadataAction, OverlayAction, ReaderAction, SearchAction,
-    SettingsAction, WatchTarget,
+    InsightsAction, LocationAction, MetadataAction, OverlayAction, ReaderAction, ReaderHintAction,
+    SearchAction, SettingsAction, WatchTarget,
 };
 use actions::{
     delete_selected, delete_selected_journal, open_reader_link, save_internal_editor,
@@ -200,7 +200,11 @@ fn apply_action<B: Backend>(
             insights_scroll,
             journal_offset,
             entry_offset,
+            reader_hints,
+            reader_openable,
         } => {
+            app.reader_hints.sync(reader_hints);
+            app.reader_openable = reader_openable;
             if let Some(scroll) = reader_scroll {
                 app.nav.scroll.reader = scroll;
             }
@@ -259,6 +263,11 @@ fn apply_action<B: Backend>(
         }
         Action::Overlay(action) => handlers::overlay(app, action)?,
         Action::Reader(action) => handlers::reader(app, action),
+        Action::ReaderHint(action) => {
+            if let Some(followup) = handlers::reader_hint(app, action) {
+                return apply_action(terminal, app, followup);
+            }
+        }
         Action::Insights(action) => handlers::insights(app, action),
         Action::Filter(action) => handlers::filter(terminal, app, action)?,
     }

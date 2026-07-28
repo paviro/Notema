@@ -4,6 +4,7 @@ mod editor;
 mod entries;
 mod footer;
 mod frames;
+mod hints;
 mod image_viewer;
 pub(crate) mod insights;
 mod journals;
@@ -406,38 +407,17 @@ fn register_view_interactions(
         );
     }
 
-    let reader = &context.view.reader;
-    let visible_start = reader.scroll as usize;
-    let visible_end = visible_start.saturating_add(reader.content_rect.height as usize);
-    for hit in &reader.links {
-        if hit.line < visible_start || hit.line >= visible_end {
-            continue;
-        }
-        let heading_line = match &hit.target {
-            crate::tui::app::ReaderLinkTarget::Uri(uri) => {
-                uri.strip_prefix('#').and_then(|anchor| {
-                    reader
-                        .headings
-                        .iter()
-                        .find(|heading| heading.anchor == anchor)
-                        .map(|heading| heading.line)
-                })
-            }
-            crate::tui::app::ReaderLinkTarget::Image(_) => None,
-        };
-        context.view.interactions.push(
-            ratatui::layout::Rect::new(
-                reader.content_rect.x.saturating_add(hit.start as u16),
-                reader
-                    .content_rect
-                    .y
-                    .saturating_add((hit.line - visible_start) as u16),
-                hit.end.saturating_sub(hit.start) as u16,
-                1,
-            ),
+    let crate::tui::ui::ViewState {
+        reader,
+        interactions,
+        ..
+    } = &mut *context.view;
+    for (hit, rect) in reader.visible_links() {
+        interactions.push(
+            rect,
             InteractionKind::Link {
                 target: hit.target.clone(),
-                heading_line,
+                heading_line: reader.heading_line_for(&hit.target),
             },
         );
     }

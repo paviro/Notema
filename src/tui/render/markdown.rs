@@ -13,6 +13,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::tui::app::{ReaderHeading, ReaderLinkHit, ReaderLinkTarget};
 use crate::tui::theme::Theme;
 
+use super::hints::HintLabeller;
+
 mod table;
 mod wrapping;
 use wrapping::{rich_from_line, wrap_line, wrap_rich};
@@ -44,9 +46,17 @@ pub(super) fn render_text_chunk(
     show_urls: bool,
     entry_path: Option<&Path>,
     attachments_openable: bool,
+    hints: Option<&mut HintLabeller>,
 ) -> RenderedChunk {
-    MarkdownTerminalRenderer::new(theme, width, show_urls, entry_path, attachments_openable)
-        .render(text)
+    MarkdownTerminalRenderer::new(
+        theme,
+        width,
+        show_urls,
+        entry_path,
+        attachments_openable,
+        hints,
+    )
+    .render(text)
 }
 
 /// A styled run tagged with the link it belongs to, if any. The renderer
@@ -88,6 +98,10 @@ struct MarkdownTerminalRenderer<'a> {
     table: Option<MarkdownTable>,
     separate_next_block: bool,
     highlight_open: bool,
+    /// Hands out a link-hint chip for each openable link, when the reader is in
+    /// hint mode. Borrowed because labels run in document order across every
+    /// chunk of the body, not per chunk.
+    hints: Option<&'a mut HintLabeller>,
     /// The entry being rendered, used to recognize links into its own asset
     /// folder as openable attachments.
     entry_path: Option<PathBuf>,
@@ -148,6 +162,7 @@ impl<'a> MarkdownTerminalRenderer<'a> {
         show_urls: bool,
         entry_path: Option<&Path>,
         attachments_openable: bool,
+        hints: Option<&'a mut HintLabeller>,
     ) -> Self {
         Self {
             theme,
@@ -166,6 +181,7 @@ impl<'a> MarkdownTerminalRenderer<'a> {
             table: None,
             separate_next_block: false,
             highlight_open: false,
+            hints,
             entry_path: entry_path.map(Path::to_path_buf),
             attachments_openable,
         }
@@ -385,10 +401,10 @@ impl<'a> MarkdownTerminalRenderer<'a> {
             }
             MarkdownTagEnd::Link | MarkdownTagEnd::Image => {
                 self.pop_style();
-                if let Some((target, text, _id)) = self.links.pop()
-                    && self.show_urls
-                    && text.trim() != target.trim()
-                {
+                let Some((target, text, id)) = self.links.pop() else {
+                    return;
+                };
+                if self.show_urls && text.trim() != target.trim() {
                     // The name (tagged with its link id, so it is the clickable
                     // region) stays `md_link`; the untagged target trails it in the
                     // faint secondary style. When URLs are hidden the trailer is
@@ -396,6 +412,20 @@ impl<'a> MarkdownTerminalRenderer<'a> {
                     self.push_span(" (", self.theme.muted());
                     self.push_span(&target, self.theme.muted());
                     self.push_span(")", self.theme.muted());
+                }
+                // The hint chip trails the name it labels. The link is already
+                // popped, so these runs carry no link id and stay outside the
+                // clickable region — and being real text, wrapping makes room
+                // for them instead of anything being painted over.
+                let openable = self.is_openable(&target, self.link_targets[id].is_image);
+                let chip = openable
+                    .then_some(self.hints.as_mut())
+                    .flatten()
+                    .and_then(|labeller| labeller.take(ReaderLinkTarget::Uri(target.clone())));
+                if let Some(chip) = chip {
+                    for (text, style) in chip.runs(self.theme) {
+                        self.push_span(&text, style);
+                    }
                 }
             }
             MarkdownTagEnd::CodeBlock | MarkdownTagEnd::Table => {}
@@ -460,6 +490,18 @@ impl<'a> MarkdownTerminalRenderer<'a> {
         // into every following block. The editor highlighter is likewise
         // per-line-conservative, so this keeps reader and editor in agreement.
         self.highlight_open = false;
+    }
+
+    /// Whether this target opens — the one predicate behind both the click hits
+    /// and the hint chips, so a link can never be labelled but not clickable.
+    fn is_openable(&self, target: &str, is_image: bool) -> bool {
+        is_openable_link(target)
+            || (!is_image
+                && is_openable_attachment(
+                    target,
+                    self.attachments_openable,
+                    self.entry_path.as_deref(),
+                ))
     }
 
     fn push_style(&mut self, style: Style) {
@@ -639,14 +681,7 @@ impl<'a> MarkdownTerminalRenderer<'a> {
             let prefix_width = prefix.width();
             for (start, end, id) in content.links {
                 let link = &self.link_targets[id];
-                let openable = is_openable_link(&link.target)
-                    || (!link.is_image
-                        && is_openable_attachment(
-                            &link.target,
-                            self.attachments_openable,
-                            self.entry_path.as_deref(),
-                        ));
-                if openable {
+                if self.is_openable(&link.target, link.is_image) {
                     self.link_hits.push(ReaderLinkHit {
                         line: self.lines.len(),
                         start: prefix_width.saturating_add(start),
@@ -795,7 +830,16 @@ mod wrap_tests {
     /// Render just the display lines (URLs shown) for the many tests that only
     /// assert on rendered text.
     fn render_lines(source: &str, width: usize) -> Vec<Line<'static>> {
-        render_text_chunk(&Theme::terminal_default(), source, width, true, None, false).lines
+        render_text_chunk(
+            &Theme::terminal_default(),
+            source,
+            width,
+            true,
+            None,
+            false,
+            None,
+        )
+        .lines
     }
 
     #[test]
@@ -1081,6 +1125,7 @@ mod wrap_tests {
             true,
             None,
             false,
+            None,
         );
         let spans = &chunk.lines[0].spans;
 
@@ -1113,6 +1158,7 @@ mod wrap_tests {
             true,
             None,
             false,
+            None,
         );
         let rendered: String = chunk.lines[0]
             .spans

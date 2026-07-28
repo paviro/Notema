@@ -1,7 +1,7 @@
 use super::*;
 use crate::tui::features::metadata::EditMetadataFocus;
 use crate::tui::render::tab_strip::StripTab;
-use crate::tui::state::ListNav;
+use crate::tui::state::{ListNav, ReaderHintMatch};
 
 /// Adjust the focused list's scroll offset so a selection moved by a handler
 /// stays on screen, using the live terminal geometry.
@@ -457,6 +457,33 @@ pub(super) fn reader(app: &mut AppModel, action: ReaderAction) {
         ReaderAction::ScrollToEnd => app.nav.scroll.reader = u16::MAX,
         ReaderAction::SetFullscreen(fullscreen) => app.nav.reader_fullscreen = fullscreen,
     }
+}
+
+/// The link-hint state machine. A completed label returns the same
+/// `OpenReaderLink` a click produces, so image, URL, attachment and anchor
+/// targets all route through the one already-tested opener.
+pub(super) fn reader_hint(app: &mut AppModel, action: ReaderHintAction) -> Option<Action> {
+    match action {
+        ReaderHintAction::Begin => app.reader_hints.begin(),
+        ReaderHintAction::Cancel => app.reader_hints.deactivate(),
+        ReaderHintAction::Pop => app.reader_hints.pop(),
+        ReaderHintAction::Push(ch) => match app.reader_hints.resolve(ch) {
+            ReaderHintMatch::Exact(index) => {
+                let hint = app.reader_hints.labels()[index].clone();
+                // An image target opens the viewer overlay; the mode has to be
+                // down before it does, or it would outlive the reader below.
+                app.reader_hints.deactivate();
+                return Some(Action::Browser(BrowserAction::OpenReaderLink {
+                    target: hint.target,
+                    heading_line: hint.heading_line,
+                }));
+            }
+            ReaderHintMatch::Prefix => app.reader_hints.push(ch),
+            // A miss is swallowed, not an exit — see `ReaderHintMatch::Dead`.
+            ReaderHintMatch::Dead => {}
+        },
+    }
+    None
 }
 
 pub(super) fn insights(app: &mut AppModel, action: InsightsAction) {

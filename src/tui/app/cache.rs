@@ -48,6 +48,11 @@ struct EntryBodyKey {
     width: usize,
     theme: crate::tui::theme::Theme,
     show_link_urls: bool,
+    /// Hint mode inserts a chip beside every openable target, so it wraps to a
+    /// different body. The typed prefix is part of the key because it mutes the
+    /// chips it rules out; it is non-empty only past 26 targets, so it rarely
+    /// costs a rebuild.
+    hints: Option<String>,
 }
 
 /// The per-frame render memo caches and the version counters that invalidate
@@ -240,6 +245,7 @@ impl AppModel {
         &self,
         path: Option<&Path>,
         width: usize,
+        hints: Option<&str>,
         build: impl FnOnce() -> RenderedEntryBody,
     ) -> Rc<RenderedEntryBody> {
         let key = EntryBodyKey {
@@ -248,6 +254,7 @@ impl AppModel {
             width,
             theme: self.appearance.theme.clone(),
             show_link_urls: self.services.config.ui.layout.reader.show_link_urls,
+            hints: hints.map(str::to_string),
         };
         self.caches.body(key, build)
     }

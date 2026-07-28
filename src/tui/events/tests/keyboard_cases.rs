@@ -863,3 +863,328 @@ fn tab_commits_a_suggestion_for_every_facet() {
         assert_eq!(app.search.query.as_str(), expected);
     }
 }
+
+/// Begin link-hint mode and render, so the labels under test are the ones the
+/// frame actually painted.
+fn begin_hints(app: &mut AppModel) {
+    app.reader_hints.begin();
+    render_and_sync(app, 80, 24);
+}
+
+#[test]
+fn o_activates_link_hints_on_the_focused_reader() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    // The count `o` is gated on comes from the drawn body, like the labels do.
+    render_and_sync(&mut app, 80, 24);
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('o')), true),
+        Some(Action::ReaderHint(ReaderHintAction::Begin))
+    );
+}
+
+#[test]
+fn o_is_inert_without_a_selected_entry() {
+    let mut app = app_with_journals(&["work"]);
+    app.nav.focus = Focus::Reader;
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('o')), true),
+        None
+    );
+}
+
+/// Nothing openable, nothing to press — `o` goes quiet, the same as `i` on an
+/// entry with no images.
+#[test]
+fn o_is_inert_with_nothing_to_open() {
+    let mut app = app_reading("Just prose, no links at all.");
+    render_and_sync(&mut app, 80, 24);
+
+    assert_eq!(app.reader_openable, 0);
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Char('o')), true),
+        None
+    );
+}
+
+#[test]
+fn typing_a_unique_hint_label_opens_its_link() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    begin_hints(&mut app);
+    let label = app.reader_hints.labels()[0].label.clone();
+    assert_eq!(label, "a", "one target takes the first home-row letter");
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    let outcome = dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::ReaderHint(ReaderHintAction::Push('a')),
+    )
+    .unwrap();
+
+    assert_eq!(
+        outcome.effects.as_slice(),
+        [Effect::Open {
+            target: OpenTarget::Uri("https://example.com".to_string()),
+            success_message: "Opened link".to_string(),
+        }]
+    );
+    assert!(
+        !app.reader_hints.is_active(),
+        "the mode closes on activation"
+    );
+}
+
+#[test]
+fn typing_a_hint_label_for_an_anchor_scrolls_to_its_heading() {
+    let filler = "\n\nfiller line".repeat(40);
+    let mut app = app_reading(&format!("[go](#details){filler}\n\n## Details\n\ntail"));
+    begin_hints(&mut app);
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::ReaderHint(ReaderHintAction::Push('a')),
+    )
+    .unwrap();
+
+    assert!(app.nav.scroll.reader > 0, "jumped to the heading");
+    assert!(app.reader_anchor_flash.is_some(), "and flashed it");
+}
+
+#[test]
+fn a_two_character_label_needs_both_keys() {
+    // Past the 26-letter alphabet, so every label is two characters wide.
+    let links: String = (0..30)
+        .map(|index| format!("[link {index}](https://example.com/{index}) "))
+        .collect();
+    let mut app = app_reading(&links);
+    begin_hints(&mut app);
+    assert_eq!(app.reader_hints.labels()[0].label, "aa");
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    let outcome = dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::ReaderHint(ReaderHintAction::Push('a')),
+    )
+    .unwrap();
+
+    assert!(outcome.effects.is_empty(), "one key only narrows the field");
+    assert_eq!(app.reader_hints.pending(), "a");
+    assert!(app.reader_hints.is_active());
+
+    let outcome = dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::ReaderHint(ReaderHintAction::Push('a')),
+    )
+    .unwrap();
+    assert_eq!(outcome.effects.len(), 1, "the second key opens it");
+}
+
+/// A letter that matches nothing is swallowed, not an exit — which letters mean
+/// nothing changes with the entry, so only Esc may end the mode.
+#[test]
+fn an_unmatched_letter_is_ignored_and_keeps_hint_mode_up() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    begin_hints(&mut app);
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    for ch in ['z', 'o'] {
+        let outcome = dispatch_action(
+            &mut terminal,
+            &mut app,
+            Action::ReaderHint(ReaderHintAction::Push(ch)),
+        )
+        .unwrap();
+
+        assert!(outcome.effects.is_empty(), "{ch} opens nothing");
+        assert!(app.reader_hints.is_active(), "{ch} does not end the mode");
+        assert!(app.reader_hints.pending().is_empty(), "{ch} is not banked");
+    }
+    assert!(app.toasts.items().is_empty(), "a miss is silent");
+}
+
+/// With enough targets to reach it, `o` is a label like any other — the key
+/// that opened the mode is not spent on closing it.
+#[test]
+fn o_opens_its_target_once_the_alphabet_reaches_it() {
+    let links: String = (0..20)
+        .map(|index| format!("[link {index}](https://example.com/{index}) "))
+        .collect();
+    let mut app = app_reading(&links);
+    begin_hints(&mut app);
+    let labelled = app
+        .reader_hints
+        .labels()
+        .iter()
+        .find(|hint| hint.label == "o")
+        .expect("o is assigned once there are 18+ targets")
+        .target
+        .clone();
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    let outcome = dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::ReaderHint(ReaderHintAction::Push('o')),
+    )
+    .unwrap();
+
+    let ReaderLinkTarget::Uri(uri) = labelled else {
+        panic!("expected a uri target");
+    };
+    assert_eq!(
+        outcome.effects.as_slice(),
+        [Effect::Open {
+            target: OpenTarget::Uri(uri),
+            success_message: "Opened link".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn esc_closes_the_hints_before_it_collapses_fullscreen() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    app.nav.reader_fullscreen = true;
+    begin_hints(&mut app);
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::ReaderHint(ReaderHintAction::Cancel))
+    );
+    assert!(
+        app.nav.reader_fullscreen,
+        "still fullscreen after the first Esc"
+    );
+}
+
+#[test]
+fn scroll_keys_stay_live_while_the_hints_are_up() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    begin_hints(&mut app);
+
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Down), true),
+        Some(Action::Reader(ReaderAction::ScrollLines(1)))
+    );
+}
+
+#[test]
+fn digits_no_longer_open_images() {
+    let app = app_reading("A [link](https://example.com) here.");
+
+    for ch in ['0', '1', '9'] {
+        assert_eq!(
+            keyboard::key_to_action(&app, key(KeyCode::Char(ch)), true),
+            None,
+            "{ch}"
+        );
+    }
+}
+
+#[test]
+fn hint_mode_ends_when_the_reader_loses_focus() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    begin_hints(&mut app);
+    assert!(app.reader_hints.is_active());
+
+    app.nav.focus = Focus::Entries;
+    render_and_sync(&mut app, 80, 24);
+
+    assert!(!app.reader_hints.is_active());
+}
+
+/// An overlay suspends the mode: the frame paints no chips, so it goes down.
+#[test]
+fn hint_mode_ends_quietly_when_an_overlay_opens() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    begin_hints(&mut app);
+
+    app.open_help();
+    render_and_sync(&mut app, 80, 24);
+
+    assert!(!app.reader_hints.is_active());
+    assert!(app.toasts.items().is_empty(), "a suspension says nothing");
+}
+
+/// Labels cover the whole entry, so scrolling neither relabels nor disturbs a
+/// half-typed one — the chips scroll with the text they sit in.
+#[test]
+fn scrolling_keeps_the_labels_and_a_pending_prefix() {
+    let links: String = (0..30)
+        .map(|index| format!("[link {index}](https://example.com/{index})\n\n"))
+        .collect();
+    let mut app = app_reading(&links);
+    begin_hints(&mut app);
+    let before: Vec<_> = app
+        .reader_hints
+        .labels()
+        .iter()
+        .map(|hint| hint.target.clone())
+        .collect();
+    app.reader_hints.push('a');
+
+    app.scroll_reader(6);
+    render_and_sync(&mut app, 80, 24);
+
+    let after: Vec<_> = app
+        .reader_hints
+        .labels()
+        .iter()
+        .map(|hint| hint.target.clone())
+        .collect();
+    assert_eq!(before, after, "the label set spans the whole entry");
+    assert_eq!(app.reader_hints.pending(), "a");
+}
+
+/// A target scrolled out of sight still opens: its chip is part of the body, so
+/// the label stays valid wherever the reader happens to be parked.
+#[test]
+fn a_label_scrolled_out_of_view_still_opens() {
+    let links: String = (0..30)
+        .map(|index| format!("[link {index}](https://example.com/{index})\n\n"))
+        .collect();
+    let mut app = app_reading(&links);
+    begin_hints(&mut app);
+    app.scroll_reader(40);
+    render_and_sync(&mut app, 80, 24);
+
+    // 30 targets, so labels are two characters wide.
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::ReaderHint(ReaderHintAction::Push('a')),
+    )
+    .unwrap();
+    let outcome = dispatch_action(
+        &mut terminal,
+        &mut app,
+        Action::ReaderHint(ReaderHintAction::Push('a')),
+    )
+    .unwrap();
+
+    assert_eq!(
+        outcome.effects.as_slice(),
+        [Effect::Open {
+            target: OpenTarget::Uri("https://example.com/0".to_string()),
+            success_message: "Opened link".to_string(),
+        }]
+    );
+}
+
+/// Reached only past the `o` gate — by a stale click, say — the mode collapses
+/// on the first frame and says nothing about it.
+#[test]
+fn hint_mode_collapses_silently_with_nothing_to_label() {
+    let mut app = app_reading("Just prose, no links at all.");
+
+    begin_hints(&mut app);
+
+    assert!(!app.reader_hints.is_active());
+    assert!(app.toasts.items().is_empty());
+}

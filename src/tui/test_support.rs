@@ -46,19 +46,35 @@ pub(crate) fn app_with_journals(names: &[&str]) -> AppModel {
     })
 }
 
+/// Write the single `work`/`a.md` entry both [`app_with_entry`] and
+/// [`app_reading`] are built on, with `body` under its `# A` heading.
+fn write_lone_entry(root: &Path, body: &str) {
+    let entry_dir = root.join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    fs::write(
+        entry_dir.join("a.md"),
+        format!(
+            "+++\nschema_version = 1\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\n# A\n{body}\n"
+        ),
+    )
+    .unwrap();
+}
+
 /// An `AppModel` with a single `work` journal holding one entry (`a.md`), with the
 /// `work` journal selected.
 pub(crate) fn app_with_entry() -> AppModel {
-    let mut app = app_in_temp(|root| {
-        let entry_dir = root.join("work").join("2026-07-01");
-        fs::create_dir_all(&entry_dir).unwrap();
-        fs::write(
-            entry_dir.join("a.md"),
-            "+++\nschema_version = 1\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\n# A\nBody\n",
-        )
-        .unwrap();
-    });
+    let mut app = app_in_temp(|root| write_lone_entry(root, "Body"));
     app.select_journal_by_name("work");
+    app
+}
+
+/// Like [`app_with_entry`], but with `body` as the entry's content and the focus
+/// already on the reader — for the tests that drive the reader itself.
+pub(crate) fn app_reading(body: &str) -> AppModel {
+    let body = body.to_string();
+    let mut app = app_in_temp(move |root| write_lone_entry(root, &body));
+    app.select_journal_by_name("work");
+    app.nav.focus = super::app::Focus::Reader;
     app
 }
 

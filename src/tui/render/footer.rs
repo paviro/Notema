@@ -46,6 +46,11 @@ pub(crate) enum HintId {
     LocationSave,
     LocationClear,
     OpenImageViewer,
+    OpenReaderLinks,
+    /// The alphabet chip shown while link-hint mode is up. Inert: the keys it
+    /// names are the labels in the body, not something to click.
+    ReaderHintKeys,
+    CancelReaderHints,
     // The per-type metadata editors, each a direct footer chip (and mouse button)
     // for the selected entry.
     EditTags,
@@ -341,6 +346,21 @@ pub(crate) fn footer_lines(theme: &Theme, app: &AppModel, width: u16) -> Text<'s
     if app.editor.is_some() {
         return Text::from(editor_footer_line().lines(theme, width, hovered));
     }
+    // Link-hint mode claims every letter for its labels, so the usual chips
+    // would advertise keys that do nothing while it is up. Show only what still
+    // works. Ahead of the mode split because the hints span browse and search
+    // alike.
+    if app.reader_hints.is_active() {
+        return Text::from(
+            HintLine {
+                hints: vec![
+                    Hint::new("open", "a–z", HintId::ReaderHintKeys),
+                    Hint::new("cancel", "esc", HintId::CancelReaderHints),
+                ],
+            }
+            .lines(theme, width, hovered),
+        );
+    }
 
     let lines = match app.nav.mode {
         Mode::Search => search_footer_line(app).lines(theme, width, hovered),
@@ -545,7 +565,11 @@ fn browse_footer_line(app: &AppModel) -> HintLine {
             hints.extend(browse_footer_tail());
             hints
         }
-        Focus::Reader if app.has_selected_entry_target() => focused_entry_footer(app),
+        Focus::Reader if app.has_selected_entry_target() => {
+            let mut hints = focused_entry_footer(app);
+            hints.extend(open_links_hint(app));
+            hints
+        }
         Focus::Reader => vec![Hint::new("new entry", "n", HintId::NewEntry)],
     };
 
@@ -559,6 +583,14 @@ fn image_hint(app: &AppModel) -> Option<Hint> {
         "i",
         HintId::OpenImageViewer,
     ))
+}
+
+/// The `open link (o)` chip: link-hint mode over everything the entry can open.
+/// Shown only when there is something to open, like [`image_hint`], and only on
+/// the focused reader — hence not in [`focused_entry_footer`], which the entries
+/// column shares.
+fn open_links_hint(app: &AppModel) -> Option<Hint> {
+    (app.reader_openable > 0).then_some(Hint::new("open link", "o", HintId::OpenReaderLinks))
 }
 
 /// The cheatsheet pointer (`?`). The full binding set — the journals/settings/hints

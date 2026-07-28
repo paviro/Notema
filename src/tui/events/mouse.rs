@@ -20,7 +20,8 @@ use super::DispatchOutcome;
 use super::action::{
     Action, BrowserAction, DialogListTarget, EditMetadataFocusTarget, EditorAction, FilterAction,
     ImageAction, InsightsAction, LocationAction, MetadataAction, MetadataSearchTarget, MouseAction,
-    OverlayAction, ScrollbarMetrics, SearchAction, SettingsAction, TextFieldTarget,
+    OverlayAction, ReaderHintAction, ScrollbarMetrics, SearchAction, SettingsAction,
+    TextFieldTarget,
 };
 
 mod overlay;
@@ -1070,6 +1071,12 @@ pub(super) fn hint_id_to_action(app: &AppModel, id: render::HintId) -> Option<Ac
         render::HintId::OpenImageViewer if app.selected_entry_image_count() > 0 => {
             Some(Action::Images(ImageAction::OpenViewer(0)))
         }
+        render::HintId::OpenReaderLinks
+            if app.nav.focus == Focus::Reader && app.reader_openable > 0 =>
+        {
+            Some(Action::ReaderHint(ReaderHintAction::Begin))
+        }
+        render::HintId::CancelReaderHints => Some(Action::ReaderHint(ReaderHintAction::Cancel)),
         // The per-type metadata chips (and star) open their editor for the
         // selected entry, the same as the bare keys.
         render::HintId::EditTags if app.can_act_on_selected_entry() => Some(Action::Metadata(

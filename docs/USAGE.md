@@ -195,13 +195,24 @@ On save, the file is copied into the entry's own `<entry>.assets/` folder and th
 reference is rewritten to point there; the original file is left untouched. In an
 encrypted journal the copy is encrypted alongside the entry.
 
-- Images appear in the reader as a numbered `[Image N …]` label — click it or press
-  its number to open the fullscreen viewer.
+- Images appear in the reader as a numbered `[Image N: alt]` label — click it to open
+  the fullscreen viewer, or press `i` for the first image and step through the rest
+  with the arrow keys.
 - Other files (PDF, audio, video, …) become a link labelled by the file name. In an
   unencrypted journal, clicking the link opens the file in your OS default app. In an
   encrypted journal the file is stored encrypted and can't be handed to the OS, so the
   link is shown but not clickable for now — in-app viewing of more file types may come
   later.
+
+### Opening things from the keyboard
+
+Press `o` on the focused reader and every openable target in the entry — links,
+image labels, attachments, in-entry `#anchor` jumps — grows a `│ press a │` chip.
+Type the letter to open it; past 26 targets the labels are two letters, so type
+both.
+
+Labels cover the whole entry, so a target you have scrolled past still opens.
+`Esc` closes them, and only `Esc` — every other key is a label while they are up.
 
 ## Import from Day One
 

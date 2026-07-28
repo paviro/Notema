@@ -140,6 +140,7 @@ const HELP_SECTIONS: [(&str, &[(&str, &str)]); 6] = [
             ("n", "New entry"),
             ("d", "Delete"),
             ("s", "Star"),
+            ("o", "Open link / image"),
             ("i", "Images"),
         ],
     ),

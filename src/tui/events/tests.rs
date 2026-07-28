@@ -11,7 +11,7 @@ use crate::{
         },
         render, scroll,
         state::{HoverTarget, ListNav},
-        test_support::{app_with_entries, app_with_entry, app_with_journals, new_app},
+        test_support::{app_reading, app_with_entries, app_with_entry, app_with_journals, new_app},
     },
 };
 use crossterm::event::{
@@ -65,6 +65,30 @@ fn render_view(
         })
         .unwrap();
     (terminal, view)
+}
+
+/// Render a frame and dispatch the `ViewRendered` the run loop would, so tests
+/// exercise the real render-to-model handshake that link-hint labels ride on.
+fn render_and_sync(
+    app: &mut AppModel,
+    w: u16,
+    h: u16,
+) -> ratatui::Terminal<ratatui::backend::TestBackend> {
+    let (mut terminal, mut view) = render_view(app, w, h);
+    dispatch_action(
+        &mut terminal,
+        app,
+        Action::ViewRendered {
+            reader_scroll: (view.reader.line_count > 0).then_some(view.reader.scroll),
+            insights_scroll: (view.insights.total > 0).then_some(view.insights.scroll),
+            journal_offset: view.journal_offset,
+            entry_offset: view.entry_offset,
+            reader_hints: std::mem::take(&mut view.reader.hints),
+            reader_openable: view.reader.openable,
+        },
+    )
+    .unwrap();
+    terminal
 }
 
 fn mouse_in_area(app: &mut AppModel, event: MouseEvent, w: u16, h: u16) {

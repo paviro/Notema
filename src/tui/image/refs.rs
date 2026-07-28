@@ -34,26 +34,6 @@ pub(crate) fn sole_image_ref(line: &str, entry_path: &Path) -> Option<(String, I
     ))
 }
 
-/// The digit key that opens the image at `index` (0-based): first nine bind to
-/// `1`–`9`, the tenth to `0`, none past that. Inverse of [`image_for_digit`].
-pub(crate) fn digit_for_image(index: usize) -> Option<char> {
-    match index {
-        0..=8 => Some((b'1' + index as u8) as char),
-        9 => Some('0'),
-        _ => None,
-    }
-}
-
-/// The image index a digit key opens: `1`–`9` the first nine, `0` the tenth.
-/// Inverse of [`digit_for_image`].
-pub(crate) fn image_for_digit(ch: char) -> Option<usize> {
-    match ch {
-        '1'..='9' => Some(ch as usize - '1' as usize),
-        '0' => Some(9),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,15 +79,5 @@ mod tests {
         assert_eq!(images.len(), 2);
         assert_eq!(images[0].file_name, "x9k2.png");
         assert_eq!(images[1].file_name, "aa11.png");
-    }
-
-    #[test]
-    fn digit_and_image_index_are_inverses() {
-        for index in 0..10 {
-            let digit = digit_for_image(index).expect("first ten images bind to a digit");
-            assert_eq!(image_for_digit(digit), Some(index));
-        }
-        assert_eq!(digit_for_image(10), None);
-        assert_eq!(image_for_digit('a'), None);
     }
 }

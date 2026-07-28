@@ -990,17 +990,17 @@ fn entry_body_cache_is_reused_until_entry_or_width_changes() {
         lines: vec![Line::from(text)],
         ..RenderedEntryBody::default()
     };
-    let first = app.cached_entry_body(path.as_deref(), 40, || body("x"));
+    let first = app.cached_entry_body(path.as_deref(), 40, None, || body("x"));
     // Same entry + width → cached rows returned, the builder isn't re-run.
-    let same = app.cached_entry_body(path.as_deref(), 40, || body("y"));
+    let same = app.cached_entry_body(path.as_deref(), 40, None, || body("y"));
     assert!(Rc::ptr_eq(&first, &same));
     // A different width rebuilds.
-    let narrower = app.cached_entry_body(path.as_deref(), 20, || body("z"));
+    let narrower = app.cached_entry_body(path.as_deref(), 20, None, || body("z"));
     assert!(!Rc::ptr_eq(&first, &narrower));
     // Reloading the store bumps entries_version, invalidating the cache.
     app.request_library_reload(ReloadReason::Automatic);
     settle_library_reload(&mut app);
-    let after = app.cached_entry_body(path.as_deref(), 40, || body("w"));
+    let after = app.cached_entry_body(path.as_deref(), 40, None, || body("w"));
     assert!(!Rc::ptr_eq(&first, &after));
 }
 
@@ -1016,7 +1016,7 @@ fn search_recompute_keeps_body_and_analytics_caches_but_rebuilds_rows() {
     let path = app.selected_entry_target().map(|target| target.path);
 
     // Prime all three caches.
-    let body = app.cached_entry_body(path.as_deref(), 40, || RenderedEntryBody {
+    let body = app.cached_entry_body(path.as_deref(), 40, None, || RenderedEntryBody {
         lines: vec![Line::from("x")],
         ..RenderedEntryBody::default()
     });
@@ -1033,7 +1033,7 @@ fn search_recompute_keeps_body_and_analytics_caches_but_rebuilds_rows() {
 
     // Body and analytics caches key on entries_version, which is untouched:
     // requerying returns the same Rc (builder skipped).
-    let body_after = app.cached_entry_body(path.as_deref(), 40, || RenderedEntryBody {
+    let body_after = app.cached_entry_body(path.as_deref(), 40, None, || RenderedEntryBody {
         lines: vec![Line::from("y")],
         ..RenderedEntryBody::default()
     });
