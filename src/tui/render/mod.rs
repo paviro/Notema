@@ -242,6 +242,14 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut AppModel, context: &mut Rend
             .interactions
             .push(area, InteractionKind::Overlay);
     }
+    // After every panel, so the popup can dim what it hangs over; before the
+    // overlays, so a real dialog still covers it.
+    entries::draw_search_overlay(
+        theme,
+        frame,
+        layout.entries.map(|entries| entries.panel.area),
+        app,
+    );
     draw_overlays(theme, frame, app);
     register_overlay_interactions(
         context,
@@ -507,6 +515,7 @@ fn register_overlay_interactions(
             register_dialog_list(
                 context,
                 layout.list,
+                layout.list,
                 state.offset(),
                 state.filtered.len(),
                 DialogId::Metadata,
@@ -530,6 +539,7 @@ fn register_overlay_interactions(
             );
             register_dialog_list(
                 context,
+                layout.list,
                 layout.list,
                 state.offset(),
                 state.item_count(),
@@ -620,6 +630,7 @@ fn register_overlay_interactions(
             register_dialog_list(
                 context,
                 layout.list,
+                layout.list,
                 state.offset(),
                 state.entries.len(),
                 DialogId::ThemePicker,
@@ -640,6 +651,7 @@ fn register_overlay_interactions(
             }
             register_dialog_list(
                 context,
+                layout.list,
                 layout.list,
                 state.offset(),
                 state.current_rows().len(),
@@ -748,18 +760,22 @@ fn register_overlay_interactions(
             .interactions
             .push(area, InteractionKind::TextField(id));
     }
-    // After the field and after the entry rows: the list hangs over them, and the
-    // hit test takes the last region pushed at a point.
-    if app.suggestions_open()
+    // After the field and after the entry rows: the popup hangs over them, and
+    // the hit test takes the last region pushed at a point. The whole frame is
+    // registered, not just the rows, so a click on its edge stays with the popup.
+    let suggestion_rows = app.search.suggestions.rows.len();
+    if app.suggestions_visible()
         && let Some(area) = entries_area
-        && let Some(rect) =
-            entries::search_suggestions_rect(context.theme, area, app.search.suggestions.rows.len())
+        && let Some(outer) = entries::search_suggestions_rect(context.theme, area, suggestion_rows)
+        && let Some(list) =
+            entries::search_suggestions_list_rect(context.theme, area, suggestion_rows)
     {
         register_dialog_list(
             context,
-            rect,
+            outer,
+            list,
             app.search.suggestions.offset(),
-            app.search.suggestions.rows.len(),
+            suggestion_rows,
             DialogId::SearchSuggestions,
         );
     }
@@ -787,15 +803,21 @@ fn register_menu(
     }
 }
 
+/// Register a dialog list's clickable regions. `surface` is what swallows a
+/// click — for a framed popup that is the whole frame, so its edge and padding
+/// don't hand the click to whatever it hangs over; `list` is the drawn row band
+/// that rows, viewport and scrollbar all come from. A dialog whose list fills
+/// its frame passes the same rect for both.
 fn register_dialog_list(
     context: &mut RenderContext<'_>,
+    surface: ratatui::layout::Rect,
     list: ratatui::layout::Rect,
     offset: usize,
     len: usize,
     dialog: DialogId,
 ) {
     context.view.interactions.push(
-        list,
+        surface,
         InteractionKind::DialogList {
             dialog,
             viewport: list.height,

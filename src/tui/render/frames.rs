@@ -86,6 +86,49 @@ pub(crate) fn dialog_list_width(
     }
 }
 
+/// Rows an anchored popup's frame consumes above and below its content.
+/// Bordered chrome spends them on the box; flat chrome on a blank row each side
+/// of the options, so they breathe without a rule to sit against.
+pub(crate) const POPUP_FRAME_ROWS: u16 = 2;
+
+/// Columns an anchored popup's frame consumes on each side. Bordered chrome
+/// spends one on the box and one on padding; flat chrome takes both as padding,
+/// so its surface reads as a card rather than a list with a wide margin.
+pub(crate) const POPUP_FRAME_COLS: u16 = 2;
+
+/// An anchored popup's content rect. Unlike [`dialog_inner`] the inset is the
+/// same in both chromes — a popup carries no title row for a border to fold
+/// into — so no sizing helper downstream has to branch on chrome.
+pub(crate) fn popup_inner(area: Rect) -> Rect {
+    // Saturating per-axis, like `dialog_inner`: sizing helpers probe with
+    // height-1 rects and still need the real width back.
+    Rect {
+        x: area.x.saturating_add(POPUP_FRAME_COLS),
+        y: area.y.saturating_add(POPUP_FRAME_ROWS / 2),
+        width: area.width.saturating_sub(2 * POPUP_FRAME_COLS),
+        height: area.height.saturating_sub(POPUP_FRAME_ROWS),
+    }
+}
+
+/// Clear and frame an anchored popup — a surface that hangs off the thing that
+/// spawned it rather than sitting centered — returning [`popup_inner`].
+///
+/// Bordered chrome draws an untitled box; flat chrome lets the dialog surface
+/// and the padding do the work, the same trade it makes everywhere else.
+pub(crate) fn draw_popup_frame(theme: &Theme, frame: &mut Frame<'_>, area: Rect) -> Rect {
+    clear_surface(theme, frame, area, theme.dialog_bg());
+    if !flat_chrome(theme) {
+        frame.render_widget(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_set(theme.glyphs().borders.border_set())
+                .border_style(theme.dialog_border()),
+            area,
+        );
+    }
+    popup_inner(area)
+}
+
 /// A single full-width content row `offset` rows below the top of `inner`.
 pub(crate) fn dialog_row(inner: Rect, offset: u16) -> Rect {
     Rect {

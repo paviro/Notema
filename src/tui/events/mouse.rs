@@ -922,13 +922,19 @@ fn hover_target_at(
         return target;
     }
 
-    // …and its suggestion list hangs over the entry rows, so it wins too.
-    if let Some(InteractionKind::DialogRow {
-        dialog: DialogId::SearchSuggestions,
-        index,
-    }) = view.interactions.hit(col, row)
-    {
-        return HoverTarget::DialogRow(*index);
+    // …and its suggestion popup hangs over the entry rows, so it wins too — the
+    // whole frame, not just the rows, or its edge and the blank tail below the
+    // last option would highlight the entry they are covering.
+    match view.interactions.hit(col, row) {
+        Some(InteractionKind::DialogRow {
+            dialog: DialogId::SearchSuggestions,
+            index,
+        }) => return HoverTarget::DialogRow(*index),
+        Some(InteractionKind::DialogList {
+            dialog: DialogId::SearchSuggestions,
+            ..
+        }) => return HoverTarget::None,
+        _ => {}
     }
 
     // Reader link hits (markdown links and image labels alike); the lookup

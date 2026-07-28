@@ -20,9 +20,18 @@ use crate::tui::{
 use super::{offsets, parse::unquote};
 
 impl AppModel {
-    /// Whether the suggestion list is on screen.
+    /// Whether the suggestion list is taking keys — it stays open underneath an
+    /// overlay, which is why [`Self::suggestions_visible`] and not this one
+    /// gates anything that draws or hit-tests.
     pub(crate) fn suggestions_open(&self) -> bool {
         self.is_search_input_active() && self.search.suggestions.is_open()
+    }
+
+    /// Whether the suggestion list is on screen: open, with nothing drawn over
+    /// it. The draw and the click map share this so an overlay can't leave
+    /// clickable rows behind for a popup nobody can see.
+    pub(crate) fn suggestions_visible(&self) -> bool {
+        self.suggestions_open() && !self.has_overlay() && self.editor.is_none()
     }
 
     /// Rebuild the suggestions for wherever the caret now is. Cheap after the

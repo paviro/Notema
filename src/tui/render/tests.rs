@@ -4439,6 +4439,24 @@ mod scrim_tests {
         assert_eq!(buf[(0u16, 0u16)].fg, Color::Rgb(0x80, 0x80, 0x80));
         assert!(buf[(0u16, 0u16)].modifier.contains(Modifier::DIM));
     }
+
+    /// A fractional scrim blends proportionally and drops the DIM fallback —
+    /// there is no half a DIM, so a non-modal surface leaves palette themes
+    /// alone rather than dimming them as hard as a dialog would.
+    #[test]
+    fn a_scaled_scrim_blends_less_and_never_dims() {
+        let theme = theme::test_flat_theme(); // scrim strength 0.45
+        let area = Rect::new(0, 0, 2, 1);
+        let mut buf = Buffer::empty(area);
+        buf[(0u16, 0u16)].fg = Color::Rgb(0x80, 0x80, 0x80);
+        buf[(1u16, 0u16)].fg = Color::Reset;
+
+        chrome::scrim_scaled(&theme, &mut buf, area, 0.5);
+
+        // 0x80 * (1 - 0.225) = 0x63, against 0x46 at full strength.
+        assert_eq!(buf[(0u16, 0u16)].fg, Color::Rgb(0x63, 0x63, 0x63));
+        assert!(!buf[(1u16, 0u16)].modifier.contains(Modifier::DIM));
+    }
 }
 
 /// The suggestion list hangs under the query field and over the results, and it
@@ -4501,4 +4519,229 @@ fn the_suggestion_list_draws_under_the_query_field() {
     let screen = drawn(&mut app);
     assert!(!screen.contains("apricot"), "{screen}");
     assert_eq!(app.nav.mode, Mode::Search);
+}
+
+/// The suggestion popup's own chrome: an app in search mode with `count` tag
+/// values on offer, its entries panel area, and the popup rects derived from it.
+mod suggestion_popup_tests {
+    use super::*;
+    use crate::tui::render::entries::{search_suggestions_list_rect, search_suggestions_rect};
+    use crate::tui::render::frames::{POPUP_FRAME_COLS, POPUP_FRAME_ROWS, popup_inner};
+    use crate::tui::theme;
+
+    const SCREEN: (u16, u16) = (120, 30);
+
+    /// A library whose entries carry `count` distinct tags all starting `a`, so
+    /// typing `tags:a` offers exactly that many values.
+    fn app_offering(count: usize, active_theme: theme::Theme) -> AppModel {
+        use crate::tui::test_support::app_in_temp;
+
+        let mut app = app_in_temp(|root| {
+            let dir = root.join("work").join("2026-07-01");
+            std::fs::create_dir_all(&dir).unwrap();
+            for index in 0..count {
+                std::fs::write(
+                    dir.join(format!("e{index}.md")),
+                    format!(
+                        "+++\nschema_version = 1\n\n[entry]\ntags = [\"a{index:02}\"]\n\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\nbody\n"
+                    ),
+                )
+                .unwrap();
+            }
+        });
+        app.appearance.theme = active_theme;
+        app.begin_search();
+        for ch in "tags:a".chars() {
+            app.search_input_key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char(ch),
+                crossterm::event::KeyModifiers::NONE,
+            ));
+        }
+        assert_eq!(app.search.suggestions.rows.len(), count, "rows on offer");
+        app
+    }
+
+    /// The entries panel area the popup hangs off, and the popup's outer and
+    /// list rects within it.
+    fn rects(app: &AppModel) -> (Rect, Rect) {
+        let area = Rect::new(0, 0, SCREEN.0, SCREEN.1);
+        let panel = tui_layout(area, app)
+            .entries
+            .expect("an entries panel at this width")
+            .panel
+            .area;
+        let rows = app.search.suggestions.rows.len();
+        let theme = &app.appearance.theme;
+        (
+            search_suggestions_rect(theme, panel, rows).expect("an outer rect"),
+            search_suggestions_list_rect(theme, panel, rows).expect("a list rect"),
+        )
+    }
+
+    fn rendered(app: &mut AppModel) -> TestBackend {
+        let mut view = crate::tui::ui::ViewState::default();
+        render_backend(SCREEN.0, SCREEN.1, |frame| draw_app(frame, app, &mut view))
+    }
+
+    /// The popup keeps a frame's worth of room on every side, so no option ever
+    /// runs into the edge — the spacing that stops it reading as a bare list
+    /// pasted over the results.
+    #[test]
+    fn the_popup_holds_its_options_off_its_edges() {
+        for chrome in [theme::ChromeStyle::Flat, theme::ChromeStyle::Bordered] {
+            let app = app_offering(
+                3,
+                theme::test_flat_theme().with_chrome_override(Some(chrome)),
+            );
+            let (outer, list) = rects(&app);
+
+            assert_eq!(popup_inner(outer).y, outer.y + 1, "{chrome:?}: a top row");
+            assert_eq!(
+                popup_inner(outer).bottom(),
+                outer.bottom() - 1,
+                "{chrome:?}: a bottom row"
+            );
+            assert_eq!(
+                list.x,
+                outer.x + POPUP_FRAME_COLS,
+                "{chrome:?}: options held off the left edge"
+            );
+            assert!(
+                list.right() <= outer.right() - POPUP_FRAME_COLS,
+                "{chrome:?}: options held off the right edge"
+            );
+            // Three options plus the frame, and the frame hangs under the field.
+            assert_eq!(outer.height, 3 + POPUP_FRAME_ROWS, "{chrome:?}");
+            assert_eq!(list.height, 3, "{chrome:?}");
+        }
+    }
+
+    /// The popup is the field's drawer: both edges square off against the field
+    /// itself. Not against the box `draw_search_field` paints around it — that
+    /// box is a cell wider on each side, in a surface near enough to invisible
+    /// that matching it reads as being a column out.
+    #[test]
+    fn the_popup_lines_up_with_the_search_field() {
+        for chrome in [theme::ChromeStyle::Flat, theme::ChromeStyle::Bordered] {
+            let app = app_offering(
+                3,
+                theme::test_flat_theme().with_chrome_override(Some(chrome)),
+            );
+            let panel = tui_layout(Rect::new(0, 0, SCREEN.0, SCREEN.1), &app)
+                .entries
+                .expect("an entries panel")
+                .panel
+                .area;
+            let field =
+                crate::tui::render::entries::search_field_rect(&app.appearance.theme, panel)
+                    .expect("a search field");
+            let (outer, _) = rects(&app);
+
+            assert_eq!(outer.x, field.x, "{chrome:?}: flush left with the field");
+            assert_eq!(
+                outer.right(),
+                field.right(),
+                "{chrome:?}: and flush right with it"
+            );
+            assert_eq!(outer.y, field.y + 1, "{chrome:?}: directly under it");
+        }
+    }
+
+    /// Each chrome separates the popup from the results its own way: bordered
+    /// draws the box, flat carries the dialog surface right out to its edge.
+    #[test]
+    fn the_popup_separates_itself_from_the_results() {
+        let bordered =
+            theme::test_flat_theme().with_chrome_override(Some(theme::ChromeStyle::Bordered));
+        let mut app = app_offering(3, bordered);
+        let (outer, list) = rects(&app);
+        let backend = rendered(&mut app);
+        for x in [outer.x, outer.right() - 1] {
+            assert_ne!(
+                backend.buffer()[(x, list.y)].symbol(),
+                " ",
+                "bordered: a border at column {x}"
+            );
+        }
+
+        let flat = theme::test_flat_theme().with_chrome_override(Some(theme::ChromeStyle::Flat));
+        let dialog_bg = flat.dialog_bg();
+        let mut app = app_offering(3, flat);
+        let (outer, list) = rects(&app);
+        let backend = rendered(&mut app);
+        let buf = backend.buffer();
+        // Out to the last column, and demonstrably not the surface behind it.
+        assert_eq!(
+            buf[(outer.right() - 1, list.y)].bg,
+            dialog_bg,
+            "flat: filled"
+        );
+        assert_ne!(
+            buf[(outer.x - 1, list.y)].bg,
+            dialog_bg,
+            "flat: the panel behind is a different surface"
+        );
+    }
+
+    /// The scrollbar belongs to the popup, so it lands inside it: on the border
+    /// in bordered chrome, inset within the padding in flat. It used to be drawn
+    /// one column *past* the popup's right edge, painting the entry panel behind
+    /// it instead.
+    #[test]
+    fn the_popup_keeps_its_scrollbar_on_its_own_edge() {
+        for (chrome, inset) in [
+            (theme::ChromeStyle::Flat, 3),
+            (theme::ChromeStyle::Bordered, 1),
+        ] {
+            let app = app_offering(
+                12,
+                theme::test_flat_theme().with_chrome_override(Some(chrome)),
+            );
+            let (outer, list) = rects(&app);
+            assert!(list.height < 12, "{chrome:?}: the list has to overflow");
+
+            let bar = chrome::dialog_list_scrollbar_rect(list);
+            assert_eq!(
+                bar.x,
+                outer.right() - inset,
+                "{chrome:?}: bar at {} in {outer:?}",
+                bar.x
+            );
+        }
+    }
+
+    /// The popup dims what it hangs over, so it reads as floating rather than
+    /// pasted on — while the field it belongs to stays at full brightness.
+    #[test]
+    fn the_popup_dims_the_results_but_not_its_own_field() {
+        let mut app = app_offering(3, theme::test_flat_theme());
+        let (outer, _) = rects(&app);
+        let field = crate::tui::render::entries::search_field_rect(
+            &app.appearance.theme,
+            tui_layout(Rect::new(0, 0, SCREEN.0, SCREEN.1), &app)
+                .entries
+                .expect("an entries panel")
+                .panel
+                .area,
+        )
+        .expect("a search field");
+
+        // The same cell with the popup up and with it dismissed: an entry row
+        // well below the popup, which nothing else redraws between the two.
+        let probe = (outer.x + 2, outer.bottom() + 3);
+        let lit = rendered(&mut app).buffer()[probe].clone();
+        app.dismiss_suggestions();
+        let plain = rendered(&mut app).buffer()[probe].clone();
+        assert_ne!(
+            lit.bg, plain.bg,
+            "the results behind the popup darken: {lit:?} vs {plain:?}"
+        );
+
+        // The field is redrawn over the scrim, so it does not.
+        let mut app = app_offering(3, theme::test_flat_theme());
+        let lit = rendered(&mut app).buffer()[(field.x, field.y)].clone();
+        app.dismiss_suggestions();
+        let plain = rendered(&mut app).buffer()[(field.x, field.y)].clone();
+        assert_eq!(lit.bg, plain.bg, "the search field stays bright");
+    }
 }

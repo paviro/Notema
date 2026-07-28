@@ -59,7 +59,19 @@ pub(crate) fn clear_surface(theme: &Theme, frame: &mut Frame<'_>, area: Rect, bg
 /// DIM modifier. Cells owned by terminal graphics protocols (`skip`) can't be
 /// restyled and stay bright.
 pub(crate) fn scrim(theme: &Theme, buf: &mut Buffer, area: Rect) {
-    let keep = 1.0 - theme.scrim_strength().clamp(0.0, 1.0);
+    scrim_scaled(theme, buf, area, 1.0);
+}
+
+/// [`scrim`] at a fraction of the theme's strength, for a surface that floats
+/// without being modal — one whose backdrop has to stay readable.
+///
+/// Below full strength there is no DIM fallback: DIM is one step and there is
+/// no half of it, so palette and terminal-default themes get no partial scrim
+/// and lean on the floating surface's own frame instead. That also keeps a
+/// `scrim = 0` theme from picking up a full-screen dim it never asked for.
+pub(crate) fn scrim_scaled(theme: &Theme, buf: &mut Buffer, area: Rect, strength: f32) {
+    let keep = 1.0 - (theme.scrim_strength() * strength).clamp(0.0, 1.0);
+    let dim_fallback = strength >= 1.0;
     let mul = |channel: u8| (f32::from(channel) * keep) as u8;
     for pos in area.positions() {
         let cell = &mut buf[pos];
@@ -75,7 +87,7 @@ pub(crate) fn scrim(theme: &Theme, buf: &mut Buffer, area: Rect) {
                 }
             }
         }
-        if !blended {
+        if !blended && dim_fallback {
             cell.modifier.insert(Modifier::DIM);
         }
     }

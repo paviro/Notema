@@ -11,9 +11,12 @@ use crate::tui::{
     entry_rows::visible_box_items,
     render::{
         EntryListGeometry,
-        chrome::{clear_surface, dot_leader_line, render_dialog_list_scrollbar},
-        clamp_scroll, count_label, list_state_for_render, panel_block, render_centered_notice,
-        render_scrollbar_if_needed,
+        chrome::{dot_leader_line, render_dialog_list_scrollbar, scrim_scaled},
+        clamp_scroll, count_label,
+        frames::{
+            POPUP_FRAME_COLS, POPUP_FRAME_ROWS, dialog_list_width, draw_popup_frame, popup_inner,
+        },
+        list_state_for_render, panel_block, render_centered_notice, render_scrollbar_if_needed,
     },
     state::ListNav,
     surface::{panel_inner, surface_content_inner},
@@ -133,10 +136,38 @@ pub(crate) fn draw_entry_list(
         };
         render_centered_notice(active_theme, frame, geometry.panel.content, message);
     }
-    // Last, so the list hangs over the results and the notice rather than under
-    // them. It is not modal and does not scrim.
-    draw_search_suggestions(active_theme, frame, geometry.panel.area, app);
     pixel_offset
+}
+
+/// How much of the theme's dialog scrim the suggestion popup lays down. Half:
+/// the popup is not modal, and the counts it lists are counts of the very
+/// results behind it, so those have to stay readable while it floats.
+const POPUP_SCRIM: f32 = 0.5;
+
+/// The search field and its suggestion popup, drawn after every panel rather
+/// than inside the entries one — the popup dims what it hangs over, and the
+/// scrim covers the whole frame. The field is redrawn here so it comes back to
+/// full brightness alongside the popup it belongs to.
+pub(super) fn draw_search_overlay(
+    active_theme: &Theme,
+    frame: &mut Frame<'_>,
+    entries_area: Option<Rect>,
+    app: &mut AppModel,
+) {
+    let Some(area) = entries_area else {
+        return;
+    };
+    // Nothing dims for a popup that won't be drawn — an unshowable one would
+    // leave the screen darkened with nothing to show for it.
+    if !app.suggestions_visible()
+        || search_suggestions_rect(active_theme, area, app.search.suggestions.rows.len()).is_none()
+    {
+        return;
+    }
+    let scrim_area = frame.area();
+    scrim_scaled(active_theme, frame.buffer_mut(), scrim_area, POPUP_SCRIM);
+    draw_search_field(active_theme, frame, area, app);
+    draw_search_suggestions(active_theme, frame, area, app);
 }
 
 /// The search field on the panel's top-right border: a fixed-width single-line
@@ -181,32 +212,50 @@ fn draw_search_field(active_theme: &Theme, frame: &mut Frame<'_>, area: Rect, ap
 /// is there to help with.
 const SUGGESTION_MAX_ROWS: u16 = 8;
 
-/// The suggestion list's rect, hanging off the search field's left edge and
-/// down over the entry list. `None` when there is nothing to show or no room.
+/// The suggestion popup's outer rect, frame included, hanging under the search
+/// field and down over the entry list. `None` when there is nothing to show, or
+/// no room for the frame and at least one option.
 ///
-/// The one geometry source, shared by the draw and the hit-test registration so
-/// the click map cannot drift from the pixels.
+/// Paired with [`search_suggestions_list_rect`], which carves the option rows
+/// out of it. Both the draw and the hit-test registration take their geometry
+/// from these two, so the click map cannot drift from the pixels.
 pub(super) fn search_suggestions_rect(theme: &Theme, area: Rect, rows: usize) -> Option<Rect> {
     let field = search_field_rect(theme, area)?;
     let content = surface_content_inner(theme, panel_inner(area));
     if rows == 0 {
         return None;
     }
-    // Wider than the field when it can be: 16 cells carrying a value, a leader
-    // and a count is not readable, and the list is free of the field's constraint
-    // to leave the panel title room.
-    let width = field.width.max(28).min(content.width);
-    let right_edge = field.x + field.width;
+    // Squared off against the field itself, both edges, so the popup reads as
+    // that field's own drawer. Not against the box `draw_search_field` paints
+    // around it: those padding cells carry the base surface, near enough to
+    // invisible that lining up with them reads as being a column out.
+    let x = field.x.max(content.x);
+    let width = (field.x + field.width).saturating_sub(x);
     let below = (area.y + area.height).saturating_sub(field.y + 1);
-    let height = (rows as u16).min(SUGGESTION_MAX_ROWS).min(below);
-    if height == 0 {
+    let height = (rows as u16)
+        .min(SUGGESTION_MAX_ROWS)
+        .saturating_add(POPUP_FRAME_ROWS)
+        .min(below);
+    // The frame alone is not a popup: it takes an option row to be worth drawing.
+    if height <= POPUP_FRAME_ROWS || width <= 2 * POPUP_FRAME_COLS {
         return None;
     }
     Some(Rect {
-        x: right_edge.saturating_sub(width).max(content.x),
+        x,
         y: field.y + 1,
         width,
         height,
+    })
+}
+
+/// The option rows inside the popup: its content rect, held back by the
+/// scrollbar gutter only when the list overflows — so the bar lands inside the
+/// popup, on the frame's border, instead of on the entry panel behind it.
+pub(super) fn search_suggestions_list_rect(theme: &Theme, area: Rect, rows: usize) -> Option<Rect> {
+    let inner = popup_inner(search_suggestions_rect(theme, area, rows)?);
+    Some(Rect {
+        width: dialog_list_width(theme, inner.width, rows, inner.height),
+        ..inner
     })
 }
 
@@ -218,22 +267,27 @@ fn draw_search_suggestions(
     area: Rect,
     app: &mut AppModel,
 ) {
-    if !app.suggestions_open() || app.has_overlay() || app.editor.is_some() {
+    if !app.suggestions_visible() {
         return;
     }
     let rows = app.search.suggestions.rows.len();
-    let Some(rect) = search_suggestions_rect(active_theme, area, rows) else {
+    let (Some(outer), Some(list_rect)) = (
+        search_suggestions_rect(active_theme, area, rows),
+        search_suggestions_list_rect(active_theme, area, rows),
+    ) else {
         return;
     };
 
     let hovered = super::dialogs::hovered_dialog_row(app.hover);
     let selected = app.search.suggestions.selected_index();
-    app.search.suggestions.ensure_selected_visible(rect.height);
+    app.search
+        .suggestions
+        .ensure_selected_visible(list_rect.height);
     let scroll = app
         .search
         .suggestions
         .offset()
-        .min(rows.saturating_sub(rect.height as usize));
+        .min(rows.saturating_sub(list_rect.height as usize));
     app.search.suggestions.list.set_offset(scroll);
 
     let items: Vec<ListItem<'_>> = app
@@ -247,7 +301,7 @@ fn draw_search_suggestions(
                 active_theme,
                 Span::raw(row.label.clone()),
                 Span::styled(row.count.to_string(), active_theme.muted()),
-                rect.width,
+                list_rect.width,
                 Some(index) == selected,
             ));
             if Some(index) == hovered && Some(index) != selected {
@@ -258,11 +312,11 @@ fn draw_search_suggestions(
         })
         .collect();
 
-    clear_surface(active_theme, frame, rect, active_theme.dialog_bg());
+    draw_popup_frame(active_theme, frame, outer);
     let list = List::new(items).highlight_style(active_theme.selection());
-    let mut state = list_state_for_render(selected, scroll, rect.height, true);
-    frame.render_stateful_widget(list, rect, &mut state);
-    render_dialog_list_scrollbar(active_theme, frame, rect, rows, scroll, true);
+    let mut state = list_state_for_render(selected, scroll, list_rect.height, true);
+    frame.render_stateful_widget(list, list_rect, &mut state);
+    render_dialog_list_scrollbar(active_theme, frame, list_rect, rows, scroll, true);
 }
 
 pub(super) fn search_field_rect(theme: &Theme, area: Rect) -> Option<Rect> {
