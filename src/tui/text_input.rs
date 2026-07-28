@@ -162,10 +162,20 @@ impl TextInput {
         col.min(width.saturating_sub(1))
     }
 
-    /// Jump the caret to a click `col` cells into the field. Same horizontal
-    /// scroll caveat as [`Self::visible_cursor_col`].
+    /// The content column a click `col` cells into the field lands on.
+    ///
+    /// `col` arrives relative to the field's rect, but `cursor_at_screen` takes an
+    /// absolute content column — so the horizontal scroll has to be *added*, the
+    /// inverse of what [`Self::visible_cursor_col`] subtracts on the way out.
+    /// Without it every click on a query wider than the field lands on the wrong
+    /// character.
+    fn content_col(&self, col: u16) -> usize {
+        col.saturating_add(self.textarea.horizontal_scroll_offset()) as usize
+    }
+
+    /// Jump the caret to a click `col` cells into the field.
     fn jump_to_col(&mut self, col: u16) {
-        let cursor = self.textarea.cursor_at_screen(0, col as usize);
+        let cursor = self.textarea.cursor_at_screen(0, self.content_col(col));
         self.textarea
             .move_cursor(CursorMove::Jump(cursor.0 as u16, cursor.1 as u16));
     }
@@ -184,7 +194,7 @@ impl TextInput {
     /// the reversed-block caret sits on a selected char rather than highlighting
     /// the boundary cell after the word.
     pub(crate) fn select_word_at(&mut self, col: u16) {
-        let column = self.textarea.cursor_at_screen(0, col as usize).1;
+        let column = self.textarea.cursor_at_screen(0, self.content_col(col)).1;
         let Some((start, end)) = word_bounds(&self.textarea.lines()[0], column) else {
             self.jump_to_col(col);
             return;
@@ -493,6 +503,35 @@ mod tests {
         assert_eq!((start.1, end.1), (4, 7));
         // The caret (cursor) rests on the word's first char, not the trailing cell.
         assert_eq!(input.cursor().1, 4);
+    }
+
+    /// A query wider than its field scrolls horizontally, and a click column
+    /// arrives relative to the rect. Without adding the scroll offset back, every
+    /// click on an overflowing query lands that many characters to the left —
+    /// which the search field, at 16 to 40 cells, reaches with two chips.
+    #[test]
+    fn a_click_in_a_scrolled_field_lands_on_the_clicked_character() {
+        let theme = crate::tui::theme::Theme::terminal_default();
+        let mut input = TextInput::from("0123456789abcdefghijklmnopqrstuvwxyz");
+        let rect = Rect::new(0, 0, 10, 1);
+
+        // Render once to scroll the field: the caret is at the end, so the view
+        // has run off the start of the text.
+        let backend = ratatui::backend::TestBackend::new(40, 3);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| input.render_in(&theme, frame, rect, true, false))
+            .unwrap();
+        let scroll = input.horizontal_scroll_offset();
+        assert!(scroll > 0, "the field scrolled");
+
+        // Clicking the leftmost cell lands on the leftmost *visible* char.
+        input.begin_mouse_selection(0);
+        assert_eq!(input.cursor().1, scroll as usize);
+
+        // …and a double-click there selects the word it is actually on.
+        input.select_word_at(0);
+        assert_eq!(input.cursor().1, 0, "one alphanumeric run, selected whole");
     }
 
     #[test]
