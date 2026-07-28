@@ -1144,7 +1144,7 @@ fn scroll_keys_stay_live_while_the_hints_are_up() {
 }
 
 #[test]
-fn digits_no_longer_open_images() {
+fn digits_are_inert_in_the_reader() {
     let app = app_reading("A [link](https://example.com) here.");
 
     for ch in ['0', '1', '9'] {

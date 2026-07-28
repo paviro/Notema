@@ -132,7 +132,7 @@ pub fn filter_rows_cold(app: &BenchApp) -> usize {
 /// tab built — and return the total row count. Closes the overlay again, so the
 /// call is repeatable.
 ///
-/// Repeatable is now also *cached*: the rows are memoized against the entry
+/// Repeatable is also *cached*: the rows are memoized against the entry
 /// version, so this measures reopening. [`filter_rows_cold`] is the walk.
 ///
 /// The focus is forced to the journals column because that is what widens the
@@ -409,8 +409,7 @@ fn narrow_entry_text(index: usize) -> String {
 ///
 /// Feelings cannot grow with the corpus: the vocabulary is the 170 canonical
 /// words in `FEELING_GROUPS` and anything else is dropped on read. They are here
-/// because matching one used to scan the whole alias table, which is a per-entry
-/// cost rather than a per-vocabulary one.
+/// because matching one is a per-entry cost rather than a per-vocabulary one.
 fn wide_entry_text(index: usize, count: usize, vocabulary: &[&'static str]) -> String {
     let topics = (count / 20).max(1);
     let contacts = (count / 50).max(1);

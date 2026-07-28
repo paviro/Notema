@@ -503,8 +503,8 @@ mod tests {
 
     #[test]
     fn rust_identifiers_and_operators_are_themed() {
-        // The bundled rust query captures neither, so these used to fall through
-        // to the plain code ink while every other language coloured them.
+        // The bundled rust query captures neither, so both reach a category
+        // through the blanket identifier and operator rules.
         let code = "let total = count + 1;";
         assert_eq!(category_at("rust", code, "total"), Some(Category::Variable));
         assert_eq!(category_at("rust", code, "="), Some(Category::Operator));
@@ -523,8 +523,7 @@ mod tests {
     #[test]
     fn sql_maps_its_nonstandard_captures() {
         // sequel predates the canonical capture names, so it spells column
-        // references `@field` and aliases `@variable`; `@field` used to drop
-        // straight through to plain code.
+        // references `@field` and aliases `@variable`.
         let query = "SELECT price, name AS label FROM t WHERE price > 1.5;";
         assert_eq!(category_at("sql", query, "price"), Some(Category::Property));
         assert_eq!(category_at("sql", query, "label"), Some(Category::Variable));

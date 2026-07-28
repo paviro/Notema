@@ -10,7 +10,7 @@ use crate::tui::{
 };
 
 /// Draw the fullscreen image viewer. The image number is 1-based to match the
-/// entry-view labels and the digit shortcut used to open it.
+/// entry-view labels.
 pub(super) fn draw_image_viewer(
     theme: &crate::tui::theme::Theme,
     frame: &mut Frame<'_>,

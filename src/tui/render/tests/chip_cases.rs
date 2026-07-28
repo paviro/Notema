@@ -95,7 +95,7 @@ fn find_text(backend: &TestBackend, needle: &str) -> Option<(u16, u16)> {
 /// The image label advertises the click only; the keyboard reaches it through
 /// link-hint mode like every other target.
 #[test]
-fn image_labels_no_longer_advertise_a_digit() {
+fn image_labels_carry_no_key_of_their_own() {
     let rendered = render_text(app_reading("Body text."), 120, 20);
     assert!(!rendered.contains("or press"));
 }

@@ -114,7 +114,6 @@ fn theme_picker_opens_on_the_active_theme_with_bundled_entries() {
     app.open_theme_picker();
 
     let state = app.theme_picker_state().expect("picker open");
-    // The bundled themes were materialized and listed, sorted by name.
     let names: Vec<&str> = state.entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(
         names,

@@ -78,8 +78,7 @@ impl LibraryLoadReport {
         )
     }
 
-    /// One-line breakdown for `NOTEMA_TIMING`. These durations are measured on
-    /// every load already; without this they're just discarded.
+    /// One-line breakdown for `NOTEMA_TIMING`.
     pub fn timing_summary(&self) -> String {
         let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
         format!(

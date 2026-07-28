@@ -5,10 +5,7 @@
 //! and a browser row are the same value ranked the same way, and neither pays for
 //! a walk the other already did.
 //!
-//! Nothing is highlighted until the list is arrowed into. Typing `tags:app` and
-//! pressing `Enter` still opens the selected result — the substring narrowing 07
-//! preserves is the default reading of a fragment, and a list that guesses
-//! otherwise would take the key away from someone who meant it.
+//! Nothing is highlighted until the list is arrowed into; see [`SuggestionState`].
 
 use crate::tui::features::filter::FilterTab;
 use std::rc::Rc;
@@ -164,14 +161,10 @@ impl AppModel {
             self.search.suggestions.clear();
             return;
         };
-        // Dismissal is keyed to the value it was made on, so typing more of that
-        // value keeps the list down and moving to another filter brings it back.
         let dismissed = self.search.suggestions.dismissed.filter(|at| *at == start);
         let rows = self.cached_filter_rows(&self.search.scope);
         let matches = matching_rows(&rows[tab.index()], tab, &fragment);
         self.search.suggestions.offer(rows, tab, matches);
-        // Nothing highlighted: a recompute follows a keystroke, and a keystroke
-        // means the typed fragment is still what was meant.
         self.search.suggestions.list = SelectableList::default();
         self.search.suggestions.dismissed = dismissed;
     }

@@ -120,8 +120,7 @@ impl AppModel {
             .unwrap_or(SearchScope::AllJournals)
     }
 
-    /// Shared tail of every search entry/exit: clear the debounce state,
-    /// invalidate the row cache, and reset the selection to the first hit.
+    /// Shared tail of every search entry/exit.
     fn commit_search_selection(&mut self) {
         self.search.dirty = false;
         self.search.last_edit = None;
@@ -180,8 +179,8 @@ impl AppModel {
             }
             match classify_segment(segment, today) {
                 SegmentKind::Filter(predicate) => predicates.push(predicate),
-                // A known filter with an unreadable value zeroes the whole query,
-                // as a lone unreadable filter always has.
+                // A known filter with an unreadable value zeroes the whole
+                // query, as a lone unreadable filter does.
                 SegmentKind::NoMatch => return Vec::new(),
                 SegmentKind::Text(text) => text_parts.push(text),
             }
@@ -600,9 +599,9 @@ mod tests {
         assert_eq!(run(&mut app, "tags:work; date:garbage"), 0);
     }
 
-    /// A scalar has no exact mode, so quoting one is only ever structural — and
-    /// an unreadable value zeroes the whole query, so an unclosed quote used to
-    /// take the filters beside it down as it was typed.
+    /// A scalar has no exact mode, so quoting one is only ever structural. An
+    /// unreadable value zeroes the whole query, which is what makes an unclosed
+    /// quote mid-typing worth reading as the value it is growing into.
     #[test]
     fn an_unclosed_quote_leaves_a_scalar_filter_readable() {
         let mut app = app_with(vec![

@@ -437,7 +437,6 @@ impl ReaderHits {
         ))
     }
 
-    /// Every hit currently on screen, paired with its rect, in document order.
     pub(crate) fn visible_links(&self) -> impl Iterator<Item = (&ReaderLinkHit, Rect)> {
         self.links
             .iter()

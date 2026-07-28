@@ -1,8 +1,8 @@
-//! A lazy-spawned background worker over an mpsc channel pair. The blocking
-//! network lookups (geocoding, weather/air quality) each run on a dedicated
-//! thread and reply over a channel the event loop drains every frame — the
-//! thread is spawned on the first request, so sessions that never trigger a
-//! lookup pay nothing.
+//! A lazy-spawned background worker over an mpsc channel pair. Whole-library
+//! reloads and the blocking network lookups (geocoding, weather/air quality)
+//! each run on a dedicated thread and reply over a channel the event loop drains
+//! every frame — the thread is spawned on the first request, so sessions that
+//! never reach one pay nothing.
 
 use std::{
     sync::mpsc::{Receiver, Sender, TryRecvError, channel},

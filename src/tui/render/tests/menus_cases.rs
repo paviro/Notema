@@ -68,7 +68,7 @@ fn editor_metadata_menu_registers_row_and_close_regions() {
 
 /// The hint grid spreads its leftover width across the gaps, so laying the
 /// hit-test out at a different origin or width than the draw shifts every chip.
-/// The first chip is where that showed: its leftmost cell used to be dead.
+/// The first chip is where that shows: its leftmost cell has to be live.
 #[test]
 fn dialog_hint_regions_start_where_the_chips_are_drawn() {
     use crate::tui::ui::InteractionKind;
@@ -118,7 +118,7 @@ fn help_cheatsheet_lists_grouped_bindings() {
         )
     });
     assert!(text.contains("Help"));
-    // A bare metadata key the footer no longer advertises, plus a grouped label.
+    // A bare metadata key the footer does not advertise, plus a grouped label.
     assert!(text.contains("Tags"));
     assert!(text.contains("Metadata"));
     // The global bindings the trimmed footer dropped still live here.

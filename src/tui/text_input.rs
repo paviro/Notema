@@ -140,8 +140,8 @@ impl TextInput {
             .map_or(text.len(), |(offset, _)| offset)
     }
 
-    /// Place the caret `offset` bytes into the text, clamped to its length and
-    /// rounded down to a char boundary.
+    /// Place the caret `offset` bytes into the text, clamped to its length. An
+    /// offset inside a character lands after it.
     pub(crate) fn set_cursor_byte(&mut self, offset: usize) {
         let column = self
             .as_str()

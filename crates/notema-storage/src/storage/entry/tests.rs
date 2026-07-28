@@ -936,9 +936,8 @@ fn png_test_bytes() -> Vec<u8> {
     bytes
 }
 
-/// A rewrite the entry cache's stamp is blind to once plan 04 drops `ctime`:
-/// same byte length, mtime put back. A save must not depend on that stamp, so
-/// the conflict is still caught.
+/// A rewrite the entry cache's stamp is blind to: same byte length, mtime put
+/// back. A save must not depend on that stamp, so the conflict is still caught.
 #[test]
 fn save_entry_edit_if_revision_detects_a_same_length_same_mtime_rewrite() {
     let dir = tempdir().unwrap();

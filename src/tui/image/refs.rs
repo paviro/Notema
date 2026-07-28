@@ -1,5 +1,5 @@
-//! Enumerating an entry's referenced images and the image-number ⇄ digit-key
-//! mapping shared by the entry-view labels and keyboard shortcuts.
+//! Enumerating an entry's referenced images, numbered as the entry-view labels
+//! show them.
 //!
 //! Images live in the entry's sibling `<stem>.assets/` folder, referenced as a
 //! lone markdown image on its own line. Parsing is owned by the storage crate

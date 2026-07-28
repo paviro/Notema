@@ -144,8 +144,7 @@ impl FacetTally {
 /// `location_predicate` reads nothing but that haystack, so entries sharing an
 /// address are interchangeable to it. Interning them into one weighted address is
 /// therefore exactly equivalent, and turns rows x entries substring tests into
-/// distinct-words x distinct-addresses — 625 rows over 25k entries becomes ~630
-/// words over ~5k addresses on the wide bench corpus.
+/// distinct-words x distinct-addresses.
 #[derive(Default)]
 pub(crate) struct PlaceCounter {
     groups: BTreeSet<PlaceGroup>,

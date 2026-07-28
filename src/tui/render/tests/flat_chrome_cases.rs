@@ -206,7 +206,7 @@ fn flat_filter_dialog_scrollbar_scopes_to_the_list_rows() {
 }
 
 /// The help overlay is a dialog like the rest, so its bar rides the same
-/// column and stays on the table's rows — it used to span the whole box at
+/// column and stays on the table's rows, rather than spanning the whole box at
 /// the outer edge, crossing the tab strip and the hint block.
 #[test]
 fn help_dialog_scrollbar_matches_the_other_dialogs() {

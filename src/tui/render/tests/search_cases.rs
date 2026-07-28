@@ -326,7 +326,7 @@ mod suggestion_popup_tests {
     }
 
     /// The scrollbar belongs to the popup, so it lands inside it: on the border
-    /// in bordered chrome, inset within the padding in flat. It used to be drawn
+    /// in bordered chrome, inset within the padding in flat. Drawn
     /// one column *past* the popup's right edge, painting the entry panel behind
     /// it instead.
     #[test]

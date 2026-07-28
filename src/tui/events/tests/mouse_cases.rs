@@ -1064,7 +1064,7 @@ fn dragging_the_suggestion_scrollbar_scrolls_the_list() {
 /// Scrolling is not blocked by having arrowed into the list, and it puts the
 /// highlight down — a row scrolled out of sight must not stay armed on `Enter`.
 /// The offset is read after a second frame because the draw is where it is
-/// clamped, and where it used to be dragged back onto the highlighted row.
+/// clamped, and where a naive implementation drags it back onto the highlighted row.
 #[test]
 fn the_wheel_scrolls_the_suggestion_list_past_a_highlighted_row() {
     use crate::tui::ui::InteractionKind;

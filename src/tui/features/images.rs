@@ -85,8 +85,7 @@ impl AppModel {
         (*self.selected_images()).clone()
     }
 
-    /// In-folder image count for the selected entry; drives the `i` footer hint
-    /// and the digit shortcuts.
+    /// In-folder image count for the selected entry; drives the `i` footer hint.
     pub(crate) fn selected_entry_image_count(&self) -> usize {
         self.selected_images().len()
     }

@@ -110,9 +110,9 @@ fn save_entry_edit_inner(
     edit: EntryEdit<'_>,
     assets: EntryAssetOptions,
 ) -> AppResult<EntryEditOutcome> {
-    // Checking the revision of the bytes just parsed is both cheaper and
-    // stronger than re-stating around the read: there is no window in which the
-    // entry and the version it was checked against can disagree.
+    // Checked against the revision of the bytes just parsed, so there is no
+    // window in which the entry and the version it was checked against can
+    // disagree.
     let entry = match revision {
         Some(expected) => {
             let (entry, actual) = codec.open_with_revision(path)?;

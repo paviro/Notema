@@ -12,7 +12,6 @@ fn internal_editor_renders_in_reader_pane() {
     // the viewer which renders the heading, so the literal `# A` proves the
     // editor drew in the pane.
     assert!(text.contains("# A"));
-    // The editor footer replaces the browse hints.
     assert!(text.contains("ctrl+s"));
 }
 
@@ -147,7 +146,7 @@ fn internal_editor_shows_the_word_count() {
 
 /// Both metadata paint paths run the mood row through `mood_line`, so a narrow
 /// pane drops the pole labels whether the block is pinned or scrolling — the
-/// pinned path used to keep them and crush the bar instead.
+/// pinned path would keep them and crush the bar instead.
 #[test]
 fn pinned_and_scrolling_mood_rows_agree_on_a_narrow_pane() {
     let theme = theme::Theme::terminal_default();

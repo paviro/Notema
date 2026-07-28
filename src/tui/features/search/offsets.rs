@@ -236,7 +236,7 @@ mod tests {
 
     /// Deleting one delimiter of a chip re-reads the rest of the value as part
     /// of it. The field draws one pill over the lot because that is what the
-    /// parser now matches — the two agree because they share the splitter.
+    /// parser matches — the two agree because they share the splitter.
     #[test]
     fn an_unbalanced_quote_swallows_the_operator_after_it() {
         assert_eq!(

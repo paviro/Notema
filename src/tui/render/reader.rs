@@ -253,8 +253,7 @@ fn draw_markdown_panel(
         hints: Vec::new(),
         openable: body.openable,
     };
-    // The chips are already drawn — they are text in the body. All that is left
-    // is telling the model which label opens what.
+    // The chips are already drawn — they are text in the body.
     hits.hints = body
         .hints
         .iter()
@@ -283,8 +282,7 @@ fn draw_markdown_panel(
 }
 
 /// Whether this frame lays link-hint chips into the body. Every condition that
-/// suspends the mode lands here: a frame that lays none reports no labels, which
-/// is what takes the mode down.
+/// suspends the mode lands here.
 fn hint_labels_shown(app: &AppModel) -> bool {
     app.reader_hints.is_active()
         && app.nav.focus == Focus::Reader
@@ -586,8 +584,8 @@ mod image_tests {
         }
     }
 
-    /// Numbering is 1-based and unbounded — the eleventh image reads the same as
-    /// the first, since no label advertises a key of its own any more.
+    /// Numbering is 1-based and unbounded: a label carries no key of its own, so
+    /// the eleventh image reads exactly like the first.
     #[test]
     fn image_label_is_its_number_and_alt_and_nothing_else() {
         let label = |index, alt| {

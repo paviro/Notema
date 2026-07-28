@@ -210,9 +210,8 @@ fn draw_search_field(active_theme: &Theme, frame: &mut Frame<'_>, area: Rect, ap
         .render_in(active_theme, frame, rect, focused, hovered);
 }
 
-/// The most suggestion rows on screen at once. Past this the list scrolls: it
-/// hangs over the results, and one that covered them would trade the narrowing it
-/// is there to help with.
+/// The most suggestion rows on screen at once. Past this the list scrolls, so
+/// the popup never covers the results it is counting.
 const SUGGESTION_MAX_ROWS: u16 = 8;
 
 /// The suggestion popup's outer rect, frame included, hanging under the search

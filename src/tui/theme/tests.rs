@@ -800,8 +800,6 @@ fn bundled_themes_agree_on_their_syntax_keys() {
             .map(|category| category.key())
             .collect()
     };
-    // `variable` and `operator` were missing from every theme for a while, which
-    // left identifiers and operators painted in raw terminal ink.
     let reference = colored(bundled(DEFAULT_THEME));
     assert_eq!(reference.len(), Category::ALL.len(), "{reference:?}");
     for (name, text) in BUNDLED {

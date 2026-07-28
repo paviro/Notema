@@ -1,15 +1,12 @@
 //! Styling for the search field's own text.
 //!
-//! The query box holds a small language, and until now it drew as flat text: a
-//! mistyped `tag:` looked exactly like a working `tags:` and only the results
-//! said otherwise. These spans colour what the parser *recognised*, so the two
-//! cases are distinguishable while typing.
+//! The query box holds a small language. These spans colour what the parser
+//! *recognised*, so a mistyped `tag:` is distinguishable from a working `tags:`
+//! while typing rather than only once the results come back.
 //!
-//! It also draws a quoted facet value as a pill. A chip is not a new kind of
-//! thing in the query — it is how `tags:"apple"` *looks*, so the text stays the
-//! one source of truth and a hand-typed value chips exactly like a launched one.
-//! Delete either quote and the pill dissolves, because the render is a function
-//! of the text and nothing else.
+//! A quoted facet value draws as a pill. The chip is not a new kind of thing in
+//! the query — it is how `tags:"apple"` looks — so the render stays a function
+//! of the text alone: delete either quote and the pill dissolves.
 //!
 //! Output is `(start_byte, end_byte, Style)` for `TextArea::set_syntax_spans`
 //! plus `(byte_offset, replacement)` for `TextArea::set_glyph_substitutions`.
@@ -249,8 +246,8 @@ mod tests {
         );
     }
 
-    /// A chip is decoration, so nothing guards it. These assert the *absence* of
-    /// a guard, and stand as the fence against reintroducing one piecemeal.
+    /// A chip is decoration, so nothing guards it: every editing key reaches the
+    /// text under it as if it were plain.
     #[test]
     fn stock_editing_keys_still_reach_a_chip() {
         use crate::tui::text_input::TextInput;

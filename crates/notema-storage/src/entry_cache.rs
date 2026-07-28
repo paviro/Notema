@@ -56,9 +56,8 @@ struct CacheRecordFile {
 }
 
 /// Just enough of a cache file to tell one written by a different build apart
-/// from a damaged one. Must stay lenient — `deny_unknown_fields` here would
-/// defeat the whole point, since the fields it skips are exactly the ones that
-/// failed to decode.
+/// from a damaged one. Deliberately lenient: the fields it skips are exactly
+/// the ones that failed to decode.
 ///
 /// `app_version` matters as much as the wire version: `Entry` is embedded whole
 /// under `deny_unknown_fields`, so any release that changes its shape makes an
@@ -262,12 +261,13 @@ pub(super) fn validate_discovery(
             .or_else(|| (policy != CachePolicy::Normal).then_some(MissCause::Rebuild));
         match (cause, record) {
             (None, Some(record)) => entries.push(record.entry),
-            (cause, _) => {
-                // `miss_cause` answers `Absent` when there is no record, so the
-                // cause is always known here.
-                causes.record(cause.unwrap_or(MissCause::Absent));
+            (Some(cause), _) => {
+                causes.record(cause);
                 misses.push(discovered.source);
             }
+            // `miss_cause` answers `Absent` when there is no record, so a hit
+            // without one cannot arise.
+            (None, None) => unreachable!("a cache hit needs a record"),
         }
     }
     // Without an mtime the stamp is only a length, which is never enough to
@@ -356,9 +356,8 @@ pub(super) fn validate_discovery(
     })
 }
 
-/// Miss causes tallied over one validation run. Counted unconditionally: the
-/// cause falls out of the hit decision the loop has to make anyway, and gating
-/// it on `NOTEMA_TIMING` would mean two copies of that decision.
+/// Miss causes tallied over one validation run. Counted unconditionally — the
+/// cause falls out of the hit decision the loop makes anyway.
 #[derive(Default)]
 struct MissCauses {
     counts: Vec<(MissCause, usize)>,
@@ -626,8 +625,8 @@ mod tests {
         );
     }
 
-    /// The point of the change: chmod bumps `ctime` and nothing else, and so do
-    /// Spotlight, Time Machine and every sync client.
+    /// chmod bumps `ctime` and nothing else, and so do Spotlight, Time Machine
+    /// and every sync client.
     #[cfg(unix)]
     #[test]
     fn a_permission_change_alone_is_a_cache_hit() {
@@ -655,8 +654,7 @@ mod tests {
         assert_eq!(validated.report.cache_status, CacheStatus::Hit);
     }
 
-    /// What length plus mtime can still catch, and what plan 04 traded `ctime`
-    /// away for.
+    /// What length plus mtime catches: a rewrite that moves the mtime.
     #[test]
     fn a_same_length_rewrite_with_a_new_mtime_is_a_miss() {
         let dir = tempdir().unwrap();
@@ -724,9 +722,9 @@ mod tests {
         assert_eq!(validated.entries[0].body, "aaaaa\n");
     }
 
-    /// The hole `ctime` used to close, and the reason the trade is written down
-    /// in `docs/STORAGE-FORMAT.md`: a same-length rewrite that puts the
-    /// recorded mtime back is indistinguishable from no change at all.
+    /// The hole the trade leaves, written down in `docs/STORAGE-FORMAT.md`: a
+    /// same-length rewrite that puts the recorded mtime back is
+    /// indistinguishable from no change at all.
     #[test]
     fn a_same_length_rewrite_that_restores_the_recorded_mtime_is_missed() {
         let dir = tempdir().unwrap();
