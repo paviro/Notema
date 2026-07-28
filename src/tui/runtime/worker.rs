@@ -20,6 +20,17 @@ pub(crate) struct Worker<Req, Res> {
     lost: bool,
 }
 
+/// A ticket to submit one request from wherever it is carried to. Dropping it
+/// without sending leaves the worker counted busy until a drain notices, which
+/// is why it is consumed by the send.
+pub(crate) struct Submission<Req>(Sender<Req>);
+
+impl<Req> Submission<Req> {
+    pub(crate) fn send(self, request: Req) {
+        let _ = self.0.send(request);
+    }
+}
+
 struct Channels<Req, Res> {
     requests: Sender<Req>,
     results: Receiver<Res>,
@@ -40,10 +51,18 @@ impl<Req: Send + 'static, Res: Send + 'static> Worker<Req, Res> {
     /// resolves each request on that thread; it's a plain `fn` (no captured
     /// state) shared by every call.
     pub(crate) fn request(&mut self, request: Req, handler: fn(Req) -> Res) {
+        self.submission(handler).send(request);
+    }
+
+    /// A ticket for one request to be sent later, possibly from another thread.
+    ///
+    /// The work counts as outstanding from the moment the ticket is taken, not
+    /// from the send: a caller that hands one to a background thread means the
+    /// request to happen, and a poll in between must not read the worker as idle.
+    pub(crate) fn submission(&mut self, handler: fn(Req) -> Res) -> Submission<Req> {
         let channels = self.channels.get_or_insert_with(|| spawn(handler));
-        if channels.requests.send(request).is_ok() {
-            self.in_flight += 1;
-        }
+        self.in_flight += 1;
+        Submission(channels.requests.clone())
     }
 
     /// Drain every finished result (empty when the worker was never started).

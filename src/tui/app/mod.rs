@@ -645,10 +645,6 @@ impl AppModel {
         self.apply_effective_theme();
     }
 
-    pub(crate) fn library_generation(&self) -> u64 {
-        self.library_generation
-    }
-
     pub(crate) fn finish_initial_library_loading(&mut self) {
         self.toasts.dismiss_message(INITIAL_LIBRARY_LOADING_TOAST);
     }
@@ -837,9 +833,31 @@ impl AppModel {
         let request = ReloadRequest {
             store: self.services.store.clone(),
             reason,
+            work: reload::ReloadWork::WalkAndReconcile,
             generation: self.library_generation,
         };
         self.library_reload.request(request, reload::reload);
+    }
+
+    /// A ticket for the startup validation, to be sent once the journal watcher
+    /// is armed. Taken here so the walk is counted as outstanding from the moment
+    /// it is promised — the first frames must not read the library as settled.
+    ///
+    /// It travels the same worker, guard and result handling as every later
+    /// reload; only the work differs, since the cache is already decoded.
+    pub(crate) fn initial_validation_submission(
+        &mut self,
+        cached: Option<CachedLibrary>,
+        discovery: Option<notema_storage::LibraryDiscovery>,
+    ) -> impl FnOnce() + Send + 'static {
+        let request = ReloadRequest {
+            store: self.services.store.clone(),
+            reason: ReloadReason::Automatic,
+            work: reload::ReloadWork::Reconcile { cached, discovery },
+            generation: self.library_generation,
+        };
+        let submission = self.library_reload.submission(reload::reload);
+        move || submission.send(request)
     }
 
     /// Install whatever the reload worker finished, reporting whether the frame

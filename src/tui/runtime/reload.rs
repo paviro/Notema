@@ -2,7 +2,7 @@
 //! runs on the event loop.
 
 use crate::tui::runtime::worker::Worker;
-use notema_storage::{CachePolicy, JournalStore, LibrarySnapshot};
+use notema_storage::{CachePolicy, CachedLibrary, JournalStore, LibraryDiscovery, LibrarySnapshot};
 use notema_timing as timing;
 
 pub(crate) type LibraryReloadWorker = Worker<ReloadRequest, ReloadResult>;
@@ -51,9 +51,21 @@ impl ReloadReason {
     }
 }
 
+/// What a reload has left to do. Startup arrives with the cache already decoded
+/// — and on iSH with the tree already walked, to confirm the mounted folder —
+/// so it reconciles what it has instead of reading either again.
+pub(crate) enum ReloadWork {
+    WalkAndReconcile,
+    Reconcile {
+        cached: Option<CachedLibrary>,
+        discovery: Option<LibraryDiscovery>,
+    },
+}
+
 pub(crate) struct ReloadRequest {
     pub(crate) store: JournalStore,
     pub(crate) reason: ReloadReason,
+    pub(crate) work: ReloadWork,
     /// The library this was asked for. A result carrying a generation the app
     /// has moved past describes a corpus that no longer exists.
     pub(crate) generation: u64,
@@ -67,10 +79,21 @@ pub(crate) struct ReloadResult {
 
 /// Run one reload. On the worker thread.
 pub(crate) fn reload(request: ReloadRequest) -> ReloadResult {
-    let snapshot = request
-        .store
-        .load_library(request.reason.policy())
-        .map_err(|error| format!("{error:#}"));
+    let policy = request.reason.policy();
+    let snapshot = match request.work {
+        ReloadWork::WalkAndReconcile => request.store.load_library(policy),
+        ReloadWork::Reconcile {
+            cached,
+            discovery: Some(discovery),
+        } => request
+            .store
+            .validate_discovered_library(cached, policy, discovery),
+        ReloadWork::Reconcile {
+            cached,
+            discovery: None,
+        } => request.store.validate_library(cached, policy),
+    }
+    .map_err(|error| format!("{error:#}"));
     // Timestamped where the walk finished, not where the loop gets around to
     // reading it, and emitted even for a result later discarded as stale.
     if let Ok(snapshot) = &snapshot {

@@ -149,9 +149,6 @@ impl WatchTarget {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum BackgroundAction {
-    LibraryValidated(Box<notema_storage::LibrarySnapshot>),
-    LibraryValidationStale,
-    LibraryValidationFailed(String),
     WatcherUnavailable {
         target: WatchTarget,
         error: String,

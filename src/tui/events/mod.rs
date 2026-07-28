@@ -282,24 +282,6 @@ fn apply_background_action(app: &mut AppModel, action: BackgroundAction) -> Disp
         effects: Vec::new(),
     };
     outcome.redraw = match action {
-        BackgroundAction::LibraryValidated(snapshot) => {
-            app.install_library_snapshot(*snapshot);
-            true
-        }
-        BackgroundAction::LibraryValidationStale => {
-            // The startup walk read a tree that has since changed. Keep the
-            // "Loading journals…" toast up and let the reload dismiss it.
-            app.request_library_reload(crate::tui::runtime::reload::ReloadReason::Automatic);
-            false
-        }
-        BackgroundAction::LibraryValidationFailed(error) => {
-            app.finish_initial_library_loading();
-            app.toast(
-                ToastVariant::Error,
-                format!("Journal changes not loaded: {error}"),
-            );
-            true
-        }
         BackgroundAction::WatcherUnavailable { target, error } => {
             app.toast(
                 ToastVariant::Warning,

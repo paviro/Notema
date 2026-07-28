@@ -16,9 +16,7 @@ use crossterm::{
     execute,
 };
 use notema_encryption::SecretString;
-use notema_storage::{
-    CachePolicy, CachedLibrary, JournalStore, LibraryDiscovery, LibrarySnapshot, StoreAccess,
-};
+use notema_storage::{CachedLibrary, JournalStore, LibraryDiscovery, StoreAccess};
 use notema_timing as timing;
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
 use std::collections::VecDeque;
@@ -78,10 +76,9 @@ pub(crate) fn run_compose(
         let (mut app, cached) =
             AppModel::new_cached(config_path, config, store, startup.detected_mode)?;
         app.begin_compose(journal, metadata);
-        let initial_validation = validate_library.then(|| InitialLibraryValidation {
+        let initial_validation = validate_library.then_some(InitialLibraryValidation {
             cached,
             discovery: None,
-            generation: app.library_generation(),
         });
         run_loop(terminal, app, initial_validation)
     })
@@ -160,15 +157,10 @@ fn run_after_unlock(
     // Must run after raw mode: the detection query reads control-sequence
     // replies from stdin.
     app.image.runtime = image::ImageRuntime::detect(&app.services.store);
-    let generation = app.library_generation();
     run_loop(
         terminal,
         app,
-        Some(InitialLibraryValidation {
-            cached,
-            discovery,
-            generation,
-        }),
+        Some(InitialLibraryValidation { cached, discovery }),
     )
 }
 
@@ -381,10 +373,12 @@ fn run_unlock_screen(
     }
 }
 
+/// What the startup validation has to reconcile: the cache this launch decoded,
+/// and the tree walk that has already happened when one has (iSH confirms the
+/// mounted folder before the app opens).
 struct InitialLibraryValidation {
     cached: Option<CachedLibrary>,
     discovery: Option<LibraryDiscovery>,
-    generation: u64,
 }
 
 fn run_loop(
@@ -394,15 +388,11 @@ fn run_loop(
 ) -> AppResult<()> {
     let mut view = super::ui::ViewState::default();
     let is_ish = crate::platform::ish::is_ish();
-    let validation_generation = initial_validation
-        .as_ref()
-        .map(|validation| validation.generation);
-    let (mut watcher, validation_rx) = start_journal_watch(
-        &app.services.config.journal.path,
-        app.services.store.clone(),
-        initial_validation,
-        is_ish,
-    );
+    let submit_validation = initial_validation.map(|validation| {
+        app.initial_validation_submission(validation.cached, validation.discovery)
+    });
+    let mut watcher =
+        start_journal_watch(&app.services.config.journal.path, submit_validation, is_ish);
     // Watch the themes directory too: edits to the active theme's file repaint
     // live, no restart needed. (The directory exists — startup materialized it.)
     //
@@ -436,16 +426,8 @@ fn run_loop(
     // Events drained while coalescing a scroll burst that weren't wheel events;
     // handled on the next iterations before polling for more input.
     let mut pending_events: VecDeque<Event> = VecDeque::new();
-    let mut validation_dirty = false;
-    let mut validation_finished = validation_rx.is_none();
 
     loop {
-        // Consume source changes before accepting the startup snapshot. If any
-        // landed while validation was running, rebuild once from the current
-        // tree instead of installing a result that may predate the change.
-        // Draining here rather than after the snapshot is what makes that
-        // possible: the watcher is handed over before validation starts, so it
-        // is always adoptable by the time a result arrives.
         let changed = watcher.poll();
         let journal_watch_failed = match changed.failure {
             Some(error) => {
@@ -462,67 +444,16 @@ fn run_loop(
             None => false,
         };
         if !changed.paths.is_empty() {
-            if !validation_finished {
-                validation_dirty = true;
-            }
             pending_paths.extend(changed.paths);
             pending_refresh_at = Some(Instant::now() + REFRESH_DEBOUNCE);
         }
-        // A rescan says changes were missed, so a startup snapshot taken across
-        // it can no longer be trusted either.
         if changed.rescan {
-            if !validation_finished {
-                validation_dirty = true;
-            }
             events::dispatch_action(
                 terminal,
                 &mut app,
                 events::Action::Background(events::BackgroundAction::WatcherLostTrack),
             )?;
         }
-        let validation_result = validation_rx
-            .as_ref()
-            .and_then(|rx| poll_library_validation(rx, validation_finished));
-        let library_updated = match validation_result {
-            Some(Ok(_snapshot))
-                if initial_library_result_is_stale(
-                    validation_generation,
-                    app.library_generation(),
-                    validation_dirty,
-                ) =>
-            {
-                validation_finished = true;
-                let _ = events::dispatch_action(
-                    terminal,
-                    &mut app,
-                    events::Action::Background(events::BackgroundAction::LibraryValidationStale),
-                );
-                true
-            }
-            Some(Ok(snapshot)) => {
-                validation_finished = true;
-                let _ = events::dispatch_action(
-                    terminal,
-                    &mut app,
-                    events::Action::Background(events::BackgroundAction::LibraryValidated(
-                        Box::new(snapshot),
-                    )),
-                );
-                true
-            }
-            Some(Err(error)) => {
-                validation_finished = true;
-                let _ = events::dispatch_action(
-                    terminal,
-                    &mut app,
-                    events::Action::Background(events::BackgroundAction::LibraryValidationFailed(
-                        error,
-                    )),
-                );
-                true
-            }
-            None => false,
-        };
         if reassert_mouse_capture_at.is_some_and(|at| Instant::now() >= at) {
             reassert_mouse_capture_at = None;
             execute!(io::stdout(), EnableMouseCapture)?;
@@ -774,7 +705,6 @@ fn run_loop(
             || journal_watch_failed
             || theme_watch_failed
             || library_reloaded
-            || library_updated
             || refreshed
             || theme_reloaded
             || search_recomputed
@@ -808,118 +738,38 @@ fn run_loop(
     Ok(())
 }
 
-/// Registers the journal watcher and runs the initial library validation behind
-/// it, on one background thread.
+/// Registers the journal watcher, then submits the initial library validation
+/// behind it, on one background thread.
 ///
 /// Ordering the two rather than racing them is what keeps a change from
 /// slipping through unseen: with the watch armed first, every write either
 /// predates the walk's read of its directory or is reported by the watcher.
-/// Reconciling after the fact would instead cost a second traversal of the
-/// corpus on every launch.
 ///
 /// iSH loses the watcher, not the validation.
 fn start_journal_watch(
     root: &Path,
-    store: JournalStore,
-    initial: Option<InitialLibraryValidation>,
+    submit_validation: Option<impl FnOnce() + Send + 'static>,
     is_ish: bool,
-) -> (
-    watcher::PendingWatcher,
-    Option<std::sync::mpsc::Receiver<Result<LibrarySnapshot, String>>>,
-) {
-    let Some(validation) = initial else {
-        let watcher = if is_ish {
+) -> watcher::PendingWatcher {
+    let Some(submit) = submit_validation else {
+        return if is_ish {
             watcher::PendingWatcher::off()
         } else {
             watcher::PendingWatcher::start(root, "watch:journal")
         };
-        return (watcher, None);
     };
-
-    let (tx, rx) = std::sync::mpsc::channel();
-    // Sharing the validation's thread with the registration also means a panic
-    // there drops this sender, which the main loop already reports.
-    let validate = move || {
-        let _ = tx.send(run_library_validation(&store, validation));
-    };
-    let watcher = if is_ish {
-        std::thread::spawn(validate);
-        watcher::PendingWatcher::off()
-    } else {
-        watcher::PendingWatcher::start_then(root, "watch:journal", validate)
-    };
-    (watcher, Some(rx))
-}
-
-fn run_library_validation(
-    store: &JournalStore,
-    validation: InitialLibraryValidation,
-) -> Result<LibrarySnapshot, String> {
-    let result = match validation.discovery {
-        Some(discovery) => {
-            store.validate_discovered_library(validation.cached, CachePolicy::Normal, discovery)
-        }
-        None => store.validate_library(validation.cached, CachePolicy::Normal),
+    if is_ish {
+        std::thread::spawn(submit);
+        return watcher::PendingWatcher::off();
     }
-    .map_err(|error| format!("{error:#}"));
-    // Timestamped where validation finished, not where the main loop gets
-    // around to reading it — and emitted even when the result is later
-    // discarded as stale.
-    if let Ok(snapshot) = &result {
-        timing::mark_with(|| snapshot.report.timing_summary());
-    }
-    result
+    watcher::PendingWatcher::start_then(root, "watch:journal", submit)
 }
-
-fn poll_library_validation<T>(
-    receiver: &std::sync::mpsc::Receiver<Result<T, String>>,
-    finished: bool,
-) -> Option<Result<T, String>> {
-    match receiver.try_recv() {
-        Ok(result) => Some(result),
-        Err(std::sync::mpsc::TryRecvError::Empty) => None,
-        Err(std::sync::mpsc::TryRecvError::Disconnected) if !finished => Some(Err(
-            "journal validation worker stopped unexpectedly".to_string(),
-        )),
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => None,
-    }
-}
-
-fn initial_library_result_is_stale(
-    started_at: Option<u64>,
-    current: u64,
-    watcher_dirty: bool,
-) -> bool {
-    watcher_dirty || started_at.is_some_and(|started_at| started_at != current)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
-    }
-
-    #[test]
-    fn disconnected_library_validator_is_reported_once() {
-        let (sender, receiver) = std::sync::mpsc::channel::<Result<(), String>>();
-        drop(sender);
-
-        let result = poll_library_validation(&receiver, false).unwrap();
-
-        assert_eq!(
-            result.unwrap_err(),
-            "journal validation worker stopped unexpectedly"
-        );
-        assert!(poll_library_validation(&receiver, true).is_none());
-    }
-
-    #[test]
-    fn changed_library_rejects_an_older_validation_result() {
-        assert!(!initial_library_result_is_stale(Some(4), 4, false));
-        assert!(initial_library_result_is_stale(Some(4), 5, false));
-        assert!(initial_library_result_is_stale(Some(4), 4, true));
     }
 
     /// Drive a fresh passphrase buffer through a sequence of keys the same way
