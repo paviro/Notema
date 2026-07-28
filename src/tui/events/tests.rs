@@ -118,6 +118,31 @@ fn apply_hover(app: &mut AppModel, col: u16, row: u16, area: Rect) -> bool {
     mouse::update_hover(&mut terminal, app, col, row, area, &view).unwrap()
 }
 
+/// A search box offering `count` tag values, typed into as the event loop would.
+/// Past the popup's eight rows the list scrolls, which is what the wheel, the
+/// thumb and the arrow keys are all measured against.
+fn app_offering_suggestions(count: usize) -> AppModel {
+    let mut app = crate::tui::test_support::app_in_temp(|root| {
+        let dir = root.join("work").join("2026-07-01");
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..count {
+            fs::write(
+                dir.join(format!("{index}.md")),
+                format!(
+                    "+++\nschema_version = 1\n\n[entry]\ntags = [\"tag-{index:02}\"]\n\n[time]\ncreated_at = \"2026-07-01T10:{index:02}:00+02:00\"\n+++\n\nbody\n"
+                ),
+            )
+            .unwrap();
+        }
+    });
+    app.begin_search();
+    for ch in "tags:tag".chars() {
+        app.search_input_key(key(KeyCode::Char(ch)));
+    }
+    assert_eq!(app.search.suggestions.rows.len(), count);
+    app
+}
+
 fn set_tag_dialog_items(app: &mut AppModel, count: usize) {
     let state = app.edit_metadata_state_mut().unwrap();
     state.all_values = (0..count)

@@ -251,7 +251,7 @@ pub(super) fn search_suggestions_rect(theme: &Theme, area: Rect, rows: usize) ->
 /// The option rows inside the popup: its content rect, held back by the
 /// scrollbar gutter only when the list overflows — so the bar lands inside the
 /// popup, on the frame's border, instead of on the entry panel behind it.
-pub(super) fn search_suggestions_list_rect(theme: &Theme, area: Rect, rows: usize) -> Option<Rect> {
+pub(crate) fn search_suggestions_list_rect(theme: &Theme, area: Rect, rows: usize) -> Option<Rect> {
     let inner = popup_inner(search_suggestions_rect(theme, area, rows)?);
     Some(Rect {
         width: dialog_list_width(theme, inner.width, rows, inner.height),
@@ -280,9 +280,8 @@ fn draw_search_suggestions(
 
     let hovered = super::dialogs::hovered_dialog_row(app.hover);
     let selected = app.search.suggestions.selected_index();
-    app.search
-        .suggestions
-        .ensure_selected_visible(list_rect.height);
+    // Clamped here and nowhere else: the viewport is only known at draw time, so an
+    // offset the wheel or a thumb drag left past the end self-corrects on this frame.
     let scroll = app
         .search
         .suggestions

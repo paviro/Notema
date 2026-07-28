@@ -349,7 +349,10 @@ fn set_dialog_scroll(app: &mut AppModel, dialog: DialogId, offset: usize) {
             }
         }
         // Not an overlay, so `open_dialog_list_mut` cannot reach it.
-        DialogId::SearchSuggestions => app.search.suggestions.list_mut().set_offset(offset),
+        DialogId::SearchSuggestions => {
+            app.search.suggestions.release_highlight();
+            app.search.suggestions.list_mut().set_offset(offset);
+        }
         // The list dialogs all navigate through one handle; the menus never
         // scroll, so they register no bar to drag.
         _ => {
@@ -388,7 +391,10 @@ fn step_dialog_scroll(app: &mut AppModel, dialog: DialogId, delta: i16, viewport
     match dialog {
         DialogId::Help => super::scroll_help(app, delta),
         DialogId::EditorHelp => super::scroll_editor_help(app, delta),
-        DialogId::SearchSuggestions => app.search.suggestions.scroll_by(delta, viewport),
+        DialogId::SearchSuggestions => {
+            app.search.suggestions.release_highlight();
+            app.search.suggestions.scroll_by(delta, viewport);
+        }
         _ => {
             if let Some(list) = super::open_dialog_list_mut(app) {
                 list.scroll_by(delta, viewport);
@@ -747,6 +753,7 @@ pub(super) fn apply_mouse_action(
                 }
             }
             DialogListTarget::SearchSuggestions => {
+                app.search.suggestions.release_highlight();
                 app.search.suggestions.scroll_by(delta, viewport);
             }
             DialogListTarget::ThemePicker => {

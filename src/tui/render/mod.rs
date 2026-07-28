@@ -77,6 +77,7 @@ pub(crate) use dialogs::{
 };
 use editor::draw_entry_editor;
 use entries::draw_entry_list;
+pub(crate) use entries::search_suggestions_list_rect;
 pub(crate) use footer::{Hint, HintId, footer_height, footer_hint_id_at_point, footer_lines};
 #[cfg(test)]
 pub(crate) use footer::{

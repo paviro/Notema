@@ -864,6 +864,80 @@ fn tab_commits_a_suggestion_for_every_facet() {
     }
 }
 
+/// Arrowing past the last visible row scrolls it into view. The popup's viewport
+/// is only known to the render, so this is what proves the handler recovers it —
+/// and the second frame proves the draw then leaves the offset alone.
+#[test]
+fn arrowing_down_the_suggestion_list_scrolls_the_row_into_view() {
+    let mut app = app_offering_suggestions(12);
+    let (mut terminal, view) = render_view(&mut app, 120, 30);
+    let viewport = view
+        .interactions
+        .dialog_list_viewport(crate::tui::ui::DialogId::SearchSuggestions)
+        .expect("the popup registers its viewport");
+    assert!(viewport < 12, "the list has to overflow");
+
+    for _ in 0..12 {
+        let action = keyboard::key_to_action(&app, key(KeyCode::Down), true).expect("Down maps");
+        dispatch_action(&mut terminal, &mut app, action).unwrap();
+    }
+
+    assert_eq!(app.search.suggestions.selected_index(), Some(11));
+    assert_eq!(
+        app.search.suggestions.offset(),
+        12 - viewport as usize,
+        "the last row is on screen"
+    );
+    render_view(&mut app, 120, 30);
+    assert_eq!(app.search.suggestions.offset(), 12 - viewport as usize);
+}
+
+/// Down re-enters a scrolled-away list at its first row, the same way it enters
+/// one that was never arrowed into — the wheel handed the list back.
+#[test]
+fn down_after_a_wheel_re_enters_the_suggestion_list_at_the_top() {
+    use crate::tui::ui::InteractionKind;
+
+    let mut app = app_offering_suggestions(12);
+    let area = Rect::new(0, 0, 120, 30);
+    app.move_suggestion_highlight(1);
+
+    let (mut terminal, view) = render_view(&mut app, area.width, area.height);
+    let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+        matches!(
+            kind,
+            InteractionKind::DialogRow {
+                dialog: crate::tui::ui::DialogId::SearchSuggestions,
+                ..
+            }
+        )
+    })
+    .expect("a suggestion row is registered");
+    for _ in 0..6 {
+        let action = mouse::mouse_to_action(
+            &app,
+            mouse(MouseEventKind::ScrollDown, col, row),
+            area,
+            &view,
+            false,
+        )
+        .expect("the wheel resolves");
+        dispatch_action(&mut terminal, &mut app, action).unwrap();
+    }
+    render_view(&mut app, area.width, area.height);
+    assert!(app.search.suggestions.offset() > 0);
+
+    let action = keyboard::key_to_action(&app, key(KeyCode::Down), true).expect("Down maps");
+    dispatch_action(&mut terminal, &mut app, action).unwrap();
+
+    assert_eq!(app.search.suggestions.selected_index(), Some(0));
+    assert_eq!(
+        app.search.suggestions.offset(),
+        0,
+        "the list came back to the row it entered at"
+    );
+}
+
 /// Begin link-hint mode and render, so the labels under test are the ones the
 /// frame actually painted.
 fn begin_hints(app: &mut AppModel) {

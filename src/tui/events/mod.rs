@@ -243,7 +243,7 @@ fn apply_action<B: Backend>(
                 return Ok(outcome);
             }
         }
-        Action::Search(action) => handlers::search(app, action),
+        Action::Search(action) => handlers::search(terminal, app, action)?,
         Action::Editor(action) => handlers::editor(app, action)?,
         Action::Metadata(action) => {
             if let Some(outcome) = handlers::metadata(terminal, app, action)? {

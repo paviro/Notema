@@ -924,25 +924,7 @@ fn clicking_a_suggestion_commits_it_rather_than_the_entry_beneath() {
 fn the_wheel_over_the_suggestion_list_scrolls_it_not_the_entries() {
     use crate::tui::ui::InteractionKind;
 
-    let mut app = crate::tui::test_support::app_in_temp(|root| {
-        let dir = root.join("work").join("2026-07-01");
-        fs::create_dir_all(&dir).unwrap();
-        for index in 0..12 {
-            fs::write(
-                dir.join(format!("{index}.md")),
-                format!(
-                    "+++\nschema_version = 1\n\n[entry]\ntags = [\"tag-{index:02}\"]\n\n[time]\ncreated_at = \"2026-07-01T10:{index:02}:00+02:00\"\n+++\n\nbody\n"
-                ),
-            )
-            .unwrap();
-        }
-    });
-    app.begin_search();
-    for ch in "tags:tag".chars() {
-        app.search_input_key(key(KeyCode::Char(ch)));
-    }
-    assert_eq!(app.search.suggestions.rows.len(), 12, "more rows than fit");
-
+    let mut app = app_offering_suggestions(12);
     let area = Rect::new(0, 0, 120, 30);
     let (mut terminal, view) = render_view(&mut app, area.width, area.height);
     let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
@@ -980,25 +962,7 @@ fn the_wheel_over_the_suggestion_list_scrolls_it_not_the_entries() {
 /// which this list is not.
 #[test]
 fn dragging_the_suggestion_scrollbar_scrolls_the_list() {
-    let mut app = crate::tui::test_support::app_in_temp(|root| {
-        let dir = root.join("work").join("2026-07-01");
-        fs::create_dir_all(&dir).unwrap();
-        for index in 0..12 {
-            fs::write(
-                dir.join(format!("{index}.md")),
-                format!(
-                    "+++\nschema_version = 1\n\n[entry]\ntags = [\"tag-{index:02}\"]\n\n[time]\ncreated_at = \"2026-07-01T10:{index:02}:00+02:00\"\n+++\n\nbody\n"
-                ),
-            )
-            .unwrap();
-        }
-    });
-    app.begin_search();
-    for ch in "tags:tag".chars() {
-        app.search_input_key(key(KeyCode::Char(ch)));
-    }
-    assert_eq!(app.search.suggestions.rows.len(), 12, "more rows than fit");
-
+    let mut app = app_offering_suggestions(12);
     let area = Rect::new(0, 0, 120, 30);
     let (mut terminal, view) = render_view(&mut app, area.width, area.height);
     let which = crate::tui::app::ScrollbarDrag::Dialog(crate::tui::ui::DialogId::SearchSuggestions);
@@ -1022,4 +986,80 @@ fn dragging_the_suggestion_scrollbar_scrolls_the_list() {
         app.search.suggestions.offset() > 0,
         "the drag moved the list"
     );
+}
+
+/// Scrolling is not blocked by having arrowed into the list, and it puts the
+/// highlight down — a row scrolled out of sight must not stay armed on `Enter`.
+/// The offset is read after a second frame because the draw is where it is
+/// clamped, and where it used to be dragged back onto the highlighted row.
+#[test]
+fn the_wheel_scrolls_the_suggestion_list_past_a_highlighted_row() {
+    use crate::tui::ui::InteractionKind;
+
+    let mut app = app_offering_suggestions(12);
+    let area = Rect::new(0, 0, 120, 30);
+    app.move_suggestion_highlight(1);
+    assert_eq!(app.search.suggestions.selected_index(), Some(0));
+
+    let (mut terminal, view) = render_view(&mut app, area.width, area.height);
+    let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+        matches!(
+            kind,
+            InteractionKind::DialogRow {
+                dialog: crate::tui::ui::DialogId::SearchSuggestions,
+                ..
+            }
+        )
+    })
+    .expect("a suggestion row is registered");
+
+    let action = mouse::mouse_to_action(
+        &app,
+        mouse(MouseEventKind::ScrollDown, col, row),
+        area,
+        &view,
+        false,
+    )
+    .expect("the wheel resolves");
+    dispatch_action(&mut terminal, &mut app, action).unwrap();
+    render_view(&mut app, area.width, area.height);
+
+    assert!(app.search.suggestions.offset() > 0, "the list scrolled");
+    assert_eq!(
+        app.search.suggestions.selected_index(),
+        None,
+        "the wheel put the highlight down"
+    );
+}
+
+/// The same for the thumb: dragging it is scrolling by hand, so it is not held
+/// back by a highlighted row either.
+#[test]
+fn dragging_the_suggestion_scrollbar_works_with_a_row_highlighted() {
+    let mut app = app_offering_suggestions(12);
+    let area = Rect::new(0, 0, 120, 30);
+    app.move_suggestion_highlight(1);
+
+    let (mut terminal, view) = render_view(&mut app, area.width, area.height);
+    let which = crate::tui::app::ScrollbarDrag::Dialog(crate::tui::ui::DialogId::SearchSuggestions);
+    let metrics = view
+        .interactions
+        .scrollbar(which)
+        .expect("the list registers a scrollbar");
+
+    let (col, row) = (metrics.bar.x, metrics.bar.y + 1);
+    for event in [
+        mouse(down(), col, row),
+        mouse(drag(), col, metrics.bar.y + metrics.bar.height),
+    ] {
+        let action = mouse::mouse_to_action(&app, event, area, &view, false).expect("resolves");
+        dispatch_action(&mut terminal, &mut app, action).unwrap();
+    }
+    render_view(&mut app, area.width, area.height);
+
+    assert!(
+        app.search.suggestions.offset() > 0,
+        "the drag moved the list"
+    );
+    assert_eq!(app.search.suggestions.selected_index(), None);
 }

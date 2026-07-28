@@ -68,14 +68,43 @@ pub(super) fn browser<B: Backend>(
     Ok(None)
 }
 
-pub(super) fn search(app: &mut AppModel, action: SearchAction) {
+/// The suggestion popup's row viewport. Out of reach of `open_dialog_list_height`:
+/// the list is not an overlay, and its rect is cut from the entries panel rather
+/// than the frame.
+fn suggestion_list_height<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &AppModel,
+) -> AppResult<u16> {
+    let layout = render::tui_layout(super::terminal_area(terminal)?, app);
+    Ok(layout
+        .entries
+        .and_then(|entries| {
+            render::search_suggestions_list_rect(
+                &app.appearance.theme,
+                entries.panel.area,
+                app.search.suggestions.rows.len(),
+            )
+        })
+        .map_or(0, |list| list.height))
+}
+
+pub(super) fn search<B: Backend>(
+    terminal: &mut Terminal<B>,
+    app: &mut AppModel,
+    action: SearchAction,
+) -> AppResult<()> {
     match action {
         SearchAction::Begin => app.begin_search(),
         SearchAction::Exit => app.exit_search(),
-        SearchAction::MoveSuggestion(delta) => app.move_suggestion_highlight(delta),
+        SearchAction::MoveSuggestion(delta) => {
+            let height = suggestion_list_height(terminal, app)?;
+            app.move_suggestion_highlight(delta);
+            app.search.suggestions.ensure_selected_visible(height);
+        }
         SearchAction::CommitSuggestion => app.commit_first_suggestion(),
         SearchAction::DismissSuggestions => app.dismiss_suggestions(),
     }
+    Ok(())
 }
 
 pub(super) fn editor(app: &mut AppModel, action: EditorAction) -> AppResult<()> {

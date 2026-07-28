@@ -357,6 +357,13 @@ impl SuggestionState {
             },
         }
     }
+
+    /// Put the highlight down, leaving the list open but only advisory again.
+    /// Scrolling by hand does this: the highlight is how the list was arrowed
+    /// into, and a row scrolled out of sight must not stay armed on `Enter`.
+    pub(crate) fn release_highlight(&mut self) {
+        self.list.select_none();
+    }
 }
 
 impl ListNav for SuggestionState {
