@@ -2,7 +2,7 @@ use super::*;
 use crate::tui::features::feelings::FeelingRow;
 use crate::tui::state::ListNav;
 use crate::tui::state::MetadataKind;
-use crate::tui::test_support::{app_with_journals, new_app, new_app_with_state};
+use crate::tui::test_support::{app_with_bodies, app_with_journals, new_app, new_app_with_state};
 use notema_domain::FEELING_GROUPS;
 use std::fs;
 use tempfile::tempdir;

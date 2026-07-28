@@ -37,6 +37,27 @@ pub(crate) fn app_in_temp(setup: impl FnOnce(&Path)) -> AppModel {
     app
 }
 
+/// An `AppModel` over a temp root holding one `work` journal whose entries are
+/// `(file stem, body)` — each written under a `# <stem>` heading in one date
+/// folder, so they sort by name. The selected journal is `work` and the entry
+/// list is focused, which is where most browsing tests start.
+pub(crate) fn app_with_bodies(entries: &[(&str, &str)]) -> AppModel {
+    let mut app = app_in_temp(|root| {
+        let dir = root.join("work").join("2026-07-01");
+        fs::create_dir_all(&dir).unwrap();
+        for (stem, body) in entries {
+            fs::write(
+                dir.join(format!("{stem}.md")),
+                format!("+++\nschema_version = 1\n+++\n\n# {stem}\n{body}\n"),
+            )
+            .unwrap();
+        }
+    });
+    app.select_journal_by_name("work");
+    app.nav.focus = crate::tui::app::Focus::Entries;
+    app
+}
+
 /// An `AppModel` over a temp root containing empty journals with the given names.
 pub(crate) fn app_with_journals(names: &[&str]) -> AppModel {
     app_in_temp(|root| {

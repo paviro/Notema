@@ -21,24 +21,7 @@ fn register_left_click_detects_a_double_click_on_the_same_cell() {
 
 #[test]
 fn changing_selected_entry_resets_reader_scroll() {
-    let dir = tempdir().unwrap();
-    let entry_dir = dir.path().join("work").join("2026-07-01");
-    fs::create_dir_all(&entry_dir).unwrap();
-    fs::write(
-        entry_dir.join("a.md"),
-        "+++\nschema_version = 1\n+++\n\n# A\n",
-    )
-    .unwrap();
-    fs::write(
-        entry_dir.join("b.md"),
-        "+++\nschema_version = 1\n+++\n\n# B\n",
-    )
-    .unwrap();
-
-    let config = Config::new(dir.path().to_path_buf());
-    let mut app = new_app(config);
-    app.select_journal_by_name("work");
-    app.nav.focus = Focus::Entries;
+    let mut app = app_with_bodies(&[("a", ""), ("b", "")]);
     app.nav.scroll.reader = 20;
 
     app.move_selection(1);
