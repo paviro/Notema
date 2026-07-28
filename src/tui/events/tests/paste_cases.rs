@@ -23,13 +23,60 @@ fn paste_into_editor_inserts_a_multiline_block() {
 }
 
 #[test]
+fn paste_into_editor_splits_carriage_return_lines() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_editor_for_new();
+    let mut terminal = test_terminal();
+
+    // iTerm2 and Terminal.app convert every newline to `\r` when sending a pasted
+    // block, and the textarea only splits on `\n`.
+    handle_paste(
+        &mut terminal,
+        &mut app,
+        "line one\rline two\r\nline three".to_string(),
+    )
+    .unwrap();
+
+    let editor = app.editor.as_ref().unwrap();
+    assert_eq!(editor.text(), "line one\nline two\nline three");
+    assert_eq!(editor.textarea.lines().len(), 3);
+}
+
+#[test]
+fn paste_into_editor_drops_escape_sequences() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_editor_for_new();
+    let mut terminal = test_terminal();
+
+    // The renderer writes line content to the terminal verbatim, so a pasted
+    // escape would be executed rather than shown.
+    handle_paste(&mut terminal, &mut app, "a\x1b[31mb".to_string()).unwrap();
+
+    assert_eq!(app.editor.as_ref().unwrap().text(), "a[31mb");
+}
+
+#[test]
+fn a_control_only_paste_leaves_the_editor_untouched() {
+    let mut app = app_with_journals(&["work"]);
+    app.open_editor_for_new();
+    let mut terminal = test_terminal();
+
+    handle_paste(&mut terminal, &mut app, "\x1b\x07".to_string()).unwrap();
+
+    let editor = app.editor.as_mut().unwrap();
+    assert_eq!(editor.text(), "");
+    assert!(!editor.textarea.undo(), "nothing was pushed to history");
+}
+
+#[test]
 fn paste_into_search_field_folds_newlines_onto_one_line() {
     let mut app = app_with_entries(1);
     app.begin_search();
     let mut terminal = test_terminal();
 
-    handle_paste(&mut terminal, &mut app, "hello\nworld".to_string()).unwrap();
+    handle_paste(&mut terminal, &mut app, "hello\r\nworld".to_string()).unwrap();
 
+    // One space, not one per control char.
     assert_eq!(app.search.query.as_str(), "hello world");
 }
 

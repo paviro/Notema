@@ -13,6 +13,7 @@ mod features;
 mod geocode;
 mod hit_test;
 mod image;
+mod paste;
 mod render;
 mod runtime;
 mod scroll;

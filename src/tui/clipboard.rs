@@ -25,11 +25,12 @@ pub(crate) fn system_copy(text: &str) {
     let _ = stdout.flush();
 }
 
-/// Read the system clipboard where a native backend exists (desktop). Returns
-/// `None` on hosts without one (iSH/termux/SSH), where the caller falls back to the
-/// internal yank buffer and system paste comes through bracketed paste instead.
+/// Read the system clipboard where a native backend exists (desktop), normalized
+/// for insertion by [`crate::tui::paste`]. Returns `None` on hosts without one
+/// (iSH/termux/SSH), where the caller falls back to the internal yank buffer and
+/// system paste comes through bracketed paste instead.
 pub(crate) fn system_paste() -> Option<String> {
-    native_get_text()
+    Some(crate::tui::paste::normalize(&native_get_text()?).into_owned())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

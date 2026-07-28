@@ -92,13 +92,14 @@ impl TextInput {
         }
     }
 
-    /// Insert a pasted block at the caret in one edit. Control chars (newlines,
-    /// tabs, stray C0 bytes) are folded to spaces so a multi-line or tabbed paste
-    /// collapses onto the single line instead of splitting or corrupting the field
-    /// — the keystroke path rejects those outright (see [`Self::input`]).
+    /// Insert a pasted block at the caret in one edit. The text is normalized
+    /// first (see [`crate::tui::paste`]), then the newlines and tabs it keeps are
+    /// folded to spaces so a multi-line or tabbed paste collapses onto the single
+    /// line instead of splitting the field — the keystroke path rejects those
+    /// outright (see [`Self::input`]). A `\r\n` therefore costs one space, not two.
     /// Returns whether the text changed, mirroring [`Self::input`].
     pub(crate) fn paste_str(&mut self, text: &str) -> bool {
-        let cleaned: String = text
+        let cleaned: String = crate::tui::paste::normalize(text)
             .chars()
             .map(|c| if c.is_control() { ' ' } else { c })
             .collect();
@@ -457,6 +458,16 @@ mod tests {
         assert_eq!(input.lines().len(), 1);
         // An empty paste is a no-op.
         assert!(!input.paste_str(""));
+    }
+
+    #[test]
+    fn paste_str_folds_a_crlf_to_one_space_and_drops_stray_controls() {
+        let mut input = TextInput::from("");
+        assert!(input.paste_str("a\r\nb\x1bc"));
+        assert_eq!(input.as_str(), "a bc");
+        // Nothing but control bytes leaves the field untouched.
+        assert!(!input.paste_str("\x1b\x07"));
+        assert_eq!(input.as_str(), "a bc");
     }
 
     #[test]

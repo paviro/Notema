@@ -65,6 +65,9 @@ pub(crate) fn handle_paste<B: ratatui::backend::Backend>(
     app: &mut AppModel,
     text: String,
 ) -> AppResult<DispatchOutcome> {
+    // Before the empty check, so a block of nothing but control bytes stays inert
+    // instead of pushing an edit or firing a field's change hook.
+    let text = crate::tui::paste::normalize(&text);
     if text.is_empty() {
         return Ok(DispatchOutcome::Continue);
     }
@@ -79,7 +82,7 @@ pub(crate) fn handle_paste<B: ratatui::backend::Backend>(
         return super::dispatch_action(
             terminal,
             app,
-            Action::Editor(EditorAction::InsertText(text)),
+            Action::Editor(EditorAction::InsertText(text.into_owned())),
         );
     }
     if app.focused_text_input_mut().is_some() {
