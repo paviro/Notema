@@ -765,13 +765,9 @@ fn the_suggestion_list_claims_no_key_until_it_is_arrowed_into() {
         Some(Action::Search(SearchAction::Exit))
     );
 
-    // With rows to show but none highlighted, only `Down`, `Tab` and `Esc` are
-    // claimed.
-    app.search.suggestions.rows = vec![crate::tui::features::search::suggest::SuggestionRow {
-        label: "apple".to_string(),
-        value: "apple".to_string(),
-        count: 1,
-    }];
+    // The same query over a corpus that has tags to offer: with rows up but none
+    // highlighted, only `Down`, `Tab` and `Esc` are claimed.
+    let mut app = app_offering_suggestions(3);
     assert!(app.suggestions_open());
     assert_eq!(
         keyboard::key_to_action(&app, key(KeyCode::Up), true),

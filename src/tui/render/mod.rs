@@ -746,7 +746,7 @@ fn register_overlay_interactions(
     // After the field and after the entry rows: the popup hangs over them, and
     // the hit test takes the last region pushed at a point. The whole frame is
     // registered, not just the rows, so a click on its edge stays with the popup.
-    let suggestion_rows = app.search.suggestions.rows.len();
+    let suggestion_rows = app.search.suggestions.len();
     if app.suggestions_visible()
         && let Some(area) = entries_area
         && let Some(outer) = entries::search_suggestions_rect(context.theme, area, suggestion_rows)

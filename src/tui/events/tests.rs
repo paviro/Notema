@@ -139,7 +139,7 @@ fn app_offering_suggestions(count: usize) -> AppModel {
     for ch in "tags:tag".chars() {
         app.search_input_key(key(KeyCode::Char(ch)));
     }
-    assert_eq!(app.search.suggestions.rows.len(), count);
+    assert_eq!(app.search.suggestions.len(), count);
     app
 }
 

@@ -159,7 +159,7 @@ pub(super) fn draw_search_overlay(
     };
     // Nothing dims for a popup that won't be drawn — an unshowable one would
     // leave the screen darkened with nothing to show for it.
-    let rows = app.search.suggestions.rows.len();
+    let rows = app.search.suggestions.len();
     let (true, Some(outer), Some(list_rect)) = (
         app.suggestions_visible(),
         search_suggestions_rect(active_theme, area, rows),
@@ -271,7 +271,7 @@ fn draw_search_suggestions(
     list_rect: Rect,
     app: &mut AppModel,
 ) {
-    let rows = app.search.suggestions.rows.len();
+    let rows = app.search.suggestions.len();
     let hovered = super::dialogs::hovered_dialog_row(app.hover);
     let selected = app.search.suggestions.selected_index();
     // Clamped here and nowhere else: the viewport is only known at draw time, so an
@@ -286,8 +286,7 @@ fn draw_search_suggestions(
     let items: Vec<ListItem<'_>> = app
         .search
         .suggestions
-        .rows
-        .iter()
+        .rows()
         .enumerate()
         .map(|(index, row)| {
             let item = ListItem::new(dot_leader_line(

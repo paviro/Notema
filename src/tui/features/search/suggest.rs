@@ -11,27 +11,23 @@
 //! otherwise would take the key away from someone who meant it.
 
 use crate::tui::features::filter::FilterTab;
+use std::rc::Rc;
+
 use crate::tui::{
     app::AppModel,
-    features::facets::FilterRow,
+    features::facets::{FilterRow, FilterRows},
     state::{ListNav, SelectableList},
 };
 
 use super::{offsets, parse::unquote};
 
-/// One value the search box offers for the prefix being typed.
-pub(crate) struct SuggestionRow {
-    /// What the row reads as — the value itself, or a place's display label.
-    pub(crate) label: String,
-    /// The raw value committing it searches for. Written into the query through
-    /// [`FilterTab::launch_value`] at that point rather than here, so a list of a
-    /// thousand candidates does not quote every one of them per keystroke.
-    pub(crate) value: String,
-    pub(crate) count: usize,
-}
-
 /// The values on offer for the filter value the caret is in, and which one is
 /// highlighted.
+///
+/// The rows are the scope's facet rows, held whole and narrowed to a list of
+/// indexes rather than copied: a keystroke re-filters a vocabulary that runs to
+/// thousands of values on a large library, and cloning each match's two strings
+/// is a cost paid per key for nothing.
 ///
 /// Nothing is highlighted until the list is arrowed into: a recompute follows a
 /// keystroke, and a keystroke means the typed fragment is still what was meant,
@@ -39,7 +35,12 @@ pub(crate) struct SuggestionRow {
 /// deliberately.
 #[derive(Default)]
 pub(crate) struct SuggestionState {
-    pub(crate) rows: Vec<SuggestionRow>,
+    /// Every facet's rows for the scope, shared with the memo that built them.
+    source: Option<Rc<FilterRows>>,
+    /// Which facet `matches` indexes into.
+    tab: FilterTab,
+    /// Positions in `source[tab]` matching the fragment, in the browser's order.
+    matches: Vec<usize>,
     pub(crate) list: SelectableList,
     /// Where the value the list was dismissed for starts, if the caret is still
     /// in it. An offset rather than a flag so dismissing survives typing more of
@@ -49,16 +50,42 @@ pub(crate) struct SuggestionState {
 }
 
 impl SuggestionState {
+    /// How many values are on offer.
+    pub(crate) fn len(&self) -> usize {
+        self.matches.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.matches.is_empty()
+    }
+
+    /// The row at `index` in the offered order.
+    pub(crate) fn row(&self, index: usize) -> Option<&FilterRow> {
+        let facet = &self.source.as_ref()?[self.tab.index()];
+        facet.get(*self.matches.get(index)?)
+    }
+
+    /// The offered rows in order, for drawing.
+    pub(crate) fn rows(&self) -> impl ExactSizeIterator<Item = &FilterRow> {
+        (0..self.len()).map(|index| self.row(index).expect("index is in range"))
+    }
+
+    /// Replace what is on offer.
+    pub(crate) fn offer(&mut self, source: Rc<FilterRows>, tab: FilterTab, matches: Vec<usize>) {
+        self.source = Some(source);
+        self.tab = tab;
+        self.matches = matches;
+    }
+
     /// Whether the list is on screen: it has rows and was not dismissed for the
     /// fragment being typed.
     pub(crate) fn is_open(&self) -> bool {
-        !self.rows.is_empty() && self.dismissed.is_none()
+        !self.is_empty() && self.dismissed.is_none()
     }
 
     /// The highlighted row, or `None` while the list is only advisory.
-    pub(crate) fn highlighted(&self) -> Option<&SuggestionRow> {
-        self.highlighted_index()
-            .and_then(|index| self.rows.get(index))
+    pub(crate) fn highlighted(&self) -> Option<&FilterRow> {
+        self.highlighted_index().and_then(|index| self.row(index))
     }
 
     /// The row a deliberate choice landed on. A dismissed list has none, whatever
@@ -68,7 +95,8 @@ impl SuggestionState {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.rows.clear();
+        self.source = None;
+        self.matches.clear();
         self.list = SelectableList::default();
         self.dismissed = None;
     }
@@ -78,7 +106,7 @@ impl SuggestionState {
     /// list once the list has been stepped out of, so neither direction is a
     /// one-way door.
     pub(crate) fn move_highlight(&mut self, delta: isize) {
-        if self.rows.is_empty() {
+        if self.is_empty() {
             return;
         }
         match self.selected_index() {
@@ -86,7 +114,7 @@ impl SuggestionState {
             None => {}
             Some(index) => match index as isize + delta {
                 next if next < 0 => self.list.select_none(),
-                next => self.select_index((next as usize).min(self.rows.len() - 1)),
+                next => self.select_index((next as usize).min(self.len() - 1)),
             },
         }
     }
@@ -109,7 +137,7 @@ impl ListNav for SuggestionState {
     }
 
     fn item_count(&self) -> usize {
-        self.rows.len()
+        self.len()
     }
 }
 
@@ -140,7 +168,8 @@ impl AppModel {
         // value keeps the list down and moving to another filter brings it back.
         let dismissed = self.search.suggestions.dismissed.filter(|at| *at == start);
         let rows = self.cached_filter_rows(&self.search.scope);
-        self.search.suggestions.rows = matching_rows(&rows[tab.index()], tab, &fragment);
+        let matches = matching_rows(&rows[tab.index()], tab, &fragment);
+        self.search.suggestions.offer(rows, tab, matches);
         // Nothing highlighted: a recompute follows a keystroke, and a keystroke
         // means the typed fragment is still what was meant.
         self.search.suggestions.list = SelectableList::default();
@@ -192,11 +221,11 @@ impl AppModel {
         let Some(tab) = FilterTab::from_prefix(caret.prefix) else {
             return;
         };
-        let Some(row) = self.search.suggestions.rows.get(index) else {
+        let Some(row) = self.search.suggestions.row(index) else {
             return;
         };
 
-        let written = tab.launch_value(&row.value);
+        let written = tab.launch_value(&row.search_value);
         let mut updated = String::with_capacity(query.len() + written.len());
         updated.push_str(&query[..caret.value.start]);
         updated.push_str(&written);
@@ -225,7 +254,7 @@ impl AppModel {
 /// Matching mirrors the predicate the prefix runs, so a row is offered exactly
 /// when typing the fragment would already be narrowing toward it: a substring for
 /// the token facets, every word for a place.
-fn matching_rows(rows: &[FilterRow], tab: FilterTab, fragment: &str) -> Vec<SuggestionRow> {
+fn matching_rows(rows: &[FilterRow], tab: FilterTab, fragment: &str) -> Vec<usize> {
     // Read through an unclosed quote the way the parser does, so a row is
     // offered on the fragment the results below are already narrowing on.
     let fragment = unquote(fragment.trim()).to_lowercase();
@@ -235,7 +264,8 @@ fn matching_rows(rows: &[FilterRow], tab: FilterTab, fragment: &str) -> Vec<Sugg
     // empty the list.
     let words = notema_domain::Location::search_tokens(&fragment);
     rows.iter()
-        .filter(|row| match tab {
+        .enumerate()
+        .filter(|(_, row)| match tab {
             // A place row's label is its display name but its value is the query
             // the row searches; match the query, which is what the count is of.
             FilterTab::Locations => {
@@ -244,11 +274,7 @@ fn matching_rows(rows: &[FilterRow], tab: FilterTab, fragment: &str) -> Vec<Sugg
             }
             _ => row.label.to_lowercase().contains(&fragment),
         })
-        .map(|row| SuggestionRow {
-            label: row.label.clone(),
-            value: row.search_value.clone(),
-            count: row.count,
-        })
+        .map(|(index, _)| index)
         .collect()
 }
 
@@ -294,8 +320,7 @@ mod tests {
     fn labels(app: &AppModel) -> Vec<&str> {
         app.search
             .suggestions
-            .rows
-            .iter()
+            .rows()
             .map(|row| row.label.as_str())
             .collect()
     }

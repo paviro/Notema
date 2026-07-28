@@ -636,7 +636,7 @@ fn suggestion_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
     let highlighted = app.search.suggestions.highlighted().is_some();
     match key.code {
         // Tab claims itself even from a dismissed list: it is how one comes back.
-        KeyCode::Tab if !app.search.suggestions.rows.is_empty() => {
+        KeyCode::Tab if !app.search.suggestions.is_empty() => {
             Some(Action::Search(SearchAction::CommitSuggestion))
         }
         _ if !app.suggestions_open() => None,

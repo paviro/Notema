@@ -199,7 +199,7 @@ mod suggestion_popup_tests {
                 crossterm::event::KeyModifiers::NONE,
             ));
         }
-        assert_eq!(app.search.suggestions.rows.len(), count, "rows on offer");
+        assert_eq!(app.search.suggestions.len(), count, "rows on offer");
         app
     }
 
@@ -212,7 +212,7 @@ mod suggestion_popup_tests {
             .expect("an entries panel at this width")
             .panel
             .area;
-        let rows = app.search.suggestions.rows.len();
+        let rows = app.search.suggestions.len();
         let theme = &app.appearance.theme;
         (
             search_suggestions_rect(theme, panel, rows).expect("an outer rect"),

@@ -914,7 +914,8 @@ fn clicking_into_an_earlier_filter_retargets_the_suggestions() {
         app.search_input_key(key(KeyCode::Char(ch)));
     }
     assert_eq!(
-        app.search.suggestions.rows[0].value, "Bob",
+        app.search.suggestions.row(0).unwrap().search_value,
+        "Bob",
         "the caret is in the people value"
     );
 
@@ -931,7 +932,8 @@ fn clicking_into_an_earlier_filter_retargets_the_suggestions() {
     .unwrap();
 
     assert_eq!(
-        app.search.suggestions.rows[0].value, "apple",
+        app.search.suggestions.row(0).unwrap().search_value,
+        "apple",
         "the rows follow the caret into the tags value"
     );
     app.commit_suggestion(0);
@@ -962,7 +964,7 @@ fn clicking_a_suggestion_commits_it_rather_than_the_entry_beneath() {
     for ch in "tags:ap".chars() {
         app.search_input_key(key(KeyCode::Char(ch)));
     }
-    assert_eq!(app.search.suggestions.rows.len(), 2);
+    assert_eq!(app.search.suggestions.len(), 2);
     let selected_before = app.nav.selected_entry_index;
 
     let area = Rect::new(0, 0, 120, 30);

@@ -83,7 +83,7 @@ fn suggestion_list_height<B: Backend>(
             render::search_suggestions_list_rect(
                 &app.appearance.theme,
                 entries.panel.area,
-                app.search.suggestions.rows.len(),
+                app.search.suggestions.len(),
             )
         })
         .map_or(0, |list| list.height))
