@@ -5,7 +5,7 @@ use notema_domain::{
     DateFilter, Entry, EntryEncryptionState, FeelingMatch, entry_group_date, feeling_matches_search,
 };
 
-use super::parse::split_values;
+use super::parse::{split_unquoted, split_values, unquote};
 use crate::tui::{app::SearchScope, features::metadata::metadata_values, state::MetadataKind};
 
 /// Whether an entry's date satisfies `filter`. Entries with neither a creation
@@ -53,17 +53,30 @@ pub(crate) fn location_tokens(query: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether an entry matches a `location:` search: every word in `query` appears
-/// (case-insensitively, any order) somewhere in the location's
-/// [`search_haystack`](notema_domain::Location::search_haystack).
+/// Whether an entry matches a `location:` search: every word of some
+/// `|`-alternative appears (case-insensitively, any order) somewhere in the
+/// location's [`search_haystack`](notema_domain::Location::search_haystack).
+///
+/// Alternatives only — there is no `+` counterpart, because an entry has one
+/// location and requiring two places at once could only ever match nothing.
+/// Quotedness is not exactness here (a place still contains the places around
+/// it); it only keeps a `;` or `|` in a name from cutting the value, so the
+/// unquoting is per alternative, after the split.
 pub(crate) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<> {
-    let needles = location_tokens(query);
+    let alternatives: Vec<Vec<String>> = split_unquoted(query, '|')
+        .into_iter()
+        .map(|alternative| location_tokens(&unquote(alternative.trim())))
+        // An empty or punctuation-only alternative matches nothing, rather than
+        // everything — `location:berlin|` is still just Berlin.
+        .filter(|needles| !needles.is_empty())
+        .collect();
     move |entry| {
-        // An empty or punctuation-only query matches nothing.
-        !needles.is_empty()
+        !alternatives.is_empty()
             && entry.location.as_ref().is_some_and(|location| {
                 let haystack = location.search_haystack();
-                needles.iter().all(|needle| haystack.contains(needle))
+                alternatives
+                    .iter()
+                    .any(|needles| needles.iter().all(|needle| haystack.contains(needle)))
             })
     }
 }

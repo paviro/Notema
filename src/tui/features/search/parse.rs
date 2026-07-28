@@ -44,6 +44,35 @@ pub(crate) fn split_prefix(segment: &str) -> Option<(Prefix, &str)> {
         .find_map(|(token, prefix)| segment.strip_prefix(token).map(|rest| (*prefix, rest)))
 }
 
+/// How a prefix builds its value out of parts. The query field colours operators
+/// from this and the predicates split on it, so the field cannot paint an
+/// operator over a character its own filter reads literally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ValueGrammar {
+    /// `+`-groups of `|`-alternatives: all groups match, any alternative in one.
+    Groups,
+    /// `|`-alternatives alone.
+    Alternatives,
+    /// One value, whole.
+    Whole,
+}
+
+impl Prefix {
+    /// The shape of this prefix's value.
+    ///
+    /// `location:` takes alternatives but no `+`: an entry has one location, so
+    /// ANDing two places could only ever match nothing, which leaves `+` free to
+    /// be a character in a place name. The scalars take neither — they parse the
+    /// whole value as a date, a score or a flag.
+    pub(super) fn value_grammar(self) -> ValueGrammar {
+        match self {
+            Self::Tags | Self::People | Self::Activities | Self::Feelings => ValueGrammar::Groups,
+            Self::Location => ValueGrammar::Alternatives,
+            Self::Star | Self::Mood | Self::Date(_) => ValueGrammar::Whole,
+        }
+    }
+}
+
 /// Where [`split_unquoted`] cuts. Each range excludes the separator that ended
 /// it, so a piece's `end` is that separator's offset — except the last piece,
 /// which ends at `input.len()`.
@@ -102,14 +131,31 @@ pub(super) fn unquote(value: &str) -> Cow<'_, str> {
 /// inside doubled so it can't close the pair early and expose a `;`/`+`/`|` after
 /// it to the splitters.
 ///
-/// Everything that builds a query from a value the user already has — the chip
-/// searches, the filter browser's rows — goes through this. It quotes
-/// unconditionally rather than only when the value holds a structural character,
-/// because quoting is what makes a value exact: otherwise `work;shop` would be
-/// exact while `work` beside it stayed a substring, and one tab's rows would mean
-/// two different things.
+/// For the prefixes that *have* an exact mode — the four [`split_values`] facets.
+/// It quotes unconditionally rather than only when the value holds a structural
+/// character, because quoting is what makes a value exact: otherwise `work;shop`
+/// would be exact while `work` beside it stayed a substring, and one tab's rows
+/// would mean two different things. [`escape_filter_value`] carries a value under
+/// the prefixes that have no exact mode.
 pub(crate) fn quote_filter_value(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+/// The query fragment carrying `value` under a prefix with no exact mode —
+/// `location:`, which tokenizes its value either way. Quotes there would claim an
+/// exactness the predicate does not have, so they appear only when the grammar
+/// would otherwise reach into the value: a bare `Berlin, Germany` stays bare.
+///
+/// The trigger is every character that would cut *this* value — the `;` between
+/// filters and the `|` between alternatives, plus the `"` that would open a span
+/// of its own. Not `+`, which [`ValueGrammar::Alternatives`] leaves as a
+/// character, so a place with one in its name still arrives bare.
+pub(crate) fn escape_filter_value(value: &str) -> Cow<'_, str> {
+    if value.contains([';', '|', '"']) {
+        Cow::Owned(quote_filter_value(value))
+    } else {
+        Cow::Borrowed(value)
+    }
 }
 
 /// One `|`-alternative of a filter value: the text to match, lowercased, and how
@@ -245,7 +291,9 @@ mod tests {
             );
         }
         for tab in FilterTab::ALL {
-            let segment = format!("{}:x", tab.search_prefix());
+            // The whole launched query, not just the prefix: a tab that quotes
+            // its value has to leave the prefix reachable in front of it.
+            let segment = tab.launch_query("x");
             assert!(
                 split_prefix(&segment).is_some(),
                 "FilterTab::{tab:?} produces {segment:?}"
@@ -258,7 +306,6 @@ mod tests {
         // Plain values are quoted too: quoting is what makes a value exact, so a
         // tab whose rows quoted only the awkward ones would mean two things.
         assert_eq!(quote_filter_value("berlin"), "\"berlin\"");
-        assert_eq!(quote_filter_value("Berlin, Germany"), "\"Berlin, Germany\"");
         assert_eq!(quote_filter_value("c++"), "\"c++\"");
         assert_eq!(quote_filter_value("r&d|ops"), "\"r&d|ops\"");
         assert_eq!(quote_filter_value("berlin; mitte"), "\"berlin; mitte\"");
@@ -266,6 +313,24 @@ mod tests {
         // the wrapping pair and let a later separator split the value.
         assert_eq!(quote_filter_value("say \"hi\""), "\"say \"\"hi\"\"\"");
         assert_eq!(quote_filter_value("a\";b"), "\"a\"\";b\"");
+    }
+
+    #[test]
+    fn escaping_quotes_only_what_the_grammar_would_cut() {
+        // The shapes a place name actually has: commas, spaces and hyphens are
+        // nothing to the grammar, and quoting them would read as exactness.
+        assert_eq!(escape_filter_value("Berlin, Germany"), "Berlin, Germany");
+        assert_eq!(escape_filter_value("Clermont-Ferrand"), "Clermont-Ferrand");
+        // `+` is not an operator under `location:`, so a place keeps it bare.
+        assert_eq!(escape_filter_value("Rock + Roll"), "Rock + Roll");
+        // A separator survives as a character instead of splitting the query.
+        assert_eq!(escape_filter_value("Ville; Sud"), "\"Ville; Sud\"");
+        assert_eq!(escape_filter_value("a|b"), "\"a|b\"");
+        assert_eq!(escape_filter_value("say \"hi\""), "\"say \"\"hi\"\"\"");
+        // Whichever branch ran, the value has to come back out whole.
+        for value in ["Berlin, Germany", "Ville; Sud", "a|b", "say \"hi\""] {
+            assert_eq!(unquote(&escape_filter_value(value)), value);
+        }
     }
 
     /// What the filter browser and the chips build has to parse back to the one

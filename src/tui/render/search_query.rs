@@ -81,9 +81,9 @@ pub(super) fn query_styling(theme: &Theme, query: &str) -> QueryStyling {
 }
 
 /// The pill category a prefix's values belong to, for the four facets that have
-/// one. Every value a filter row or a chip launches is quoted, `location:`
-/// included, so a quoted span alone does not mean exact — only these four carry
-/// that meaning, and a pill on the others would claim it falsely.
+/// one. A pill draws exactness, and these are the prefixes that have an exact
+/// mode to draw: the rest `unquote` their value and match it the same either way,
+/// so a pill there would claim a precision the predicate does not have.
 fn pill_category(prefix: Prefix) -> Option<PillCategory> {
     match prefix {
         Prefix::Tags => Some(PillCategory::Tags),
@@ -217,8 +217,8 @@ mod tests {
         ] {
             assert!(drawn(&theme, query).contains('['), "{query}");
         }
-        // Every launched value is quoted, so a quoted one of these is not a
-        // claim of exactness and must not look like one.
+        // These match their value the same quoted or not, so a hand-typed pair
+        // is not a claim of exactness and must not look like one.
         for query in [
             "location:\"berlin\"",
             "mood:\"3\"",
@@ -270,19 +270,25 @@ mod tests {
         assert_eq!((start.1, end.1), (6, 11));
     }
 
-    /// Launching a filter row builds `tags:"value"` through `quote_filter_value`,
-    /// and that has to chip with no special-casing of where the text came from.
+    /// No launched row leaves a bare `"` on screen: the four facets quote and
+    /// that quote draws as a chip, and a location does not quote at all. The one
+    /// case that survives is the launcher keeping a separator literal, and there
+    /// the quotes are escaping rather than a claim about the match.
     #[test]
-    fn a_launched_filter_value_round_trips_to_a_chip() {
-        use crate::tui::features::search::quote_filter_value;
+    fn a_launched_filter_value_never_draws_a_raw_quote() {
         use crate::tui::state::FilterTab;
 
         let theme = bracket();
         for tab in FilterTab::ALL {
-            let query = format!("{}:{}", tab.search_prefix(), quote_filter_value("apple"));
+            let query = tab.launch_query("apple");
+            assert!(!drawn(&theme, &query).contains('"'), "{query}");
             let chipped = !query_styling(&theme, &query).substitutions.is_empty();
             assert_eq!(chipped, tab != FilterTab::Locations, "{query}");
         }
+        assert_eq!(
+            FilterTab::Locations.launch_query("Ville; Sud, France"),
+            "location:\"Ville; Sud, France\""
+        );
     }
 
     #[test]

@@ -8,9 +8,10 @@
 //! The [`Segment`] here is a location, not the classification `super::Segment`
 //! makes of the same piece.
 
+use std::iter::once;
 use std::ops::Range;
 
-use super::parse::{Prefix, is_quoted, split_prefix, split_unquoted_ranges};
+use super::parse::{Prefix, ValueGrammar, is_quoted, split_prefix, split_unquoted_ranges};
 
 /// One `;`-separated piece of a query.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,14 +71,24 @@ fn scan_segment(query: &str, piece: Range<usize>, separator: Option<usize>) -> S
     let value = trimmed.end - rest.len()..trimmed.end;
     let mut operators = Vec::new();
     let mut alternatives = Vec::new();
-    let groups = split_unquoted_ranges(&query[value.clone()], '+');
+    let grammar = prefix.value_grammar();
+    // A prefix that does not group is scanned as a single group, so the `|` pass
+    // below is the only one that cuts it; one that takes no operators at all is
+    // one alternative spanning the whole value.
+    let groups = match grammar {
+        ValueGrammar::Groups => split_unquoted_ranges(&query[value.clone()], '+'),
+        _ => once(0..value.len()).collect(),
+    };
     let last_group = groups.len() - 1;
     for (index, group) in groups.into_iter().enumerate() {
         let group = shift(group, value.start);
         if index < last_group {
             operators.push(('+', group.end));
         }
-        let alts = split_unquoted_ranges(&query[group.clone()], '|');
+        let alts = match grammar {
+            ValueGrammar::Whole => once(0..group.len()).collect(),
+            _ => split_unquoted_ranges(&query[group.clone()], '|'),
+        };
         let last_alt = alts.len() - 1;
         for (index, alt) in alts.into_iter().enumerate() {
             let alt = shift(alt, group.start);
@@ -250,6 +261,40 @@ mod tests {
         for &(operator, offset) in &segment.operators {
             assert_eq!(query[offset..].chars().next(), Some(operator));
         }
+    }
+
+    /// A prefix is only scanned for the operators it actually splits on, so the
+    /// query field cannot colour a character its own filter matches literally.
+    #[test]
+    fn a_prefix_is_scanned_for_its_own_operators_only() {
+        // `location:` takes alternatives but no groups: the `|` is an operator
+        // and cuts, the `+` is part of the place name.
+        let segment = &scan("location:berlin|paris")[0];
+        assert_eq!(segment.operators, vec![('|', 15)]);
+        assert_eq!(alternatives("location:berlin|paris"), vec!["berlin", "paris"]);
+
+        let segment = &scan("location:Rock + Roll")[0];
+        assert!(segment.operators.is_empty());
+        assert_eq!(alternatives("location:Rock + Roll"), vec!["Rock + Roll"]);
+
+        // The scalars take neither — they parse the whole value.
+        for query in ["mood:3|4", "star:a+b", "date:2026|2027"] {
+            assert!(scan(query)[0].operators.is_empty(), "{query}");
+        }
+        assert_eq!(alternatives("mood:3|4"), vec!["3|4"]);
+
+        // The token facets are unchanged: `+` groups, `|` alternates.
+        let segment = &scan("tags:a+b|c")[0];
+        assert_eq!(segment.operators, vec![('+', 6), ('|', 8)]);
+    }
+
+    /// The trimmed text of each alternative, in order.
+    fn alternatives(query: &str) -> Vec<&str> {
+        scan(query)[0]
+            .alternatives
+            .iter()
+            .map(|alt| &query[alt.range.clone()])
+            .collect()
     }
 
     /// Every offset feeds a byte-range API that slices the query, and a slice

@@ -15,7 +15,7 @@ use notema_domain::Entry;
 use crate::tui::app::{AppModel, Focus, SearchScope};
 use crate::tui::features::facets::{FacetTally, PlaceCounter};
 use crate::tui::features::metadata::metadata_values;
-use crate::tui::features::search::{entry_in_search_scope, quote_filter_value};
+use crate::tui::features::search::entry_in_search_scope;
 use crate::tui::render::tab_strip::StripTab;
 use crate::tui::state::{FilterTab, ListNav, MetadataKind, Overlay, SelectableList};
 
@@ -227,11 +227,7 @@ impl AppModel {
             return;
         };
         let scope = state.scope.clone();
-        let query = format!(
-            "{}:{}",
-            state.tab.search_prefix(),
-            quote_filter_value(&row.search_value)
-        );
+        let query = state.tab.launch_query(&row.search_value);
         self.close_overlay();
         // `search_results` parses the query box and reads `self.search.scope`, so
         // set both to the captured values before computing hits; `enter_search`
@@ -295,8 +291,9 @@ mod tests {
     /// The tags carry the shapes a row's value has to survive: one value holding
     /// another (`work`/`homework`), a casing pair both across entries and within
     /// one, a value with surrounding whitespace, and characters the query parser
-    /// reads as structure. The feelings carry `happy`/`unhappy`, which are two
-    /// canonical feelings, one holding the other's name.
+    /// reads as structure — as does one place name. The feelings carry
+    /// `happy`/`unhappy`, which are two canonical feelings, one holding the
+    /// other's name.
     fn fixture_app() -> AppModel {
         let entries = vec![
             entry("work", |e| {
@@ -325,6 +322,22 @@ mod tests {
                 e.starred = true;
                 e.location = Some(place("Paris", "France"));
             }),
+            entry("trips", |e| {
+                // Place names holding a query separator. A location is not quoted
+                // on the way out, so these are the rows whose counts only survive
+                // if the launcher still keeps a separator literal — `;` between
+                // filters, `|` between a location's alternatives.
+                e.location = Some(place("Ville; Sud", "France"));
+            }),
+            entry("trips", |e| {
+                e.location = Some(place("Rock | Roll", "USA"));
+            }),
+            // Shares a word with one half of `Rock | Roll`, so an unescaped `|`
+            // in that row's launched query would reach this entry too and its
+            // count would stop matching its results.
+            entry("trips", |e| {
+                e.location = Some(place("Roll", "USA"));
+            }),
             entry("work", |e| {
                 e.encryption_state = EntryEncryptionState::EncryptedLocked;
                 e.tags = strings(&["secret"]);
@@ -337,14 +350,12 @@ mod tests {
         app
     }
 
-    /// Run the search a row would launch and return its hit count.
+    /// Run the search a row would launch and return its hit count. Goes through
+    /// `launch_query` rather than rebuilding it, so a change to how a tab quotes
+    /// cannot pass here while breaking the browser.
     fn search_count(app: &mut AppModel, scope: &SearchScope, tab: FilterTab, value: &str) -> usize {
         app.search.scope = scope.clone();
-        app.search.query.set_text(&format!(
-            "{}:{}",
-            tab.search_prefix(),
-            quote_filter_value(value)
-        ));
+        app.search.query.set_text(&tab.launch_query(value));
         app.search_results().len()
     }
 

@@ -77,8 +77,8 @@ beach; tags:travel                 full-text "beach" and the travel tag
 ```
 
 A prefix-less piece is a full-text search AND-ed with the filters, so it also
-supplies the ranking. Only `;`, `+`, and `|` are structural — values keep
-everything else (`location:Berlin, Germany`).
+supplies the ranking. Only `;`, `+`, and `|` are structural, and only where the
+prefix takes them — values keep everything else (`location:Berlin, Germany`).
 
 `tags:`, `people:`, `activities:` and `feelings:` match a bare value anywhere in
 the field, which is what keeps the list narrowing as you type. Quote it to mean
@@ -93,11 +93,20 @@ tags:"say ""hi"""   a quote inside a quoted value is written twice
 ```
 
 `location:` is not exact either way: a place contains the places around it, so
-`location:Germany` finds every entry in it.
+`location:Germany` finds every entry in it. It takes `|` but not `+` — an entry
+has one location, so `location:Berlin|Paris` is either city and a `+` is just a
+character in a place name:
+
+```
+location:Berlin|Paris     entries in either city
+location:Rock + Roll      the place "Rock + Roll"
+```
 
 Searches launched by clicking a tag, person, feeling, or a filter-browser row
-(`f`) quote themselves, so the query they drop in the search box means the value
-you clicked and only that one.
+(`b`) quote themselves, so the query they drop in the search box means the value
+you clicked and only that one. A launched `location:` does not — quoting would
+not narrow it — so it arrives as plain text (`location:Berlin, Germany`), quoted
+only if the place name itself holds a `;` or a `|`.
 
 ## Location
 

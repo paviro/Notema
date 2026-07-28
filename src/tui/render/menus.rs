@@ -217,6 +217,7 @@ const SEARCH_SECTIONS: [(&str, &[(&str, &str)]); 5] = [
             ("tags:x+y", "All values match"),
             ("tags:x|y", "Any value matches"),
             ("tags:x+y|z", "x and (y or z)"),
+            ("location:x|y", "Either place, no +"),
             ("beach; tags:x", "Text plus filters"),
             ("tags:\"x\"", "Exactly x, not xy"),
             ("tags:\"x+y\"", "Exact, operators literal"),

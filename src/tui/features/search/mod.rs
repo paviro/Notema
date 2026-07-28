@@ -21,7 +21,7 @@ use crate::tui::{
 use parse::{parse_starred_value, split_unquoted, unquote};
 use predicate::date_predicate;
 
-pub(crate) use parse::{Prefix, quote_filter_value, split_prefix};
+pub(crate) use parse::{Prefix, escape_filter_value, quote_filter_value, split_prefix};
 pub(crate) use predicate::{
     entry_in_search_scope, feeling_predicate, location_predicate, location_tokens,
     metadata_predicate,
@@ -209,7 +209,9 @@ fn classify_segment(segment: &str, today: NaiveDate) -> Segment<'_> {
             Some(want) => Segment::Filter(Box::new(move |entry: &Entry| entry.starred == want)),
             None => Segment::NoMatch,
         },
-        Prefix::Location => Segment::Filter(Box::new(location_predicate(&unquote(value)))),
+        // Raw: the `|` split runs before unquoting, so `"a|b"|c` is the one place
+        // `a|b` and the place `c`, exactly as it reads.
+        Prefix::Location => Segment::Filter(Box::new(location_predicate(value))),
         Prefix::Mood => match unquote(value).parse::<i8>() {
             Ok(score) if MOOD_RANGE.contains(&score) => {
                 Segment::Filter(Box::new(move |entry: &Entry| entry.mood == Some(score)))
@@ -312,6 +314,37 @@ mod tests {
         // Every word must match, so a bogus or absent part finds nothing.
         assert_eq!(run(&mut app, "location:Berlin Tokyo"), 0);
         assert_eq!(run(&mut app, "location:Tokyo"), 0);
+    }
+
+    /// `|` is the one operator a place takes: an entry has a single location, so
+    /// alternatives are the only combination that can match anything.
+    #[test]
+    fn a_location_takes_alternatives_but_reads_a_plus_literally() {
+        let mut app = app_with(vec![
+            located_entry("Berlin", "Germany", None),
+            located_entry("Paris", "France", None),
+            located_entry("Rock + Roll", "USA", None),
+        ]);
+
+        assert_eq!(run(&mut app, "location:Berlin|Paris"), 2);
+        assert_eq!(run(&mut app, "location:Berlin | Paris"), 2);
+        assert_eq!(run(&mut app, "location:Berlin|Tokyo"), 1);
+        assert_eq!(run(&mut app, "location:Tokyo|Kyoto"), 0);
+        // Each alternative still requires all of its own words.
+        assert_eq!(run(&mut app, "location:Berlin France|Paris France"), 1);
+        // An empty alternative narrows nothing rather than matching everything.
+        assert_eq!(run(&mut app, "location:Berlin|"), 1);
+
+        // `+` is a character in a place name, not an AND.
+        assert_eq!(run(&mut app, "location:Rock + Roll"), 1);
+        assert_eq!(run(&mut app, "location:Berlin+Paris"), 0);
+
+        // Quoting keeps a `|` inside one alternative, and is still not exactness:
+        // the country alone reaches the entry either way.
+        let mut app = app_with(vec![located_entry("A|B", "Germany", None)]);
+        assert_eq!(run(&mut app, "location:\"A|B\""), 1);
+        assert_eq!(run(&mut app, "location:\"A|B\"|Tokyo"), 1);
+        assert_eq!(run(&mut app, "location:Germany"), 1);
     }
 
     fn dated_entry(created_at: Option<&str>, path: &str) -> Entry {

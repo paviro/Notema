@@ -1,12 +1,14 @@
 //! Focused state containers held by [`AppModel`](super::app::AppModel), split out so the
 //! reset/lifecycle logic for each concern lives in one place.
 
+use std::borrow::Cow;
 use std::time::{Duration, Instant};
 
 use notema_domain::SearchHit;
 use ratatui::widgets::ListState;
 
 use super::app::SearchScope;
+use super::features::search::{escape_filter_value, quote_filter_value};
 use super::features::{
     feelings::EditFeelingState, filter::FilterState, location::EditLocationState,
     metadata::EditMetadataState,
@@ -472,6 +474,20 @@ impl FilterTab {
             Self::Feelings => "feelings",
             Self::Locations => "location",
         }
+    }
+
+    /// The whole query a chosen row launches. Only the token facets quote, since
+    /// a quoted value is an exact one and `location:` matches on words either
+    /// way — a location quotes only to keep a structural character literal.
+    ///
+    /// The one builder, so what the browser launches and what its counts are
+    /// measured against cannot drift.
+    pub(crate) fn launch_query(self, value: &str) -> String {
+        let value = match self {
+            Self::Locations => escape_filter_value(value),
+            _ => Cow::Owned(quote_filter_value(value)),
+        };
+        format!("{}:{value}", self.search_prefix())
     }
 }
 
