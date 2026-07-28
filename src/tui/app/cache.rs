@@ -4,7 +4,7 @@
 
 use super::{AppModel, Mode, RenderedEntryBody};
 use crate::tui::entry_rows::{EntryRowCache, build_entry_row_cache};
-use crate::tui::features::filter::FilterRows;
+use crate::tui::features::facets::FilterRows;
 use crate::tui::features::insights::{InsightsScope, InsightsTimeframe};
 use notema_analytics::{Analytics, Correlations, analyze, build_correlations};
 use notema_domain::{Entry, SearchScope, entry_group_date};

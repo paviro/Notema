@@ -2,11 +2,11 @@
 
 use chrono::NaiveDate;
 use notema_domain::{
-    DateFilter, Entry, EntryEncryptionState, FeelingMatch, entry_group_date, feeling_matches_search,
+    DateFilter, Entry, FeelingMatch, Location, entry_group_date, feeling_matches_search,
 };
 
 use super::parse::{split_unquoted, split_values, unquote};
-use crate::tui::{app::SearchScope, features::metadata::metadata_values, state::MetadataKind};
+use crate::tui::{features::metadata::metadata_values, state::MetadataKind};
 
 /// Whether an entry's date satisfies `filter`. Entries with neither a creation
 /// timestamp nor a dated filename have no date to compare, so they never match.
@@ -42,19 +42,6 @@ pub(super) fn metadata_predicate(
     }
 }
 
-/// The words a `location:` value matches on: maximal alphanumeric runs,
-/// lowercased — so `"Berlin, Germany"` and `"Berlin - Germany"` tokenize alike.
-///
-/// Shared with the filter browser's place counter so the two cannot tokenize a
-/// query differently and disagree about a row's count.
-pub(crate) fn location_tokens(query: &str) -> Vec<String> {
-    query
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(str::to_lowercase)
-        .collect()
-}
-
 /// Whether an entry matches a `location:` search: every word of some
 /// `|`-alternative appears (case-insensitively, any order) somewhere in the
 /// location's [`search_haystack`](notema_domain::Location::search_haystack).
@@ -67,7 +54,7 @@ pub(crate) fn location_tokens(query: &str) -> Vec<String> {
 pub(super) fn location_predicate(query: &str) -> impl Fn(&Entry) -> bool + use<> {
     let alternatives: Vec<Vec<String>> = split_unquoted(query, '|')
         .into_iter()
-        .map(|alternative| location_tokens(&unquote(alternative.trim())))
+        .map(|alternative| Location::search_tokens(&unquote(alternative.trim())))
         // An empty or punctuation-only alternative matches nothing, rather than
         // everything — `location:berlin|` is still just Berlin.
         .filter(|needles| !needles.is_empty())
@@ -119,17 +106,5 @@ pub(super) fn feeling_predicate(feeling: &str) -> impl Fn(&Entry) -> bool + use<
                         .any(|entry_feeling| feeling_matches_search(entry_feeling, needle, *mode))
                 })
             })
-    }
-}
-
-/// Whether `entry` is visible to a search under `scope`: unlocked (locked and
-/// unreadable encrypted entries never match) and inside the scope.
-pub(crate) fn entry_in_search_scope(entry: &Entry, scope: &SearchScope) -> bool {
-    !matches!(
-        entry.encryption_state,
-        EntryEncryptionState::EncryptedLocked | EntryEncryptionState::EncryptedUnreadable
-    ) && match scope {
-        SearchScope::AllJournals => true,
-        SearchScope::Journal(journal) => entry.journal == *journal,
     }
 }

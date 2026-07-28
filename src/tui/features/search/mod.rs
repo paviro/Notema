@@ -23,7 +23,6 @@ use parse::{parse_starred_value, split_unquoted, unquote};
 use predicate::{date_predicate, feeling_predicate, location_predicate, metadata_predicate};
 
 pub(crate) use parse::{Prefix, escape_filter_value, quote_filter_value, split_prefix};
-pub(crate) use predicate::{entry_in_search_scope, location_tokens};
 
 /// Boxed so segments with different predicate types share one `Vec`.
 type EntryPredicate = Box<dyn Fn(&Entry) -> bool>;
@@ -170,7 +169,7 @@ impl AppModel {
         self.library
             .entries
             .iter()
-            .filter(|entry| entry_in_search_scope(entry, &self.search.scope) && predicate(entry))
+            .filter(|entry| self.search.scope.covers(entry) && predicate(entry))
             .map(SearchHit::from_entry)
             .collect()
     }

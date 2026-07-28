@@ -12,11 +12,11 @@
 
 use crate::tui::{
     app::AppModel,
-    features::filter::FilterRow,
+    features::facets::FilterRow,
     state::{FilterTab, SelectableList, SuggestionRow},
 };
 
-use super::{offsets, parse::unquote, predicate::location_tokens};
+use super::{offsets, parse::unquote};
 
 impl AppModel {
     /// Whether the suggestion list is taking keys — it stays open underneath an
@@ -138,7 +138,7 @@ fn matching_rows(rows: &[FilterRow], tab: FilterTab, fragment: &str) -> Vec<Sugg
     // `Berlin - Germany`, and splitting that on spaces looks for a literal `-`
     // the haystack never contains — so typing back the row just offered would
     // empty the list.
-    let words = location_tokens(&fragment);
+    let words = notema_domain::Location::search_tokens(&fragment);
     rows.iter()
         .filter(|row| match tab {
             // A place row's label is its display name but its value is the query

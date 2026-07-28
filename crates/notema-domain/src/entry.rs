@@ -253,6 +253,21 @@ impl Location {
         .to_lowercase()
     }
 
+    /// The words a query matches [`search_haystack`](Self::search_haystack) on:
+    /// maximal alphanumeric runs, lowercased — so `"Berlin, Germany"` and
+    /// `"Berlin - Germany"` tokenize alike.
+    ///
+    /// Beside the haystack because the two are one rule. Anything counting or
+    /// completing places tokenizes here, so none of them can disagree with the
+    /// search about what a place is called.
+    pub fn search_tokens(query: &str) -> Vec<String> {
+        query
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|word| !word.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    }
+
     /// A one-line label for display. The `name` is set off with `" - "`; the
     /// address parts follow, joined by `", "`. Only a curated subset is shown —
     /// road + house number, `neighbourhood`, `suburb`, postcode + settlement, and
@@ -687,6 +702,24 @@ pub enum SearchScope {
     #[default]
     AllJournals,
     Journal(String),
+}
+
+impl SearchScope {
+    /// Whether `entry` is visible to a search under this scope: unlocked (locked
+    /// and unreadable encrypted entries never match) and inside the scope.
+    ///
+    /// Beside the scope itself because everything answering "what is in scope"
+    /// has to agree — the search, the facet counts the search is launched from,
+    /// and the suggestions offering those facets.
+    pub fn covers(&self, entry: &Entry) -> bool {
+        !matches!(
+            entry.encryption_state,
+            EntryEncryptionState::EncryptedLocked | EntryEncryptionState::EncryptedUnreadable
+        ) && match self {
+            Self::AllJournals => true,
+            Self::Journal(journal) => entry.journal == *journal,
+        }
+    }
 }
 
 #[cfg(test)]
