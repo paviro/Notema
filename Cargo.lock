@@ -2487,7 +2487,7 @@ dependencies = [
 [[package]]
 name = "notema-textarea"
 version = "0.9.2"
-source = "git+https://github.com/paviro/notema-textarea?rev=eb794a2#eb794a20295124a46f2ab773c3a35b4ff79062b9"
+source = "git+https://github.com/paviro/notema-textarea?rev=cbf1b84#cbf1b8448599c981a398975c8bc4581286f019e8"
 dependencies = [
  "ratatui-core",
  "ratatui-crossterm",
