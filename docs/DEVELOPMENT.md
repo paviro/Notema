@@ -22,7 +22,7 @@ These mirror the CI jobs; run them before pushing.
 
 ```bash
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo clippy --workspace --all-targets --features bench --locked -- -D warnings
 cargo test --workspace --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
@@ -95,16 +95,16 @@ cargo bench --features bench --bench tui
 The `tui` bench reaches otherwise-private TUI paths through the `bench` feature,
 which exposes a small `notema::bench` module (a `BenchApp` handle plus one entry
 point per benched path). The feature is dev-only
-and never compiled into the shipped binary. Because the `[[bench]]` entry sets
-`required-features`, a plain `cargo clippy --all-targets` *skips* this target —
-lint it with `cargo clippy --workspace --all-targets --features bench`.
+and never compiled into the shipped binary. Because the `[[bench]]` entry sets `required-features`, a plain
+`cargo clippy --all-targets` *skips* this target, which is why the lint command
+above passes `--features bench`.
 
 Two corpus shapes, chosen per bench:
 
 - **Narrow** (`app_with_entries`) holds the vocabulary fixed — 30 tags, 20
   people, 12 activities, no feelings, no locations — however large the corpus
-  gets. `render_frame` and `search` use it, and must keep using it: changing the
-  corpus under them would silently rebase every number recorded so far.
+  gets. `render_frame` and `search` use it, and must keep using it — changing
+  the corpus under them rebases every number recorded so far.
 - **Wide** (`app_with_corpus(.., BenchCorpus::Wide)`) grows the vocabulary with
   the corpus, so paths that scale with the number of *distinct* values are
   actually exercised. The filter-browser lines use it and print their row count
@@ -117,15 +117,13 @@ The `filter_*` and `metadata_picker`/`location_picker` lines are two views of th
 same facets: the browser lists a facet to search by, the picker lists it to
 assign from, and neither is cached. `metadata_filter` is the picker's
 per-keystroke refilter with the value list already built. The picker's cost is
-dominated by the per-entry walk rather than the vocabulary — the 12-value
-Activities line is within a factor of two of the 1280-value Tags one.
+dominated by the per-entry walk rather than the vocabulary.
 
 `insights_analytics` and `insights_drivers` time cache *hits* — what a redraw
-with the insights pane open costs once the aggregate is built. The cold build is
-`cargo bench -p notema-analytics --bench analytics`; do not add it here as well.
-The two lines differ on purpose: the analytics memo is flat, while the drivers
-one gathers its entry references before consulting the cache and so grows with
-the corpus.
+with the insights pane open costs once the aggregate is built; the cold build is
+`cargo bench -p notema-analytics --bench analytics`. The analytics memo is flat,
+while the drivers one gathers its entry references before consulting the cache
+and so grows with the corpus.
 
 `editor_input` is one keystroke reaching the buffer; `editor_highlight` is the
 whole-body re-scan the next frame pays for, which every keystroke makes a miss
@@ -133,18 +131,17 @@ by construction. Both are linear in document length, so read the 10k-line row
 as the slope rather than as a realistic entry — a long journal entry is closer
 to the 200-line row.
 
-`search` and `search_query` are two different things. `search` is the text
-kernel alone — no parse, no predicate — and stays on the narrow corpus so its
-numbers remain comparable with everything recorded before. `search_query` is the
+`search` is the text kernel alone — no parse, no predicate — and stays on the
+narrow corpus so its numbers remain comparable with everything recorded before.
+`search_query` is the
 whole rescan the search box's debounce defers, on the wide corpus, one line per
 query shape (unquoted substring, quoted exact, `location:`, chained filters,
 filters plus scoring text) with its hit count and the query itself alongside.
 
 The `reload_journal_list`, `refresh_path`, `rename_journal` and
-`install_snapshot` lines are the incremental routes that replaced whole-library
-reloads. Read them against `validate/{size}` in the `scan` bench, which is the
-warm-cache full walk each of them exists to avoid — that is the comparison, and
-none of them should ever approach it.
+`install_snapshot` lines are the incremental reload routes. Read them against
+`validate/{size}` in the `scan` bench — the warm-cache full walk each exists to
+avoid, and which none of them should approach.
 
 Reading the numbers: each line is the mean wall-clock time per iteration, e.g.
 `scan/25000: 1.1s`. There is no built-in baseline comparison — record the 25k

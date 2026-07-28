@@ -102,7 +102,6 @@ notema-timing = { path = "crates/notema-timing" }
 
 # Cuts release binary size and startup overhead.
 [profile.release]
-opt-level = 3
 lto = "thin"
 codegen-units = 1
 # Unwinding preserves FUSE error containment and terminal restoration.
