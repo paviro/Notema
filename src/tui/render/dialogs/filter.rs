@@ -57,6 +57,9 @@ impl StripTab for FilterTab {
     fn initial(self) -> &'static str {
         self.initial()
     }
+    fn index(self) -> usize {
+        self.index()
+    }
 }
 
 // ── Layout ────────────────────────────────────────────────────────────────────

@@ -36,6 +36,18 @@ const PREFIXES: [(&str, Prefix); 10] = [
     ("after:", Prefix::Date(DateBound::After)),
 ];
 
+impl Prefix {
+    /// The token that parses back to this prefix, colon included. Read out of
+    /// the same table [`split_prefix`] matches against, so anything writing a
+    /// query writes one the parser recognizes.
+    pub(crate) fn token(self) -> &'static str {
+        PREFIXES
+            .iter()
+            .find_map(|(token, prefix)| (*prefix == self).then_some(*token))
+            .unwrap_or_default()
+    }
+}
+
 /// Split a segment into its filter prefix and the raw text after it; `None` is a
 /// full-text segment. Matching is byte-exact, so `Tags:` and `tags :` are text.
 pub(crate) fn split_prefix(segment: &str) -> Option<(Prefix, &str)> {
@@ -292,8 +304,9 @@ mod tests {
     }
 
     /// The two enums that *build* queries must name prefixes the parser reads
-    /// back. They hold their own `&'static str`, so nothing but this stops a
-    /// filter row from launching a search that silently ran as full text.
+    /// back. Both take their token from `PREFIXES` now, so this mostly guards
+    /// `Prefix::token`'s empty fallback and the round trip through
+    /// `from_prefix`, which is how the search box knows whose values to offer.
     #[test]
     fn every_produced_prefix_parses_back() {
         for kind in [
@@ -301,7 +314,7 @@ mod tests {
             MetadataKind::People,
             MetadataKind::Activities,
         ] {
-            let segment = format!("{}:x", kind.search_prefix());
+            let segment = format!("{}x", kind.search_prefix());
             assert!(
                 split_prefix(&segment).is_some(),
                 "MetadataKind::{kind:?} produces {segment:?}"

@@ -18,7 +18,6 @@ use crate::tui::app::{AppModel, Focus, SearchScope};
 use crate::tui::features::facets::{FacetTally, PlaceCounter};
 use crate::tui::features::metadata::metadata_values;
 use crate::tui::features::search::entry_in_search_scope;
-use crate::tui::render::tab_strip::StripTab;
 use crate::tui::state::{FilterTab, ListNav, MetadataKind, Overlay, SelectableList};
 
 /// One row of a filter tab: its display `label`, the search payload it

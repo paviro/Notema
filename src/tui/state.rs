@@ -606,12 +606,14 @@ impl MetadataKind {
         }
     }
 
+    /// The search prefix listing this facet's values, colon included.
     pub(crate) fn search_prefix(self) -> &'static str {
         match self {
-            MetadataKind::Tags => "tags",
-            MetadataKind::People => "people",
-            MetadataKind::Activities => "activities",
+            MetadataKind::Tags => Prefix::Tags,
+            MetadataKind::People => Prefix::People,
+            MetadataKind::Activities => Prefix::Activities,
         }
+        .token()
     }
 }
 
@@ -639,6 +641,19 @@ impl FilterTab {
 
     /// Number of tabs.
     pub(crate) const COUNT: usize = Self::ALL.len();
+
+    /// This tab's slot in a `[_; COUNT]` keyed by tab — the facet arrays are
+    /// indexed by it, so it is spelt out here rather than found by scanning
+    /// `ALL` through a rendering trait whose miss would silently answer `Tags`.
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::Tags => 0,
+            Self::People => 1,
+            Self::Activities => 2,
+            Self::Feelings => 3,
+            Self::Locations => 4,
+        }
+    }
 
     pub(crate) fn title(self) -> &'static str {
         match self {
@@ -674,14 +689,16 @@ impl FilterTab {
     }
 
     /// The search prefix a chosen row launches (`tags:`, `location:`, …).
+    /// The search prefix listing this tab's values, colon included.
     pub(crate) fn search_prefix(self) -> &'static str {
         match self {
-            Self::Tags => "tags",
-            Self::People => "people",
-            Self::Activities => "activities",
-            Self::Feelings => "feelings",
-            Self::Locations => "location",
+            Self::Tags => Prefix::Tags,
+            Self::People => Prefix::People,
+            Self::Activities => Prefix::Activities,
+            Self::Feelings => Prefix::Feelings,
+            Self::Locations => Prefix::Location,
         }
+        .token()
     }
 
     /// The tab a search prefix lists the values of, or `None` for the prefixes
@@ -715,7 +732,7 @@ impl FilterTab {
     /// The whole query a chosen row launches: this tab's prefix, then
     /// [`launch_value`](Self::launch_value).
     pub(crate) fn launch_query(self, value: &str) -> String {
-        format!("{}:{}", self.search_prefix(), self.launch_value(value))
+        format!("{}{}", self.search_prefix(), self.launch_value(value))
     }
 }
 

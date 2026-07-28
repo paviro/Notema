@@ -138,11 +138,11 @@ impl AppModel {
                 continue;
             }
             match classify_segment(segment, today) {
-                Segment::Filter(predicate) => predicates.push(predicate),
+                SegmentKind::Filter(predicate) => predicates.push(predicate),
                 // A known filter with an unreadable value zeroes the whole query,
                 // as a lone unreadable filter always has.
-                Segment::NoMatch => return Vec::new(),
-                Segment::Text(text) => text_parts.push(text),
+                SegmentKind::NoMatch => return Vec::new(),
+                SegmentKind::Text(text) => text_parts.push(text),
             }
         }
 
@@ -177,7 +177,7 @@ impl AppModel {
 }
 
 /// One `;`-separated piece of a search query.
-enum Segment<'a> {
+enum SegmentKind<'a> {
     /// A recognized `prefix:` filter, as a predicate to AND with the others.
     Filter(EntryPredicate),
     /// A recognized filter whose value couldn't be read (e.g. `date:garbage`);
@@ -188,39 +188,41 @@ enum Segment<'a> {
 }
 
 /// Classify one query segment. `today` is threaded in so date matching stays pure.
-fn classify_segment(segment: &str, today: NaiveDate) -> Segment<'_> {
+fn classify_segment(segment: &str, today: NaiveDate) -> SegmentKind<'_> {
     let Some((prefix, value)) = split_prefix(segment) else {
-        return Segment::Text(segment);
+        return SegmentKind::Text(segment);
     };
     let value = value.trim();
     match prefix {
-        Prefix::Tags => Segment::Filter(Box::new(metadata_predicate(MetadataKind::Tags, value))),
-        Prefix::People => {
-            Segment::Filter(Box::new(metadata_predicate(MetadataKind::People, value)))
+        Prefix::Tags => {
+            SegmentKind::Filter(Box::new(metadata_predicate(MetadataKind::Tags, value)))
         }
-        Prefix::Activities => Segment::Filter(Box::new(metadata_predicate(
+        Prefix::People => {
+            SegmentKind::Filter(Box::new(metadata_predicate(MetadataKind::People, value)))
+        }
+        Prefix::Activities => SegmentKind::Filter(Box::new(metadata_predicate(
             MetadataKind::Activities,
             value,
         ))),
-        Prefix::Feelings => Segment::Filter(Box::new(feeling_predicate(value))),
+        Prefix::Feelings => SegmentKind::Filter(Box::new(feeling_predicate(value))),
         Prefix::Star => match parse_starred_value(&unquote(value)) {
-            Some(want) => Segment::Filter(Box::new(move |entry: &Entry| entry.starred == want)),
-            None => Segment::NoMatch,
+            Some(want) => SegmentKind::Filter(Box::new(move |entry: &Entry| entry.starred == want)),
+            None => SegmentKind::NoMatch,
         },
         // Raw: the `|` split runs before unquoting, so `"a|b"|c` is the one place
         // `a|b` and the place `c`, exactly as it reads.
-        Prefix::Location => Segment::Filter(Box::new(location_predicate(value))),
+        Prefix::Location => SegmentKind::Filter(Box::new(location_predicate(value))),
         Prefix::Mood => match unquote(value).parse::<i8>() {
             Ok(score) if MOOD_RANGE.contains(&score) => {
-                Segment::Filter(Box::new(move |entry: &Entry| entry.mood == Some(score)))
+                SegmentKind::Filter(Box::new(move |entry: &Entry| entry.mood == Some(score)))
             }
-            _ => Segment::NoMatch,
+            _ => SegmentKind::NoMatch,
         },
         Prefix::Date(bound) => match DateSpec::parse(&unquote(value)) {
             Some(spec) => {
-                Segment::Filter(Box::new(date_predicate(DateFilter { bound, spec }, today)))
+                SegmentKind::Filter(Box::new(date_predicate(DateFilter { bound, spec }, today)))
             }
-            None => Segment::NoMatch,
+            None => SegmentKind::NoMatch,
         },
     }
 }

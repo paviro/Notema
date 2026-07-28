@@ -123,7 +123,7 @@ impl AppModel {
     fn begin_metadata_search(&mut self, kind: MetadataKind, value: &str) {
         let scope = self.current_journal_scope();
         let value = quote_filter_value(value);
-        self.enter_search(scope, format!("{}:{value}", kind.search_prefix()));
+        self.enter_search(scope, format!("{}{value}", kind.search_prefix()));
     }
 
     pub(crate) fn edit_metadata_state(&self) -> Option<&EditMetadataState> {

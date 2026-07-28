@@ -5,9 +5,6 @@
 //! the grammar it is about to run. Both walk the same splitters, which is what
 //! keeps a pill's reach equal to the value the parser matched.
 //!
-//! The [`Segment`] here is a location, not the classification `super::Segment`
-//! makes of the same piece.
-
 use std::iter::once;
 use std::ops::Range;
 

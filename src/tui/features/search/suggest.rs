@@ -13,7 +13,6 @@
 use crate::tui::{
     app::AppModel,
     features::filter::FilterRow,
-    render::tab_strip::StripTab,
     state::{FilterTab, SelectableList, SuggestionRow},
 };
 
