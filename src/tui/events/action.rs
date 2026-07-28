@@ -52,6 +52,7 @@ pub(crate) enum DialogListTarget {
     ThemePicker,
     Filter,
     Settings,
+    SearchSuggestions,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

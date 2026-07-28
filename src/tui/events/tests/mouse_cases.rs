@@ -866,3 +866,160 @@ fn fold_leading_wheel_edge_cases() {
     let click = vec![Event::Mouse(mouse(down(), 0, 0))];
     assert_eq!(fold_leading_wheel(&click), (0, 0));
 }
+
+/// The suggestion list hangs over the entry rows and is not an overlay, so it has
+/// to win the hit test on its own. A click that fell through would select an
+/// entry the list was covering.
+#[test]
+fn clicking_a_suggestion_commits_it_rather_than_the_entry_beneath() {
+    use crate::tui::ui::InteractionKind;
+
+    let mut app = crate::tui::test_support::app_in_temp(|root| {
+        let dir = root.join("work").join("2026-07-01");
+        fs::create_dir_all(&dir).unwrap();
+        for (name, tags) in [("a", "\"apple\""), ("b", "\"apricot\"")] {
+            fs::write(
+                dir.join(format!("{name}.md")),
+                format!(
+                    "+++\nschema_version = 1\n\n[entry]\ntags = [{tags}]\n\n[time]\ncreated_at = \"2026-07-01T10:00:00+02:00\"\n+++\n\nbody\n"
+                ),
+            )
+            .unwrap();
+        }
+    });
+    app.begin_search();
+    for ch in "tags:ap".chars() {
+        app.search_input_key(key(KeyCode::Char(ch)));
+    }
+    assert_eq!(app.search.suggestions.rows.len(), 2);
+    let selected_before = app.nav.selected_entry_index;
+
+    let area = Rect::new(0, 0, 120, 30);
+    let (mut terminal, view) = render_view(&mut app, area.width, area.height);
+    let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+        matches!(
+            kind,
+            InteractionKind::DialogRow {
+                dialog: crate::tui::ui::DialogId::SearchSuggestions,
+                index: 1,
+            }
+        )
+    })
+    .expect("the second suggestion row is registered");
+
+    let action = mouse::mouse_to_action(&app, mouse(down(), col, row), area, &view, false)
+        .expect("the click resolves");
+    dispatch_action(&mut terminal, &mut app, action).unwrap();
+
+    assert_eq!(app.search.query.as_str(), "tags:\"apricot\"");
+    assert_eq!(
+        app.nav.selected_entry_index, selected_before,
+        "the click never reached the entry row underneath"
+    );
+}
+
+/// Same overlap, for the wheel: it has to scroll the list under the pointer, not
+/// the results behind it.
+#[test]
+fn the_wheel_over_the_suggestion_list_scrolls_it_not_the_entries() {
+    use crate::tui::ui::InteractionKind;
+
+    let mut app = crate::tui::test_support::app_in_temp(|root| {
+        let dir = root.join("work").join("2026-07-01");
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..12 {
+            fs::write(
+                dir.join(format!("{index}.md")),
+                format!(
+                    "+++\nschema_version = 1\n\n[entry]\ntags = [\"tag-{index:02}\"]\n\n[time]\ncreated_at = \"2026-07-01T10:{index:02}:00+02:00\"\n+++\n\nbody\n"
+                ),
+            )
+            .unwrap();
+        }
+    });
+    app.begin_search();
+    for ch in "tags:tag".chars() {
+        app.search_input_key(key(KeyCode::Char(ch)));
+    }
+    assert_eq!(app.search.suggestions.rows.len(), 12, "more rows than fit");
+
+    let area = Rect::new(0, 0, 120, 30);
+    let (mut terminal, view) = render_view(&mut app, area.width, area.height);
+    let (col, row) = find_interaction(&view, area.width, area.height, |kind| {
+        matches!(
+            kind,
+            InteractionKind::DialogRow {
+                dialog: crate::tui::ui::DialogId::SearchSuggestions,
+                ..
+            }
+        )
+    })
+    .expect("a suggestion row is registered");
+
+    let entry_scroll = app.nav.entry_list.offset();
+    let action = mouse::mouse_to_action(
+        &app,
+        mouse(MouseEventKind::ScrollDown, col, row),
+        area,
+        &view,
+        false,
+    )
+    .expect("the wheel resolves");
+    dispatch_action(&mut terminal, &mut app, action).unwrap();
+
+    assert!(app.search.suggestions.offset() > 0, "the list scrolled");
+    assert_eq!(
+        app.nav.entry_list.offset(),
+        entry_scroll,
+        "the results behind it did not"
+    );
+}
+
+/// The list registers a scrollbar like every other dialog list, so its thumb has
+/// to be draggable too — the setters behind it reach the open *overlay* dialog,
+/// which this list is not.
+#[test]
+fn dragging_the_suggestion_scrollbar_scrolls_the_list() {
+    let mut app = crate::tui::test_support::app_in_temp(|root| {
+        let dir = root.join("work").join("2026-07-01");
+        fs::create_dir_all(&dir).unwrap();
+        for index in 0..12 {
+            fs::write(
+                dir.join(format!("{index}.md")),
+                format!(
+                    "+++\nschema_version = 1\n\n[entry]\ntags = [\"tag-{index:02}\"]\n\n[time]\ncreated_at = \"2026-07-01T10:{index:02}:00+02:00\"\n+++\n\nbody\n"
+                ),
+            )
+            .unwrap();
+        }
+    });
+    app.begin_search();
+    for ch in "tags:tag".chars() {
+        app.search_input_key(key(KeyCode::Char(ch)));
+    }
+    assert_eq!(app.search.suggestions.rows.len(), 12, "more rows than fit");
+
+    let area = Rect::new(0, 0, 120, 30);
+    let (mut terminal, view) = render_view(&mut app, area.width, area.height);
+    let which = crate::tui::app::ScrollbarDrag::Dialog(crate::tui::ui::DialogId::SearchSuggestions);
+    let metrics = view
+        .interactions
+        .scrollbar(which)
+        .expect("the list registers a scrollbar");
+
+    // Press on the thumb — the row below the bar's up arrow, where it sits at
+    // offset 0 — then drag to the bar's bottom.
+    let (col, row) = (metrics.bar.x, metrics.bar.y + 1);
+    for event in [
+        mouse(down(), col, row),
+        mouse(drag(), col, metrics.bar.y + metrics.bar.height),
+    ] {
+        let action = mouse::mouse_to_action(&app, event, area, &view, false).expect("resolves");
+        dispatch_action(&mut terminal, &mut app, action).unwrap();
+    }
+
+    assert!(
+        app.search.suggestions.offset() > 0,
+        "the drag moved the list"
+    );
+}

@@ -748,6 +748,21 @@ fn register_overlay_interactions(
             .interactions
             .push(area, InteractionKind::TextField(id));
     }
+    // After the field and after the entry rows: the list hangs over them, and the
+    // hit test takes the last region pushed at a point.
+    if app.suggestions_open()
+        && let Some(area) = entries_area
+        && let Some(rect) =
+            entries::search_suggestions_rect(context.theme, area, app.search.suggestions.rows.len())
+    {
+        register_dialog_list(
+            context,
+            rect,
+            app.search.suggestions.offset(),
+            app.search.suggestions.rows.len(),
+            DialogId::SearchSuggestions,
+        );
+    }
 }
 
 fn interaction_overlay_open(app: &AppModel) -> bool {

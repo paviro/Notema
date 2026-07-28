@@ -173,8 +173,9 @@ fn dialog_row_action(dialog: DialogId, index: usize) -> Option<Action> {
             _ => None,
         },
         DialogId::ThemePicker => Some(Action::Settings(SettingsAction::ThemePickerClick(index))),
-        // The help tables have no rows to click.
-        DialogId::Help | DialogId::EditorHelp => None,
+        // The help tables have no rows to click, and the suggestion list is not
+        // an overlay — `mouse_to_action` probes it directly.
+        DialogId::Help | DialogId::EditorHelp | DialogId::SearchSuggestions => None,
         DialogId::Metadata => Some(Action::Mouse(MouseAction::DialogRow {
             target: DialogListTarget::Metadata,
             index,

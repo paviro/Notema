@@ -47,6 +47,9 @@ pub(crate) enum DialogId {
     Filter,
     Help,
     EditorHelp,
+    /// The search box's suggestion list. Not an overlay — it hangs under the
+    /// query field while the entry list stays live behind it.
+    SearchSuggestions,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

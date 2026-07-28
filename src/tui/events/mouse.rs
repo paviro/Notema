@@ -151,6 +151,22 @@ pub(super) fn mouse_to_action(
                         row: mouse.row,
                     }))
                 }
+                // The suggestion list is not an overlay, so it is probed here
+                // rather than on the overlay path — and before the panels, whose
+                // rows sit underneath it.
+                Some(InteractionKind::DialogRow {
+                    dialog: DialogId::SearchSuggestions,
+                    index,
+                }) => Some(Action::Mouse(MouseAction::DialogRow {
+                    target: DialogListTarget::SearchSuggestions,
+                    index: *index,
+                })),
+                // The list's own background: swallow the click rather than
+                // letting it select whatever entry is drawn under it.
+                Some(InteractionKind::DialogList {
+                    dialog: DialogId::SearchSuggestions,
+                    ..
+                }) => None,
                 Some(InteractionKind::Row { panel, index }) => {
                     panel_click_action(app, *panel, Some(*index), &layout, mouse)
                 }
@@ -331,6 +347,8 @@ fn set_dialog_scroll(app: &mut AppModel, dialog: DialogId, offset: usize) {
                 *scroll = offset.min(u16::MAX as usize) as u16;
             }
         }
+        // Not an overlay, so `open_dialog_list_mut` cannot reach it.
+        DialogId::SearchSuggestions => app.search.suggestions.list_mut().set_offset(offset),
         // The list dialogs all navigate through one handle; the menus never
         // scroll, so they register no bar to drag.
         _ => {
@@ -369,6 +387,7 @@ fn step_dialog_scroll(app: &mut AppModel, dialog: DialogId, delta: i16, viewport
     match dialog {
         DialogId::Help => super::scroll_help(app, delta),
         DialogId::EditorHelp => super::scroll_editor_help(app, delta),
+        DialogId::SearchSuggestions => app.search.suggestions.scroll_by(delta, viewport),
         _ => {
             if let Some(list) = super::open_dialog_list_mut(app) {
                 list.scroll_by(delta, viewport);
@@ -466,6 +485,26 @@ fn panel_click_action(
 /// line-granular panes reads as a crawl there.
 const WHEEL_PIXELS_PER_NOTCH: i16 = 2;
 
+/// The suggestion list's viewport when the pointer is over it. The rows shadow
+/// the list region they sit in, so the viewport is recovered by dialog id — the
+/// same recovery the overlay wheel makes.
+fn suggestion_wheel(view: &ViewState, mouse: MouseEvent, delta: i16) -> Option<(u16, i16)> {
+    let viewport = match view.interactions.hit(mouse.column, mouse.row)? {
+        InteractionKind::DialogList {
+            dialog: DialogId::SearchSuggestions,
+            viewport,
+        } => *viewport,
+        InteractionKind::DialogRow {
+            dialog: DialogId::SearchSuggestions,
+            ..
+        } => view
+            .interactions
+            .dialog_list_viewport(DialogId::SearchSuggestions)?,
+        _ => return None,
+    };
+    Some((viewport, delta))
+}
+
 fn wheel_action(
     app: &AppModel,
     mouse: MouseEvent,
@@ -493,6 +532,16 @@ fn wheel_action(
             delta,
             content_length: view.reader.line_count,
             viewport: view.reader.content_rect.height,
+        }));
+    }
+
+    // Ahead of the entries panel it hangs over, so the wheel scrolls the list
+    // under the pointer rather than the results behind it.
+    if let Some((viewport, delta)) = suggestion_wheel(view, mouse, delta) {
+        return Some(Action::Mouse(MouseAction::DialogScroll {
+            target: DialogListTarget::SearchSuggestions,
+            delta,
+            viewport,
         }));
     }
 
@@ -653,6 +702,12 @@ pub(super) fn apply_mouse_action(
                     return Ok(Some(Action::Filter(FilterAction::Launch)));
                 }
             }
+            // Clicking a row is choosing it, so it commits — the same "select
+            // and act" a filter row's click makes.
+            DialogListTarget::SearchSuggestions => {
+                app.search.suggestions.select_index(index);
+                app.commit_suggestion(index);
+            }
         },
         MouseAction::DialogFocusMetadata(focus) => {
             let focus = match focus {
@@ -689,6 +744,9 @@ pub(super) fn apply_mouse_action(
                 if let Some(state) = app.edit_location_state_mut() {
                     state.scroll_by(delta, viewport);
                 }
+            }
+            DialogListTarget::SearchSuggestions => {
+                app.search.suggestions.scroll_by(delta, viewport);
             }
             DialogListTarget::ThemePicker => {
                 if let Some(state) = app.theme_picker_state_mut() {
@@ -862,6 +920,15 @@ fn hover_target_at(
     // over the panel probe below.
     if let Some(target) = text_field_hover_at(col, row, view) {
         return target;
+    }
+
+    // …and its suggestion list hangs over the entry rows, so it wins too.
+    if let Some(InteractionKind::DialogRow {
+        dialog: DialogId::SearchSuggestions,
+        index,
+    }) = view.interactions.hit(col, row)
+    {
+        return HoverTarget::DialogRow(*index);
     }
 
     // Reader link hits (markdown links and image labels alike); the lookup
