@@ -112,6 +112,45 @@ fn refresh_paths_handles_create_and_delete() {
     assert_eq!(app.selected_entries().len(), 1);
 }
 
+/// `path.exists()` and the read that follows are separate syscalls, so a file
+/// can vanish or turn unreadable between them — during exactly the create/delete
+/// storms this path exists to absorb. The failure is reported, but the index is
+/// rebuilt first: abandoning the loop would leave the journal ranges describing
+/// the vector as it was before the removal, and the next frame slices it.
+#[test]
+fn refresh_paths_rebuilds_the_index_even_when_a_read_fails() {
+    let dir = tempdir().unwrap();
+    let entry_dir = dir.path().join("work").join("2026-07-01");
+    fs::create_dir_all(&entry_dir).unwrap();
+    let a = write_entry(
+        &entry_dir,
+        "a.md",
+        "2026-07-01T10:00:00+02:00",
+        "# A\nalpha",
+    );
+    let b = write_entry(&entry_dir, "b.md", "2026-07-01T11:00:00+02:00", "# B\nbeta");
+    let config = Config::new(dir.path().to_path_buf());
+    let mut app = new_app(config);
+    app.select_journal_by_name("work");
+    assert_eq!(app.library.entries.len(), 2);
+
+    // `a` is gone; `b` is replaced by a directory, so it still `exists()` but
+    // cannot be read. The removal sorts first, so it lands before the failure.
+    fs::remove_file(&a).unwrap();
+    fs::remove_file(&b).unwrap();
+    fs::create_dir(&b).unwrap();
+
+    assert!(app.refresh_paths(&[a, b]).is_err());
+    assert_eq!(app.library.entries.len(), 1);
+    assert_eq!(
+        app.library.range("work"),
+        Some(0..app.library.entries.len()),
+        "the index must describe the entries that survived, not the ones that did not"
+    );
+    // The range is what the entry list slices, so a stale one panics here.
+    assert_eq!(app.selected_entries().len(), 1);
+}
+
 #[test]
 fn refresh_paths_falls_back_to_full_reload_for_a_new_journal() {
     let dir = tempdir().unwrap();

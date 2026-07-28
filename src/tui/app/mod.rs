@@ -956,16 +956,25 @@ impl AppModel {
         // (the version-keyed row/body/analytics caches self-invalidate on the bump).
         self.clear_image_caches();
 
+        // A failed read cannot cut the loop short: the entries already upserted
+        // or removed leave `journal_ranges` describing a vector that no longer
+        // exists, and the next frame slices it.
+        let mut failure = None;
         for (journal, path) in targets {
             if path.exists() {
-                let entry = self.services.store.read_entry(&journal, &path)?;
-                self.upsert_entry(entry);
+                match self.services.store.read_entry(&journal, &path) {
+                    Ok(entry) => self.upsert_entry(entry),
+                    Err(error) => failure = failure.or(Some(error)),
+                }
             } else {
                 self.remove_entry_by_path(&path);
             }
         }
         self.after_entries_changed();
-        Ok(())
+        match failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     fn clear_image_caches(&mut self) {
