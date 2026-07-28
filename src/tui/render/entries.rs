@@ -159,15 +159,18 @@ pub(super) fn draw_search_overlay(
     };
     // Nothing dims for a popup that won't be drawn — an unshowable one would
     // leave the screen darkened with nothing to show for it.
-    if !app.suggestions_visible()
-        || search_suggestions_rect(active_theme, area, app.search.suggestions.rows.len()).is_none()
-    {
+    let rows = app.search.suggestions.rows.len();
+    let (true, Some(outer), Some(list_rect)) = (
+        app.suggestions_visible(),
+        search_suggestions_rect(active_theme, area, rows),
+        search_suggestions_list_rect(active_theme, area, rows),
+    ) else {
         return;
-    }
+    };
     let scrim_area = frame.area();
     scrim_scaled(active_theme, frame.buffer_mut(), scrim_area, POPUP_SCRIM);
     draw_search_field(active_theme, frame, area, app);
-    draw_search_suggestions(active_theme, frame, area, app);
+    draw_search_suggestions(active_theme, frame, outer, list_rect, app);
 }
 
 /// The search field on the panel's top-right border: a fixed-width single-line
@@ -264,20 +267,11 @@ pub(crate) fn search_suggestions_list_rect(theme: &Theme, area: Rect, rows: usiz
 fn draw_search_suggestions(
     active_theme: &Theme,
     frame: &mut Frame<'_>,
-    area: Rect,
+    outer: Rect,
+    list_rect: Rect,
     app: &mut AppModel,
 ) {
-    if !app.suggestions_visible() {
-        return;
-    }
     let rows = app.search.suggestions.rows.len();
-    let (Some(outer), Some(list_rect)) = (
-        search_suggestions_rect(active_theme, area, rows),
-        search_suggestions_list_rect(active_theme, area, rows),
-    ) else {
-        return;
-    };
-
     let hovered = super::dialogs::hovered_dialog_row(app.hover);
     let selected = app.search.suggestions.selected_index();
     // Clamped here and nowhere else: the viewport is only known at draw time, so an

@@ -111,11 +111,11 @@ pub(crate) fn popup_inner(area: Rect) -> Rect {
 }
 
 /// Clear and frame an anchored popup — a surface that hangs off the thing that
-/// spawned it rather than sitting centered — returning [`popup_inner`].
+/// spawned it rather than sitting centered.
 ///
 /// Bordered chrome draws an untitled box; flat chrome lets the dialog surface
 /// and the padding do the work, the same trade it makes everywhere else.
-pub(crate) fn draw_popup_frame(theme: &Theme, frame: &mut Frame<'_>, area: Rect) -> Rect {
+pub(crate) fn draw_popup_frame(theme: &Theme, frame: &mut Frame<'_>, area: Rect) {
     clear_surface(theme, frame, area, theme.dialog_bg());
     if !flat_chrome(theme) {
         frame.render_widget(
@@ -126,7 +126,6 @@ pub(crate) fn draw_popup_frame(theme: &Theme, frame: &mut Frame<'_>, area: Rect)
             area,
         );
     }
-    popup_inner(area)
 }
 
 /// A single full-width content row `offset` rows below the top of `inner`.

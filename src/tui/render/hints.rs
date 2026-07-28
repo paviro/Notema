@@ -21,7 +21,7 @@ const ALPHABET: [char; 26] = [
 /// up to 26 targets, two up to 676.
 ///
 /// Uniform length keeps every label prefix-free, so a keystroke can act at once.
-pub(crate) fn hint_labels(count: usize) -> Vec<String> {
+fn hint_labels(count: usize) -> Vec<String> {
     if count == 0 {
         return Vec::new();
     }

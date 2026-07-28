@@ -506,7 +506,7 @@ const WHEEL_PIXELS_PER_NOTCH: i16 = 2;
 /// The suggestion list's viewport when the pointer is over it. The rows shadow
 /// the list region they sit in, so the viewport is recovered by dialog id — the
 /// same recovery the overlay wheel makes.
-fn suggestion_wheel(view: &ViewState, mouse: MouseEvent, delta: i16) -> Option<(u16, i16)> {
+fn suggestion_wheel(view: &ViewState, mouse: MouseEvent) -> Option<u16> {
     let viewport = match view.interactions.hit(mouse.column, mouse.row)? {
         InteractionKind::DialogList {
             dialog: DialogId::SearchSuggestions,
@@ -520,7 +520,7 @@ fn suggestion_wheel(view: &ViewState, mouse: MouseEvent, delta: i16) -> Option<(
             .dialog_list_viewport(DialogId::SearchSuggestions)?,
         _ => return None,
     };
-    Some((viewport, delta))
+    Some(viewport)
 }
 
 fn wheel_action(
@@ -555,7 +555,7 @@ fn wheel_action(
 
     // Ahead of the entries panel it hangs over, so the wheel scrolls the list
     // under the pointer rather than the results behind it.
-    if let Some((viewport, delta)) = suggestion_wheel(view, mouse, delta) {
+    if let Some(viewport) = suggestion_wheel(view, mouse) {
         return Some(Action::Mouse(MouseAction::DialogScroll {
             target: DialogListTarget::SearchSuggestions,
             delta,
