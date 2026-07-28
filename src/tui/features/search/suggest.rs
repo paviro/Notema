@@ -14,10 +14,10 @@ use crate::tui::{
     app::AppModel,
     features::filter::FilterRow,
     render::tab_strip::StripTab,
-    state::{FilterTab, ListNav, SelectableList, SuggestionRow},
+    state::{FilterTab, SelectableList, SuggestionRow},
 };
 
-use super::{offsets, parse::unquote};
+use super::{offsets, parse::unquote, predicate::location_tokens};
 
 impl AppModel {
     /// Whether the suggestion list is taking keys — it stays open underneath an
@@ -121,7 +121,7 @@ impl AppModel {
     /// Commit the highlighted row, or the first one when the list is only
     /// advisory — what `Tab` means.
     pub(crate) fn commit_first_suggestion(&mut self) {
-        let index = self.search.suggestions.selected_index().unwrap_or(0);
+        let index = self.search.suggestions.highlighted_index().unwrap_or(0);
         self.commit_suggestion(index);
     }
 }
@@ -135,7 +135,11 @@ fn matching_rows(rows: &[FilterRow], tab: FilterTab, fragment: &str) -> Vec<Sugg
     // Read through an unclosed quote the way the parser does, so a row is
     // offered on the fragment the results below are already narrowing on.
     let fragment = unquote(fragment.trim()).to_lowercase();
-    let words: Vec<&str> = fragment.split_whitespace().collect();
+    // Tokenized as the predicate does, not on whitespace: a place label reads
+    // `Berlin - Germany`, and splitting that on spaces looks for a literal `-`
+    // the haystack never contains — so typing back the row just offered would
+    // empty the list.
+    let words = location_tokens(&fragment);
     rows.iter()
         .filter(|row| match tab {
             // A place row's label is its display name but its value is the query
@@ -157,7 +161,7 @@ fn matching_rows(rows: &[FilterRow], tab: FilterTab, fragment: &str) -> Vec<Sugg
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tui::test_support::app_in_temp;
+    use crate::tui::{state::ListNav, test_support::app_in_temp};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::fs;
 
@@ -258,6 +262,33 @@ mod tests {
         assert_eq!(labels(&app), vec!["Berlin - Germany", "Bern - Germany"]);
         type_query(&mut app, "n");
         assert_eq!(labels(&app), vec!["Bern - Germany"]);
+    }
+
+    /// The row reads `Berlin - Germany`, so typing it back has to keep offering
+    /// it: splitting the fragment on whitespace would look for a literal `-` the
+    /// searched value never contains and empty the list mid-word.
+    #[test]
+    fn typing_back_a_place_label_keeps_offering_it() {
+        let mut app = fixture();
+        type_query(&mut app, "location:Berlin - Ger");
+        assert_eq!(labels(&app), vec!["Berlin - Germany"]);
+    }
+
+    /// `Tab` takes the first row when the list is only advisory — but a dismissed
+    /// list is not on screen, so whatever was armed before `Esc` cannot be what
+    /// the user meant.
+    #[test]
+    fn tab_after_a_dismissal_commits_the_first_row_not_the_armed_one() {
+        let mut app = fixture();
+        type_query(&mut app, "tags:app");
+        app.move_suggestion_highlight(1);
+        app.move_suggestion_highlight(1);
+        assert_eq!(app.search.suggestions.selected_index(), Some(1));
+
+        app.dismiss_suggestions();
+        app.commit_first_suggestion();
+
+        assert_eq!(app.search.query.as_str(), "tags:\"apple\"");
     }
 
     /// An opening quote with no partner is a fragment like any other. Offering

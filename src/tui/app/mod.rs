@@ -852,7 +852,16 @@ impl AppModel {
     /// an edit landed in it, and installing it would put the edit back.
     pub(crate) fn apply_library_reload_results(&mut self) -> bool {
         let results = self.library_reload.drain();
-        let changed = !results.is_empty();
+        let mut changed = !results.is_empty();
+        if self.library_reload.take_lost() {
+            self.finish_initial_library_loading();
+            self.finish_manual_refresh();
+            self.toast(
+                ToastVariant::Error,
+                "Journal changes not loaded: the reload worker stopped unexpectedly".to_string(),
+            );
+            changed = true;
+        }
         for result in results {
             if result.generation != self.library_generation {
                 self.request_library_reload(result.reason);

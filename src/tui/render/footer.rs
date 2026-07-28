@@ -451,7 +451,7 @@ fn search_footer_line(app: &AppModel) -> HintLine {
     // With the suggestion list up, the footer teaches the one thing that is not
     // guessable: nothing is highlighted yet, so `enter` still opens the result
     // and `tab` is what takes the value.
-    if app.suggestions_open() {
+    if app.suggestions_visible() {
         let mut hints = vec![Hint::new(
             "choose",
             if app.search.suggestions.highlighted().is_some() {

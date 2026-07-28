@@ -5,7 +5,7 @@
 //! lookup pay nothing.
 
 use std::{
-    sync::mpsc::{Receiver, Sender, channel},
+    sync::mpsc::{Receiver, Sender, TryRecvError, channel},
     thread,
 };
 
@@ -15,6 +15,9 @@ use std::{
 pub(crate) struct Worker<Req, Res> {
     channels: Option<Channels<Req, Res>>,
     in_flight: usize,
+    /// The worker died with requests outstanding. Set by the drain that notices,
+    /// cleared by the caller that reports it.
+    lost: bool,
 }
 
 struct Channels<Req, Res> {
@@ -27,6 +30,7 @@ impl<Req, Res> Default for Worker<Req, Res> {
         Self {
             channels: None,
             in_flight: 0,
+            lost: false,
         }
     }
 }
@@ -43,13 +47,35 @@ impl<Req: Send + 'static, Res: Send + 'static> Worker<Req, Res> {
     }
 
     /// Drain every finished result (empty when the worker was never started).
+    ///
+    /// A worker whose thread died — a panic inside the handler — is forgotten
+    /// here rather than left counted as busy forever, which would pin
+    /// [`Self::has_pending`] true and starve every later request. The next
+    /// request spawns a fresh thread; [`Self::take_lost`] reports the loss.
     pub(crate) fn drain(&mut self) -> Vec<Res> {
         let Some(channels) = &self.channels else {
             return Vec::new();
         };
-        let results: Vec<Res> = channels.results.try_iter().collect();
+        let mut results = Vec::new();
+        let died = loop {
+            match channels.results.try_recv() {
+                Ok(result) => results.push(result),
+                Err(TryRecvError::Empty) => break false,
+                Err(TryRecvError::Disconnected) => break true,
+            }
+        };
         self.in_flight = self.in_flight.saturating_sub(results.len());
+        if died {
+            self.lost = self.in_flight > 0;
+            self.in_flight = 0;
+            self.channels = None;
+        }
         results
+    }
+
+    /// Whether the worker died mid-request since this was last asked.
+    pub(crate) fn take_lost(&mut self) -> bool {
+        std::mem::take(&mut self.lost)
     }
 
     /// Whether a request is still outstanding.

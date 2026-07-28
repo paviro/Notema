@@ -329,9 +329,14 @@ impl SuggestionState {
 
     /// The highlighted row, or `None` while the list is only advisory.
     pub(crate) fn highlighted(&self) -> Option<&SuggestionRow> {
-        self.is_open()
-            .then(|| self.selected_index().and_then(|index| self.rows.get(index)))
-            .flatten()
+        self.highlighted_index()
+            .and_then(|index| self.rows.get(index))
+    }
+
+    /// The row a deliberate choice landed on. A dismissed list has none, whatever
+    /// was armed before it went down — it is no longer on screen to be meant.
+    pub(crate) fn highlighted_index(&self) -> Option<usize> {
+        self.is_open().then(|| self.selected_index()).flatten()
     }
 
     pub(crate) fn clear(&mut self) {

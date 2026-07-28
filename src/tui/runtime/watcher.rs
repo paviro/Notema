@@ -138,20 +138,26 @@ impl FileWatcher {
         let reported_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         let mut watcher = RecommendedWatcher::new(
             move |res: notify::Result<Event>| {
-                if let Ok(event) = res {
-                    if event.need_rescan() {
-                        flag.store(true, Ordering::Relaxed);
-                    }
-                    // Forward each changed path so the app can reload just the
-                    // affected entries instead of re-reading the whole corpus.
-                    for path in event
-                        .paths
-                        .into_iter()
-                        .map(|p| rebase(&reported_root, &filter_root, p))
-                        .filter(|p| is_relevant(&filter_root, p))
-                    {
-                        let _ = tx.send(path);
-                    }
+                // A backend error after registration (a failed read, the root
+                // moving out from under the watch) means events went missing,
+                // which is what a rescan says: the paths seen are no longer a
+                // complete account and only re-reading the tree can say.
+                let Ok(event) = res else {
+                    flag.store(true, Ordering::Relaxed);
+                    return;
+                };
+                if event.need_rescan() {
+                    flag.store(true, Ordering::Relaxed);
+                }
+                // Forward each changed path so the app can reload just the
+                // affected entries instead of re-reading the whole corpus.
+                for path in event
+                    .paths
+                    .into_iter()
+                    .map(|p| rebase(&reported_root, &filter_root, p))
+                    .filter(|p| is_relevant(&filter_root, p))
+                {
+                    let _ = tx.send(path);
                 }
             },
             Config::default(),
