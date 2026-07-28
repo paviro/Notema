@@ -205,9 +205,19 @@ impl TextInput {
         self.textarea.move_cursor(CursorMove::Jump(0, start as u16));
     }
 
-    /// Mouse drag: extend the armed selection to the dragged column.
-    pub(crate) fn drag_mouse_selection(&mut self, col: u16) {
-        self.jump_to_col(col);
+    /// Mouse drag: extend the armed selection to the dragged column, where
+    /// `overshoot` is how many cells past the field's edge the pointer is.
+    ///
+    /// The caret goes to the column the pointer *would* be over if the field were
+    /// wide enough, so dragging past an edge runs off the visible text and the
+    /// next render scrolls to follow the caret. Clamping to the edge instead
+    /// would pin the selection at the last visible character, which is the one
+    /// case where you cannot see what you are selecting.
+    pub(crate) fn drag_mouse_selection(&mut self, col: u16, overshoot: i16) {
+        let target = (self.content_col(col) as isize + overshoot as isize).max(0) as usize;
+        let cursor = self.textarea.cursor_at_screen(0, target);
+        self.textarea
+            .move_cursor(CursorMove::Jump(cursor.0 as u16, cursor.1 as u16));
     }
 
     /// Mouse up: a click without a drag leaves an empty selection — cancel it
@@ -532,6 +542,53 @@ mod tests {
         // …and a double-click there selects the word it is actually on.
         input.select_word_at(0);
         assert_eq!(input.cursor().1, 0, "one alphanumeric run, selected whole");
+    }
+
+    /// Dragging a selection past the field's edge has to keep going, or the one
+    /// thing you cannot see is the text you are selecting.
+    #[test]
+    fn dragging_past_the_edge_scrolls_the_selection_into_view() {
+        let theme = crate::tui::theme::Theme::terminal_default();
+        let mut input = TextInput::from("0123456789abcdefghijklmnopqrstuvwxyz");
+        let rect = Rect::new(0, 0, 10, 1);
+        let backend = ratatui::backend::TestBackend::new(40, 3);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let mut render = |input: &mut TextInput| {
+            terminal
+                .draw(|frame| input.render_in(&theme, frame, rect, true, false))
+                .unwrap();
+        };
+
+        // Start at the head of the text, so the field shows its beginning and
+        // there is somewhere to the right to drag toward.
+        input.set_cursor_byte(0);
+        render(&mut input);
+        assert_eq!(input.horizontal_scroll_offset(), 0);
+
+        // Select from the field's left edge, then drag off its right edge.
+        input.begin_mouse_selection(0);
+        let anchor = input.cursor().1;
+        input.drag_mouse_selection(rect.width - 1, 0);
+        let at_edge = input.cursor().1;
+        assert_eq!(at_edge, (rect.width - 1) as usize, "the last visible cell");
+        assert!(at_edge > anchor);
+
+        // Three cells past the edge reaches three further characters…
+        input.drag_mouse_selection(rect.width - 1, 3);
+        assert_eq!(input.cursor().1, at_edge + 3);
+
+        // …and the render that follows scrolls to keep the caret visible, so the
+        // next drag at the same pointer position reaches further still.
+        let scrolled_from = input.horizontal_scroll_offset();
+        render(&mut input);
+        assert!(input.horizontal_scroll_offset() > scrolled_from, "followed");
+        input.drag_mouse_selection(rect.width - 1, 3);
+        assert!(input.cursor().1 > at_edge + 3);
+
+        // The selection is still anchored where the drag started.
+        let (start, end) = input.selection_range().expect("selecting");
+        assert_eq!(start.1, anchor);
+        assert_eq!(end.1, input.cursor().1);
     }
 
     #[test]

@@ -595,9 +595,9 @@ pub(super) fn apply_mouse_action(
                 input.select_word_at(column);
             }
         }
-        MouseAction::TextFieldDrag { column } => {
+        MouseAction::TextFieldDrag { column, overshoot } => {
             if let Some(input) = app.focused_text_input_mut() {
-                input.drag_mouse_selection(column);
+                input.drag_mouse_selection(column, overshoot);
             }
         }
         MouseAction::TextFieldRelease => {

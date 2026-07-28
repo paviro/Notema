@@ -74,6 +74,9 @@ pub(crate) enum MouseAction {
     },
     TextFieldDrag {
         column: u16,
+        /// Cells the pointer is outside the field, signed — negative left of it,
+        /// positive right. Non-zero is what scrolls a selection past the edge.
+        overshoot: i16,
     },
     TextFieldRelease,
     JournalClick {

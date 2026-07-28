@@ -286,11 +286,11 @@ pub(super) fn text_field_mouse_action(
         MouseEventKind::Drag(MouseButton::Left) if app.nav.input_selecting => {
             let target = active_text_field_target(app)?;
             let rect = view.interactions.area_for_text_field(target.into())?;
+            let last = rect.x + rect.width.saturating_sub(1);
+            let clamped = mouse.column.clamp(rect.x, last);
             Some(MouseAction::TextFieldDrag {
-                column: mouse
-                    .column
-                    .clamp(rect.x, rect.x + rect.width.saturating_sub(1))
-                    .saturating_sub(rect.x),
+                column: clamped - rect.x,
+                overshoot: mouse.column as i16 - clamped as i16,
             })
         }
         MouseEventKind::Up(MouseButton::Left) if app.nav.input_selecting => {
