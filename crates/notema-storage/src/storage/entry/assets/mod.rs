@@ -792,22 +792,64 @@ pub fn stored_asset_reference_for(entry_path: &Path, target: &str) -> Option<Str
     stored_asset_reference(target, &dir_name).map(|reference| reference.file_name)
 }
 
+/// A body line that is exactly one image stored in the entry's own asset folder,
+/// optionally wrapped in a single link.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SoleStoredImage {
+    /// The image's alt text.
+    pub alt: String,
+    /// The image's file name inside `<stem>.assets/`.
+    pub file_name: String,
+    /// The wrapping link's target, for the `[![alt](img)](href)` shape web and
+    /// Day One imports leave behind. `None` for a bare image line.
+    pub link: Option<String>,
+}
+
 /// If `line` (ignoring surrounding whitespace) is exactly one markdown image
-/// pointing inside `entry_path`'s own `<stem>.assets/` folder, return its alt
-/// text and stored file name; any other text or a second image rejects it.
+/// pointing inside `entry_path`'s own `<stem>.assets/` folder — bare, or wrapped
+/// in a single link — return it; any other text or a second image rejects it.
 ///
 /// Shared by the entry-view labels and the fullscreen viewer so an image's
 /// position (and its `Image N` number) is identical everywhere.
-pub fn sole_stored_image(line: &str, entry_path: &Path) -> Option<(String, String)> {
+pub fn sole_stored_image(line: &str, entry_path: &Path) -> Option<SoleStoredImage> {
     let dir_name = entry_assets_dir_name(entry_path)?;
     let trimmed = line.trim();
     let image = next_markdown_image(trimmed)?;
-    if image.start != 0 || image.end != trimmed.len() {
-        return None;
-    }
+    let link = match image.start {
+        0 if image.end == trimmed.len() => None,
+        1 => Some(wrapping_link_target(trimmed, &image)?.to_string()),
+        _ => return None,
+    };
     let target = trimmed[image.target_range()].trim();
     let reference = stored_asset_reference(target, &dir_name)?;
-    Some((image.alt(trimmed).to_string(), reference.file_name))
+    Some(SoleStoredImage {
+        alt: image.alt(trimmed).to_string(),
+        file_name: reference.file_name,
+        link,
+    })
+}
+
+/// The href of the link wrapping `image`, when `trimmed` is exactly
+/// `[<image>](href)`. Deliberately strict: anything looser falls through to the
+/// markdown renderer, so a disagreement with the real parser costs a label, never
+/// a wrong target.
+fn wrapping_link_target<'a>(trimmed: &'a str, image: &MarkdownImage) -> Option<&'a str> {
+    let bytes = trimmed.as_bytes();
+    if bytes.first() != Some(&b'[') || !trimmed[image.end..].starts_with("](") {
+        return None;
+    }
+    let open = image.end + 2;
+    let close = trimmed.len().checked_sub(1)?;
+    if open > close || bytes[close] != b')' {
+        return None;
+    }
+    let href = trimmed[open..close].trim();
+    // Parens, quotes, and whitespace are what a second inline, a parenthesized
+    // URL, and a `"title"` suffix all show up as.
+    if href.contains(['(', ')', '"']) || href.chars().any(char::is_whitespace) {
+        return None;
+    }
+    Some(href)
 }
 
 /// Resolve a canonical stored asset name to an absolute path, rejecting
@@ -1617,13 +1659,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let entry = entry_path(dir.path());
 
-        let (alt, file) = sole_stored_image(
+        let image = sole_stored_image(
             "![a shot](2026-07-05T14-30-00-abc123.assets/x9k2.png)",
             &entry,
         )
         .expect("should match");
-        assert_eq!(alt, "a shot");
-        assert_eq!(file, "x9k2.png");
+        assert_eq!(image.alt, "a shot");
+        assert_eq!(image.file_name, "x9k2.png");
+        assert_eq!(image.link, None);
 
         // Leading/trailing whitespace around the sole image is ignored.
         assert!(
@@ -1661,6 +1704,61 @@ mod tests {
         assert!(sole_stored_image(&format!("look ![]({asset})"), &entry).is_none());
         assert!(sole_stored_image(&format!("![]({asset}) trailing"), &entry).is_none());
         assert!(sole_stored_image(&format!("![]({asset}) ![]({asset})"), &entry).is_none());
+    }
+
+    #[test]
+    fn sole_stored_image_matches_a_link_wrapped_image() {
+        let dir = tempdir().unwrap();
+        let entry = entry_path(dir.path());
+        let asset = "2026-07-05T14-30-00-abc123.assets/x9k2.png";
+
+        let image = sole_stored_image(
+            &format!("[![a shot]({asset})](https://example.org/page)"),
+            &entry,
+        )
+        .expect("should match");
+        assert_eq!(image.alt, "a shot");
+        assert_eq!(image.file_name, "x9k2.png");
+        assert_eq!(image.link.as_deref(), Some("https://example.org/page"));
+
+        // The surrounding whitespace trim covers the wrapped shape too.
+        let padded = sole_stored_image(&format!("  [![]({asset})](#notes)  "), &entry)
+            .expect("should match");
+        assert_eq!(padded.link.as_deref(), Some("#notes"));
+    }
+
+    #[test]
+    fn sole_stored_image_keeps_a_wrapper_with_no_target() {
+        let dir = tempdir().unwrap();
+        let entry = entry_path(dir.path());
+        let asset = "2026-07-05T14-30-00-abc123.assets/x9k2.png";
+
+        // The image still earns its label; the empty href simply opens nothing.
+        let image = sole_stored_image(&format!("[![]({asset})]()"), &entry).expect("should match");
+        assert_eq!(image.link.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn sole_stored_image_rejects_a_loose_wrapper() {
+        let dir = tempdir().unwrap();
+        let entry = entry_path(dir.path());
+        let asset = "2026-07-05T14-30-00-abc123.assets/x9k2.png";
+
+        for line in [
+            format!("see [![]({asset})](https://x)"),
+            format!("[![]({asset})](https://x) trailing"),
+            format!("[text ![]({asset})](https://x)"),
+            format!("![]({asset})](https://x)"),
+            format!("[![]({asset})]"),
+            format!("[![]({asset})](https://x \"Title\")"),
+            format!("[![]({asset})](https://x/(y))"),
+            format!("[![]({asset})](https://x) ![]({asset})"),
+        ] {
+            assert!(
+                sole_stored_image(&line, &entry).is_none(),
+                "should reject: {line}"
+            );
+        }
     }
 
     #[test]

@@ -340,7 +340,7 @@ fn build_body_lines(
     let mut after_image = false;
 
     for line in content.split('\n') {
-        let Some((alt, _asset)) = sole_image_ref(line, entry_path) else {
+        let Some(image) = sole_image_ref(line, entry_path) else {
             if after_image && buffer.is_empty() && line.trim().is_empty() {
                 lines.push(Line::from(""));
                 continue;
@@ -380,19 +380,38 @@ fn build_body_lines(
         }
         after_image = true;
 
-        let chip = hints
-            .as_mut()
-            .and_then(|labeller| labeller.take(ReaderLinkTarget::Image(image_index)));
-        let (label, click_width) = image_label_line(theme, image_index, &alt, chip);
+        let href = image.link.as_deref().filter(|href| {
+            super::markdown::is_openable_target(href, attachments_openable, Some(entry_path))
+        });
+        let label = image_label_line(
+            theme,
+            image_index,
+            &image.alt,
+            href,
+            show_urls,
+            hints.as_deref_mut(),
+        );
+        let row = lines.len();
         links.push(ReaderLinkHit {
-            line: lines.len(),
-            start: 0,
-            end: click_width,
+            line: row,
+            start: label.image.0,
+            end: label.image.1,
             target: ReaderLinkTarget::Image(image_index),
             group: group_base,
         });
         group_base += 1;
-        lines.push(label);
+        // A separate group, so hovering the image never lights the link.
+        if let (Some((start, end)), Some(href)) = (label.link, href) {
+            links.push(ReaderLinkHit {
+                line: row,
+                start,
+                end,
+                target: ReaderLinkTarget::Uri(href.to_string()),
+                group: group_base,
+            });
+            group_base += 1;
+        }
+        lines.push(label.line);
         image_index += 1;
     }
 
@@ -521,15 +540,30 @@ fn patch_line_range(line: &mut Line<'static>, start: usize, end: usize, style: S
     }
 }
 
-/// A clickable `[Image N: alt]` label, numbered 1-based. The keyboard reaches it
-/// through link-hint mode like any other target, so the label advertises only
-/// the click.
+/// The assembled image-label row and the column ranges its clickable runs
+/// occupy. `link` is set only for the `[![alt](img)](href)` shape.
+struct ImageLabel {
+    line: Line<'static>,
+    image: (usize, usize),
+    link: Option<(usize, usize)>,
+}
+
+/// A clickable `[Image N: alt]` label, numbered 1-based, followed for a wrapped
+/// image by a second clickable run for the page it links to. The keyboard
+/// reaches both through link-hint mode like any other target, so the row
+/// advertises only the click.
+///
+/// Both chips are taken here, image first, so the counting and sized walks in
+/// [`build_reader_body`] hand them out in the same order.
 fn image_label_line(
     theme: &Theme,
     index: usize,
     alt: &str,
-    chip: Option<super::hints::Chip>,
-) -> (Line<'static>, usize) {
+    // Already filtered to openable targets by the caller.
+    link: Option<&str>,
+    show_urls: bool,
+    mut hints: Option<&mut HintLabeller>,
+) -> ImageLabel {
     let alt = alt.trim();
     let number = index + 1;
     let head = if alt.is_empty() {
@@ -543,16 +577,68 @@ fn image_label_line(
     // after the link is popped and so carries no link id. Measuring the whole
     // line here instead would drag the chip into the hit, and hovering the image
     // would light the chip up too.
-    let width = UnicodeWidthStr::width(label.as_str());
+    let image = (0, UnicodeWidthStr::width(label.as_str()));
     let mut spans = vec![Span::styled(label, theme.md_link())];
-    if let Some(chip) = chip {
-        spans.extend(
-            chip.runs(theme)
-                .into_iter()
-                .map(|(text, style)| Span::styled(text, style)),
-        );
+
+    if let Some(chip) = hints
+        .as_mut()
+        .and_then(|labeller| labeller.take(ReaderLinkTarget::Image(index)))
+    {
+        spans.extend(chip.runs(theme).into_iter().map(styled));
     }
-    (Line::from(spans), width)
+
+    let link = link.map(|href| {
+        spans.push(Span::raw(" "));
+        let start = line_width(&spans);
+        spans.push(Span::styled(
+            format!("[{}]", link_label(href)),
+            theme.md_link(),
+        ));
+        let range = (start, line_width(&spans));
+        // The full URL trails in the faint secondary style, matching a markdown
+        // link's ` (url)` trailer — the run above is its short name.
+        if show_urls {
+            spans.push(Span::styled(format!(" ({href})"), theme.muted()));
+        }
+        if let Some(chip) = hints
+            .as_mut()
+            .and_then(|labeller| labeller.take(ReaderLinkTarget::Uri(href.to_string())))
+        {
+            spans.extend(chip.runs(theme).into_iter().map(styled));
+        }
+        range
+    });
+
+    ImageLabel {
+        line: Line::from(spans),
+        image,
+        link,
+    }
+}
+
+fn styled((text, style): (String, Style)) -> Span<'static> {
+    Span::styled(text, style)
+}
+
+fn line_width(spans: &[Span<'static>]) -> usize {
+    spans.iter().map(Span::width).sum()
+}
+
+/// The visible name for a wrapped image's link: the host for an http(s) URL, the
+/// target itself for `#anchor`, `mailto:`, and stored attachments. This row is
+/// assembled by hand and never wrapped, so a bare URL would be truncated at the
+/// pane edge and could swallow the trailing hint chip; the full href rides on the
+/// hit instead.
+fn link_label(href: &str) -> &str {
+    let rest = href
+        .strip_prefix("https://")
+        .or_else(|| href.strip_prefix("http://"));
+    let Some(rest) = rest else {
+        return href;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    if host.is_empty() { href } else { host }
 }
 
 #[cfg(test)]
@@ -589,7 +675,9 @@ mod image_tests {
     #[test]
     fn image_label_is_its_number_and_alt_and_nothing_else() {
         let label = |index, alt| {
-            line_text(&image_label_line(&Theme::terminal_default(), index, alt, None).0)
+            line_text(
+                &image_label_line(&Theme::terminal_default(), index, alt, None, false, None).line,
+            )
         };
         assert_eq!(label(0, "sunset"), "[Image 1: sunset]");
         assert_eq!(label(3, ""), "[Image 4]");
@@ -602,13 +690,139 @@ mod image_tests {
     #[test]
     fn an_image_hint_chip_is_outside_the_clickable_span() {
         let mut labeller = HintLabeller::new(1, "");
-        let chip = labeller.take(ReaderLinkTarget::Image(0));
-        let (line, click_width) = image_label_line(&Theme::terminal_default(), 0, "sunset", chip);
+        let label = image_label_line(
+            &Theme::terminal_default(),
+            0,
+            "sunset",
+            None,
+            false,
+            Some(&mut labeller),
+        );
 
-        assert_eq!(click_width, "[Image 1: sunset]".len());
+        assert_eq!(label.image, (0, "[Image 1: sunset]".len()));
         assert!(
-            line.width() > click_width,
+            label.line.width() > label.image.1,
             "the chip widens the line past the clickable span"
+        );
+    }
+
+    /// A link-wrapped image reaches both of its targets: the label opens the
+    /// viewer, a second run beside it opens the page, and the two never share a
+    /// hover group.
+    #[test]
+    fn a_wrapped_image_gets_a_label_and_a_link() {
+        let (_guard, entry_path) = entry_path_with_asset();
+        let content = "[![a shot](2026-07-05T14-30-00-abc123.assets/x9k2.png)](https://www.example.org/wiki/File:X)";
+
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            content,
+            80,
+            Some(&entry_path),
+            false,
+            true,
+            None,
+        );
+
+        let row = body.links[0].line;
+        assert_eq!(
+            line_text(&body.lines[row]),
+            "[Image 1: a shot] [example.org]"
+        );
+        assert_eq!(body.links.len(), 2);
+        assert_eq!(body.links[0].target, ReaderLinkTarget::Image(0));
+        assert_eq!((body.links[0].start, body.links[0].end), (0, 17));
+        assert_eq!(body.links[1].line, row);
+        assert_eq!(
+            target_uri(&body.links[1]),
+            "https://www.example.org/wiki/File:X"
+        );
+        assert_eq!((body.links[1].start, body.links[1].end), (18, 31));
+        assert_ne!(body.links[0].group, body.links[1].group);
+    }
+
+    /// A wrapper the reader cannot open leaves the row exactly as a bare image —
+    /// the same predicate gates the run and the hit, so nothing is labelled but
+    /// unclickable.
+    #[test]
+    fn a_wrapped_image_with_an_inert_link_is_just_a_label() {
+        let (_guard, entry_path) = entry_path_with_asset();
+        let content = "[![a shot](2026-07-05T14-30-00-abc123.assets/x9k2.png)](2026-07-05T14-30-00-abc123.assets/notes.pdf)";
+
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            content,
+            80,
+            Some(&entry_path),
+            false,
+            // Encrypted entry: its assets are `.age` on disk and stay inert.
+            false,
+            None,
+        );
+
+        assert_eq!(body.links.len(), 1);
+        let row = body.links[0].line;
+        assert_eq!(line_text(&body.lines[row]), "[Image 1: a shot]");
+    }
+
+    /// `show_link_urls` adds the full href as a muted trailer, outside both hits —
+    /// the short host run is the link's name, exactly as a markdown link's name
+    /// precedes its ` (url)`.
+    #[test]
+    fn a_wrapped_image_trails_its_full_url_when_urls_are_shown() {
+        let (_guard, entry_path) = entry_path_with_asset();
+        let content =
+            "[![a shot](2026-07-05T14-30-00-abc123.assets/x9k2.png)](https://example.org/p)";
+
+        let body = build_body_lines(
+            &Theme::terminal_default(),
+            content,
+            120,
+            Some(&entry_path),
+            true,
+            true,
+            None,
+        );
+
+        let row = body.links[0].line;
+        assert_eq!(
+            line_text(&body.lines[row]),
+            "[Image 1: a shot] [example.org] (https://example.org/p)"
+        );
+        // The trailer starts after the link hit ends.
+        assert_eq!(body.links[1].end, 31);
+    }
+
+    /// Hint mode labels the image before the page it links to, so the chips read
+    /// left to right along the row.
+    #[test]
+    fn a_wrapped_image_labels_the_image_before_its_link() {
+        let (_guard, entry_path) = entry_path_with_asset();
+        let content =
+            "[![a shot](2026-07-05T14-30-00-abc123.assets/x9k2.png)](https://example.org/p)";
+
+        let body = build_reader_body(
+            &Theme::terminal_default(),
+            content,
+            120,
+            Some(&entry_path),
+            false,
+            true,
+            Some(""),
+        );
+
+        assert_eq!(body.openable, 2);
+        let targets: Vec<_> = body
+            .hints
+            .iter()
+            .map(|(_, target)| target.clone())
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                ReaderLinkTarget::Image(0),
+                ReaderLinkTarget::Uri("https://example.org/p".to_string()),
+            ]
         );
     }
 
@@ -991,6 +1205,8 @@ and [EtText](http://ettext.taint.org/doc/) -- the end.";
         assert!(styled);
     }
 
+    /// Also pins that an image outside any link is its own outermost link, so
+    /// `current_link` claiming the outermost open one leaves a bare image alone.
     #[test]
     fn inline_image_is_not_opened_as_an_attachment() {
         let (_guard, entry_path) = entry_path_with_asset();
@@ -1045,12 +1261,13 @@ mod hit_span_tests {
         std::fs::write(entry_dir.join("a.assets/notes.pdf"), b"x").unwrap();
         let entry = entry_dir.join("a.md");
 
-        // The badge idiom nests an image inside a link, so the image's own chip
-        // is written while the outer link is still open — and since the alt text
-        // is tagged with the image, that chip is the only run the outer link
-        // could claim.
+        // The badge idiom nests an image inside a link, so the image's own chip is
+        // written while the outer link is still open — right beside the alt text
+        // the outer link claims. The wrapped in-folder image is the other way the
+        // two land on one row: its label and its link each carry a chip.
         let content = "See [one](https://example.com) and [notes](a.assets/notes.pdf).\n\n\
                        ![a shot](a.assets/pic.png)\n\n\
+                       [![linked](a.assets/pic.png)](https://example.net/page)\n\n\
                        [![badge](https://example.org/b.svg)](https://example.org)\n\n\
                        Jump to [details](#details).\n\n## Details\n\ntail";
         let body = build_reader_body(
@@ -1065,8 +1282,9 @@ mod hit_span_tests {
 
         assert_eq!(
             body.hints.len(),
-            6,
-            "url, attachment, image, nested badge, its link, and anchor"
+            8,
+            "url, attachment, image, wrapped image and its link, \
+             nested badge and its link, and anchor"
         );
         for hit in &body.links {
             let covered = columns(&body.lines[hit.line], hit.start, hit.end);
@@ -1079,9 +1297,9 @@ mod hit_span_tests {
     }
 
     /// Every openable target gets a chip, including those that leave no hit: an
-    /// empty link name, and the clickable-image idiom, whose alt text is tagged
-    /// with the image rather than the link. Both still ask for a label, so a
-    /// count taken from the hits leaves the last target without one.
+    /// empty link name, and a nested image, whose alt text the enclosing link
+    /// claims. Both still ask for a label, so a count taken from the hits leaves
+    /// the last target without one.
     #[test]
     fn a_link_that_leaves_no_hit_still_consumes_a_label() {
         let content = "[](https://example.com)\n\n\

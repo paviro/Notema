@@ -559,10 +559,15 @@ impl<'a> MarkdownTerminalRenderer<'a> {
         }
     }
 
-    /// The id of the innermost open link/image, tagging characters emitted while
-    /// it is open so wrapping can recover the clickable region.
+    /// The id of the outermost open link/image, tagging characters emitted while
+    /// it is open so wrapping can recover the clickable region. Markdown nests
+    /// only one way — an image inside a link — and there the alt text is the
+    /// enclosing link's name, so `[![badge](img)](page)` clicks through to the
+    /// page. A bare image is its own outermost link. The image's own target keeps
+    /// the untagged trailer and hint chip written at its closing tag, so hint mode
+    /// still offers both.
     fn current_link(&self) -> Option<usize> {
-        self.links.last().map(|(_, _, id)| *id)
+        self.links.first().map(|(_, _, id)| *id)
     }
 
     /// Accumulate an open link's visible text so the closing tag can compare it
@@ -780,6 +785,16 @@ impl<'a> MarkdownTerminalRenderer<'a> {
         );
         self.separate_next_block = true;
     }
+}
+
+/// Whether a non-image target opens. Shared with the image-label rows `reader`
+/// assembles by hand, so a target can never be labelled but not clickable.
+pub(super) fn is_openable_target(
+    target: &str,
+    attachments_openable: bool,
+    entry_path: Option<&Path>,
+) -> bool {
+    is_openable_link(target) || is_openable_attachment(target, attachments_openable, entry_path)
 }
 
 /// Whether a link target is worth making clickable — external URLs and in-page
@@ -1183,6 +1198,49 @@ mod wrap_tests {
         assert_eq!(
             chunk.links[0].target,
             ReaderLinkTarget::Uri("https://example.com".into())
+        );
+    }
+
+    /// The badge idiom: the visible alt text is the enclosing link's name, so the
+    /// click goes to the page rather than to the image the badge is drawn from.
+    #[test]
+    fn a_nested_image_alt_is_claimed_by_the_enclosing_link() {
+        let chunk = render_text_chunk(
+            &Theme::terminal_default(),
+            "[![badge](https://cdn.example.com/b.svg)](https://example.org/page)",
+            80,
+            false,
+            None,
+            false,
+            None,
+        );
+
+        assert_eq!(chunk.links.len(), 1);
+        assert_eq!(
+            chunk.links[0].target,
+            ReaderLinkTarget::Uri("https://example.org/page".into())
+        );
+        assert_eq!((chunk.links[0].start, chunk.links[0].end), (0, 5));
+    }
+
+    /// An image outside any link is its own outermost link, so taking the
+    /// outermost never robs a bare image of its region.
+    #[test]
+    fn a_bare_image_alt_still_belongs_to_the_image() {
+        let chunk = render_text_chunk(
+            &Theme::terminal_default(),
+            "![badge](https://cdn.example.com/b.svg)",
+            80,
+            false,
+            None,
+            false,
+            None,
+        );
+
+        assert_eq!(chunk.links.len(), 1);
+        assert_eq!(
+            chunk.links[0].target,
+            ReaderLinkTarget::Uri("https://cdn.example.com/b.svg".into())
         );
     }
 

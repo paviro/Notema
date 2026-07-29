@@ -9,7 +9,6 @@ mod journals;
 pub use dates::{entry_timestamp_label, parse_entry_timestamp};
 pub use entry::entry_id;
 pub use entry::is_entry_file;
-pub use entry::sole_stored_image;
 pub use entry::{
     AssetFailure, AssetReport, EditOutcome, EntryAssetOptions, EntryCreateOutcome, EntryDraft,
     EntryEdit, EntryEditOutcome,
@@ -21,6 +20,7 @@ pub(crate) use entry::{
     read_entry, read_entry_content, read_entry_with_revision, save_entry_edit,
     save_entry_edit_if_revision, scan_import_sources,
 };
+pub use entry::{SoleStoredImage, sole_stored_image};
 pub use entry::{resolve_entry_asset_path, stored_asset_reference, stored_asset_reference_for};
 pub use journal_metadata::JournalTheme;
 pub(crate) use journal_metadata::set_theme as set_journal_theme;
