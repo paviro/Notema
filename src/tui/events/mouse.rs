@@ -922,17 +922,16 @@ fn hover_target_at(
     }
 
     if app.has_overlay() || editor_prompt_is_open(app) {
-        return mapped_hover_target(col, row, view);
+        return mapped_hover_target(app, col, row, view);
     }
 
     // The footer first: it overlays nothing, so it can't shadow a list row.
     // Covers the editor's footer too — its hints are the same clickable kind.
     let footer = footer_area(app, area);
     if render::point_in_rect(footer, col, row) {
-        if let Some(id) = footer_hint_at(app, footer, col, row) {
-            return HoverTarget::FooterHint(id);
-        }
-        return HoverTarget::None;
+        return footer_hint_at(app, footer, col, row)
+            .filter(|id| hint_id_to_action(app, *id).is_some())
+            .map_or(HoverTarget::None, HoverTarget::FooterHint);
     }
 
     if app.editor.is_some() {

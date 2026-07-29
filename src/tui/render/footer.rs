@@ -24,7 +24,8 @@ pub(crate) enum HintId {
     ToggleStarred,
     ExitSearch,
     CancelOverlay,
-    /// Step the highlighted setting (← / →) — keyboard-only, so no click action.
+    /// Step the highlighted setting (← / →). Inert: two keys with opposite
+    /// effects, and a click cannot say which was meant.
     SettingsAdjust,
     MetadataToggle,
     MetadataSwitchFocus,
@@ -47,8 +48,8 @@ pub(crate) enum HintId {
     LocationClear,
     OpenImageViewer,
     OpenReaderLinks,
-    /// The alphabet chip shown while link-hint mode is up. Inert: the keys it
-    /// names are the labels in the body, not something to click.
+    /// The alphabet chip shown while link-hint mode is up. Inert — the keys it
+    /// names are the labels in the body — so it does not hover either.
     ReaderHintKeys,
     CancelReaderHints,
     // The per-type metadata editors, each a direct footer chip (and mouse button)
@@ -78,8 +79,7 @@ pub(crate) enum HintId {
     FilterNextTab,
     FilterLaunch,
     HelpSwitchTab,
-    /// Step the suggestion highlight. Inert: it names two keys with opposite
-    /// effects, and a click cannot say which was meant.
+    /// Step the suggestion highlight. Inert, like [`Self::SettingsAdjust`].
     MoveSuggestion,
     CommitSuggestion,
     DismissSuggestions,

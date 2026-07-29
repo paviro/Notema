@@ -592,6 +592,30 @@ fn hover_finds_footer_hints() {
     assert!(hovered, "no footer hint hoverable on the browse footer");
 }
 
+/// Hover is the click affordance, so a chip a click does nothing with must not
+/// take it. Link-hint mode's alphabet chip is the case: it names the labels in
+/// the body, which only the keyboard can reach.
+#[test]
+fn an_inert_footer_chip_does_not_hover() {
+    let mut app = app_reading("A [link](https://example.com) here.");
+    app.reader_hints.begin();
+    let area = Rect::new(0, 0, 120, 20);
+    let footer = render::tui_layout(area, &app).footer;
+    let text = render::footer_text(&app, footer.width);
+    let open = text.find("a–z  open").expect("the alphabet chip is up") as u16;
+    let cancel = text.find("esc  cancel").expect("the cancel chip is up") as u16;
+
+    apply_hover(&mut app, footer.x + open, footer.y, area);
+    assert_eq!(app.hover, HoverTarget::None, "a–z has no action to promise");
+
+    apply_hover(&mut app, footer.x + cancel, footer.y, area);
+    assert_eq!(
+        app.hover,
+        HoverTarget::FooterHint(render::HintId::CancelReaderHints),
+        "esc does, so it lifts"
+    );
+}
+
 #[test]
 fn hover_tracks_insights_tabs_without_switching_tabs() {
     let mut app = app_with_entries(1);

@@ -12,12 +12,24 @@ pub(super) fn text_field_hover_at(col: u16, row: u16, view: &ViewState) -> Optio
 
 /// The hover target inside an overlay or editor prompt, read from the
 /// interaction regions registered during render.
-pub(super) fn mapped_hover_target(col: u16, row: u16, view: &ViewState) -> HoverTarget {
+///
+/// A hint lights up only when clicking it would do something: the chips that
+/// name a key the mouse cannot press — a two-way step, or the alphabet the
+/// reader's link labels are typed from — are not affordances, and lifting them
+/// under the cursor would promise an action that never comes.
+pub(super) fn mapped_hover_target(
+    app: &AppModel,
+    col: u16,
+    row: u16,
+    view: &ViewState,
+) -> HoverTarget {
     match view.interactions.hit(col, row) {
         Some(InteractionKind::TextField(_)) => {
             text_field_hover_at(col, row, view).unwrap_or_default()
         }
-        Some(InteractionKind::Hint(id)) => HoverTarget::FooterHint(*id),
+        Some(InteractionKind::Hint(id)) if super::hint_id_to_action(app, *id).is_some() => {
+            HoverTarget::FooterHint(*id)
+        }
         Some(InteractionKind::FilterTab(tab)) => HoverTarget::FilterTab(*tab),
         Some(InteractionKind::HelpTab(tab)) => HoverTarget::HelpTab(*tab),
         Some(InteractionKind::DialogRow { index, .. }) => HoverTarget::DialogRow(*index),
