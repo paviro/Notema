@@ -367,6 +367,10 @@ pub(crate) enum MetadataKind {
 }
 
 impl MetadataKind {
+    /// Every kind, for the bench that sweeps the pickers. The app itself always
+    /// names the one it wants, so this is gated with its only caller rather than
+    /// left as an enumeration nothing enumerates.
+    #[cfg(feature = "bench")]
     pub(crate) const ALL: [MetadataKind; 3] = [Self::Tags, Self::People, Self::Activities];
 
     pub(crate) fn title(self) -> &'static str {
