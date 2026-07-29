@@ -5,29 +5,47 @@
 //! never reach one pay nothing.
 
 use std::{
-    sync::mpsc::{Receiver, Sender, TryRecvError, channel},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc::{Receiver, Sender, TryRecvError, channel},
+    },
     thread,
 };
 
 /// Handle to a background worker resolving `Req` into `Res`. `in_flight` counts
 /// dispatched-but-not-yet-drained requests so the event loop can poll faster
-/// while a lookup is outstanding.
+/// while a lookup is outstanding. Shared with every [`Submission`], which
+/// uncounts itself if dropped unsent.
 pub(crate) struct Worker<Req, Res> {
     channels: Option<Channels<Req, Res>>,
-    in_flight: usize,
+    in_flight: Arc<AtomicUsize>,
     /// The worker died with requests outstanding. Set by the drain that notices,
     /// cleared by the caller that reports it.
     lost: bool,
 }
 
 /// A ticket to submit one request from wherever it is carried to. Dropping it
-/// without sending leaves the worker counted busy until a drain notices, which
-/// is why it is consumed by the send.
-pub(crate) struct Submission<Req>(Sender<Req>);
+/// unsent uncounts the request, so an abandoned ticket cannot pin the worker
+/// busy.
+pub(crate) struct Submission<Req> {
+    sender: Sender<Req>,
+    pending: Arc<AtomicUsize>,
+    sent: bool,
+}
 
 impl<Req> Submission<Req> {
-    pub(crate) fn send(self, request: Req) {
-        let _ = self.0.send(request);
+    pub(crate) fn send(mut self, request: Req) {
+        self.sent = true;
+        let _ = self.sender.send(request);
+    }
+}
+
+impl<Req> Drop for Submission<Req> {
+    fn drop(&mut self) {
+        if !self.sent {
+            self.pending.fetch_sub(1, Ordering::Relaxed);
+        }
     }
 }
 
@@ -40,7 +58,7 @@ impl<Req, Res> Default for Worker<Req, Res> {
     fn default() -> Self {
         Self {
             channels: None,
-            in_flight: 0,
+            in_flight: Arc::default(),
             lost: false,
         }
     }
@@ -61,8 +79,12 @@ impl<Req: Send + 'static, Res: Send + 'static> Worker<Req, Res> {
     /// request to happen, and a poll in between must not read the worker as idle.
     pub(crate) fn submission(&mut self, handler: fn(Req) -> Res) -> Submission<Req> {
         let channels = self.channels.get_or_insert_with(|| spawn(handler));
-        self.in_flight += 1;
-        Submission(channels.requests.clone())
+        self.in_flight.fetch_add(1, Ordering::Relaxed);
+        Submission {
+            sender: channels.requests.clone(),
+            pending: Arc::clone(&self.in_flight),
+            sent: false,
+        }
     }
 
     /// Drain every finished result (empty when the worker was never started).
@@ -83,10 +105,13 @@ impl<Req: Send + 'static, Res: Send + 'static> Worker<Req, Res> {
                 Err(TryRecvError::Disconnected) => break true,
             }
         };
-        self.in_flight = self.in_flight.saturating_sub(results.len());
+        self.in_flight.fetch_sub(results.len(), Ordering::Relaxed);
         if died {
-            self.lost = self.in_flight > 0;
-            self.in_flight = 0;
+            self.lost = self.in_flight.load(Ordering::Relaxed) > 0;
+            // A fresh counter, not a reset: a ticket for the dead worker may
+            // still be in flight elsewhere, and its drop must not uncount a
+            // request of the replacement.
+            self.in_flight = Arc::default();
             self.channels = None;
         }
         results
@@ -99,7 +124,7 @@ impl<Req: Send + 'static, Res: Send + 'static> Worker<Req, Res> {
 
     /// Whether a request is still outstanding.
     pub(crate) fn has_pending(&self) -> bool {
-        self.in_flight > 0
+        self.in_flight.load(Ordering::Relaxed) > 0
     }
 }
 
@@ -118,5 +143,41 @@ fn spawn<Req: Send + 'static, Res: Send + 'static>(handler: fn(Req) -> Res) -> C
     Channels {
         requests: request_tx,
         results: result_rx,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    fn echo(value: u8) -> u8 {
+        value
+    }
+
+    #[test]
+    fn a_ticket_dropped_unsent_uncounts_its_request() {
+        let mut worker = Worker::<u8, u8>::default();
+        drop(worker.submission(echo));
+        assert!(!worker.has_pending());
+    }
+
+    #[test]
+    fn a_sent_ticket_counts_until_its_result_is_drained() {
+        let mut worker = Worker::<u8, u8>::default();
+        worker.submission(echo).send(7);
+        assert!(worker.has_pending());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let results = loop {
+            let results = worker.drain();
+            if !results.is_empty() {
+                break results;
+            }
+            assert!(Instant::now() < deadline, "result never arrived");
+            thread::sleep(Duration::from_millis(1));
+        };
+        assert_eq!(results, [7]);
+        assert!(!worker.has_pending());
     }
 }
