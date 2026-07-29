@@ -8,6 +8,15 @@ use notema_domain::{
 use super::parse::{split_unquoted, split_values, unquote};
 use crate::tui::{features::metadata::metadata_values, state::MetadataKind};
 
+/// Whether every [`split_values`] `+`-group has a `|`-alternative that
+/// satisfies `matches`. Empty groups — a value not yet typed — match nothing.
+fn all_groups_match<T>(groups: &[Vec<T>], mut matches: impl FnMut(&T) -> bool) -> bool {
+    !groups.is_empty()
+        && groups
+            .iter()
+            .all(|alternatives| alternatives.iter().any(&mut matches))
+}
+
 /// Whether an entry's date satisfies `filter`. Entries with neither a creation
 /// timestamp nor a dated filename have no date to compare, so they never match.
 pub(super) fn date_predicate(
@@ -33,12 +42,9 @@ pub(super) fn metadata_predicate(
     let groups = split_values(query);
     move |entry| {
         let values = metadata_values(entry, kind);
-        !groups.is_empty()
-            && groups.iter().all(|alternatives| {
-                alternatives
-                    .iter()
-                    .any(|needle| values.iter().any(|value| needle.matches(value)))
-            })
+        all_groups_match(&groups, |needle| {
+            values.iter().any(|value| needle.matches(value))
+        })
     }
 }
 
@@ -97,14 +103,11 @@ pub(super) fn feeling_predicate(feeling: &str) -> impl Fn(&Entry) -> bool + use<
         })
         .collect();
     move |entry| {
-        !groups.is_empty()
-            && groups.iter().all(|alternatives| {
-                alternatives.iter().any(|(needle, mode)| {
-                    entry
-                        .feelings
-                        .iter()
-                        .any(|entry_feeling| feeling_matches_search(entry_feeling, needle, *mode))
-                })
-            })
+        all_groups_match(&groups, |(needle, mode)| {
+            entry
+                .feelings
+                .iter()
+                .any(|entry_feeling| feeling_matches_search(entry_feeling, needle, *mode))
+        })
     }
 }
