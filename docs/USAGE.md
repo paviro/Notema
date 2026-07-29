@@ -212,7 +212,8 @@ Type the letter to open it; past 26 targets the labels are two letters, so type
 both.
 
 Labels cover the whole entry, so a target you have scrolled past still opens.
-`Esc` closes them, and only `Esc` — every other key is a label while they are up.
+`Backspace` takes back a letter you mistyped, `Esc` closes them, and every other
+key is a label while they are up.
 
 ## Import from Day One
 
