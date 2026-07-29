@@ -90,8 +90,8 @@ impl FilterTab {
         }
     }
 
-    /// The search prefix a chosen row launches (`tags:`, `location:`, …).
-    /// The search prefix listing this tab's values, colon included.
+    /// The search prefix a chosen row launches, colon included (`tags:`,
+    /// `location:`, …).
     pub(crate) fn search_prefix(self) -> &'static str {
         match self {
             Self::Tags => Prefix::Tags,
