@@ -34,6 +34,9 @@ pub(crate) struct Segment {
 pub(crate) struct Alternative {
     /// The trimmed text, which is what the parser tests for quotedness.
     pub(crate) range: Range<usize>,
+    /// The same alternative with its surrounding whitespace, which is where the
+    /// caret still counts as being in this value.
+    pub(crate) span: Range<usize>,
     /// Wrapped in a quote pair, i.e. matched exactly rather than as a fragment.
     pub(crate) quoted: bool,
 }
@@ -54,6 +57,7 @@ pub(crate) fn scan(query: &str) -> Vec<Segment> {
 
 fn scan_segment(query: &str, piece: Range<usize>, separator: Option<usize>) -> Segment {
     let trimmed = trim_range(query, piece.clone());
+    let piece_end = piece.end;
     let plain = Segment {
         range: piece,
         separator,
@@ -65,7 +69,9 @@ fn scan_segment(query: &str, piece: Range<usize>, separator: Option<usize>) -> S
         return plain;
     };
 
-    let value = trimmed.end - rest.len()..trimmed.end;
+    // The value runs to the segment's untrimmed end so the last alternative's
+    // span covers the whitespace a caret sits in mid-typing.
+    let value = trimmed.end - rest.len()..piece_end;
     let mut operators = Vec::new();
     let mut alternatives = Vec::new();
     let grammar = prefix.value_grammar();
@@ -92,10 +98,11 @@ fn scan_segment(query: &str, piece: Range<usize>, separator: Option<usize>) -> S
             if index < last_alt {
                 operators.push(('|', alt.end));
             }
-            let range = trim_range(query, alt);
+            let range = trim_range(query, alt.clone());
             alternatives.push(Alternative {
                 quoted: is_quoted(&query[range.clone()]),
                 range,
+                span: alt,
             });
         }
     }
@@ -115,15 +122,19 @@ pub(crate) struct Caret {
     pub(crate) prefix: Prefix,
     /// The alternative's trimmed range — what completing it would replace.
     pub(crate) value: Range<usize>,
+    /// The alternative with its whitespace, which is what a completion replaces
+    /// when the value itself is empty.
+    pub(crate) span: Range<usize>,
     pub(crate) quoted: bool,
 }
 
 /// The filter value at byte offset `at`, or `None` when the caret is in a
 /// full-text segment or under an unrecognised prefix.
 ///
-/// A range is matched inclusively at both ends, so a caret sitting just past the
-/// last character still belongs to the value it is extending — which is where it
-/// is for all of typing. Under a prefix there is always at least one alternative
+/// The caret is placed by the alternative's untrimmed span, matched inclusively
+/// at both ends: it sits just past the last character for all of typing, and the
+/// whitespace in `tags: apple` is part of the value being typed rather than a
+/// gap between values. Under a prefix there is always at least one alternative
 /// (a bare `tags:` yields an empty one at the value start), so an empty value
 /// needs no special case.
 pub(crate) fn caret_context(query: &str, at: usize) -> Option<Caret> {
@@ -134,10 +145,11 @@ pub(crate) fn caret_context(query: &str, at: usize) -> Option<Caret> {
     let alternative = segment
         .alternatives
         .into_iter()
-        .find(|alt| alt.range.contains(&at) || alt.range.end == at)?;
+        .find(|alt| alt.span.contains(&at) || alt.span.end == at)?;
     Some(Caret {
         prefix,
         value: alternative.range,
+        span: alternative.span,
         quoted: alternative.quoted,
     })
 }
@@ -339,6 +351,11 @@ mod tests {
         assert_eq!(at("tags:app", 8), Some(("app", false)));
         // Whitespace after the prefix is not part of the value.
         assert_eq!(at("tags: app", 9), Some(("app", false)));
+        // But a caret in that whitespace is still in the value being typed —
+        // pressing space must not take the completions away.
+        assert_eq!(at("tags: ", 6), Some(("", false)));
+        assert_eq!(at("tags:app ", 9), Some(("app", false)));
+        assert_eq!(at("tags:a | ", 9), Some(("", false)));
 
         // A committed value: the caret lands past the closing quote and the pair
         // is balanced, which is what tells the list to stay shut.

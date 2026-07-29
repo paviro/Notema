@@ -218,12 +218,19 @@ impl AppModel {
             return;
         };
 
+        // An empty value is a caret sitting in whitespace, and writing beside it
+        // would leave the space behind: `tags: ` completes to `tags:"apple"`.
+        let replaced = if caret.value.is_empty() {
+            caret.span
+        } else {
+            caret.value
+        };
         let written = tab.launch_value(&row.search_value);
         let mut updated = String::with_capacity(query.len() + written.len());
-        updated.push_str(&query[..caret.value.start]);
+        updated.push_str(&query[..replaced.start]);
         updated.push_str(&written);
         let caret_byte = updated.len();
-        updated.push_str(&query[caret.value.end..]);
+        updated.push_str(&query[replaced.end..]);
 
         self.search.query.set_text(&updated);
         self.search.query.set_cursor_byte(caret_byte);
@@ -333,6 +340,20 @@ mod tests {
         // Nothing highlighted until the list is arrowed into, so `Enter` is still
         // the entry list's.
         assert_eq!(app.search.suggestions.selected_index(), None);
+    }
+
+    /// A space after the prefix is part of typing the value, so the list stays
+    /// up — and completing into it replaces the space rather than writing beside
+    /// it.
+    #[test]
+    fn a_space_after_the_prefix_keeps_the_whole_vocabulary_on_offer() {
+        let mut app = fixture();
+        type_query(&mut app, "tags: ");
+        assert_eq!(labels(&app), vec!["apple", "App", "pear"]);
+        assert!(app.suggestions_open());
+
+        app.commit_first_suggestion();
+        assert_eq!(app.search.query.as_str(), "tags:\"apple\"");
     }
 
     #[test]
