@@ -57,18 +57,6 @@ impl Default for SearchState {
     }
 }
 
-impl MetadataKind {
-    /// The search prefix listing this facet's values, colon included.
-    pub(crate) fn search_prefix(self) -> &'static str {
-        match self {
-            MetadataKind::Tags => Prefix::Tags,
-            MetadataKind::People => Prefix::People,
-            MetadataKind::Activities => Prefix::Activities,
-        }
-        .token()
-    }
-}
-
 impl AppModel {
     pub(crate) fn begin_search(&mut self) {
         let scope = if self.nav.focus == Focus::Journals {

@@ -8,7 +8,7 @@ use ratatui::widgets::ListState;
 use super::features::filter::FilterTab;
 use super::features::{
     feelings::EditFeelingState, filter::FilterState, location::EditLocationState,
-    metadata::EditMetadataState,
+    metadata::EditMetadataState, search::Prefix,
 };
 use super::image::ImageAsset;
 use super::text_input::TextInput;
@@ -379,6 +379,16 @@ impl MetadataKind {
             MetadataKind::People => "People",
             MetadataKind::Activities => "Activities",
         }
+    }
+
+    /// The search prefix listing this facet's values, colon included.
+    pub(crate) fn search_prefix(self) -> &'static str {
+        match self {
+            MetadataKind::Tags => Prefix::Tags,
+            MetadataKind::People => Prefix::People,
+            MetadataKind::Activities => Prefix::Activities,
+        }
+        .token()
     }
 }
 
