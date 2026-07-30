@@ -718,6 +718,41 @@ fn release_drops_handle_even_when_commit_fails() {
 }
 
 #[test]
+fn rdonly_o_trunc_neither_presents_nor_causes_truncation() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    write_new(&fx, "/diary/note.md", b"hello world");
+
+    let p = cpath("/diary/note.md");
+    let mut fh = 0u64;
+    assert_eq!(
+        jf_open(fx.ctx, p.as_ptr(), libc::O_RDONLY | libc::O_TRUNC, &mut fh),
+        0
+    );
+    let mut buf = [0u8; 16];
+    assert_eq!(
+        jf_read(
+            fx.ctx,
+            p.as_ptr(),
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len(),
+            0,
+            fh,
+        ),
+        11
+    );
+    assert_eq!(&buf[..11], b"hello world");
+    let mut st = empty_stat();
+    assert_eq!(jf_getattr(fx.ctx, p.as_ptr(), &mut st), 0);
+    assert_eq!(st.st_size, 11);
+    assert_eq!(jf_release(fx.ctx, p.as_ptr(), fh), 0);
+    assert_eq!(
+        fx.read_disk(&fx.root().join("diary/note.md.age")),
+        b"hello world"
+    );
+}
+
+#[test]
 fn getattr_reports_plaintext_size() {
     let fx = Fixture::new();
     fx.mkdir_p("diary");

@@ -339,7 +339,10 @@ fn open(ctx: *mut c_void, path: *const c_char, flags: c_int, fh_out: *mut u64) -
     };
     let access = flags & libc::O_ACCMODE;
     let writable = access == libc::O_WRONLY || access == libc::O_RDWR;
-    let truncate = flags & libc::O_TRUNC != 0;
+    // POSIX leaves O_TRUNC without write access unspecified; honoring it here
+    // would present an empty buffer that can never be committed — a read-only
+    // open must not change what the file appears to hold.
+    let truncate = flags & libc::O_TRUNC != 0 && writable;
     let buf = if truncate {
         Zeroizing::new(Vec::new())
     } else {
@@ -361,7 +364,7 @@ fn open(ctx: *mut c_void, path: *const c_char, flags: c_int, fh_out: *mut u64) -
             encoding: file.encoding,
             buf,
             deleted: false,
-            dirty: truncate && writable,
+            dirty: truncate,
             writable,
         },
     );
