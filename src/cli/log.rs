@@ -5,7 +5,9 @@ use std::{
 
 use anyhow::{Context, bail};
 use chrono::Local;
-use notema_context::{EnvironmentProvider, fetch_environment, resolve_zone, rezone};
+use notema_context::{
+    EnvironmentProvider, EnvironmentWants, fetch_environment, resolve_zone, rezone,
+};
 use notema_domain::{Location, MOOD_RANGE, Metadata, validate_feelings};
 use notema_storage::JournalStore;
 use notema_timing as timing;
@@ -118,7 +120,7 @@ pub(super) fn run(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<(
             created_at = rezone(created_at, zone);
             timezone = Some(zone.name().to_string());
         }
-        let report = fetch_environment(coordinates, created_at);
+        let report = fetch_environment(coordinates, created_at, EnvironmentWants::all());
         for warning in &report.warnings {
             eprintln!(
                 "note: {} unavailable ({})",

@@ -1085,9 +1085,7 @@ mod tests {
                 notema_domain::Coordinates::try_new(52.52, 13.405).unwrap(),
                 datetime,
             ),
-            weather: None,
-            air_quality: None,
-            warnings: Vec::new(),
+            ..Environment::default()
         });
         app.editor = Some(editor);
         save_internal_editor(&mut app).unwrap();

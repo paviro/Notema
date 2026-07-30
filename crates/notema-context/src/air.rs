@@ -2,15 +2,14 @@
 //! air-quality API — free and keyless, a sibling to the weather fetch.
 //!
 //! A single endpoint serves both the recent past and a short forecast; there is
-//! no archive/forecast split like the weather API. Its reanalysis reaches back
-//! only a few years and its past window is bounded (about three months), so
-//! entries older than that — most Day One imports — simply get no reading and
-//! the `[air_quality]` table is omitted.
+//! no archive/forecast split like the weather API. Its reanalysis begins at
+//! [`COVERAGE_START`], so entries older than that — many Day One imports — get
+//! no reading and the `[air_quality]` table is omitted.
 
 use crate::Result;
 use crate::http::get;
 use crate::weather::nearest_hour_index;
-use chrono::{DateTime, FixedOffset, NaiveDateTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime};
 use notema_domain::{AirQuality, Coordinates};
 use serde::Deserialize;
 
@@ -20,15 +19,28 @@ const ENDPOINT: &str = "https://air-quality-api.open-meteo.com/v1/air-quality";
 const HOURLY: &str = "pm2_5,pm10,ozone,nitrogen_dioxide,sulphur_dioxide,carbon_monoxide,european_aqi,us_aqi,uv_index,grass_pollen,birch_pollen,ragweed_pollen";
 /// Attribution stored in the `[air_quality]` table's `source`.
 const SOURCE: &str = "Open-Meteo";
+/// First date the CAMS reanalysis covers. Asking for anything earlier is not an
+/// empty result but an HTTP 400 (`start_date is out of allowed range`), so the
+/// bound has to be enforced here rather than discovered from the response.
+const COVERAGE_START: NaiveDate = NaiveDate::from_ymd_opt(2013, 1, 1).expect("valid date");
+
+/// Whether Open-Meteo has air-quality data for a date at all. Callers use this to
+/// skip a request that could only ever fail.
+pub(crate) fn covers(datetime: DateTime<FixedOffset>) -> bool {
+    datetime.date_naive() >= COVERAGE_START
+}
 
 /// Fetch the air quality for a point at an instant. `Ok(None)` when Open-Meteo
-/// has no usable sample there/then (date outside the endpoint's window, or a gap
-/// in the data). Errors are transport/HTTP failures — the caller drops them
+/// has no usable sample there/then (date before [`COVERAGE_START`], or a gap in
+/// the data). Errors are transport/HTTP failures — the caller drops them
 /// silently so a save never fails.
 pub fn fetch_air_quality(
     coordinates: Coordinates,
     datetime: DateTime<FixedOffset>,
 ) -> Result<Option<AirQuality>> {
+    if !covers(datetime) {
+        return Ok(None);
+    }
     let lat = coordinates.latitude();
     let lon = coordinates.longitude();
     let date = datetime.format("%Y-%m-%d");
@@ -130,6 +142,24 @@ mod tests {
             "uv_index": [4.0, 6.2]
         }
     }"#;
+
+    fn at(text: &str) -> DateTime<FixedOffset> {
+        DateTime::parse_from_rfc3339(text).unwrap()
+    }
+
+    #[test]
+    fn coverage_starts_in_2013() {
+        assert!(!covers(at("2012-12-31T23:00:00+00:00")));
+        assert!(covers(at("2013-01-01T00:00:00+00:00")));
+    }
+
+    #[test]
+    fn dates_before_coverage_yield_no_reading_without_a_request() {
+        let coordinates = Coordinates::try_new(52.52, 13.4).unwrap();
+        // Offline: a request here would be a certain HTTP 400.
+        let air = fetch_air_quality(coordinates, at("2012-12-21T05:54:08+00:00")).unwrap();
+        assert!(air.is_none());
+    }
 
     #[test]
     fn maps_nearest_hour_and_rounds_aqi() {

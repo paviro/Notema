@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, FixedOffset};
-use notema_context::{EnvironmentReport, fetch_environment};
+use notema_context::{EnvironmentReport, EnvironmentWants, fetch_environment};
 use notema_domain::{Coordinates, MetadataField};
 
 use crate::tui::runtime::worker::Worker;
@@ -51,7 +51,7 @@ pub(crate) fn fetch_entry_environment(
     coordinates: Coordinates,
     datetime: DateTime<FixedOffset>,
 ) -> Environment {
-    fetch_environment(coordinates, datetime)
+    fetch_environment(coordinates, datetime, EnvironmentWants::all())
 }
 
 /// Resolve one environment request. Runs on the worker thread.

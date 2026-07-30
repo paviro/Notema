@@ -8,15 +8,15 @@
 use std::{thread, time::Duration};
 
 use chrono::Local;
-use notema_context::{compute_celestial, fetch_environment, reverse_geocode};
+use notema_context::{EnvironmentWants, compute_celestial, fetch_environment, reverse_geocode};
 use notema_domain::{EntryEncryptionState, MetadataField};
 
 use super::{Cli, unlock_if_encrypted};
 use crate::{AppResult, startup};
 
-/// Pause after any entry that hit the network, so consecutive lookups stay at or
-/// under the providers' one-request-per-second ceiling (each entry makes at most
-/// one Nominatim call — the strict one — before this gap).
+/// Pause after any entry that issued a request, so consecutive lookups stay at or
+/// under the providers' one-request-per-second ceiling (Nominatim, the strict
+/// one, is called at most once per entry).
 const REQUEST_GAP: Duration = Duration::from_secs(1);
 
 pub(super) fn run(cli: &Cli) -> AppResult<()> {
@@ -76,18 +76,22 @@ pub(super) fn run(cli: &Cli) -> AppResult<()> {
         let need_air = entry.air_quality.is_none();
         let need_celestial = entry.celestial.is_none();
         if need_weather || need_air {
-            hit_network = true;
-            let report = fetch_environment(coordinates, datetime);
+            let wants = EnvironmentWants {
+                weather: need_weather,
+                air_quality: need_air,
+            };
+            let report = fetch_environment(coordinates, datetime, wants);
+            hit_network |= report.requests > 0;
             for warning in &report.warnings {
                 eprintln!("note: {} — {}", entry.path.display(), warning.message);
             }
             if need_celestial {
                 fields.push(MetadataField::Celestial(Some(Box::new(report.celestial))));
             }
-            if need_weather && let Some(weather) = report.weather {
+            if let Some(weather) = report.weather {
                 fields.push(MetadataField::Weather(Some(Box::new(weather))));
             }
-            if need_air && let Some(air_quality) = report.air_quality {
+            if let Some(air_quality) = report.air_quality {
                 fields.push(MetadataField::AirQuality(Some(Box::new(air_quality))));
             }
         } else if need_celestial {
