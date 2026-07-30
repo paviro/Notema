@@ -31,8 +31,8 @@ pub(crate) fn covers(datetime: DateTime<FixedOffset>) -> bool {
 }
 
 /// Fetch the air quality for a point at an instant. `Ok(None)` when Open-Meteo
-/// has no usable sample there/then (date before [`COVERAGE_START`], or a gap in
-/// the data). Errors are transport/HTTP failures — the caller drops them
+/// has no usable sample there/then (date before the 2013 reanalysis start, or a
+/// gap in the data). Errors are transport/HTTP failures — the caller drops them
 /// silently so a save never fails.
 pub fn fetch_air_quality(
     coordinates: Coordinates,
