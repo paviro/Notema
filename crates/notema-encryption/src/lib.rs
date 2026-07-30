@@ -44,5 +44,5 @@ pub use pending::{PendingRequest, read_pending, remove_pending, request_store_ac
 pub use recipients::{
     Recipient, add_recipient, advance_trust_pins, commit_rotated_identity, drop_old_recipient,
     identity_is_recipient, initialize_store_identity, read_recipients, rename_recipient,
-    revoke_recipient, rotate_add_new_key,
+    revoke_recipient, revoked_recipient_keys, rotate_add_new_key,
 };

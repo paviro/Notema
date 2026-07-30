@@ -75,6 +75,16 @@ fn verified_roster(paths: &KeyPaths) -> Result<roster::Verified> {
     verified
 }
 
+/// Encryption keys the verified roster shows a `revoke` op for — positive
+/// evidence those devices were revoked (a never-approved device's key appears
+/// in no op at all). Empty when the store isn't encrypted.
+pub fn revoked_recipient_keys(paths: &KeyPaths) -> Result<Vec<String>> {
+    if !paths.devices_file.exists() {
+        return Ok(Vec::new());
+    }
+    Ok(verified_roster(paths)?.revoked_keys)
+}
+
 /// Advance this device's trust pins to the roster's current, verified head (also
 /// recording the genesis on first sight). Called after a change this device made
 /// or observed, so a later rollback below this point is detectable.

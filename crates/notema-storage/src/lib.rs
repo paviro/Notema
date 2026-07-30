@@ -417,9 +417,11 @@ impl JournalStore {
 
     /// Resolve whether this device can open the store, after its identity has
     /// been unlocked (or found not to need unlocking). On an encrypted store this
-    /// device isn't a recipient of, a now-dead (revoked) key is retired aside as
-    /// a side effect so the user only has to re-enroll — reported via
-    /// [`StoreAccess::NeedsEnroll`]'s `retired_key`.
+    /// device isn't a recipient of, a key the verified roster shows a revoke op
+    /// for is retired aside as a side effect so the user only has to re-enroll —
+    /// reported via [`StoreAccess::NeedsEnroll`]'s `retired_key`. A key with no
+    /// revocation evidence (denied, or a request/approval that hasn't synced
+    /// yet) is kept, so it can re-request access.
     pub fn resolve_access(&self) -> AppResult<StoreAccess> {
         // Fail closed when the roster is gone but this device previously pinned
         // one and encrypted entries still exist: without this the store would be
@@ -446,7 +448,14 @@ impl JournalStore {
         if self.self_request_pending()? {
             return Ok(StoreAccess::AwaitingApproval { device_name });
         }
-        let retired_key = self.retire_revoked_identity()?.is_some();
+        // Retire only on positive evidence — a revoke op for this key in the
+        // verified roster. A missing pending file alone can also mean the
+        // request or its approval simply hasn't synced yet.
+        let revoked = match self.identity_public_key() {
+            Some(own_key) => crypto::revoked_recipient_keys(&self.paths.keys)?.contains(&own_key),
+            None => false,
+        };
+        let retired_key = revoked && self.retire_revoked_identity()?.is_some();
         Ok(StoreAccess::NeedsEnroll {
             device_name,
             retired_key,

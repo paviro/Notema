@@ -163,6 +163,10 @@ pub(crate) struct TrustPins {
 #[derive(Debug, Clone)]
 pub(crate) struct Verified {
     pub recipients: Vec<Recipient>,
+    /// Encryption keys a `revoke` op removed — positive evidence a device was
+    /// revoked, as opposed to never having been added. A key later re-added
+    /// stays listed; check `recipients` for current membership first.
+    pub revoked_keys: Vec<String>,
     pub genesis_hash: String,
     pub head_hash: String,
 }
@@ -194,6 +198,7 @@ pub(crate) fn verify(ops: &[RosterOp], pins: &TrustPins) -> Result<Verified> {
 
     let mut trusted: Vec<String> = vec![genesis_op.signing_key.clone()];
     let mut recipients: Vec<Recipient> = vec![genesis_op.recipient()];
+    let mut revoked_keys: Vec<String> = Vec::new();
     let mut hashes: Vec<String> = vec![genesis_hash.clone()];
 
     for (index, op) in ops.iter().enumerate().skip(1) {
@@ -225,6 +230,9 @@ pub(crate) fn verify(ops: &[RosterOp], pins: &TrustPins) -> Result<Verified> {
             OpKind::Revoke => {
                 recipients.retain(|r| r.encryption_key != op.encryption_key);
                 trusted.retain(|key| key != &op.signing_key);
+                if !revoked_keys.contains(&op.encryption_key) {
+                    revoked_keys.push(op.encryption_key.clone());
+                }
             }
             OpKind::Rename => {
                 if let Some(target) = recipients
@@ -255,6 +263,7 @@ pub(crate) fn verify(ops: &[RosterOp], pins: &TrustPins) -> Result<Verified> {
 
     Ok(Verified {
         recipients,
+        revoked_keys,
         genesis_hash,
         head_hash: hashes
             .into_iter()

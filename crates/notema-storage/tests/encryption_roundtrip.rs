@@ -523,6 +523,80 @@ fn revoked_device_retires_its_identity_but_keeps_trust_pins() {
 }
 
 #[test]
+fn unsynced_request_keeps_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let journals = dir.path().join("journals");
+
+    let mut laptop = JournalStore::new(&journals, dir.path().join("laptop"));
+    laptop.ensure().unwrap();
+    laptop.initialize_encryption("laptop", None).unwrap();
+    laptop.unlock(None).unwrap();
+
+    let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    let phone_recipient = phone.request_access("phone", None).unwrap();
+    phone.unlock(None).unwrap();
+
+    // The pending file vanishes without a roster revoke op: a denied request,
+    // or one that simply hasn't synced. Either way there is no revocation
+    // evidence, so the phone must keep its key and stay able to re-request.
+    let pending: Vec<_> = laptop.pending_requests().unwrap();
+    assert_eq!(pending.len(), 1);
+    laptop.deny_pending(&pending[0]).unwrap();
+
+    let phone_identity = dir.path().join("phone").join("identity.toml");
+    match phone.resolve_access().unwrap() {
+        notema_storage::StoreAccess::NeedsEnroll { retired_key, .. } => {
+            assert!(!retired_key, "no revocation evidence — key must be kept");
+        }
+        _ => panic!("phone should need enrollment"),
+    }
+    assert!(
+        phone_identity.exists(),
+        "identity must survive a lost request"
+    );
+    assert_eq!(
+        phone.identity_public_key().unwrap(),
+        phone_recipient.encryption_key
+    );
+}
+
+#[test]
+fn revoked_device_resolve_access_retires_its_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let journals = dir.path().join("journals");
+
+    let mut laptop = JournalStore::new(&journals, dir.path().join("laptop"));
+    laptop.ensure().unwrap();
+    laptop.initialize_encryption("laptop", None).unwrap();
+    laptop.unlock(None).unwrap();
+    laptop.create_journal("diary").unwrap();
+    create_entry(&laptop, "diary", "shared body");
+
+    let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    phone.request_access("phone", None).unwrap();
+    let pending = laptop.pending_requests().unwrap();
+    laptop.approve_pending(&pending[0], |_, _| {}).unwrap();
+    phone.unlock(None).unwrap();
+
+    laptop.revoke_recipient("phone", |_, _| {}).unwrap();
+
+    // The roster now carries a revoke op for the phone's key — positive
+    // evidence, so resolve_access retires the identity aside.
+    let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    phone.unlock(None).unwrap();
+    match phone.resolve_access().unwrap() {
+        notema_storage::StoreAccess::NeedsEnroll { retired_key, .. } => {
+            assert!(retired_key, "revoked key should be retired");
+        }
+        _ => panic!("phone should need enrollment"),
+    }
+    assert!(!dir.path().join("phone").join("identity.toml").exists());
+}
+
+#[test]
 fn remote_disable_reconcile_holds_off_while_entries_are_still_encrypted() {
     // A half-synced disable: the roster deletion arrived before the plaintext
     // entry conversions. The device must keep its key to read what's still
