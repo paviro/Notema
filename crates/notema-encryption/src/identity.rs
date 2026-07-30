@@ -270,7 +270,11 @@ fn decrypt_identity(
         }
         KeyMaterial::Plain(plain) => plain.clone(),
     };
-    let bundle: SecretBundle = toml::from_str(&bundle_toml)?;
+    // toml::de::Error's Display echoes the offending input line — here the
+    // decrypted secret bundle — and would retain it unzeroized; report the
+    // plain malformed-identity error instead, like the UTF-8 guard above.
+    let bundle: SecretBundle =
+        toml::from_str(&bundle_toml).map_err(|_| EncryptionError::MalformedStoredIdentity)?;
     if bundle.schema_version != 1 {
         return Err(EncryptionError::UnsupportedSchema {
             kind: "secret identity bundle",
@@ -289,7 +293,10 @@ fn decrypt_identity(
 }
 
 fn read_stored_identity(path: &Path) -> Result<StoredIdentity> {
-    Ok(toml::from_str(&fs::read_to_string(path)?)?)
+    // The raw file carries the plaintext key bundle in the no-passphrase case:
+    // zeroize the buffer, and don't let toml::de::Error echo a line of it.
+    let raw = Zeroizing::new(fs::read_to_string(path)?);
+    toml::from_str(&raw).map_err(|_| EncryptionError::MalformedStoredIdentity)
 }
 
 fn encrypt_secret(plaintext: &[u8], passphrase: &SecretString) -> Result<Zeroizing<String>> {

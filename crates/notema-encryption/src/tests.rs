@@ -244,6 +244,52 @@ fn stored_identity_rejects_unknown_fields() {
     assert!(unlock_identity(&paths, Some(&SecretString::from("secret"))).is_err());
 }
 
+#[test]
+fn malformed_identity_file_error_does_not_echo_contents() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
+    fs::write(
+        &paths.identity_file,
+        "AGE-SECRET-KEY-MARKER = broken [ toml",
+    )
+    .unwrap();
+
+    let error = match unlock_identity(&paths, None) {
+        Ok(_) => panic!("malformed identity must not unlock"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, EncryptionError::MalformedStoredIdentity));
+    assert!(
+        !error.to_string().contains("MARKER"),
+        "parse error must not echo the identity file: {error}"
+    );
+}
+
+#[test]
+fn malformed_plain_secret_bundle_error_does_not_echo_secret() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
+    // A valid wire document whose embedded plaintext bundle is broken TOML:
+    // exercises the bundle parse without scrypt.
+    fs::write(
+        &paths.identity_file,
+        "schema_version = 1\ndevice_name = \"laptop\"\nplain_keys = \"AGE-SECRET-KEY-MARKER broken [ toml\"\n",
+    )
+    .unwrap();
+
+    let error = match unlock_identity(&paths, None) {
+        Ok(_) => panic!("malformed bundle must not unlock"),
+        Err(error) => error,
+    };
+    assert!(matches!(error, EncryptionError::MalformedStoredIdentity));
+    assert!(
+        !error.to_string().contains("MARKER"),
+        "parse error must not echo the secret bundle: {error}"
+    );
+}
+
 /// Decrypt an in-memory ciphertext with an unlocked identity (test helper;
 /// the production path decrypts files, not buffers).
 fn decrypt_file_bytes_from(
