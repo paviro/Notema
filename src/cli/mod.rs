@@ -464,6 +464,7 @@ fn device_rotate_command(cli: &Cli) -> AppResult<()> {
         summary.migrated_files
     );
     println!("The previous key can no longer read this journal.");
+    print_warnings(&summary.warnings);
     Ok(())
 }
 
@@ -568,13 +569,15 @@ fn device_revoke_command(cli: &Cli, name: &str, skip_confirm: bool) -> AppResult
         summary.migrated_files
     );
     println!("Revocation is forward-only: entries that device already synced stay readable to it.");
+    print_warnings(&summary.warnings);
     Ok(())
 }
 
 fn device_rename_command(cli: &Cli, old: &str, new: &str) -> AppResult<()> {
     let store = open_unlocked_store(cli)?;
-    store.rename_recipient(old, new)?;
+    let warnings = store.rename_recipient(old, new)?;
     println!("Renamed '{old}' to '{new}'.");
+    print_warnings(&warnings);
     Ok(())
 }
 
@@ -617,6 +620,7 @@ fn device_approve_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<(
             "Approved '{}' and re-encrypted {} file(s).",
             request.recipient.name, summary.migrated_files
         );
+        print_warnings(&summary.warnings);
     }
     Ok(())
 }
@@ -639,6 +643,14 @@ fn device_reject_command(cli: &Cli, args: &RequestSelectionArgs) -> AppResult<()
 
 fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
     if count == 1 { one } else { many }
+}
+
+/// Print post-success warnings from a storage operation (leftover backup,
+/// un-advanced trust pins). The operation itself succeeded.
+pub(crate) fn print_warnings(warnings: &[String]) {
+    for warning in warnings {
+        eprintln!("Warning: {warning}");
+    }
 }
 
 fn set_default_journal(cli: &Cli, journal: &str) -> AppResult<()> {

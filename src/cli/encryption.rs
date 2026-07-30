@@ -67,10 +67,11 @@ pub(crate) fn encrypt_store(
         if passphrase.is_none() {
             println!("This key has no passphrase — keep this device and its backups secure.");
         }
+        super::print_warnings(&summary.warnings);
         return Ok(());
     };
 
-    store.encrypt_store(cli_progress("files"))?;
+    let summary = store.encrypt_store(cli_progress("files"))?;
     println!(
         "Encrypted journal store at {}",
         config.journal.path.display()
@@ -79,6 +80,7 @@ pub(crate) fn encrypt_store(
         "Encryption recipient: {recipient}. Identity file: {}. Back it up; without it encrypted journal files cannot be decrypted.",
         store.identity_path().display()
     );
+    super::print_warnings(&summary.warnings);
     Ok(())
 }
 

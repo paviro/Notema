@@ -11,6 +11,10 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MigrationSummary {
     pub migrated_files: usize,
+    /// Post-success cleanup steps that failed after the change itself committed
+    /// (leftover backup, un-advanced trust pins). Surface to the user; never a
+    /// reason to treat the operation as failed.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,8 +53,8 @@ pub(crate) fn encrypt_store(
 ) -> AppResult<MigrationSummary> {
     let backup = backup_store(&store.paths().journal_root)?;
     match encrypt_store_without_backup(store, progress) {
-        Ok(summary) => {
-            fs::remove_dir_all(&backup)?;
+        Ok(mut summary) => {
+            summary.warnings.extend(backup_cleanup_warning(&backup));
             Ok(summary)
         }
         Err(error) => {
@@ -81,7 +85,10 @@ pub(crate) fn encrypt_store_without_backup(
         },
         progress,
     )?;
-    Ok(MigrationSummary { migrated_files })
+    Ok(MigrationSummary {
+        migrated_files,
+        warnings: Vec::new(),
+    })
 }
 
 pub(crate) fn decrypt_store(
@@ -234,6 +241,7 @@ pub(crate) fn reencrypt_store(
     }
     Ok(MigrationSummary {
         migrated_files: files.len(),
+        warnings: Vec::new(),
     })
 }
 
@@ -498,14 +506,14 @@ fn decrypted_entry_path(path: &Path) -> AppResult<PathBuf> {
 /// their roster mutation *and* [`reencrypt_store`] inside this so the two can't
 /// diverge. (The local trust pins live outside the root; callers advance them
 /// only after this returns `Ok`.)
-pub(crate) fn atomic<T>(store: &JournalStore, op: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
+pub(crate) fn atomic<T>(
+    store: &JournalStore,
+    op: impl FnOnce() -> AppResult<T>,
+) -> AppResult<(T, Vec<String>)> {
     let root = store.paths().journal_root.clone();
     let backup = backup_store(&root)?;
     match op() {
-        Ok(value) => {
-            fs::remove_dir_all(&backup)?;
-            Ok(value)
-        }
+        Ok(value) => Ok((value, backup_cleanup_warning(&backup).into_iter().collect())),
         Err(error) => {
             if let Err(restore_error) = restore_store(&root, &backup) {
                 bail!(
@@ -550,6 +558,18 @@ pub(crate) fn backup_store(root: &Path) -> AppResult<PathBuf> {
     let backup = backup_path(root);
     copy_dir_all(root, &backup)?;
     Ok(backup)
+}
+
+/// Remove a consumed backup, degrading failure to a warning: the operation the
+/// backup covered already committed, so a stuck cleanup must not report it as
+/// failed. A leftover is also caught by the startup scan.
+fn backup_cleanup_warning(backup: &Path) -> Option<String> {
+    fs::remove_dir_all(backup).err().map(|error| {
+        format!(
+            "the change succeeded, but its backup at {} could not be removed: {error}; delete it by hand",
+            backup.display()
+        )
+    })
 }
 
 /// Leftover `<root_name>.backup-*` siblings of the journal root: snapshots a

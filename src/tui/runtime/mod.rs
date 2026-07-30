@@ -144,16 +144,20 @@ fn run_after_unlock(
     }
 
     let had_pending_requests = !store.pending_requests()?.is_empty();
-    if !approve_pending_requests(terminal, &mut store, &startup.theme)? {
+    let Some(approval_warnings) = approve_pending_requests(terminal, &mut store, &startup.theme)?
+    else {
         // User quit at a pending-request modal; exit cleanly.
         return Ok(());
-    }
+    };
     if had_pending_requests {
         discovery = None;
     }
 
     let (mut app, cached) =
         AppModel::new_cached(config_path, config, store, startup.detected_mode)?;
+    for warning in approval_warnings {
+        app.toast(crate::tui::state::ToastVariant::Warning, warning);
+    }
     // Must run after raw mode: the detection query reads control-sequence
     // replies from stdin.
     app.image.runtime = image::ImageRuntime::detect(&app.services.store);
@@ -167,17 +171,19 @@ fn run_after_unlock(
 /// Surface any pending device-access requests as a modal before the app loads,
 /// approving/denying each in turn. Runs only on a device that can decrypt, since
 /// approval re-encrypts the store with the unlocked identity. Returns `Ok(false)`
-/// if the user quit with Ctrl-C; `Esc` defers the rest (they reappear next launch)
-/// and returns `Ok(true)`.
+/// if the user quit with Ctrl-C (`None`); `Esc` defers the rest (they reappear
+/// next launch). `Some` carries post-success warnings to surface once the app
+/// is up.
 fn approve_pending_requests(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     store: &mut JournalStore,
     theme: &theme::Theme,
-) -> AppResult<bool> {
+) -> AppResult<Option<Vec<String>>> {
+    let mut warnings = Vec::new();
     // Only a device that can already read the store may approve others: approval
     // re-encrypts history, which a not-yet-approved device can't decrypt.
     if !store.is_current_recipient()? {
-        return Ok(true);
+        return Ok(Some(warnings));
     }
 
     let recipients = store.recipients()?;
@@ -203,11 +209,11 @@ fn approve_pending_requests(
                 continue;
             }
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                return Ok(false);
+                return Ok(None);
             }
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    store.approve_pending(&request, |done, total| {
+                    let summary = store.approve_pending(&request, |done, total| {
                         let _ = terminal.draw(|frame| {
                             render::draw_pending_request(
                                 theme,
@@ -217,6 +223,7 @@ fn approve_pending_requests(
                             )
                         });
                     })?;
+                    warnings.extend(summary.warnings);
                     break;
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') => {
@@ -224,13 +231,13 @@ fn approve_pending_requests(
                     break;
                 }
                 // Defer: leave this and any remaining requests for next launch.
-                KeyCode::Esc => return Ok(true),
+                KeyCode::Esc => return Ok(Some(warnings)),
                 _ => {}
             }
         }
     }
 
-    Ok(true)
+    Ok(Some(warnings))
 }
 
 /// Draw a full-screen notice and block until the user presses any key to

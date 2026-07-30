@@ -239,7 +239,10 @@ mod tests {
         assert!(modifier(8).contains(Modifier::DIM), "; dim"); // the `;`
         for col in [5u16, 7, 10] {
             let m = modifier(col);
-            assert!(!m.contains(Modifier::BOLD) && !m.contains(Modifier::DIM), "col {col}");
+            assert!(
+                !m.contains(Modifier::BOLD) && !m.contains(Modifier::DIM),
+                "col {col}"
+            );
         }
     }
 

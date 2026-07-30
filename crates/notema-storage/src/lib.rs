@@ -128,6 +128,8 @@ pub enum StoreAccess {
 pub struct EnableEncryptionSummary {
     pub recipient: String,
     pub migrated_files: usize,
+    /// Post-success cleanup failures (see [`MigrationSummary::warnings`]).
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,12 +328,20 @@ impl JournalStore {
             Ok(EnableEncryptionSummary {
                 recipient,
                 migrated_files: summary.migrated_files,
+                warnings: summary.warnings,
             })
         })();
 
         match result {
-            Ok(summary) => {
-                fs::remove_dir_all(&root_backup)?;
+            Ok(mut summary) => {
+                // The store is fully encrypted; a stuck backup cleanup must not
+                // report the enable as failed. The startup scan also catches it.
+                if let Err(cleanup_error) = fs::remove_dir_all(&root_backup) {
+                    summary.warnings.push(format!(
+                        "encryption succeeded, but the plaintext backup at {} could not be removed: {cleanup_error}; delete it by hand",
+                        root_backup.display()
+                    ));
+                }
                 Ok(summary)
             }
             Err(error) => {
@@ -449,11 +459,12 @@ impl JournalStore {
         mut progress: impl FnMut(usize, usize),
     ) -> AppResult<MigrationSummary> {
         let identity = self.require_reencrypt_identity("add-recipient")?;
-        let summary = migrate::atomic(self, || {
+        let (mut summary, warnings) = migrate::atomic(self, || {
             crypto::add_recipient(&self.paths.keys, identity, &recipient)?;
             migrate::reencrypt_store(self, identity, &mut progress)
         })?;
-        crypto::advance_trust_pins(&self.paths.keys)?;
+        summary.warnings.extend(warnings);
+        summary.warnings.extend(self.advance_pins_warning());
         Ok(summary)
     }
 
@@ -477,22 +488,23 @@ impl JournalStore {
         {
             bail!("refusing to revoke this device's own recipient");
         }
-        let summary = migrate::atomic(self, || {
+        let (mut summary, warnings) = migrate::atomic(self, || {
             crypto::revoke_recipient(&self.paths.keys, identity, name)?;
             migrate::reencrypt_store(self, identity, &mut progress)
         })?;
-        crypto::advance_trust_pins(&self.paths.keys)?;
+        summary.warnings.extend(warnings);
+        summary.warnings.extend(self.advance_pins_warning());
         Ok(summary)
     }
 
     /// Relabel a recipient by appending a signed `rename` op. No re-encryption
     /// needed, but it must be signed, so it requires an unlocked recipient
-    /// identity — an unsigned relabel would be a tamper vector.
-    pub fn rename_recipient(&self, old: &str, new: &str) -> AppResult<()> {
+    /// identity — an unsigned relabel would be a tamper vector. Returns
+    /// post-success warnings (see [`MigrationSummary::warnings`]).
+    pub fn rename_recipient(&self, old: &str, new: &str) -> AppResult<Vec<String>> {
         let identity = self.require_reencrypt_identity("rename-recipient")?;
         crypto::rename_recipient(&self.paths.keys, identity, old, new)?;
-        crypto::advance_trust_pins(&self.paths.keys)?;
-        Ok(())
+        Ok(self.advance_pins_warning().into_iter().collect())
     }
 
     /// Add, remove, or change the passphrase on this device's identity. `current`
@@ -562,6 +574,7 @@ impl JournalStore {
 
             Ok(MigrationSummary {
                 migrated_files: first.migrated_files + second.migrated_files,
+                warnings: Vec::new(),
             })
         })();
 
@@ -629,21 +642,38 @@ impl JournalStore {
             .any(|recipient| recipient.encryption_key == request.recipient.encryption_key)
         {
             crypto::remove_pending(&self.paths.keys, &request.id)?;
-            return Ok(MigrationSummary { migrated_files: 0 });
+            return Ok(MigrationSummary {
+                migrated_files: 0,
+                warnings: Vec::new(),
+            });
         }
-        let summary = migrate::atomic(self, || {
+        let (mut summary, warnings) = migrate::atomic(self, || {
             crypto::add_recipient(&self.paths.keys, identity, &request.recipient)?;
             let summary = migrate::reencrypt_store(self, identity, &mut progress)?;
             crypto::remove_pending(&self.paths.keys, &request.id)?;
             Ok(summary)
         })?;
-        crypto::advance_trust_pins(&self.paths.keys)?;
+        summary.warnings.extend(warnings);
+        summary.warnings.extend(self.advance_pins_warning());
         Ok(summary)
     }
 
     /// Reject a pending join request without granting access.
     pub fn deny_pending(&self, request: &PendingRequest) -> AppResult<()> {
         Ok(crypto::remove_pending(&self.paths.keys, &request.id)?)
+    }
+
+    /// Advance the roster trust pins after a committed roster change, degrading
+    /// failure to a warning: the change itself already succeeded, and
+    /// `refresh_trust_pins` re-advances best-effort on every unlock.
+    fn advance_pins_warning(&self) -> Option<String> {
+        crypto::advance_trust_pins(&self.paths.keys)
+            .err()
+            .map(|error| {
+                format!(
+                    "the change committed, but the roster trust pins could not be advanced: {error}; they are retried at the next unlock"
+                )
+            })
     }
 
     fn require_identity(&self, context: &'static str) -> AppResult<&crypto::UnlockedIdentity> {
