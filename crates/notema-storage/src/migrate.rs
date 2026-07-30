@@ -552,6 +552,38 @@ pub(crate) fn backup_store(root: &Path) -> AppResult<PathBuf> {
     Ok(backup)
 }
 
+/// Leftover `<root_name>.backup-*` siblings of the journal root: snapshots a
+/// crashed migration or restore never consumed. Detection only — a leftover can
+/// hold the sole complete copy of the store, so nothing here deletes it.
+pub(crate) fn stale_backup_dirs(root: &Path) -> AppResult<Vec<PathBuf>> {
+    let (Some(parent), Some(name)) = (root.parent(), root.file_name().and_then(OsStr::to_str))
+    else {
+        return Ok(Vec::new());
+    };
+    if !parent.exists() {
+        return Ok(Vec::new());
+    }
+    let prefix = format!("{name}.backup-");
+    let mut dirs = Vec::new();
+    for entry in fs::read_dir(parent)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir()
+            && entry
+                .file_name()
+                .to_str()
+                .is_some_and(|sibling| sibling.starts_with(&prefix))
+        {
+            dirs.push(entry.path());
+        }
+    }
+    dirs.sort();
+    Ok(dirs)
+}
+
+/// Backups must live on the root's filesystem so [`restore_store`]'s renames
+/// stay atomic; the sibling slot is the only guaranteed such place. Cost: if
+/// the root's *parent* is inside a synced tree, a mid-migration plaintext
+/// snapshot syncs too — the startup scan at least surfaces any leftover.
 fn backup_path(root: &Path) -> PathBuf {
     let timestamp = Local::now().format("%Y%m%d%H%M%S%f");
     let name = root
@@ -638,6 +670,19 @@ fn disabled_path_for_timestamp(path: &Path, stem: &str, ext: &str, timestamp: &s
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn stale_backup_sibling_is_reported() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("journals");
+        fs::create_dir_all(&root).unwrap();
+        let stale = dir.path().join("journals.backup-20260730120000");
+        fs::create_dir_all(&stale).unwrap();
+        fs::create_dir_all(dir.path().join("unrelated")).unwrap();
+        fs::write(dir.path().join("journals.backup-notadir"), "file").unwrap();
+
+        assert_eq!(stale_backup_dirs(&root).unwrap(), vec![stale]);
+    }
 
     #[test]
     fn restore_store_replaces_root_with_backup() {

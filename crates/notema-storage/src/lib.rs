@@ -222,6 +222,14 @@ impl JournalStore {
         Ok(migrate::reconcile_disabled_encryption(self)?.is_some())
     }
 
+    /// Leftover `*.backup-*` siblings of the journal root — snapshots an
+    /// interrupted migration or restore never consumed. The caller should
+    /// surface these: a leftover can hold the sole complete copy of the store,
+    /// or a plaintext snapshot of an encrypted one. Never deleted here.
+    pub fn stale_backup_dirs(&self) -> AppResult<Vec<PathBuf>> {
+        migrate::stale_backup_dirs(&self.paths.journal_root)
+    }
+
     /// Retire this device's identity after its access was revoked; see
     /// the encryption cleanup helper. Returns the renamed-aside path, or
     /// `None` when there was no identity to retire.
