@@ -11,7 +11,7 @@ use zeroize::Zeroizing;
 
 use crate::path_policy::{
     BackingFile, backing_for_new_file, existing_file, is_directory, is_protected_path,
-    is_rejected_system_name, is_shadowed_age_alias, visible_entries, with_age,
+    is_rejected_system_name, is_shadowed_age_alias, visible_entries,
 };
 
 /// An open file: the whole file buffered as plaintext bytes, its on-disk path
@@ -741,39 +741,82 @@ fn rename(ctx: *mut c_void, from: *const c_char, to: *const c_char, flags: u32) 
     {
         return -libc::EEXIST;
     }
-    // Resolve the source: a directory keeps its plain name; a file keeps its
-    // backing encoding across the move.
-    let (from_disk, to_disk) = if is_directory(&from_base) {
-        (from_base, to_base)
-    } else if let Some(src) = existing_file(&from_base) {
-        let dst = match src.encoding {
-            StoreFileEncoding::Encrypted => with_age(&to_base),
-            StoreFileEncoding::Plain => to_base,
+    // A directory keeps its plain name; open handles under it follow the move.
+    if is_directory(&from_base) {
+        if from_base == to_base {
+            return 0;
+        }
+        return match std::fs::rename(&from_base, &to_base) {
+            Ok(()) => {
+                let mut inner = ctx.lock();
+                for handle in inner.handles.values_mut() {
+                    if let Ok(relative) = handle.on_disk.strip_prefix(&from_base) {
+                        handle.on_disk = to_base.join(relative);
+                    }
+                }
+                0
+            }
+            Err(err) => errno(&err),
         };
-        (src.path, dst)
-    } else {
+    }
+    let Some(src) = existing_file(&from_base) else {
         return -libc::ENOENT;
     };
-    if from_disk == to_disk {
+    // The destination's encoding follows its *name* (the same policy create
+    // applies), never the source's backing: `mv x.md x.txt` must decrypt and
+    // the reverse must encrypt, or the moved name would resolve to the wrong
+    // encoding — a plaintext shadow or an unreadable raw `.age` entry.
+    let stale_dst = existing_file(&to_base);
+    let dst = backing_for_new_file(to_base);
+    if src.path == dst.path {
         return 0;
     }
-    match std::fs::rename(&from_disk, &to_disk) {
-        Ok(()) => {
-            let mut inner = ctx.lock();
-            for handle in inner.handles.values_mut() {
-                if handle.on_disk == to_disk {
-                    handle.deleted = true;
-                    handle.dirty = false;
-                } else if handle.on_disk == from_disk {
-                    handle.on_disk = to_disk.clone();
-                } else if let Ok(relative) = handle.on_disk.strip_prefix(&from_disk) {
-                    handle.on_disk = to_disk.join(relative);
-                }
-            }
-            0
+    if src.encoding == dst.encoding {
+        if let Err(err) = std::fs::rename(&src.path, &dst.path) {
+            return errno(&err);
         }
-        Err(err) => errno(&err),
+    } else if let Err(rc) = transcode(ctx, &src, &dst) {
+        return rc;
     }
+    // A leftover backing of the other encoding at the destination name would
+    // shadow the moved file or linger invisibly (`existing_file` prefers `.age`).
+    if let Some(stale) = &stale_dst
+        && stale.path != dst.path
+        && let Err(err) = std::fs::remove_file(&stale.path)
+    {
+        return errno(&err);
+    }
+    let mut inner = ctx.lock();
+    for handle in inner.handles.values_mut() {
+        if handle.on_disk == src.path {
+            handle.on_disk.clone_from(&dst.path);
+            handle.encoding = dst.encoding;
+        } else if handle.on_disk == dst.path
+            || stale_dst.as_ref().is_some_and(|s| handle.on_disk == s.path)
+        {
+            handle.deleted = true;
+            handle.dirty = false;
+        }
+    }
+    0
+}
+
+/// Move a file across encodings: write the destination first (atomically, in
+/// the destination name's encoding), and only remove the source once that
+/// succeeded — a crash in between duplicates the entry, never loses it.
+fn transcode(ctx: &Ctx, src: &BackingFile, dst: &BackingFile) -> Result<(), c_int> {
+    let bytes = match ctx.store.read_store_file(&src.path, src.encoding) {
+        Ok(bytes) => Zeroizing::new(bytes),
+        Err(e) => return Err(app_errno(&e)),
+    };
+    if let Err(e) = ctx.store.write_store_file(&dst.path, dst.encoding, &bytes) {
+        return Err(app_errno(&e));
+    }
+    if let Err(err) = std::fs::remove_file(&src.path) {
+        let _ = std::fs::remove_file(&dst.path);
+        return Err(errno(&err));
+    }
+    Ok(())
 }
 
 /// Report the backing filesystem's space so `df` shows real numbers and GUI file

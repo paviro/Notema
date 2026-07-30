@@ -489,6 +489,153 @@ fn rename_open_file_moves_later_writeback_to_new_path() {
 }
 
 #[test]
+fn rename_md_to_txt_transcodes_to_plain() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    write_new(&fx, "/diary/a.md", b"body");
+
+    assert_eq!(
+        jf_rename(
+            fx.ctx,
+            cpath("/diary/a.md").as_ptr(),
+            cpath("/diary/a.txt").as_ptr(),
+            0,
+        ),
+        0
+    );
+    assert!(!fx.root().join("diary/a.md.age").exists());
+    assert!(!fx.root().join("diary/a.txt.age").exists());
+    assert_eq!(
+        std::fs::read(fx.root().join("diary/a.txt")).unwrap(),
+        b"body"
+    );
+    assert_eq!(
+        visible_entries(&fx.root().join("diary")).unwrap(),
+        vec![OsString::from("a.txt")]
+    );
+    let mut st = empty_stat();
+    assert_eq!(
+        jf_getattr(fx.ctx, cpath("/diary/a.txt").as_ptr(), &mut st),
+        0
+    );
+    assert_eq!(st.st_size, 4);
+}
+
+#[test]
+fn rename_txt_to_md_transcodes_to_encrypted() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    write_new(&fx, "/diary/a.txt", b"body");
+    assert!(fx.root().join("diary/a.txt").is_file());
+
+    assert_eq!(
+        jf_rename(
+            fx.ctx,
+            cpath("/diary/a.txt").as_ptr(),
+            cpath("/diary/b.md").as_ptr(),
+            0,
+        ),
+        0
+    );
+    assert!(!fx.root().join("diary/a.txt").exists());
+    assert!(!fx.root().join("diary/b.md").exists());
+    let moved = fx.root().join("diary/b.md.age");
+    assert!(
+        std::fs::read(&moved)
+            .unwrap()
+            .starts_with(b"age-encryption.org/")
+    );
+    assert_eq!(fx.read_disk(&moved), b"body");
+}
+
+#[test]
+fn rename_transcode_updates_open_handle_encoding_and_path() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    write_new(&fx, "/diary/a.md", b"old body");
+
+    let p = cpath("/diary/a.md");
+    let mut fh = 0u64;
+    assert_eq!(
+        jf_open(fx.ctx, p.as_ptr(), libc::O_RDWR | libc::O_TRUNC, &mut fh),
+        0
+    );
+    assert_eq!(
+        jf_rename(
+            fx.ctx,
+            cpath("/diary/a.md").as_ptr(),
+            cpath("/diary/a.txt").as_ptr(),
+            0,
+        ),
+        0
+    );
+    assert_eq!(
+        jf_write(
+            fx.ctx,
+            p.as_ptr(),
+            b"new body".as_ptr() as *const c_char,
+            8,
+            0,
+            fh,
+        ),
+        8
+    );
+    assert_eq!(jf_release(fx.ctx, p.as_ptr(), fh), 0);
+    assert!(!fx.root().join("diary/a.md.age").exists());
+    assert!(!fx.root().join("diary/a.txt.age").exists());
+    assert_eq!(
+        std::fs::read(fx.root().join("diary/a.txt")).unwrap(),
+        b"new body"
+    );
+}
+
+#[test]
+fn rename_replaces_stale_other_encoding_destination() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    write_new(&fx, "/diary/a.md", b"body");
+    // A legacy plaintext entry at the destination name, beside where the
+    // moved ciphertext will land.
+    std::fs::write(fx.root().join("diary/b.md"), b"legacy").unwrap();
+
+    assert_eq!(
+        jf_rename(
+            fx.ctx,
+            cpath("/diary/a.md").as_ptr(),
+            cpath("/diary/b.md").as_ptr(),
+            0,
+        ),
+        0
+    );
+    assert!(!fx.root().join("diary/a.md.age").exists());
+    assert!(!fx.root().join("diary/b.md").exists());
+    assert_eq!(fx.read_disk(&fx.root().join("diary/b.md.age")), b"body");
+}
+
+#[test]
+fn rename_noreplace_refuses_cross_encoding_target() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    write_new(&fx, "/diary/a.md", b"aaa");
+    write_new(&fx, "/diary/b.txt", b"bbb");
+
+    assert_eq!(
+        jf_rename(
+            fx.ctx,
+            cpath("/diary/a.md").as_ptr(),
+            cpath("/diary/b.txt").as_ptr(),
+            RENAME_NOREPLACE,
+        ),
+        -libc::EEXIST
+    );
+    assert_eq!(fx.read_disk(&fx.root().join("diary/a.md.age")), b"aaa");
+    assert_eq!(
+        std::fs::read(fx.root().join("diary/b.txt")).unwrap(),
+        b"bbb"
+    );
+}
+
+#[test]
 fn unlink_removes_file() {
     let fx = Fixture::new();
     fx.mkdir_p("diary");
