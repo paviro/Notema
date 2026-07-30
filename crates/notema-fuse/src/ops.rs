@@ -120,10 +120,14 @@ impl Ctx {
     /// live buffer so `stat` stays consistent mid-edit.
     fn file_size(&self, file: &BackingFile) -> AppResult<u64> {
         let inner = self.lock();
-        if let Some(handle) = inner
+        // Several open handles on one file hold independent buffers; report the
+        // one the next flush would persist — a dirty writable buffer — with the
+        // newest handle breaking ties, so repeated stats agree.
+        if let Some((_, handle)) = inner
             .handles
-            .values()
-            .find(|h| h.on_disk == file.path && !h.deleted)
+            .iter()
+            .filter(|(_, h)| h.on_disk == file.path && !h.deleted)
+            .max_by_key(|(fh, h)| (h.dirty && h.writable, **fh))
         {
             return Ok(u64::try_from(handle.buf.len())?);
         }

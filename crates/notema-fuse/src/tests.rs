@@ -708,6 +708,46 @@ fn getattr_reflects_external_size_changes() {
 }
 
 #[test]
+fn getattr_prefers_dirty_writable_handle_across_multiple_opens() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    write_new(&fx, "/diary/note.md", b"abc");
+
+    let p = cpath("/diary/note.md");
+    let mut ro = 0u64;
+    assert_eq!(jf_open(fx.ctx, p.as_ptr(), libc::O_RDONLY, &mut ro), 0);
+    let mut rw = 0u64;
+    assert_eq!(jf_open(fx.ctx, p.as_ptr(), libc::O_RDWR, &mut rw), 0);
+    assert_eq!(
+        jf_write(
+            fx.ctx,
+            p.as_ptr(),
+            b"a longer body".as_ptr() as *const c_char,
+            13,
+            0,
+            rw,
+        ),
+        13
+    );
+
+    // The dirty writable buffer is what the next flush persists, so stat must
+    // report it, not the stale read-only view — even after a newer read-only
+    // open appears.
+    let mut st = empty_stat();
+    assert_eq!(jf_getattr(fx.ctx, p.as_ptr(), &mut st), 0);
+    assert_eq!(st.st_size, 13);
+    let mut ro2 = 0u64;
+    assert_eq!(jf_open(fx.ctx, p.as_ptr(), libc::O_RDONLY, &mut ro2), 0);
+    let mut st = empty_stat();
+    assert_eq!(jf_getattr(fx.ctx, p.as_ptr(), &mut st), 0);
+    assert_eq!(st.st_size, 13);
+
+    for fh in [ro, rw, ro2] {
+        assert_eq!(jf_release(fx.ctx, p.as_ptr(), fh), 0);
+    }
+}
+
+#[test]
 fn getattr_reports_size_for_multichunk_file() {
     let fx = Fixture::new();
     fx.mkdir_p("diary");
