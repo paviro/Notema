@@ -128,9 +128,8 @@ impl Ctx {
             return Ok(u64::try_from(handle.buf.len())?);
         }
         drop(inner);
-        Ok(u64::try_from(
-            self.store.read_store_file(&file.path, file.encoding)?.len(),
-        )?)
+        self.store
+            .store_file_plaintext_len(&file.path, file.encoding)
     }
 
     /// Re-encrypt and write back a dirty handle's buffer; no-op for clean or
@@ -589,7 +588,7 @@ fn truncate(ctx: *mut c_void, path: *const c_char, size: i64, _fh: u64, _has_fh:
         return -libc::ENOENT;
     };
     let mut bytes = match ctx.store.read_store_file(&file.path, file.encoding) {
-        Ok(bytes) => bytes,
+        Ok(bytes) => Zeroizing::new(bytes),
         Err(e) => return app_errno(&e),
     };
     bytes.resize(size, 0);

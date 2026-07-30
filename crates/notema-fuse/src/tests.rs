@@ -708,6 +708,22 @@ fn getattr_reflects_external_size_changes() {
 }
 
 #[test]
+fn getattr_reports_size_for_multichunk_file() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    // Spans two 64 KiB age STREAM chunks, so any error in deriving the
+    // plaintext size from the ciphertext layout would surface here.
+    write_new(&fx, "/diary/big.md", &vec![b'x'; 130_000]);
+
+    let mut st = empty_stat();
+    assert_eq!(
+        jf_getattr(fx.ctx, cpath("/diary/big.md").as_ptr(), &mut st),
+        0
+    );
+    assert_eq!(st.st_size, 130_000);
+}
+
+#[test]
 fn age_metadata_passes_through_plaintext() {
     let fx = Fixture::new();
     let disk = fx.root().join(".age/devices.toml");
