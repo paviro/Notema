@@ -90,17 +90,30 @@ pub(crate) fn decrypt_store(
     progress: ProgressFn<'_>,
 ) -> AppResult<DecryptSummary> {
     let paths = store.paths();
-    let migration = migrate_store(
-        paths.journal_root.as_path(),
-        MigrationMode::Decrypt { identity },
-        progress,
-    )?;
+    let root = paths.journal_root.as_path();
+    let backup = backup_store(root)?;
+    let migration = migrate_store_files(root, MigrationMode::Decrypt { identity }, progress);
+    let migrated_files = match migration {
+        Ok(migrated_files) => migrated_files,
+        Err(error) => {
+            if let Err(restore_error) = restore_store(root, &backup) {
+                bail!(
+                    "{error}; ALSO failed to roll back the store: {restore_error}. \
+                     A backup of the pre-decryption store remains at {}",
+                    backup.display()
+                );
+            }
+            bail!("{error}; decryption failed and the store was restored unchanged");
+        }
+    };
+    // These retire key files in the config dir, outside the root snapshot, so a
+    // failure here must not roll the (fully decrypted) root back.
     clear_age_dir(&paths.keys)?;
     let disabled_trust_file = disable_trust_file(&paths.keys)?;
     let disabled_identity_file = disable_identity_file(&paths.keys)?;
     Ok(DecryptSummary {
-        migrated_files: migration.migrated_files,
-        backup_path: migration.backup_path,
+        migrated_files,
+        backup_path: Some(backup),
         disabled_identity_file,
         disabled_trust_file,
     })
@@ -247,43 +260,6 @@ pub(crate) fn store_has_encrypted_entry_files(store: &JournalStore) -> AppResult
         Ok(())
     })?;
     Ok(has_match)
-}
-
-struct MigrationResult {
-    migrated_files: usize,
-    backup_path: Option<PathBuf>,
-}
-
-fn migrate_store(
-    root: &Path,
-    mode: MigrationMode<'_>,
-    progress: ProgressFn<'_>,
-) -> AppResult<MigrationResult> {
-    let encrypting = matches!(mode, MigrationMode::Encrypt { .. });
-    let backup = backup_store(root)?;
-    let result = migrate_store_files(root, mode, progress);
-
-    let migrated_files = match result {
-        Ok(migrated_files) => migrated_files,
-        Err(error) => {
-            bail!(
-                "migration failed; plaintext backup remains at {}: {error}",
-                backup.display()
-            );
-        }
-    };
-
-    let backup_path = if encrypting {
-        fs::remove_dir_all(&backup)?;
-        None
-    } else {
-        Some(backup)
-    };
-
-    Ok(MigrationResult {
-        migrated_files,
-        backup_path,
-    })
 }
 
 fn migrate_store_files(

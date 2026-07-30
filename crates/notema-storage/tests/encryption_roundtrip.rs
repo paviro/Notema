@@ -98,6 +98,51 @@ fn md_attachment_round_trips_through_encrypt_and_decrypt() {
 }
 
 #[test]
+fn decrypt_store_rolls_back_when_migration_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store_at(dir.path());
+    store.ensure().unwrap();
+    store
+        .initialize_encryption("laptop", Some(&pw("pw")))
+        .unwrap();
+    store.unlock(Some(&pw("pw"))).unwrap();
+    store.create_journal("diary").unwrap();
+    let entry = create_entry(&store, "diary", "keep me encrypted");
+    let stem = notema_storage::entry_id(&entry).unwrap();
+    let assets = entry.parent().unwrap().join(format!("{stem}.assets"));
+    std::fs::create_dir_all(&assets).unwrap();
+    let asset = assets.join("photo.png.age");
+    // Entries convert before assets, so a corrupt asset fails the migration
+    // after real work happened — the rollback must undo the decrypted entries.
+    std::fs::write(&asset, b"not a valid age file").unwrap();
+    let entry_before = std::fs::read(&entry).unwrap();
+
+    let error = store.decrypt_store(|_, _| {}).unwrap_err();
+    assert!(error.to_string().contains("restored unchanged"), "{error}");
+
+    assert_eq!(
+        std::fs::read(&entry).unwrap(),
+        entry_before,
+        "encrypted entry should be restored byte-identical"
+    );
+    assert!(asset.exists(), "corrupt asset should be restored");
+    assert!(
+        dir.path()
+            .join("journals")
+            .join(".age")
+            .join("devices.toml")
+            .exists(),
+        "roster should survive a failed decrypt"
+    );
+    let mut reopened = store_at(dir.path());
+    assert!(reopened.encryption_enabled());
+    reopened.unlock(Some(&pw("pw"))).unwrap();
+    let entries = reopened.scan_entries().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].body.contains("keep me encrypted"));
+}
+
+#[test]
 fn encrypted_md_asset_does_not_count_as_an_encrypted_entry() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_at(dir.path());
