@@ -114,6 +114,11 @@ pub enum EncryptionError {
     #[error("unsupported {kind} schema version {version}; expected 1")]
     UnsupportedSchema { kind: &'static str, version: u32 },
 
+    /// A file expected to be binary age v1 ciphertext has a header or length
+    /// that doesn't fit the format, so its plaintext size cannot be derived.
+    #[error("not a well-formed binary age v1 file: {detail}")]
+    MalformedAgeFile { detail: &'static str },
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 

@@ -108,6 +108,63 @@ pub fn decrypt_file_reader(identity: &UnlockedIdentity, input: &Path) -> Result<
     Ok(reader)
 }
 
+const AGE_V1_MAGIC: &[u8] = b"age-encryption.org/v1\n";
+/// STREAM payload layout: a 16-byte nonce, then 64 KiB plaintext chunks each
+/// followed by a 16-byte Poly1305 tag; the final chunk may be short, and is
+/// empty only when the whole plaintext is empty.
+const STREAM_NONCE_LEN: u64 = 16;
+const CHUNK_TAG_LEN: u64 = 16;
+const CHUNK_CIPHERTEXT_LEN: u64 = 64 * 1024 + CHUNK_TAG_LEN;
+/// A binary age header is a few hundred bytes per recipient stanza; a header
+/// that hasn't ended within this window is not one this store wrote.
+const HEADER_SCAN_LIMIT: u64 = 64 * 1024;
+
+/// Exact plaintext length of a binary age v1 file, derived from the header and
+/// the ciphertext length alone — no identity, no decryption, and at most one
+/// 64 KiB read.
+///
+/// # Errors
+///
+/// Fails on I/O errors and on any file that is not well-formed binary age v1
+/// (wrong magic, unterminated header, or a payload too short to hold the
+/// mandatory final chunk); callers needing the size of such a file must fall
+/// back to decrypting it.
+pub fn encrypted_plaintext_len(path: &Path) -> Result<u64> {
+    let malformed = |detail| EncryptionError::MalformedAgeFile { detail };
+    let mut file = fs::File::open(path)?;
+    let file_len = file.metadata()?.len();
+    let mut head = Vec::with_capacity(HEADER_SCAN_LIMIT.min(file_len) as usize);
+    Read::take(&mut file, HEADER_SCAN_LIMIT).read_to_end(&mut head)?;
+    if !head.starts_with(AGE_V1_MAGIC) {
+        return Err(malformed("missing age v1 magic"));
+    }
+    // The header ends with the MAC line `--- <b64>`. No other header line can
+    // start that way: stanzas open with `-> ` and their body lines are base64,
+    // which has no `-`.
+    let mut line_start = AGE_V1_MAGIC.len();
+    let header_len = loop {
+        let Some(newline) = head[line_start..].iter().position(|&b| b == b'\n') else {
+            return Err(malformed("unterminated header"));
+        };
+        let next = line_start + newline + 1;
+        if head[line_start..next].starts_with(b"--- ") {
+            break next as u64;
+        }
+        line_start = next;
+    };
+    let payload = file_len
+        .checked_sub(header_len + STREAM_NONCE_LEN)
+        .ok_or(malformed("payload shorter than the STREAM nonce"))?;
+    if payload < CHUNK_TAG_LEN {
+        return Err(malformed("payload shorter than the mandatory final chunk"));
+    }
+    payload
+        .div_ceil(CHUNK_CIPHERTEXT_LEN)
+        .checked_mul(CHUNK_TAG_LEN)
+        .and_then(|tags| payload.checked_sub(tags))
+        .ok_or(malformed("payload inconsistent with chunk layout"))
+}
+
 /// Encrypt bytes to every store recipient.
 pub fn encrypt_bytes(paths: &KeyPaths, plaintext: &PlaintextBytes) -> Result<CiphertextBytes> {
     EncryptionRecipients::for_store(paths)?.encrypt(plaintext)

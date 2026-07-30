@@ -361,3 +361,44 @@ fn decrypt_file_bytes_from(
 ) -> Result<PlaintextBytes> {
     decrypt_bytes_with_identity(ciphertext, &identity.identity)
 }
+
+#[test]
+fn plaintext_len_matches_roundtrip_at_chunk_boundaries() {
+    let dir = tempdir().unwrap();
+    let keys: Vec<age::x25519::Identity> =
+        (0..2).map(|_| age::x25519::Identity::generate()).collect();
+    let recipients: Vec<age::x25519::Recipient> = keys.iter().map(|k| k.to_public()).collect();
+    // Sizes straddling every STREAM chunk edge: empty, first chunk, second.
+    for size in [0usize, 1, 65_535, 65_536, 65_537, 131_072, 131_073] {
+        for count in [1, 2] {
+            let plaintext = PlaintextBytes::from_vec(vec![b'x'; size]);
+            let ciphertext =
+                crate::cipher::encrypt_to_recipients(&recipients[..count], &plaintext).unwrap();
+            let path = dir.path().join(format!("s{size}-r{count}.age"));
+            fs::write(&path, ciphertext.as_bytes()).unwrap();
+            assert_eq!(
+                encrypted_plaintext_len(&path).unwrap(),
+                size as u64,
+                "size {size} with {count} recipient(s)"
+            );
+        }
+    }
+}
+
+#[test]
+fn plaintext_len_rejects_non_age_file() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("garbage.age");
+    fs::write(&path, b"not an age file at all").unwrap();
+    assert!(matches!(
+        encrypted_plaintext_len(&path),
+        Err(EncryptionError::MalformedAgeFile { .. })
+    ));
+    // A header that never reaches its MAC line must also be refused.
+    let truncated = dir.path().join("truncated.age");
+    fs::write(&truncated, b"age-encryption.org/v1\n-> X25519 abc\n").unwrap();
+    assert!(matches!(
+        encrypted_plaintext_len(&truncated),
+        Err(EncryptionError::MalformedAgeFile { .. })
+    ));
+}
