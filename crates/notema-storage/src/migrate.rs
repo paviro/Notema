@@ -563,7 +563,7 @@ pub(crate) fn backup_store(root: &Path) -> AppResult<PathBuf> {
 /// Remove a consumed backup, degrading failure to a warning: the operation the
 /// backup covered already committed, so a stuck cleanup must not report it as
 /// failed. A leftover is also caught by the startup scan.
-fn backup_cleanup_warning(backup: &Path) -> Option<String> {
+pub(crate) fn backup_cleanup_warning(backup: &Path) -> Option<String> {
     fs::remove_dir_all(backup).err().map(|error| {
         format!(
             "the change succeeded, but its backup at {} could not be removed: {error}; delete it by hand",
@@ -576,7 +576,22 @@ fn backup_cleanup_warning(backup: &Path) -> Option<String> {
 /// crashed migration or restore never consumed. Detection only — a leftover can
 /// hold the sole complete copy of the store, so nothing here deletes it.
 pub(crate) fn stale_backup_dirs(root: &Path) -> AppResult<Vec<PathBuf>> {
-    let (Some(parent), Some(name)) = (root.parent(), root.file_name().and_then(OsStr::to_str))
+    stale_backup_siblings(root, |file_type| file_type.is_dir())
+}
+
+/// Leftover `identity.toml.backup-*` siblings of the identity file: private-key
+/// snapshots a crashed rotation left behind. Detection only, like
+/// [`stale_backup_dirs`] — a leftover can hold the only copy of the
+/// pre-rotation key.
+pub(crate) fn stale_identity_backups(paths: &KeyPaths) -> AppResult<Vec<PathBuf>> {
+    stale_backup_siblings(&paths.identity_file, |file_type| file_type.is_file())
+}
+
+fn stale_backup_siblings(
+    path: &Path,
+    keep: impl Fn(&fs::FileType) -> bool,
+) -> AppResult<Vec<PathBuf>> {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name().and_then(OsStr::to_str))
     else {
         return Ok(Vec::new());
     };
@@ -584,20 +599,28 @@ pub(crate) fn stale_backup_dirs(root: &Path) -> AppResult<Vec<PathBuf>> {
         return Ok(Vec::new());
     }
     let prefix = format!("{name}.backup-");
-    let mut dirs = Vec::new();
+    let mut leftovers = Vec::new();
     for entry in fs::read_dir(parent)? {
         let entry = entry?;
-        if entry.file_type()?.is_dir()
+        if keep(&entry.file_type()?)
             && entry
                 .file_name()
                 .to_str()
                 .is_some_and(|sibling| sibling.starts_with(&prefix))
         {
-            dirs.push(entry.path());
+            leftovers.push(entry.path());
         }
     }
-    dirs.sort();
-    Ok(dirs)
+    leftovers.sort();
+    Ok(leftovers)
+}
+
+/// Sibling backup path for a single file: `<file_name>.backup-<timestamp>`,
+/// matching the naming the startup scan looks for.
+pub(crate) fn file_backup_path(file: &Path) -> PathBuf {
+    let timestamp = Local::now().format("%Y%m%d%H%M%S%f");
+    let name = file.file_name().and_then(OsStr::to_str).unwrap_or("notema");
+    file.with_file_name(format!("{name}.backup-{timestamp}"))
 }
 
 /// Backups must live on the root's filesystem so [`restore_store`]'s renames

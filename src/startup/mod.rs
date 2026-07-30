@@ -70,10 +70,11 @@ pub(crate) fn load_existing(path_override: Option<&Path>) -> AppResult<Startup> 
             "Note: encryption was disabled on another device; retired this device's key and trust pins."
         );
     }
-    for backup in store.stale_backup_dirs()? {
+    for backup in store.stale_backups()? {
         eprintln!(
-            "Warning: leftover store backup at {} — an interrupted encryption change left it behind. \
-             Verify your journal is complete, then delete it (it may hold a plaintext copy).",
+            "Warning: leftover backup at {} — an interrupted encryption change left it behind. \
+             Verify your journal and keys are intact, then delete it (it may hold a plaintext \
+             copy or a retired private key).",
             backup.display()
         );
     }

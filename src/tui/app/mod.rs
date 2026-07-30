@@ -539,7 +539,7 @@ impl AppModel {
                 report: cache.report.clone(),
             },
         };
-        let stale_backups = store.stale_backup_dirs()?;
+        let stale_backups = store.stale_backups()?;
         let mut app = Self::new_with_snapshot(config_path, config, store, snapshot, detected_mode)?;
         if cache.cached.is_none() && !locked {
             app.toasts
@@ -549,7 +549,7 @@ impl AppModel {
             app.toast(
                 ToastVariant::Warning,
                 format!(
-                    "Leftover store backup at {} — verify your journal, then delete it",
+                    "Leftover backup at {} — verify your journal and keys, then delete it",
                     backup.display()
                 ),
             );

@@ -303,6 +303,51 @@ fn add_recipient_rolls_back_when_reencrypt_fails() {
 }
 
 #[test]
+fn rotate_identity_failure_restores_identity_and_cleans_disk_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store_at(dir.path());
+    store.ensure().unwrap();
+    store
+        .initialize_encryption("laptop", Some(&pw("pw")))
+        .unwrap();
+    store.unlock(Some(&pw("pw"))).unwrap();
+    store.create_journal("diary").unwrap();
+    let good = create_entry(&store, "diary", "keep me");
+    let bad = create_entry(&store, "diary", "corrupt me");
+    let identity_path = dir.path().join("identity.toml");
+    let identity_before = std::fs::read(&identity_path).unwrap();
+    let good_before = std::fs::read(&good).unwrap();
+
+    // Corrupt one entry so the first re-encryption pass fails mid-rotation.
+    std::fs::write(&bad, b"not a valid age file").unwrap();
+
+    store
+        .rotate_identity(Some(&pw("pw")), |_, _| {})
+        .unwrap_err();
+
+    assert_eq!(
+        std::fs::read(&identity_path).unwrap(),
+        identity_before,
+        "identity should be rolled back byte-identical"
+    );
+    assert_eq!(std::fs::read(&good).unwrap(), good_before);
+    let leftover_backup = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name().to_string_lossy().contains(".backup-"));
+    assert!(
+        !leftover_backup,
+        "rollback should consume the store and identity backups"
+    );
+
+    // The pre-rotation key still opens the store.
+    let mut reopened = store_at(dir.path());
+    reopened.unlock(Some(&pw("pw"))).unwrap();
+    let entries = reopened.scan_entries().unwrap();
+    assert!(entries.iter().any(|entry| entry.body.contains("keep me")));
+}
+
+#[test]
 fn disable_clears_age_artifacts() {
     let dir = tempfile::tempdir().unwrap();
     let mut laptop = store_at(dir.path());

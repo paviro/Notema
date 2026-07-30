@@ -224,12 +224,15 @@ impl JournalStore {
         Ok(migrate::reconcile_disabled_encryption(self)?.is_some())
     }
 
-    /// Leftover `*.backup-*` siblings of the journal root — snapshots an
-    /// interrupted migration or restore never consumed. The caller should
-    /// surface these: a leftover can hold the sole complete copy of the store,
-    /// or a plaintext snapshot of an encrypted one. Never deleted here.
-    pub fn stale_backup_dirs(&self) -> AppResult<Vec<PathBuf>> {
-        migrate::stale_backup_dirs(&self.paths.journal_root)
+    /// Leftover `*.backup-*` siblings of the journal root or identity file —
+    /// snapshots an interrupted migration, restore, or rotation never consumed.
+    /// The caller should surface these: a leftover can hold the sole complete
+    /// copy of the store, a plaintext snapshot of an encrypted one, or a
+    /// pre-rotation private key. Never deleted here.
+    pub fn stale_backups(&self) -> AppResult<Vec<PathBuf>> {
+        let mut leftovers = migrate::stale_backup_dirs(&self.paths.journal_root)?;
+        leftovers.extend(migrate::stale_identity_backups(&self.paths.keys)?);
+        Ok(leftovers)
     }
 
     /// Retire this device's identity after its access was revoked; see
@@ -552,6 +555,11 @@ impl JournalStore {
         // pins" and then delete the rollback pins on restore.
         let identity_backup =
             crypto::Zeroizing::new(crypto::read_identity_file_bytes(&self.paths.keys)?);
+        // Also snapshot it to disk (0600, config dir — never synced): if the
+        // process dies mid-rotation or the rollback's identity restore fails,
+        // the in-memory copy is gone and this file is the only pre-rotation key.
+        let identity_backup_path = migrate::file_backup_path(&self.paths.keys.identity_file);
+        crypto::atomic_write_private(&identity_backup_path, &identity_backup)?;
         let trust_backup = read_optional_file(&self.paths.keys.trust_file)?;
         let backup = migrate::backup_store(&root)?;
 
@@ -579,16 +587,50 @@ impl JournalStore {
         })();
 
         match result {
-            Ok(summary) => {
-                fs::remove_dir_all(&backup)?;
-                crypto::advance_trust_pins(&self.paths.keys)?;
+            Ok(mut summary) => {
+                summary
+                    .warnings
+                    .extend(migrate::backup_cleanup_warning(&backup));
+                if let Err(cleanup_error) = fs::remove_file(&identity_backup_path) {
+                    summary.warnings.push(format!(
+                        "the rotation succeeded, but the retired-key backup at {} could not be removed: {cleanup_error}; it can still read pre-rotation ciphertext — delete it by hand",
+                        identity_backup_path.display()
+                    ));
+                }
+                summary.warnings.extend(self.advance_pins_warning());
                 Ok(summary)
             }
             Err(error) => {
-                migrate::restore_store(&root, &backup)?;
-                crypto::restore_identity_file(&self.paths.keys, &identity_backup)?;
-                self.restore_trust_file(trust_backup.as_deref())?;
+                // The store is being rolled back to old-key ciphertext, so the
+                // old key is the usable one whatever happens below.
                 self.identity = Some(old);
+                if let Err(restore_error) = migrate::restore_store(&root, &backup) {
+                    bail!(
+                        "{error}; ALSO failed to roll back the store: {restore_error}. \
+                         A backup of the pre-rotation store remains at {} and of this \
+                         device's pre-rotation identity at {}",
+                        backup.display(),
+                        identity_backup_path.display()
+                    );
+                }
+                if let Err(restore_error) =
+                    crypto::restore_identity_file(&self.paths.keys, &identity_backup)
+                {
+                    bail!(
+                        "{error}; the store was rolled back, but the pre-rotation identity \
+                         could not be restored: {restore_error}. A copy remains at {} — move \
+                         it back to {} by hand",
+                        identity_backup_path.display(),
+                        self.paths.keys.identity_file.display()
+                    );
+                }
+                if let Err(restore_error) = self.restore_trust_file(trust_backup.as_deref()) {
+                    bail!(
+                        "{error}; the store and identity were rolled back, but the roster \
+                         trust pins could not be restored: {restore_error}"
+                    );
+                }
+                let _ = fs::remove_file(&identity_backup_path);
                 Err(error)
             }
         }
