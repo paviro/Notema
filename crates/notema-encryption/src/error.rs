@@ -125,9 +125,6 @@ pub enum EncryptionError {
 
     #[error("invalid hex encoding: {0}")]
     Hex(#[from] hex::FromHexError),
-
-    #[error("invalid UTF-8 in key material: {0}")]
-    Utf8(#[from] std::string::FromUtf8Error),
 }
 
 impl EncryptionError {
