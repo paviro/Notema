@@ -78,6 +78,13 @@ pub(crate) fn load_existing(path_override: Option<&Path>) -> AppResult<Startup> 
             backup.display()
         );
     }
+    for backup in store.kept_decrypt_backups()? {
+        eprintln!(
+            "Note: the encrypted backup from turning off encryption remains at {} — \
+             delete it once you no longer need it.",
+            backup.display()
+        );
+    }
     timing::mark("startup:reconcile-encryption");
     Ok(Startup {
         config_path,

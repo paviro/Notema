@@ -540,6 +540,7 @@ impl AppModel {
             },
         };
         let stale_backups = store.stale_backups()?;
+        let kept_decrypt_backups = store.kept_decrypt_backups()?;
         let mut app = Self::new_with_snapshot(config_path, config, store, snapshot, detected_mode)?;
         if cache.cached.is_none() && !locked {
             app.toasts
@@ -550,6 +551,15 @@ impl AppModel {
                 ToastVariant::Warning,
                 format!(
                     "Leftover backup at {} — verify your journal and keys, then delete it",
+                    backup.display()
+                ),
+            );
+        }
+        for backup in kept_decrypt_backups {
+            app.toast(
+                ToastVariant::Info,
+                format!(
+                    "Backup from turning off encryption at {} — delete it when no longer needed",
                     backup.display()
                 ),
             );

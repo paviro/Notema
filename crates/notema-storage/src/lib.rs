@@ -235,6 +235,14 @@ impl JournalStore {
         Ok(leftovers)
     }
 
+    /// `*.decrypt-backup-*` siblings a successful decrypt kept on purpose:
+    /// pre-decryption ciphertext, not a crash artifact. Surface as a gentle
+    /// cleanup reminder — separate from [`stale_backups`](Self::stale_backups),
+    /// which reports crash leftovers. Never deleted here.
+    pub fn kept_decrypt_backups(&self) -> AppResult<Vec<PathBuf>> {
+        migrate::kept_decrypt_backups(&self.paths.journal_root)
+    }
+
     /// Retire this device's identity after its access was revoked; see
     /// the encryption cleanup helper. Returns the renamed-aside path, or
     /// `None` when there was no identity to retire.

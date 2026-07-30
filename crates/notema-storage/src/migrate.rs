@@ -118,6 +118,17 @@ pub(crate) fn decrypt_store(
     clear_age_dir(&paths.keys)?;
     let disabled_trust_file = disable_trust_file(&paths.keys)?;
     let disabled_identity_file = disable_identity_file(&paths.keys)?;
+    // The decrypt completed, so this snapshot is a deliberate keep, not a crash
+    // leftover: move it out of the `*.backup-*` namespace the startup warning
+    // covers. On a failed rename the old name stays — merely over-warned.
+    let kept = backup
+        .file_name()
+        .and_then(OsStr::to_str)
+        .map(|name| backup.with_file_name(name.replacen(BACKUP_MARKER, DECRYPT_BACKUP_MARKER, 1)));
+    let backup = match kept {
+        Some(kept) if fs::rename(&backup, &kept).is_ok() => kept,
+        _ => backup,
+    };
     Ok(DecryptSummary {
         migrated_files,
         backup_path: Some(backup),
@@ -571,11 +582,25 @@ pub(crate) fn backup_cleanup_warning(backup: &Path) -> Option<String> {
     })
 }
 
+/// The name marker of a snapshot a migration is still using (or crashed and
+/// left behind); [`DECRYPT_BACKUP_MARKER`] is what a successful decrypt renames
+/// its deliberately kept snapshot to, taking it out of the crash-leftover
+/// namespace the startup warning covers.
+const BACKUP_MARKER: &str = ".backup-";
+const DECRYPT_BACKUP_MARKER: &str = ".decrypt-backup-";
+
 /// Leftover `<root_name>.backup-*` siblings of the journal root: snapshots a
 /// crashed migration or restore never consumed. Detection only — a leftover can
 /// hold the sole complete copy of the store, so nothing here deletes it.
 pub(crate) fn stale_backup_dirs(root: &Path) -> AppResult<Vec<PathBuf>> {
-    stale_backup_siblings(root, |file_type| file_type.is_dir())
+    backup_siblings(root, BACKUP_MARKER, |file_type| file_type.is_dir())
+}
+
+/// The `<root_name>.decrypt-backup-*` siblings a successful decrypt kept on
+/// purpose: pre-decryption ciphertext, not a crash artifact — surface as a
+/// gentle cleanup reminder, not a warning.
+pub(crate) fn kept_decrypt_backups(root: &Path) -> AppResult<Vec<PathBuf>> {
+    backup_siblings(root, DECRYPT_BACKUP_MARKER, |file_type| file_type.is_dir())
 }
 
 /// Leftover `identity.toml.backup-*` siblings of the identity file: private-key
@@ -583,11 +608,14 @@ pub(crate) fn stale_backup_dirs(root: &Path) -> AppResult<Vec<PathBuf>> {
 /// [`stale_backup_dirs`] — a leftover can hold the only copy of the
 /// pre-rotation key.
 pub(crate) fn stale_identity_backups(paths: &KeyPaths) -> AppResult<Vec<PathBuf>> {
-    stale_backup_siblings(&paths.identity_file, |file_type| file_type.is_file())
+    backup_siblings(&paths.identity_file, BACKUP_MARKER, |file_type| {
+        file_type.is_file()
+    })
 }
 
-fn stale_backup_siblings(
+fn backup_siblings(
     path: &Path,
+    marker: &str,
     keep: impl Fn(&fs::FileType) -> bool,
 ) -> AppResult<Vec<PathBuf>> {
     let (Some(parent), Some(name)) = (path.parent(), path.file_name().and_then(OsStr::to_str))
@@ -597,7 +625,7 @@ fn stale_backup_siblings(
     if !parent.exists() {
         return Ok(Vec::new());
     }
-    let prefix = format!("{name}.backup-");
+    let prefix = format!("{name}{marker}");
     let mut leftovers = Vec::new();
     for entry in fs::read_dir(parent)? {
         let entry = entry?;
@@ -724,6 +752,18 @@ mod tests {
         fs::write(dir.path().join("journals.backup-notadir"), "file").unwrap();
 
         assert_eq!(stale_backup_dirs(&root).unwrap(), vec![stale]);
+    }
+
+    #[test]
+    fn kept_decrypt_backup_is_not_reported_as_stale() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("journals");
+        fs::create_dir_all(&root).unwrap();
+        let kept = dir.path().join("journals.decrypt-backup-20260730120000");
+        fs::create_dir_all(&kept).unwrap();
+
+        assert!(stale_backup_dirs(&root).unwrap().is_empty());
+        assert_eq!(kept_decrypt_backups(&root).unwrap(), vec![kept]);
     }
 
     #[test]

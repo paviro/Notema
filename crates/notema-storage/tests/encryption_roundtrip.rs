@@ -43,7 +43,20 @@ fn decrypt_store_restores_plaintext_and_disables_encryption() {
 
     let summary = store.decrypt_store(|_, _| {}).unwrap();
     assert!(summary.migrated_files >= 1);
-    assert!(summary.backup_path.is_some_and(|p| p.exists()));
+    let backup = summary.backup_path.expect("decrypt keeps its backup");
+    assert!(backup.exists());
+    // Deliberately kept, so it lives outside the crash-leftover namespace the
+    // startup warning covers and is reported as a gentle reminder instead.
+    assert!(
+        backup
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.contains(".decrypt-backup-")),
+        "kept backup should be renamed: {}",
+        backup.display()
+    );
+    assert!(store.stale_backups().unwrap().is_empty());
+    assert_eq!(store.kept_decrypt_backups().unwrap(), vec![backup]);
     assert!(summary.disabled_identity_file.exists());
 
     // Recipients gone → a fresh store treats everything as plaintext and reads it.
