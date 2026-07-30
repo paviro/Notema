@@ -29,35 +29,42 @@ pub(super) struct QueryStyling {
 /// pill. Everything else is full text and stays plain, because that is what it is.
 pub(super) fn query_styling(theme: &Theme, query: &str) -> QueryStyling {
     let syntax = theme.syntax();
-    // Plain themes skip the markdown and code highlighters; skipping this too is
-    // what keeps them monochrome throughout. Pills still apply — theirs is the
-    // reversed look those themes already use for a chip in the reader.
-    let colours = syntax.any_color();
-    // A category the theme leaves unset gets no span at all, so the field's own
-    // ink shows through instead of an explicit `Color::Reset` overriding it.
-    let styled = |category: Category, modifier: Modifier| {
-        let colour = category.color(syntax);
-        (colour != Color::Reset).then(|| Style::new().fg(colour).add_modifier(modifier))
+    // A category the theme colours draws in that colour; one it leaves unset
+    // falls back to a modifier, so a monochrome theme still tells the recognised
+    // prefix (bold) from the connective punctuation (dim) rather than leaving the
+    // grammar indistinguishable. Only the `Reset` branch is new — a set colour is
+    // styled exactly as before.
+    let keyword = {
+        let colour = Category::Keyword.color(syntax);
+        let style = Style::new().add_modifier(Modifier::BOLD);
+        if colour == Color::Reset {
+            style
+        } else {
+            style.fg(colour)
+        }
     };
-    let keyword = styled(Category::Keyword, Modifier::BOLD);
-    let operator = styled(Category::Operator, Modifier::empty());
-    let punctuation = styled(Category::Punctuation, Modifier::empty());
+    let connective = |category: Category| {
+        let colour = category.color(syntax);
+        if colour == Color::Reset {
+            Style::new().add_modifier(Modifier::DIM)
+        } else {
+            Style::new().fg(colour)
+        }
+    };
+    let operator = connective(Category::Operator);
+    let punctuation = connective(Category::Punctuation);
 
     let mut styling = QueryStyling::default();
     for segment in offsets::scan(query) {
-        if colours {
-            if let (Some((_, range)), Some(keyword)) = (&segment.prefix, keyword) {
-                styling.spans.push((range.start, range.end, keyword));
-            }
-            // Every separator in the grammar is a one-byte ASCII character.
-            if let Some(operator) = operator {
-                for &(_, at) in &segment.operators {
-                    styling.spans.push((at, at + 1, operator));
-                }
-            }
-            if let (Some(at), Some(punctuation)) = (segment.separator, punctuation) {
-                styling.spans.push((at, at + 1, punctuation));
-            }
+        if let Some((_, range)) = &segment.prefix {
+            styling.spans.push((range.start, range.end, keyword));
+        }
+        // Every separator in the grammar is a one-byte ASCII character.
+        for &(_, at) in &segment.operators {
+            styling.spans.push((at, at + 1, operator));
+        }
+        if let Some(at) = segment.separator {
+            styling.spans.push((at, at + 1, punctuation));
         }
 
         let Some(category) = segment.prefix.and_then(|(prefix, _)| pill_category(prefix)) else {
@@ -167,17 +174,83 @@ mod tests {
             vec!["tags:", "\"a+b\""]
         );
         // A bracket theme carries the pill in its glyphs and has no syntax
-        // palette here, so it styles nothing at all.
-        assert!(styled(&bracket(), "tags:\"a+b\"").is_empty());
+        // palette, so it marks only the prefix — the `+` inside the quoted value
+        // is still never an operator span.
+        assert_eq!(styled(&bracket(), "tags:\"a+b\""), vec!["tags:"]);
+    }
+
+    /// The style each grammar slice of `query` carries, in text order.
+    fn grammar(theme: &Theme, query: &str) -> Vec<(String, Style)> {
+        let mut spans = query_styling(theme, query).spans;
+        spans.sort_by_key(|&(start, ..)| start);
+        spans
+            .into_iter()
+            .map(|(start, end, style)| (query[start..end].to_string(), style))
+            .collect()
     }
 
     #[test]
-    fn a_theme_without_syntax_colours_styles_nothing() {
+    fn a_monochrome_theme_marks_the_grammar_with_modifiers() {
+        // No syntax colour, so the grammar carries meaning through modifiers: the
+        // recognised prefix is bold, the connective `+`/`;` are dim, and none set
+        // a foreground — the field's own ink shows through.
         let plain = Theme::terminal_default();
-        assert!(query_styling(&plain, "tags:a+b; x").spans.is_empty());
+        assert_eq!(
+            grammar(&plain, "tags:a+b; x"),
+            vec![
+                (
+                    "tags:".to_string(),
+                    Style::new().add_modifier(Modifier::BOLD)
+                ),
+                ("+".to_string(), Style::new().add_modifier(Modifier::DIM)),
+                (";".to_string(), Style::new().add_modifier(Modifier::DIM)),
+            ]
+        );
         // Pills are not syntax colour, so they survive on a plain theme — as
         // reversed text, exactly as the reader draws a chip there.
         assert!(!query_styling(&plain, "tags:\"a\"").spans.is_empty());
+    }
+
+    /// The end of the chain: the monochrome styles survive the widget and land on
+    /// the screen. A modifier-only span (no foreground) is the case that would
+    /// quietly vanish if the field's rendering dropped colourless spans.
+    #[test]
+    fn the_monochrome_grammar_modifiers_reach_the_rendered_cells() {
+        use crate::tui::text_input::TextInput;
+        use ratatui::{Terminal, backend::TestBackend};
+
+        let theme = Theme::terminal_default();
+        let mut input = TextInput::from("tags:a+b; x".to_string());
+        let spans = query_styling(&theme, input.as_str()).spans;
+        input.set_syntax_spans(vec![spans]);
+
+        let mut term = Terminal::new(TestBackend::new(20, 1)).expect("test backend");
+        term.draw(|frame| input.render_in(&theme, frame, frame.area(), true, false))
+            .expect("render");
+        let buffer = term.backend().buffer();
+        let modifier = |col: u16| buffer[(col, 0u16)].modifier;
+
+        // `tags:` is bold; the connective `+` and `;` are dim; the value is neither.
+        for col in 0..=4 {
+            assert!(modifier(col).contains(Modifier::BOLD), "col {col} bold");
+            assert!(!modifier(col).contains(Modifier::DIM), "col {col} not dim");
+        }
+        assert!(modifier(6).contains(Modifier::DIM), "+ dim"); // the `+`
+        assert!(modifier(8).contains(Modifier::DIM), "; dim"); // the `;`
+        for col in [5u16, 7, 10] {
+            let m = modifier(col);
+            assert!(!m.contains(Modifier::BOLD) && !m.contains(Modifier::DIM), "col {col}");
+        }
+    }
+
+    #[test]
+    fn a_coloured_theme_uses_colour_not_the_monochrome_modifiers() {
+        // The dim/bold-only fallback is the unset-colour branch only: a theme that
+        // colours these categories keeps its exact look, so the connective spans
+        // carry no dim.
+        for (_, style) in grammar(&coloured(), "tags:a+b|c; x") {
+            assert!(!style.add_modifier.contains(Modifier::DIM));
+        }
     }
 
     #[test]
