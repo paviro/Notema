@@ -674,6 +674,50 @@ fn unlink_open_file_release_does_not_resurrect_it() {
 }
 
 #[test]
+fn release_drops_handle_even_when_commit_fails() {
+    let fx = Fixture::new();
+    fx.mkdir_p("diary");
+    write_new(&fx, "/diary/note.md", b"body");
+
+    let p = cpath("/diary/note.md");
+    let mut fh = 0u64;
+    assert_eq!(jf_open(fx.ctx, p.as_ptr(), libc::O_RDWR, &mut fh), 0);
+    assert_eq!(
+        jf_write(
+            fx.ctx,
+            p.as_ptr(),
+            b"new".as_ptr() as *const c_char,
+            3,
+            0,
+            fh
+        ),
+        3
+    );
+    // Sabotage the write-back: the handle's parent directory becomes a file,
+    // so the commit's atomic write cannot create its temp sibling.
+    std::fs::remove_dir_all(fx.root().join("diary")).unwrap();
+    std::fs::write(fx.root().join("diary"), b"").unwrap();
+
+    assert!(jf_release(fx.ctx, p.as_ptr(), fh) < 0);
+    // The handle must be gone regardless — libfuse never retries a release, so
+    // a surviving entry would leak the plaintext buffer for the mount's
+    // lifetime. (A panicking commit is covered structurally: release removes
+    // the handle before committing, so unwinding drops it.)
+    let mut buf = [0u8; 4];
+    assert_eq!(
+        jf_read(
+            fx.ctx,
+            p.as_ptr(),
+            buf.as_mut_ptr() as *mut c_char,
+            buf.len(),
+            0,
+            fh,
+        ),
+        -libc::EBADF
+    );
+}
+
+#[test]
 fn getattr_reports_plaintext_size() {
     let fx = Fixture::new();
     fx.mkdir_p("diary");

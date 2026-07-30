@@ -137,16 +137,18 @@ impl Ctx {
     }
 
     /// Re-encrypt and write back a dirty handle's buffer; no-op for clean or
-    /// read-only handles.
+    /// read-only handles. The handle stays in the table — `flush`/`fsync` run
+    /// this mid-lifetime.
     fn commit(&self, fh: u64) -> Result<(), c_int> {
         let mut inner = self.lock();
         let Some(handle) = inner.handles.get_mut(&fh) else {
             return Ok(());
         };
-        if handle.deleted {
-            return Ok(());
-        }
-        if !handle.dirty || !handle.writable {
+        self.commit_handle(handle)
+    }
+
+    fn commit_handle(&self, handle: &mut Handle) -> Result<(), c_int> {
+        if handle.deleted || !handle.dirty || !handle.writable {
             return Ok(());
         }
         self.store
@@ -880,9 +882,13 @@ pub(crate) unsafe extern "C" fn jf_release(
 fn release(ctx: *mut c_void, _path: *const c_char, fh: u64) -> c_int {
     // SAFETY: `jf_release` validates the callback lifetime and context pointer.
     let ctx = unsafe { ctx_ref(ctx) };
-    let result = ctx.commit(fh);
-    ctx.lock().handles.remove(&fh);
-    match result {
+    // Take the handle out of the table before committing: libfuse never
+    // retries a release, so the entry must not survive a failed or panicking
+    // commit — unwinding drops the owned handle and scrubs its buffer.
+    let Some(mut handle) = ctx.lock().handles.remove(&fh) else {
+        return 0;
+    };
+    match ctx.commit_handle(&mut handle) {
         Ok(()) => 0,
         Err(e) => e,
     }
