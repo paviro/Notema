@@ -245,6 +245,35 @@ fn stored_identity_rejects_unknown_fields() {
 }
 
 #[test]
+fn renew_access_reuses_the_existing_key() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+
+    let phone_dir = dir.path().join("phone");
+    let phone =
+        KeyPaths::for_config(&phone_dir.join("config.toml"), &dir.path().join("journals")).unwrap();
+    let first = request_store_access(&phone, "phone", None).unwrap();
+
+    // The request is denied (deleted) but the identity remains; renewing must
+    // produce a verifiable request for the same key.
+    let id = read_pending(&paths).unwrap().remove(0).id;
+    remove_pending(&paths, &id).unwrap();
+    assert!(read_pending(&paths).unwrap().is_empty());
+
+    let unlocked = unlock_identity(&phone, None).unwrap();
+    let renewed = renew_store_access(&phone, "phone", &unlocked).unwrap();
+    assert_eq!(renewed.encryption_key, first.encryption_key);
+    assert_eq!(renewed.signing_key, first.signing_key);
+
+    // read_pending drops requests whose self-signature fails, so surviving the
+    // read proves the renewed request verifies.
+    let pending = read_pending(&paths).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].recipient.encryption_key, first.encryption_key);
+}
+
+#[test]
 fn malformed_identity_file_error_does_not_echo_contents() {
     let dir = tempdir().unwrap();
     let paths = paths_in(dir.path());

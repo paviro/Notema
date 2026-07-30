@@ -1,7 +1,7 @@
 use crate::files::atomic_write;
 use crate::identity::{UnlockedIdentity, create_device_identity};
 use crate::signing::{sign_bytes, verify_signature};
-use crate::{KeyPaths, Recipient, Result, roster};
+use crate::{EncryptionError, KeyPaths, Recipient, Result, roster};
 use age::secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -43,6 +43,27 @@ pub fn request_store_access(
 ) -> Result<Recipient> {
     let (recipient, identity) = create_device_identity(paths, name, passphrase)?;
     write_pending(paths, &recipient, &identity)?;
+    Ok(recipient)
+}
+
+/// Re-drop a join request for this device's *existing* unlocked identity — for
+/// a device whose earlier request was denied or lost, so it can ask again with
+/// the same key instead of minting a new one. Grants nothing by itself: a
+/// current recipient still has to approve the request.
+pub fn renew_store_access(
+    paths: &KeyPaths,
+    name: &str,
+    identity: &UnlockedIdentity,
+) -> Result<Recipient> {
+    if name.trim().is_empty() {
+        return Err(EncryptionError::EmptyDeviceName);
+    }
+    let recipient = Recipient {
+        name: name.to_string(),
+        encryption_key: identity.public_key(),
+        signing_key: identity.signing_public(),
+    };
+    write_pending(paths, &recipient, identity)?;
     Ok(recipient)
 }
 

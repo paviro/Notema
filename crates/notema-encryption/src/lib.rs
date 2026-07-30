@@ -40,7 +40,9 @@ pub use identity::{
     restore_identity_file, set_identity_passphrase, unlock_identity,
 };
 pub use paths::KeyPaths;
-pub use pending::{PendingRequest, read_pending, remove_pending, request_store_access};
+pub use pending::{
+    PendingRequest, read_pending, remove_pending, renew_store_access, request_store_access,
+};
 pub use recipients::{
     Recipient, add_recipient, advance_trust_pins, commit_rotated_identity, drop_old_recipient,
     identity_is_recipient, initialize_store_identity, read_recipients, rename_recipient,

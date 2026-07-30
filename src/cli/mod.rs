@@ -476,17 +476,42 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
         );
     }
     if store.unlock_available() {
+        let mut store = store;
         let name = store
             .this_device()?
             .map(|device| device.name)
             .unwrap_or_default();
-        bail!(
-            "this device already has an identity ('{name}') at {}.\n\
-             If you're waiting for approval, run `notema encryption device list` to see the \
-             request, or approve it from a device that can already read this journal.\n\
-             To start over, delete that identity file and re-run enroll.",
-            store.identity_path().display()
+        // Unlock to tell the states apart: already a recipient, request still
+        // queued, or request denied/lost — that last one re-requests with the
+        // existing key rather than minting a new identity.
+        let passphrase = if store.identity_needs_passphrase()? {
+            Some(prompts::prompt_unlock_passphrase()?)
+        } else {
+            None
+        };
+        store.unlock(passphrase.as_ref())?;
+        if store.is_current_recipient()? {
+            bail!("this device can already read this journal as '{name}'");
+        }
+        if store.self_request_pending()? {
+            bail!(
+                "this device is already waiting for approval as '{name}'.\n\
+                 Run `notema encryption device list` to see the request, or approve it \
+                 from a device that can already read this journal."
+            );
+        }
+        let recipient = store.renew_access_request()?;
+        println!("Requested access again as '{name}' with this device's existing key.");
+        println!("  {}", recipient.encryption_key);
+        println!(
+            "Fingerprint (read this out to confirm it on the approving device):\n  {}",
+            recipient.fingerprint()
         );
+        println!(
+            "On a device that can already read this journal, approve it — this request\nappears in `notema encryption device list` and a modal at launch — then run there:"
+        );
+        println!("  {} {name}", crate::APPROVE_CMD);
+        return Ok(());
     }
 
     let (name, passphrase) =

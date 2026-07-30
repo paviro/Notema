@@ -386,6 +386,22 @@ impl JournalStore {
         )?)
     }
 
+    /// Re-drop this device's join request using its existing unlocked identity —
+    /// for a device whose earlier request was denied or lost. Parallel to
+    /// [`request_access`](Self::request_access), which mints a fresh key.
+    pub fn renew_access_request(&self) -> AppResult<Recipient> {
+        let identity = self.require_identity("renew-request")?;
+        let name = self
+            .this_device()?
+            .map(|device| device.name)
+            .unwrap_or_default();
+        Ok(crypto::renew_store_access(
+            &self.paths.keys,
+            &name,
+            identity,
+        )?)
+    }
+
     /// Whether this device's unlocked identity is one of the store's current
     /// recipients — a device that can already decrypt, and so may re-encrypt the
     /// store to approve or remove others. `false` when locked or not yet approved.

@@ -562,6 +562,47 @@ fn unsynced_request_keeps_identity() {
 }
 
 #[test]
+fn denied_request_can_be_renewed_and_approved_with_the_same_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let journals = dir.path().join("journals");
+
+    let mut laptop = JournalStore::new(&journals, dir.path().join("laptop"));
+    laptop.ensure().unwrap();
+    laptop.initialize_encryption("laptop", None).unwrap();
+    laptop.unlock(None).unwrap();
+    laptop.create_journal("diary").unwrap();
+    create_entry(&laptop, "diary", "shared body");
+
+    let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    let first = phone.request_access("phone", None).unwrap();
+    phone.unlock(None).unwrap();
+
+    let pending = laptop.pending_requests().unwrap();
+    laptop.deny_pending(&pending[0]).unwrap();
+    assert!(laptop.pending_requests().unwrap().is_empty());
+
+    // The denied phone kept its identity; renewing queues the same key again,
+    // and approval then makes it a recipient.
+    let renewed = phone.renew_access_request().unwrap();
+    assert_eq!(renewed.encryption_key, first.encryption_key);
+    let pending = laptop.pending_requests().unwrap();
+    assert_eq!(pending.len(), 1);
+    laptop.approve_pending(&pending[0], |_, _| {}).unwrap();
+
+    let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    phone.unlock(None).unwrap();
+    assert!(phone.is_current_recipient().unwrap());
+    let entries = phone.scan_entries().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.body.contains("shared body"))
+    );
+}
+
+#[test]
 fn revoked_device_resolve_access_retires_its_key() {
     let dir = tempfile::tempdir().unwrap();
     let journals = dir.path().join("journals");
