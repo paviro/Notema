@@ -519,14 +519,30 @@ pub(crate) fn atomic<T>(store: &JournalStore, op: impl FnOnce() -> AppResult<T>)
     }
 }
 
-/// Replace `root` with `backup` wholesale: drop the (partially changed) root and
-/// move the snapshot into its place. A single rename, so no half-converted files
-/// or leftover temps survive.
+/// Replace `root` with `backup` wholesale: rename the (partially changed) root
+/// aside, rename the snapshot into its place, then drop the aside copy. The
+/// root is never deleted before the snapshot is in position, so a crash at any
+/// point leaves a complete store either at `root` or in a `*.backup-*` sibling
+/// the startup scan reports — never an empty root that would silently mint a
+/// fresh store id.
 pub(crate) fn restore_store(root: &Path, backup: &Path) -> AppResult<()> {
-    if root.exists() {
-        fs::remove_dir_all(root)?;
+    let aside = if root.exists() {
+        let aside = backup_path(root);
+        fs::rename(root, &aside)?;
+        Some(aside)
+    } else {
+        None
+    };
+    if let Err(error) = fs::rename(backup, root) {
+        if let Some(aside) = &aside {
+            let _ = fs::rename(aside, root);
+        }
+        return Err(error.into());
     }
-    fs::rename(backup, root)?;
+    if let Some(aside) = aside {
+        // Best effort: a leftover aside copy is caught by the startup scan.
+        let _ = fs::remove_dir_all(aside);
+    }
     Ok(())
 }
 
@@ -622,6 +638,48 @@ fn disabled_path_for_timestamp(path: &Path, stem: &str, ext: &str, timestamp: &s
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn restore_store_replaces_root_with_backup() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("journals");
+        let backup = dir.path().join("journals.backup-1");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("partial.md"), "half converted").unwrap();
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(backup.join("entry.md"), "snapshot").unwrap();
+
+        restore_store(&root, &backup).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(root.join("entry.md")).unwrap(),
+            "snapshot"
+        );
+        assert!(!root.join("partial.md").exists());
+        let leftovers = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".backup-"))
+            .count();
+        assert_eq!(leftovers, 0, "aside copy and backup should both be gone");
+    }
+
+    #[test]
+    fn restore_store_keeps_root_when_backup_rename_fails() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("journals");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("entry.md"), "still here").unwrap();
+
+        let missing_backup = dir.path().join("journals.backup-missing");
+        restore_store(&root, &missing_backup).unwrap_err();
+
+        assert_eq!(
+            fs::read_to_string(root.join("entry.md")).unwrap(),
+            "still here",
+            "root should be renamed back after a failed restore"
+        );
+    }
 
     #[test]
     fn disabled_path_uses_timestamped_filename() {
