@@ -240,7 +240,8 @@ fn reencrypt_file(
 pub(crate) fn store_has_encrypted_entry_files(store: &JournalStore) -> AppResult<bool> {
     let mut has_match = false;
     collect_store_files_including_trash(store.paths().journal_root.as_path(), &mut |path| {
-        if storage::is_encrypted_entry_file(path) {
+        // A `.md.age` attachment inside `*.assets/` is an asset, not an entry.
+        if storage::is_encrypted_entry_file(path) && !is_in_assets_dir(path) {
             has_match = true;
         }
         Ok(())
@@ -389,10 +390,13 @@ fn strip_age(path: &Path) -> AppResult<PathBuf> {
 fn migration_files(root: &Path, mode: &MigrationMode<'_>) -> AppResult<Vec<PathBuf>> {
     let mut files = Vec::new();
     collect_store_files_including_trash(root, &mut |path| {
-        let matches = match mode {
-            MigrationMode::Encrypt { .. } => storage::is_plain_entry_file(path),
-            MigrationMode::Decrypt { .. } => storage::is_encrypted_entry_file(path),
-        };
+        // An attachment keeps its extension verbatim, so a `.md`/`.md.age` file
+        // inside `*.assets/` belongs to the asset pass, not the entry pass.
+        let matches = !is_in_assets_dir(path)
+            && match mode {
+                MigrationMode::Encrypt { .. } => storage::is_plain_entry_file(path),
+                MigrationMode::Decrypt { .. } => storage::is_encrypted_entry_file(path),
+            };
         if matches {
             files.push(path.to_path_buf());
         }

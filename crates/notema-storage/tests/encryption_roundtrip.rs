@@ -63,6 +63,56 @@ fn decrypt_store_restores_plaintext_and_disables_encryption() {
 }
 
 #[test]
+fn md_attachment_round_trips_through_encrypt_and_decrypt() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store_at(dir.path());
+    store.ensure().unwrap();
+    store.create_journal("diary").unwrap();
+    let path = create_entry(&store, "diary", "# Entry\nwith an attached note");
+    // A markdown file stored as an attachment keeps its `.md` extension; it must
+    // migrate as an asset, not be mistaken for an entry.
+    let stem = notema_storage::entry_id(&path).unwrap();
+    let assets = path.parent().unwrap().join(format!("{stem}.assets"));
+    std::fs::create_dir_all(&assets).unwrap();
+    let attachment = assets.join("notes.md");
+    std::fs::write(&attachment, "attached markdown body").unwrap();
+
+    store
+        .enable_encryption("laptop", Some(&pw("pw")), |_, _| {})
+        .unwrap();
+    let encrypted_attachment = assets.join("notes.md.age");
+    assert!(encrypted_attachment.exists(), "attachment should encrypt");
+    assert!(!attachment.exists(), "plaintext attachment should be gone");
+    assert!(!path.exists(), "plaintext entry should be gone");
+
+    store.unlock(Some(&pw("pw"))).unwrap();
+    store.decrypt_store(|_, _| {}).unwrap();
+    assert!(!encrypted_attachment.exists());
+    assert_eq!(
+        std::fs::read_to_string(&attachment).unwrap(),
+        "attached markdown body"
+    );
+    let entries = store_at(dir.path()).scan_entries().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].body.contains("attached note"));
+}
+
+#[test]
+fn encrypted_md_asset_does_not_count_as_an_encrypted_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_at(dir.path());
+    store.ensure().unwrap();
+    store.create_journal("diary").unwrap();
+    let path = create_entry(&store, "diary", "plain body");
+    let stem = notema_storage::entry_id(&path).unwrap();
+    let assets = path.parent().unwrap().join(format!("{stem}.assets"));
+    std::fs::create_dir_all(&assets).unwrap();
+    std::fs::write(assets.join("notes.md.age"), "ciphertext").unwrap();
+
+    assert!(!store.has_encrypted_entries().unwrap());
+}
+
+#[test]
 fn deleting_the_roster_with_encrypted_entries_fails_access_closed() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = store_at(dir.path());
