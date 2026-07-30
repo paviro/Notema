@@ -245,6 +245,40 @@ fn stored_identity_rejects_unknown_fields() {
 }
 
 #[test]
+fn duplicate_names_make_revoke_and_rename_ambiguous() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let identity = unlock_identity(&paths, None).unwrap();
+
+    // A second, uniquely named device so revoking "laptop" isn't last-recipient.
+    let phone = KeyPaths::for_config(
+        &dir.path().join("phone").join("config.toml"),
+        &dir.path().join("journals"),
+    )
+    .unwrap();
+    let phone_recipient = request_store_access(&phone, "phone", None).unwrap();
+    add_recipient(&paths, &identity, &phone_recipient).unwrap();
+
+    // A rotation that never dropped the old key: the ghost shares "laptop".
+    rotate_add_new_key(&paths, &identity).unwrap();
+
+    let error = revoke_recipient(&paths, &identity, "laptop").unwrap_err();
+    assert!(matches!(
+        error,
+        EncryptionError::AmbiguousRecipientName { .. }
+    ));
+    let error = rename_recipient(&paths, &identity, "laptop", "desk").unwrap_err();
+    assert!(matches!(
+        error,
+        EncryptionError::AmbiguousRecipientName { .. }
+    ));
+
+    // A unique name still resolves.
+    rename_recipient(&paths, &identity, "phone", "mobile").unwrap();
+}
+
+#[test]
 fn renew_access_reuses_the_existing_key() {
     let dir = tempdir().unwrap();
     let paths = paths_in(dir.path());

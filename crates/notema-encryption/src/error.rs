@@ -52,6 +52,12 @@ pub enum EncryptionError {
     #[error("no recipient named '{name}'")]
     UnknownRecipient { name: String },
 
+    /// More than one recipient carries this name (a crashed rotation can leave
+    /// a same-named ghost key), so a name-addressed change could pick the wrong
+    /// device.
+    #[error("more than one recipient is named '{name}'; refusing to guess which key is meant")]
+    AmbiguousRecipientName { name: String },
+
     /// Revoking this recipient would leave the store with none, making it
     /// impossible to re-encrypt.
     #[error("cannot revoke the last recipient; the store would become unreadable")]

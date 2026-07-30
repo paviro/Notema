@@ -144,15 +144,30 @@ pub fn add_recipient(
 /// impossible to re-encrypt.
 pub fn revoke_recipient(paths: &KeyPaths, signer: &UnlockedIdentity, name: &str) -> Result<()> {
     let recipients = read_recipients(paths)?;
-    let Some(target) = recipients.iter().find(|r| r.name == name) else {
-        return Err(EncryptionError::UnknownRecipient {
-            name: name.to_string(),
-        });
-    };
+    let target = find_unique_by_name(&recipients, name)?;
     if recipients.len() == 1 {
         return Err(EncryptionError::LastRecipient);
     }
     append_op(paths, signer, roster::OpKind::Revoke, target)
+}
+
+/// Resolve `name` to exactly one recipient. Duplicate names exist transiently
+/// mid-rotation (the new key joins under the old key's name), and a crash there
+/// can leave the ghost behind — erroring beats revoking or renaming the wrong
+/// key.
+fn find_unique_by_name<'a>(recipients: &'a [Recipient], name: &str) -> Result<&'a Recipient> {
+    let mut matches = recipients.iter().filter(|recipient| recipient.name == name);
+    let target = matches
+        .next()
+        .ok_or_else(|| EncryptionError::UnknownRecipient {
+            name: name.to_string(),
+        })?;
+    if matches.next().is_some() {
+        return Err(EncryptionError::AmbiguousRecipientName {
+            name: name.to_string(),
+        });
+    }
+    Ok(target)
 }
 
 /// Append a signed `rename` op relabelling a recipient, authorized by `signer`.
@@ -172,11 +187,7 @@ pub fn rename_recipient(
             name: new.to_string(),
         });
     }
-    let Some(target) = recipients.iter().find(|recipient| recipient.name == old) else {
-        return Err(EncryptionError::UnknownRecipient {
-            name: old.to_string(),
-        });
-    };
+    let target = find_unique_by_name(&recipients, old)?;
     let relabelled = Recipient {
         name: new.to_string(),
         encryption_key: target.encryption_key.clone(),
