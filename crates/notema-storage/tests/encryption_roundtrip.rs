@@ -876,6 +876,42 @@ fn write_store_file_reencrypts_entries_and_assets() {
     );
 }
 
+/// The size-only companion to `read_store_file`: it must agree with the full
+/// read for both encodings without needing to decrypt the encrypted one.
+#[test]
+fn store_file_plaintext_len_matches_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store_at(dir.path());
+    store.ensure().unwrap();
+    store
+        .initialize_encryption("laptop", Some(&pw("pw")))
+        .unwrap();
+    store.unlock(Some(&pw("pw"))).unwrap();
+
+    let encrypted = dir.path().join("note.md.age");
+    store
+        .write_store_file(
+            &encrypted,
+            notema_storage::StoreFileEncoding::Encrypted,
+            b"eleven byte",
+        )
+        .unwrap();
+    let plain = dir.path().join("note.txt");
+    store
+        .write_store_file(&plain, notema_storage::StoreFileEncoding::Plain, b"four")
+        .unwrap();
+
+    for (path, encoding) in [
+        (&encrypted, notema_storage::StoreFileEncoding::Encrypted),
+        (&plain, notema_storage::StoreFileEncoding::Plain),
+    ] {
+        assert_eq!(
+            store.store_file_plaintext_len(path, encoding).unwrap(),
+            store.read_store_file(path, encoding).unwrap().len() as u64
+        );
+    }
+}
+
 // --- roster integrity: the whole point of the signed device log ---------------
 //
 // A folder-write attacker can rewrite `.age/devices.toml`. These assert the store

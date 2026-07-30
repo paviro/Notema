@@ -954,6 +954,31 @@ impl JournalStore {
         }
     }
 
+    /// Plaintext length of any store file without reading (plain) or decrypting
+    /// (encrypted) its content. An encrypted file whose header defies size
+    /// derivation falls back to a full decrypt.
+    pub fn store_file_plaintext_len(
+        &self,
+        path: &Path,
+        encoding: StoreFileEncoding,
+    ) -> AppResult<u64> {
+        match encoding {
+            StoreFileEncoding::Plain => Ok(fs::metadata(path)?.len()),
+            StoreFileEncoding::Encrypted => {
+                if let Ok(len) = crypto::encrypted_plaintext_len(path) {
+                    return Ok(len);
+                }
+                let identity = self
+                    .identity
+                    .as_ref()
+                    .ok_or(crate::EncryptionError::Locked { context: "file" })?;
+                Ok(u64::try_from(
+                    crypto::decrypt_file_bytes(identity, path)?.as_bytes().len(),
+                )?)
+            }
+        }
+    }
+
     /// Write any store file atomically, encrypting only when the caller says the
     /// backing file is encrypted.
     pub fn write_store_file(
