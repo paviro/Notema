@@ -660,9 +660,10 @@ fn set_default_journal(cli: &Cli, journal: &str) -> AppResult<()> {
     let startup::Startup {
         config_path: path,
         mut config,
+        store,
         ..
     } = startup::load_existing(cli.config.as_deref())?;
-    log::validate_existing_journal(&config.journal.path, journal)?;
+    log::validate_existing_journal(store.root(), journal)?;
     config.journal.default = Some(journal.to_string());
     config::save_config(&path, &config)?;
     println!("Default journal set to {journal}");

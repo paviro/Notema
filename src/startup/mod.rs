@@ -35,7 +35,7 @@ pub(crate) fn load_or_setup_with_path(path_override: Option<&Path>) -> AppResult
     let (config, store, discovery) = if config_path.exists() {
         let config = config::load_config(&config_path)?;
         timing::mark("startup:config-load");
-        let prepared = ish::prepare_store(&config_path, &config.journal.path, true)?;
+        let prepared = ish::prepare_store(&config_path, &config.journal_root(&config_path), true)?;
         timing::mark("startup:prepare-store");
         (config, prepared.store, prepared.discovery)
     } else {
@@ -63,7 +63,7 @@ pub(crate) fn load_existing(path_override: Option<&Path>) -> AppResult<Startup> 
 
     let config = config::load_config(&config_path)?;
     timing::mark("startup:config-load");
-    let store = ish::prepare_store(&config_path, &config.journal.path, false)?.store;
+    let store = ish::prepare_store(&config_path, &config.journal_root(&config_path), false)?.store;
     timing::mark("startup:prepare-store");
     if store.reconcile_disabled_encryption()? {
         eprintln!(
@@ -159,7 +159,7 @@ fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
         config.ui.theme = "classic".to_string();
         config.ui.ignore_journal_themes = true;
     }
-    let prepared = ish::prepare_store(config_path, &config.journal.path, true)?;
+    let prepared = ish::prepare_store(config_path, &config.journal_root(config_path), true)?;
     let store = prepared.store;
 
     if should_offer_encryption(&store)? {
@@ -170,7 +170,7 @@ fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
         writeln!(
             stdout,
             "Using existing journal at {}. Encryption is off; run `notema encryption enable` to turn it on.",
-            config.journal.path.display()
+            store.root().display()
         )?;
     }
 

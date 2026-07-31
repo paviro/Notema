@@ -30,7 +30,8 @@ pub(crate) struct Config {
 pub(crate) struct JournalSection {
     /// Directory holding every journal. A relative path resolves against the
     /// directory containing `config.toml`, so a config dir can carry its
-    /// journal root with it.
+    /// journal root with it. Always the raw value as written in the file —
+    /// resolve through [`Config::journal_root`] so saving never rewrites it.
     pub path: PathBuf,
     /// Journal selected on startup when the previous session didn't record one.
     #[serde(default)]
@@ -333,6 +334,13 @@ impl Config {
             location: LocationSection::default(),
         }
     }
+
+    /// The journal root with `~` expanded and a relative path anchored to the
+    /// config file's directory. `journal.path` itself stays raw so it survives
+    /// a save.
+    pub(crate) fn journal_root(&self, config_path: &Path) -> PathBuf {
+        resolve_journal_root(self.journal.path.clone(), config_path)
+    }
 }
 
 /// Per-device, machine-written UI state kept next to `config.toml` in `state.toml`
@@ -409,7 +417,7 @@ pub(crate) fn default_config_path() -> AppResult<PathBuf> {
 pub(crate) fn load_config(path: &Path) -> AppResult<Config> {
     let text =
         fs::read_to_string(path).with_context(|| format!("reading config {}", path.display()))?;
-    let mut config: Config =
+    let config: Config =
         toml::from_str(&text).with_context(|| format!("parsing config {}", path.display()))?;
     if config.schema_version != CONFIG_SCHEMA_VERSION {
         bail!(
@@ -417,7 +425,6 @@ pub(crate) fn load_config(path: &Path) -> AppResult<Config> {
             config.schema_version
         );
     }
-    config.journal.path = resolve_journal_root(config.journal.path, path);
     Ok(config)
 }
 
@@ -523,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn save_and_load_config_expands_tilde_root() {
+    fn journal_root_expands_tilde_and_keeps_the_raw_path() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
         fs::write(
@@ -534,12 +541,15 @@ mod tests {
 
         let config = load_config(&path).unwrap();
 
-        assert!(config.journal.path.ends_with("Journals"));
+        assert_eq!(config.journal.path, PathBuf::from("~/Journals"));
+        let root = config.journal_root(&path);
+        assert!(root.is_absolute());
+        assert!(root.ends_with("Journals"));
         assert_eq!(config.journal.default, None);
     }
 
     #[test]
-    fn load_config_resolves_relative_root_against_config_dir() {
+    fn journal_root_resolves_relative_root_against_config_dir() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
         fs::write(
@@ -550,7 +560,30 @@ mod tests {
 
         let config = load_config(&path).unwrap();
 
-        assert_eq!(config.journal.path, dir.path().join("journals"));
+        assert_eq!(config.journal.path, PathBuf::from("journals"));
+        assert_eq!(config.journal_root(&path), dir.path().join("journals"));
+    }
+
+    #[test]
+    fn save_config_preserves_portable_journal_roots() {
+        for raw in ["~/Journals", "journals"] {
+            let dir = tempdir().unwrap();
+            let path = dir.path().join("config.toml");
+            fs::write(
+                &path,
+                format!("schema_version = 1\n\n[journal]\npath = \"{raw}\"\n"),
+            )
+            .unwrap();
+
+            let config = load_config(&path).unwrap();
+            save_config(&path, &config).unwrap();
+
+            let text = fs::read_to_string(&path).unwrap();
+            assert!(
+                text.contains(&format!("path = \"{raw}\"")),
+                "saved config lost the raw form {raw:?}: {text}"
+            );
+        }
     }
 
     #[test]

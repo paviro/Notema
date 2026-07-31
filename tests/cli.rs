@@ -427,6 +427,35 @@ fn set_default_journal_persists_to_config() {
 }
 
 #[test]
+fn set_default_journal_keeps_a_relative_journal_root_raw() {
+    let dir = tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    fs::create_dir_all(dir.path().join("journals").join("work")).unwrap();
+    write_config(&config_path, Path::new("journals"), None);
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(config_path.parent().unwrap())
+        .arg("use")
+        .arg("work")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = fs::read_to_string(config_path).unwrap();
+    assert!(
+        text.contains("path = \"journals\""),
+        "saving rewrote the portable journal root: {text}"
+    );
+    let config: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(config["journal"]["default"].as_str(), Some("work"));
+}
+
+#[test]
 fn log_command_without_default_or_journal_fails() {
     let dir = tempdir().unwrap();
     let root = dir.path().join("journals");

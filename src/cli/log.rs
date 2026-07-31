@@ -34,7 +34,7 @@ pub(super) fn run(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<(
         .as_deref()
         .or(config.journal.default.as_deref())
         .context("no journal specified; pass --journal or set one with `notema use <name>`")?;
-    validate_existing_journal(&config.journal.path, journal)?;
+    validate_existing_journal(store.root(), journal)?;
     timing::mark("log:validate-journal");
 
     // No inline text: compose interactively in the fullscreen built-in editor. Its
