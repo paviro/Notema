@@ -71,8 +71,9 @@ pub(crate) fn encrypt_store(
     Ok(())
 }
 
-pub(crate) fn decrypt_store(mut store: JournalStore) -> AppResult<()> {
-    super::unlock_identity(&mut store)?;
+/// Decrypt every entry and retire this device's key. The caller has already
+/// validated the encryption state, confirmed, and unlocked the store.
+pub(crate) fn decrypt_store(store: JournalStore) -> AppResult<()> {
     let summary = store.decrypt_store(cli_progress("files"))?;
     println!("Decrypted journal store at {}", store.root().display());
     if let Some(backup) = summary.backup_path {

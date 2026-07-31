@@ -265,7 +265,13 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
             encryption::encrypt_store(&store, args.name.as_deref(), args.no_passphrase)
         }
         EncryptionCommand::Disable(args) => {
-            let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
+            let startup::Startup { mut store, .. } = startup::load_existing(cli.config.as_deref())?;
+            // Everything knowable without secrets is validated before the scary
+            // confirmation and the passphrase prompt.
+            if !store.encryption_enabled() {
+                bail!("this journal is not encrypted; there is nothing to disable");
+            }
+            require_unlock_available(&store)?;
             if !prompts::confirm(
                 "Decrypt every entry and turn encryption off for this journal?",
                 args.yes,
@@ -273,6 +279,7 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
                 println!("Aborted.");
                 return Ok(());
             }
+            unlock_identity(&mut store)?;
             encryption::decrypt_store(store)
         }
         EncryptionCommand::Device { command } => handle_device_command(cli, command),
@@ -292,10 +299,8 @@ fn handle_device_command(cli: &Cli, command: &DeviceCommand) -> AppResult<()> {
     }
 }
 
-/// Unlock this device's identity, prompting for a passphrase only when the key
-/// is passphrase-protected. Returns the passphrase too (for rotation, which
-/// re-wraps the new key with it). Bails when this device has no key.
-fn unlock_identity(store: &mut JournalStore) -> AppResult<Option<SecretString>> {
+/// Bail unless this device has a key that can unlock this journal.
+fn require_unlock_available(store: &JournalStore) -> AppResult<()> {
     if !store.unlock_available() {
         bail!(
             "this journal is encrypted but this device has no key at {}; run `{}` first",
@@ -303,6 +308,14 @@ fn unlock_identity(store: &mut JournalStore) -> AppResult<Option<SecretString>> 
             crate::ENROLL_CMD
         );
     }
+    Ok(())
+}
+
+/// Unlock this device's identity, prompting for a passphrase only when the key
+/// is passphrase-protected. Returns the passphrase too (for rotation, which
+/// re-wraps the new key with it). Bails when this device has no key.
+fn unlock_identity(store: &mut JournalStore) -> AppResult<Option<SecretString>> {
+    require_unlock_available(store)?;
     let passphrase = if store.identity_needs_passphrase()? {
         Some(prompts::prompt_unlock_passphrase()?)
     } else {
@@ -558,6 +571,20 @@ fn device_list_command(cli: &Cli) -> AppResult<()> {
 }
 
 fn device_revoke_command(cli: &Cli, name: &str, skip_confirm: bool) -> AppResult<()> {
+    let startup::Startup { mut store, .. } = startup::load_existing(cli.config.as_deref())?;
+    // Everything knowable without secrets is validated before the scary
+    // confirmation and the passphrase prompt.
+    if !store.encryption_enabled() {
+        bail!("this journal is not encrypted; there are no devices to revoke");
+    }
+    if !store
+        .recipients()?
+        .iter()
+        .any(|recipient| recipient.name == name)
+    {
+        bail!("no device named '{name}'; run `notema encryption device list` to see the roster");
+    }
+    require_unlock_available(&store)?;
     if !prompts::confirm(
         &format!("Revoke '{name}' and re-encrypt all entries to exclude it?"),
         skip_confirm,
@@ -565,7 +592,7 @@ fn device_revoke_command(cli: &Cli, name: &str, skip_confirm: bool) -> AppResult
         println!("Aborted.");
         return Ok(());
     }
-    let store = open_unlocked_store(cli)?;
+    unlock_identity(&mut store)?;
     let summary = store.revoke_recipient(name, encryption::cli_progress("files"))?;
     println!(
         "Revoked '{name}' and re-encrypted {} file(s).",

@@ -1003,6 +1003,76 @@ fn key_workflow_grants_second_device_history_access() {
 }
 
 #[test]
+fn disable_on_a_plaintext_store_fails_before_confirming() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("journals");
+    let config = dir.path().join("config.toml");
+    fs::create_dir_all(root.join("work")).unwrap();
+    write_config(&config, &root, None);
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(config.parent().unwrap())
+        .args(["encryption", "disable"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not encrypted"), "{stderr}");
+    // Validation must run before the confirmation prompt, and a plaintext
+    // store must not be pointed at enroll.
+    assert!(!stderr.contains("refusing to continue"), "{stderr}");
+    assert!(!stderr.contains("enroll"), "{stderr}");
+}
+
+#[test]
+fn revoke_on_a_plaintext_store_fails_before_confirming() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("journals");
+    let config = dir.path().join("config.toml");
+    fs::create_dir_all(root.join("work")).unwrap();
+    write_config(&config, &root, None);
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(config.parent().unwrap())
+        .args(["encryption", "device", "revoke", "phone"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not encrypted"), "{stderr}");
+    assert!(!stderr.contains("refusing to continue"), "{stderr}");
+}
+
+#[test]
+fn revoke_of_an_unknown_device_fails_before_confirming() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("journals");
+    let config = dir.path().join("config.toml");
+    fs::create_dir_all(root.join("work")).unwrap();
+    write_config(&config, &root, None);
+    generate_identity_store(&config, &root, "secret passphrase");
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(config.parent().unwrap())
+        .args(["encryption", "device", "revoke", "ghost"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("no device named 'ghost'"), "{stderr}");
+    assert!(!stderr.contains("refusing to continue"), "{stderr}");
+}
+
+#[test]
 fn encrypt_decrypt_converts_assets_and_keeps_clean_links() {
     let dir = tempdir().unwrap();
     let root = dir.path().join("journals");
