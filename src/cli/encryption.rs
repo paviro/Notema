@@ -53,6 +53,13 @@ pub(crate) fn encrypt_store(
         }
         .into());
     } else {
+        if store.unlock_available() {
+            bail!(
+                "a device key already exists at {} but this journal has no device roster; enabling encryption would overwrite it. If this device is waiting to join an encrypted journal, let the journal folder finish syncing, then run `{}`; otherwise move the key file aside and re-run.",
+                store.identity_path().display(),
+                crate::ENROLL_CMD,
+            );
+        }
         println!("No journal encryption identity configured; generating an age identity.");
         let (name, passphrase) = prompts::resolve_new_identity_options(device_name, no_passphrase)?;
         let summary = store.enable_encryption(&name, passphrase.as_ref(), cli_progress("files"))?;

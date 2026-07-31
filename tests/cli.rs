@@ -1003,6 +1003,45 @@ fn key_workflow_grants_second_device_history_access() {
 }
 
 #[test]
+fn enable_refuses_to_overwrite_an_existing_device_key() {
+    let dir = tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+
+    // A device key from a prior enrol lives beside config.toml; its roster and
+    // trust pins belong to a different (unsynced) journal. Drop the trust pins so
+    // startup's disabled-encryption reconcile leaves the identity in place — the
+    // real "waiting to join" state where the roster simply hasn't synced yet.
+    let roster_root = dir.path().join("other-journal");
+    fs::create_dir_all(&roster_root).unwrap();
+    generate_identity_store(&config, &roster_root, "secret passphrase");
+    fs::remove_file(dir.path().join("devices-trust.toml")).unwrap();
+    let identity = dir.path().join("identity.toml");
+    let identity_before = fs::read(&identity).unwrap();
+
+    // Point the config at a fresh plaintext journal that has no roster.
+    let root = dir.path().join("journals");
+    fs::create_dir_all(root.join("work")).unwrap();
+    write_config(&config, &root, None);
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(config.parent().unwrap())
+        .args(["encryption", "enable", "--name", "laptop", "--no-passphrase"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("device key already exists"), "{stderr}");
+    assert_eq!(
+        fs::read(&identity).unwrap(),
+        identity_before,
+        "enable overwrote the existing device key"
+    );
+}
+
+#[test]
 fn disable_on_a_plaintext_store_fails_before_confirming() {
     let dir = tempdir().unwrap();
     let root = dir.path().join("journals");
