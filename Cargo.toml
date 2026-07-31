@@ -24,6 +24,7 @@ publish = false
 [workspace.dependencies]
 age = { version = "0.12.1", default-features = false, features = ["armor"] }
 anyhow = "1"
+async-io = "2"
 cc = "1"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
@@ -32,6 +33,7 @@ crossterm = "0.29"
 dirs = "6"
 ed25519-dalek = { version = "3", features = ["zeroize"] }
 flate2 = "1"
+futures-lite = "2"
 getrandom = "0.4"
 hex = "0.4"
 iana-time-zone = "0.1"

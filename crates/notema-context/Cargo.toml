@@ -32,6 +32,8 @@ exact-timezone = []
 # it extracts and runs the bundled `notema-locate` helper .app (a bare binary
 # can't get CoreLocation authorization on modern macOS).
 [target.'cfg(target_os = "linux")'.dependencies]
+async-io.workspace = true
+futures-lite.workspace = true
 rustix.workspace = true
 zbus.workspace = true
 

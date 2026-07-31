@@ -5,9 +5,10 @@
 
 use super::{DeviceFix, DeviceLocationSource};
 use crate::{ContextError, Result};
+use futures_lite::StreamExt;
 use notema_domain::Coordinates;
 use std::time::Duration;
-use zbus::{blocking::Connection, proxy, zvariant::OwnedObjectPath};
+use zbus::{Connection, proxy, zvariant::OwnedObjectPath};
 
 /// How long to wait for GeoClue to produce a fix before giving up.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -56,58 +57,65 @@ trait Location {
 }
 
 pub(super) fn locate() -> Result<DeviceFix> {
-    // The D-Bus exchange is blocking and may never answer if no backend can, so
-    // bound it — nothing to clean up when it overruns.
-    super::run_with_timeout(TIMEOUT, query_geoclue).unwrap_or_else(|| {
+    // Race the whole exchange against the deadline: no backend may ever answer.
+    // On timeout the query future is dropped, which closes the D-Bus connection;
+    // GeoClue destroys the client (stopping the location hardware) when its
+    // peer vanishes from the bus.
+    zbus::block_on(futures_lite::future::or(query_geoclue(), async {
+        async_io::Timer::after(TIMEOUT).await;
         Err(ContextError::message(
             "timed out waiting for a location fix from GeoClue",
         ))
-    })
+    }))
 }
 
-fn query_geoclue() -> Result<DeviceFix> {
-    let connection = Connection::system().map_err(|error| {
+async fn query_geoclue() -> Result<DeviceFix> {
+    let connection = Connection::system().await.map_err(|error| {
         ContextError::message(format!("cannot reach the system D-Bus: {error}"))
     })?;
 
-    let manager = ManagerProxyBlocking::new(&connection)
+    let manager = ManagerProxy::new(&connection)
+        .await
         .map_err(|_| ContextError::message("GeoClue2 is not available on this system"))?;
     let client_path = manager
         .get_client()
+        .await
         .map_err(|error| ContextError::message(format!("GeoClue refused a client: {error}")))?;
 
-    let client = ClientProxyBlocking::builder(&connection)
+    let client = ClientProxy::builder(&connection)
         .path(client_path)?
-        .build()?;
-    client.set_desktop_id(DESKTOP_ID)?;
-    client.set_requested_accuracy_level(ACCURACY_EXACT)?;
+        .build()
+        .await?;
+    client.set_desktop_id(DESKTOP_ID).await?;
+    client.set_requested_accuracy_level(ACCURACY_EXACT).await?;
 
     // Subscribe before Start so we can't miss the first update.
-    let mut updates = client.receive_location_updated()?;
-    client.start().map_err(|error| {
+    let mut updates = client.receive_location_updated().await?;
+    client.start().await.map_err(|error| {
         ContextError::message(format!("GeoClue could not start locating: {error}"))
     })?;
 
-    let fix = match updates.next() {
+    let fix = match updates.next().await {
         Some(signal) => {
             let args = signal.args()?;
-            read_location(&connection, args.new)
+            read_location(&connection, args.new).await
         }
         None => Err(ContextError::message("GeoClue returned no location")),
     };
-    let _ = client.stop();
+    let _ = client.stop().await;
     fix
 }
 
-fn read_location(connection: &Connection, path: OwnedObjectPath) -> Result<DeviceFix> {
-    let location = LocationProxyBlocking::builder(connection)
+async fn read_location(connection: &Connection, path: OwnedObjectPath) -> Result<DeviceFix> {
+    let location = LocationProxy::builder(connection)
         .path(path)?
-        .build()?;
-    let coordinates = Coordinates::try_new(location.latitude()?, location.longitude()?)
+        .build()
+        .await?;
+    let coordinates = Coordinates::try_new(location.latitude().await?, location.longitude().await?)
         .map_err(|error| ContextError::message(error.to_string()))?;
     Ok(DeviceFix {
         coordinates,
-        accuracy_m: location.accuracy().ok(),
+        accuracy_m: location.accuracy().await.ok(),
         source: DeviceLocationSource::GeoClue,
     })
 }
