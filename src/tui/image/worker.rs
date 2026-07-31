@@ -3,6 +3,7 @@
 //! shipped back over a channel and folded into the cache by the runtime.
 
 use std::{
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::mpsc::{Receiver, Sender, channel},
     thread,
 };
@@ -72,12 +73,16 @@ fn worker_loop(
         let mode = mode.clone();
         let results = results.clone();
         rayon::spawn(move || {
-            let built = match &mode {
+            // A panic escaping a rayon task aborts the process, skipping
+            // terminal restoration — and decoding arbitrary image files is the
+            // likeliest place to hit one. Report it as a failed build instead.
+            let built = catch_unwind(AssertUnwindSafe(|| match &mode {
                 BuildMode::Graphics(picker) => {
                     graphics::build_protocol(&store, picker, &request.key).map(Built::Graphics)
                 }
                 BuildMode::Ascii => ascii::build_ascii(&store, &request.key).map(Built::Ascii),
-            };
+            }))
+            .unwrap_or(None);
             let _ = results.send(BuildResult {
                 generation: request.generation,
                 key: request.key,
