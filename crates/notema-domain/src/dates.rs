@@ -226,15 +226,17 @@ fn days_in_month(year: Option<i32>, month: u32) -> u32 {
 }
 
 fn parse_relative(raw: &str) -> Option<DateSpec> {
-    let (count, unit) = raw.split_at(raw.len().checked_sub(1)?);
-    let unit = match unit {
-        "d" | "D" => DateUnit::Days,
-        "w" | "W" => DateUnit::Weeks,
-        "m" | "M" => DateUnit::Months,
-        "y" | "Y" => DateUnit::Years,
+    // Take the unit off with next_back, not split_at: a byte index one short of
+    // the end is no char boundary when the last char is multibyte.
+    let mut chars = raw.chars();
+    let unit = match chars.next_back()? {
+        'd' | 'D' => DateUnit::Days,
+        'w' | 'W' => DateUnit::Weeks,
+        'm' | 'M' => DateUnit::Months,
+        'y' | 'Y' => DateUnit::Years,
         _ => return None,
     };
-    let count: u32 = count.parse().ok()?;
+    let count: u32 = chars.as_str().parse().ok()?;
     Some(DateSpec::Relative { count, unit })
 }
 
@@ -374,6 +376,11 @@ mod tests {
             "07-25",
             "d",
             "-7d",
+            // Multibyte finals must be rejected, not split mid-char.
+            "5ä",
+            "7д",
+            "ä",
+            "٣d",
         ] {
             assert_eq!(
                 DateSpec::parse(value),
