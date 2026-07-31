@@ -392,8 +392,11 @@ impl Default for UiState {
 }
 
 pub(crate) fn default_config_path() -> AppResult<PathBuf> {
-    // An explicit XDG_CONFIG_HOME always wins, on every platform.
-    if let Ok(config_home) = env::var("XDG_CONFIG_HOME") {
+    // An explicit XDG_CONFIG_HOME always wins, on every platform. Per the XDG
+    // spec an empty value counts as unset, so fall through to the default.
+    if let Ok(config_home) = env::var("XDG_CONFIG_HOME")
+        && !config_home.is_empty()
+    {
         return Ok(PathBuf::from(config_home)
             .join("notema")
             .join("config.toml"));

@@ -1003,6 +1003,32 @@ fn key_workflow_grants_second_device_history_access() {
 }
 
 #[test]
+fn empty_xdg_config_home_is_treated_as_unset() {
+    let home = tempdir().unwrap();
+
+    // With XDG_CONFIG_HOME empty (spec: counts as unset) the config path must
+    // fall back under HOME, not resolve relative to an empty base.
+    let output = Command::new(journal_bin())
+        .args(["use", "work"])
+        .env("XDG_CONFIG_HOME", "")
+        .env("HOME", home.path())
+        .env_remove("NOTEMA_CONFIG")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let marker = "config file not found at ";
+    let start = stderr.find(marker).unwrap_or_else(|| panic!("{stderr}"));
+    let path = &stderr[start + marker.len()..];
+    assert!(
+        path.starts_with(&*home.path().to_string_lossy()),
+        "config path should be under HOME: {stderr}"
+    );
+}
+
+#[test]
 fn first_run_setup_refuses_without_a_terminal() {
     let dir = tempdir().unwrap();
 
