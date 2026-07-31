@@ -142,4 +142,11 @@ impl EncryptionError {
     pub fn is_no_matching_keys(&self) -> bool {
         matches!(self, Self::Decrypt(age::DecryptError::NoMatchingKeys))
     }
+
+    /// Whether this failure means the supplied passphrase didn't open the
+    /// scrypt-wrapped identity. Age's MAC can't tell a wrong passphrase from a
+    /// corrupted payload, so this also matches the (far rarer) corruption case.
+    pub fn is_wrong_passphrase(&self) -> bool {
+        matches!(self, Self::Decrypt(age::DecryptError::DecryptionFailed))
+    }
 }

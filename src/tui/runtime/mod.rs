@@ -308,6 +308,20 @@ fn unlock_key_action(key: KeyEvent) -> UnlockAction {
     }
 }
 
+/// "Incorrect passphrase" only when the identity's decrypt failed; any other
+/// failure (I/O, corrupt identity file, unsupported schema) shows its real
+/// cause instead of sending the user retyping.
+fn unlock_error_message(error: &anyhow::Error) -> String {
+    let wrong_passphrase = error
+        .downcast_ref::<notema_encryption::EncryptionError>()
+        .is_some_and(notema_encryption::EncryptionError::is_wrong_passphrase);
+    if wrong_passphrase {
+        "Incorrect passphrase".to_string()
+    } else {
+        format!("Could not unlock: {error}")
+    }
+}
+
 /// Draw the fullscreen unlock screen and collect the passphrase until it unlocks
 /// the store. Returns `Ok(true)` once unlocked, `Ok(false)` if the user quits
 /// (Esc / Ctrl-C) first. The typed passphrase is zeroized as soon as it's been
@@ -341,9 +355,9 @@ fn run_unlock_screen(
                             input.zeroize();
                             return Ok(true);
                         }
-                        Err(_) => {
+                        Err(unlock_error) => {
                             input.zeroize();
-                            error = Some("Incorrect passphrase".to_string());
+                            error = Some(unlock_error_message(&unlock_error));
                         }
                     }
                 }
@@ -798,6 +812,17 @@ mod tests {
             }
         }
         (input.as_str().to_string(), None)
+    }
+
+    #[test]
+    fn unlock_errors_other_than_a_wrong_passphrase_show_their_cause() {
+        let io_error = anyhow::Error::from(notema_encryption::EncryptionError::Io(
+            std::io::Error::other("disk on fire"),
+        ));
+        assert!(unlock_error_message(&io_error).contains("disk on fire"));
+
+        let plain = anyhow::anyhow!("something else entirely");
+        assert!(unlock_error_message(&plain).contains("something else entirely"));
     }
 
     #[test]

@@ -26,6 +26,32 @@ fn passphrase_identity_round_trips_a_message() {
 }
 
 #[test]
+fn wrong_passphrase_is_distinguishable_from_other_unlock_failures() {
+    // UnlockedIdentity has no Debug (it's key material), so no unwrap_err.
+    fn unlock_error(paths: &KeyPaths, passphrase: Option<&SecretString>) -> EncryptionError {
+        match unlock_identity(paths, passphrase) {
+            Err(error) => error,
+            Ok(_) => panic!("expected the unlock to fail"),
+        }
+    }
+
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    initialize_store_identity(&paths, "laptop", Some(&SecretString::from("secret"))).unwrap();
+
+    let wrong = unlock_error(&paths, Some(&SecretString::from("wrong")));
+    assert!(wrong.is_wrong_passphrase());
+
+    let none = unlock_error(&paths, None);
+    assert!(!none.is_wrong_passphrase());
+
+    // A mangled identity file is a corruption error, not a bad passphrase.
+    fs::write(&paths.identity_file, "not an identity").unwrap();
+    let corrupt = unlock_error(&paths, Some(&SecretString::from("secret")));
+    assert!(!corrupt.is_wrong_passphrase());
+}
+
+#[test]
 fn streaming_encryption_round_trips_a_message() {
     let dir = tempdir().unwrap();
     let paths = paths_in(dir.path());
