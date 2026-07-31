@@ -1,6 +1,10 @@
 use crate::tui::geocode::{GeocodeQuery, GeocodeRequest};
 use crate::tui::state::{ListNav, SelectableList};
-use crate::tui::{app::AppModel, state::Overlay, text_input::TextInput};
+use crate::tui::{
+    app::AppModel,
+    state::{Overlay, ToastVariant},
+    text_input::TextInput,
+};
 use chrono::{DateTime, FixedOffset};
 use notema_context::{DeviceFix, GeocodeHit};
 use notema_domain::Location;
@@ -167,6 +171,18 @@ impl AppModel {
     pub(crate) fn apply_geocode_results(&mut self) -> bool {
         let results = self.geocode.drain();
         let mut changed = false;
+        if self.geocode.take_lost() {
+            if let Some(state) = self.edit_location_state_mut()
+                && state.pending_request_id.take().is_some()
+            {
+                state.lookup_failed("the lookup stopped unexpectedly".to_string());
+            }
+            self.toast(
+                ToastVariant::Error,
+                "Location lookup failed: the geocode worker stopped unexpectedly",
+            );
+            changed = true;
+        }
         for result in results {
             let Some(state) = self.edit_location_state_mut() else {
                 continue;
@@ -554,6 +570,35 @@ mod tests {
             accuracy_m: Some(12.0),
             source: notema_context::DeviceLocationSource::CoreLocation,
         }
+    }
+
+    fn boom_geocode(_: GeocodeRequest) -> crate::tui::geocode::GeocodeResult {
+        panic!("geocode loss test")
+    }
+
+    #[test]
+    fn a_lost_geocode_worker_fails_the_pending_lookup_and_toasts() {
+        let mut app = crate::tui::test_support::app_with_entry();
+        app.begin_edit_location();
+        let state = app.edit_location_state_mut().unwrap();
+        state.pending_request_id = Some(1);
+        state.status = LocationResolveStatus::Resolving;
+
+        app.geocode.submission(boom_geocode).send(GeocodeRequest {
+            id: 1,
+            query: GeocodeQuery::Address("x".to_string()),
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !app.apply_geocode_results() {
+            assert!(std::time::Instant::now() < deadline, "loss never observed");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        let state = app.edit_location_state().unwrap();
+        assert_eq!(state.pending_request_id, None);
+        assert!(matches!(state.status, LocationResolveStatus::Error(_)));
+        let toast = app.toasts.items().last().expect("a toast was pushed");
+        assert!(toast.message.contains("geocode worker"));
     }
 
     #[test]

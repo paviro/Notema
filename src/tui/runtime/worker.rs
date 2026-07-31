@@ -156,6 +156,10 @@ mod tests {
         value
     }
 
+    fn boom(_: u8) -> u8 {
+        panic!("worker loss test")
+    }
+
     #[test]
     fn a_ticket_dropped_unsent_uncounts_its_request() {
         let mut worker = Worker::<u8, u8>::default();
@@ -179,5 +183,22 @@ mod tests {
         };
         assert_eq!(results, [7]);
         assert!(!worker.has_pending());
+    }
+
+    #[test]
+    fn a_dead_worker_is_reported_lost_once() {
+        let mut worker = Worker::<u8, u8>::default();
+        worker.submission(boom).send(1);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let _ = worker.drain();
+            if worker.take_lost() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "loss never observed");
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!worker.has_pending());
+        assert!(!worker.take_lost());
     }
 }

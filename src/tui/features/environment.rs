@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::tui::app::AppModel;
 use crate::tui::editor_state::EditorTarget;
 use crate::tui::environment::{EnvironmentRequest, EnvironmentTarget, environment_fields};
+use crate::tui::state::ToastVariant;
 use chrono::{DateTime, FixedOffset, Local};
 use notema_domain::{Coordinates, Location};
 
@@ -105,6 +106,19 @@ impl AppModel {
     pub(crate) fn apply_environment_results(&mut self) -> bool {
         let results = self.environment.drain();
         let mut changed = false;
+        if self.environment.take_lost() {
+            // Clearing the pending id also releases a save deferred behind the
+            // "Fetching weather…" modal: the poll sees the fetch as landed and
+            // re-runs the save without the data, like its timeout path.
+            if let Some(editor) = self.editor.as_mut() {
+                editor.pending_environment = None;
+            }
+            self.toast(
+                ToastVariant::Error,
+                "Weather and air quality not fetched: the worker stopped unexpectedly",
+            );
+            changed = true;
+        }
         for result in results {
             match result.target {
                 EnvironmentTarget::Editor => {
@@ -137,5 +151,40 @@ impl AppModel {
             }
         }
         changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::tui::environment::{EnvironmentRequest, EnvironmentResult};
+    use crate::tui::test_support::app_with_entry;
+
+    fn boom_environment(_: EnvironmentRequest) -> EnvironmentResult {
+        panic!("environment loss test")
+    }
+
+    #[test]
+    fn a_lost_environment_worker_clears_the_pending_fetch_and_toasts() {
+        let mut app = app_with_entry();
+        app.open_editor_for_new();
+        app.editor.as_mut().unwrap().pending_environment = Some(3);
+
+        app.environment
+            .submission(boom_environment)
+            .send(EnvironmentRequest {
+                id: 3,
+                coordinates: notema_domain::Coordinates::try_new(52.5, 13.4).unwrap(),
+                datetime: chrono::Local::now().fixed_offset(),
+                target: super::EnvironmentTarget::Editor,
+            });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !app.apply_environment_results() {
+            assert!(std::time::Instant::now() < deadline, "loss never observed");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        assert_eq!(app.editor.as_ref().unwrap().pending_environment, None);
+        let toast = app.toasts.items().last().expect("a toast was pushed");
+        assert!(toast.message.contains("worker stopped"));
     }
 }
