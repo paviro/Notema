@@ -412,8 +412,7 @@ fn run_loop(
     let submit_validation = initial_validation.map(|validation| {
         app.initial_validation_submission(validation.cached, validation.discovery)
     });
-    let mut watcher =
-        start_journal_watch(app.services.store.root(), submit_validation, is_ish);
+    let mut watcher = start_journal_watch(app.services.store.root(), submit_validation, is_ish);
     // Watch the themes directory too: edits to the active theme's file repaint
     // live, no restart needed. (The directory exists — startup materialized it.)
     //

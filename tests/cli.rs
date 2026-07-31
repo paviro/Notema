@@ -1089,7 +1089,13 @@ fn enable_refuses_to_overwrite_an_existing_device_key() {
     let output = Command::new(journal_bin())
         .arg("--config")
         .arg(config.parent().unwrap())
-        .args(["encryption", "enable", "--name", "laptop", "--no-passphrase"])
+        .args([
+            "encryption",
+            "enable",
+            "--name",
+            "laptop",
+            "--no-passphrase",
+        ])
         .stdin(Stdio::null())
         .output()
         .unwrap();
