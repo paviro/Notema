@@ -21,6 +21,7 @@ pub(super) fn with_terminal(
     // Declared before the terminal guard so unwinding restores the terminal
     // before deferred diagnostics are flushed.
     let _timing_guard = timing::defer();
+    install_panic_hook();
     enable_raw_mode()?;
     let mut terminal_guard = TerminalRestoreGuard::new();
     let mut stdout = io::stdout();
@@ -57,6 +58,23 @@ pub(super) fn with_terminal(
         Ok(()) => restore_result,
         Err(error) => Err(error),
     }
+}
+
+/// Restore the terminal before the default hook prints a main-thread panic, so
+/// the message lands readable on the normal screen instead of vanishing with
+/// the alternate one. Only the main thread restores: image builds and worker
+/// handlers panic without tearing the TUI down, and their hooks fire even when
+/// the panic is caught. Stays installed after `with_terminal` returns — a
+/// duplicate restore only emits escape codes the terminal ignores.
+fn install_panic_hook() {
+    let main_thread = std::thread::current().id();
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if std::thread::current().id() == main_thread {
+            let _ = restore_terminal(&mut io::stdout());
+        }
+        previous(info);
+    }));
 }
 
 struct TerminalRestoreGuard {
