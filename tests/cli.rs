@@ -1003,6 +1003,24 @@ fn key_workflow_grants_second_device_history_access() {
 }
 
 #[test]
+fn first_run_setup_refuses_without_a_terminal() {
+    let dir = tempdir().unwrap();
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(dir.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("stdin is not a terminal"), "{stderr}");
+    assert!(!dir.path().join("config.toml").exists());
+    assert!(!dir.path().join("Journals").exists());
+}
+
+#[test]
 fn approve_rejects_a_named_request_together_with_all() {
     let dir = tempdir().unwrap();
     let config = dir.path().join("config.toml");

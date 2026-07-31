@@ -8,7 +8,7 @@ use anyhow::bail;
 use notema_storage::{CachePolicy, JournalStore, LibraryDiscovery, LibraryLoadProgress};
 use notema_timing as timing;
 use std::{
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -133,6 +133,17 @@ fn resolve_setup_root(input: &str, default_root: PathBuf, cwd: &Path) -> PathBuf
 }
 
 fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
+    // First-run setup prompts for the journal root; without a terminal to answer
+    // on, its reads return EOF and it would silently create a store from the
+    // defaults. Refuse instead so a non-interactive run (e.g. stdin from
+    // /dev/null) doesn't leave a stray store behind.
+    if !io::stdin().is_terminal() {
+        bail!(
+            "no config found at {} and stdin is not a terminal; run `notema` interactively to set it up, or pass --config <DIR> pointing at an existing config",
+            config_path.display()
+        );
+    }
+
     let mut stdout = io::stdout();
     let default_root = dirs::home_dir()
         .map(|home| home.join("Journals"))
