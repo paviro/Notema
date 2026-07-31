@@ -369,6 +369,10 @@ fn mount_command(cli: &Cli, mountpoint: Option<&Path>) -> AppResult<()> {
              Enable encryption with `notema encryption enable`, or open the files directly."
         );
     }
+    // Unlock before creating the mount point, so a wrong passphrase leaves no
+    // stray directory behind.
+    unlock_identity(&mut store)?;
+
     // Resolve the mount point. An explicit path is created if missing; with none,
     // fall back to a fresh temp directory. `created` tracks whether we made the
     // directory so we can remove it again on unmount and leave nothing behind.
@@ -391,8 +395,6 @@ fn mount_command(cli: &Cli, mountpoint: Option<&Path>) -> AppResult<()> {
             (path, true)
         }
     };
-
-    unlock_identity(&mut store)?;
 
     println!(
         "Mounting journal at {}. Unmount with `umount {}` (macOS: `diskutil unmount`) or Ctrl-C.",

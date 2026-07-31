@@ -59,6 +59,7 @@ pub(crate) fn ensure_journal_mounted(mountpoint: &Path) -> AppResult<()> {
         return Ok(());
     }
 
+    let created = !mountpoint.exists();
     fs::create_dir_all(mountpoint)?;
     println!(
         "Select the journal folder when the iOS picker opens (mounting at {})…",
@@ -73,6 +74,11 @@ pub(crate) fn ensure_journal_mounted(mountpoint: &Path) -> AppResult<()> {
     // `mount` blocks until the picker resolves, but give the kernel a moment to
     // register the mount before we trust /proc/mounts.
     if !mounted_within(mountpoint, Duration::from_secs(3)) {
+        // Nothing mounted here, so remove the directory we created (only while
+        // empty) rather than leave an empty stand-in that reads as a journal.
+        if created {
+            let _ = fs::remove_dir(mountpoint);
+        }
         if !status.success() {
             bail!(
                 "mounting the journal folder failed (mount exited with {status}); relaunch and select the folder"
