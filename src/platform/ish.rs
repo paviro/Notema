@@ -179,8 +179,12 @@ fn read_binding(config_path: &Path) -> AppResult<Option<StoreId>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
     };
-    let binding: StoreBinding =
-        toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+    let binding: StoreBinding = toml::from_str(&text).with_context(|| {
+        format!(
+            "parsing {}; if the file is corrupt, delete it and launch `notema` to select and confirm the journal folder again",
+            path.display()
+        )
+    })?;
     if binding.schema_version != BINDING_SCHEMA_VERSION {
         bail!(
             "unsupported iSH store binding schema {} in {}",
@@ -303,5 +307,32 @@ fn mounted_within(path: &Path, timeout: Duration) -> bool {
         }
         thread::sleep(deadline);
         waited += deadline;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn read_binding_reports_a_recovery_hint_for_a_corrupt_file() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(dir.path().join(BINDING_FILE), "not = valid = toml").unwrap();
+
+        let error = read_binding(&config_path).unwrap_err();
+        let rendered = format!("{error:#}");
+        assert!(rendered.contains("delete it and launch"), "{rendered}");
+    }
+
+    #[test]
+    fn read_binding_returns_none_when_absent() {
+        let dir = tempdir().unwrap();
+        assert!(
+            read_binding(&dir.path().join("config.toml"))
+                .unwrap()
+                .is_none()
+        );
     }
 }
