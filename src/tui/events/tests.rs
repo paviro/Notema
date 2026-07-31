@@ -156,6 +156,7 @@ fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::empty())
 }
 
+mod environment_cases;
 mod keyboard_cases;
 mod mouse_cases;
 mod overlay_cases;
