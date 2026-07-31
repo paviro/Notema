@@ -1003,6 +1003,25 @@ fn key_workflow_grants_second_device_history_access() {
 }
 
 #[test]
+fn approve_rejects_a_named_request_together_with_all() {
+    let dir = tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    fs::create_dir_all(dir.path().join("journals").join("work")).unwrap();
+    write_config(&config, &dir.path().join("journals"), None);
+
+    let output = Command::new(journal_bin())
+        .arg("--config")
+        .arg(config.parent().unwrap())
+        .args(["encryption", "device", "approve", "phone", "--all"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot be used with"), "{stderr}");
+}
+
+#[test]
 fn enable_refuses_to_overwrite_an_existing_device_key() {
     let dir = tempdir().unwrap();
     let config = dir.path().join("config.toml");

@@ -164,7 +164,7 @@ struct RequestSelectionArgs {
     which: Option<String>,
 
     /// Act on every pending request
-    #[arg(long)]
+    #[arg(long, conflicts_with = "which")]
     all: bool,
 }
 
