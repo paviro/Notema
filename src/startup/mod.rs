@@ -56,7 +56,7 @@ pub(crate) fn load_existing(path_override: Option<&Path>) -> AppResult<Startup> 
     timing::mark("startup:config-path");
     if !config_path.exists() {
         bail!(
-            "config file not found at {}; run `journal` once to set it up or pass --config <DIR>",
+            "config file not found at {}; run `notema` once to set it up or pass --config <DIR>",
             config_path.display()
         );
     }
@@ -115,6 +115,23 @@ fn config_path(path_override: Option<&Path>) -> AppResult<PathBuf> {
     }
 }
 
+/// Turn the typed journal-root answer into an absolute path. A relative answer
+/// is anchored to the cwd the user typed it in — later loads anchor a relative
+/// `journal.path` to the config dir instead, so persisting it unresolved would
+/// point the next launch at a different directory.
+fn resolve_setup_root(input: &str, default_root: PathBuf, cwd: &Path) -> PathBuf {
+    let input = input.trim();
+    if input.is_empty() {
+        return default_root;
+    }
+    let root = config::expand_tilde(PathBuf::from(input));
+    if root.is_relative() {
+        cwd.join(root)
+    } else {
+        root
+    }
+}
+
 fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
     let mut stdout = io::stdout();
     let default_root = dirs::home_dir()
@@ -139,11 +156,7 @@ fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
 
         let mut root_input = String::new();
         io::stdin().read_line(&mut root_input)?;
-        if root_input.trim().is_empty() {
-            default_root
-        } else {
-            PathBuf::from(root_input.trim())
-        }
+        resolve_setup_root(&root_input, default_root, &std::env::current_dir()?)
     };
 
     let mut config = Config::new(journal_root);
@@ -394,6 +407,39 @@ mod tests {
         let store = store_in(dir.path());
         store.initialize_encryption("laptop", None).unwrap();
         assert!(!should_offer_encryption(&store).unwrap());
+    }
+
+    #[test]
+    fn setup_root_defaults_when_the_answer_is_blank() {
+        let default = PathBuf::from("/home/user/Journals");
+        assert_eq!(
+            resolve_setup_root("  \n", default.clone(), Path::new("/cwd")),
+            default
+        );
+    }
+
+    #[test]
+    fn setup_root_anchors_a_relative_answer_to_the_cwd() {
+        assert_eq!(
+            resolve_setup_root("journals\n", PathBuf::new(), Path::new("/cwd")),
+            Path::new("/cwd/journals")
+        );
+    }
+
+    #[test]
+    fn setup_root_keeps_an_absolute_answer() {
+        assert_eq!(
+            resolve_setup_root("/data/journals\n", PathBuf::new(), Path::new("/cwd")),
+            Path::new("/data/journals")
+        );
+    }
+
+    #[test]
+    fn setup_root_expands_a_tilde_answer() {
+        let root = resolve_setup_root("~/Journals\n", PathBuf::new(), Path::new("/cwd"));
+        assert!(root.is_absolute());
+        assert!(root.ends_with("Journals"));
+        assert!(!root.starts_with("/cwd"));
     }
 
     #[test]
