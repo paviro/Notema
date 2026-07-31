@@ -1,4 +1,4 @@
-use crate::{AppResult, config::Config};
+use crate::AppResult;
 
 use super::prompts;
 use anyhow::bail;
@@ -31,11 +31,10 @@ pub(crate) fn cli_progress(unit: &'static str) -> impl FnMut(usize, usize) {
 
 pub(crate) fn encrypt_store(
     store: &JournalStore,
-    config: &Config,
     device_name: Option<&str>,
     no_passphrase: bool,
 ) -> AppResult<()> {
-    let recipient = if store.encryption_enabled() {
+    let (recipient, warnings, minted_without_passphrase) = if store.encryption_enabled() {
         if !store.unlock_available() {
             bail!(
                 "this journal is already encrypted for other devices, but this one has no key at {}; run `{}` to request access instead",
@@ -43,7 +42,9 @@ pub(crate) fn encrypt_store(
                 crate::ENROLL_CMD,
             );
         }
-        store.public_recipient()?
+        let recipient = store.public_recipient()?;
+        let summary = store.encrypt_store(cli_progress("files"))?;
+        (recipient, summary.warnings, false)
     } else if store.has_encrypted_entries()? {
         // Encrypted entries but no roster to encrypt more against — surface the
         // storage layer's own typed error rather than restating its message here.
@@ -55,53 +56,25 @@ pub(crate) fn encrypt_store(
         println!("No journal encryption identity configured; generating an age identity.");
         let (name, passphrase) = prompts::resolve_new_identity_options(device_name, no_passphrase)?;
         let summary = store.enable_encryption(&name, passphrase.as_ref(), cli_progress("files"))?;
-        let recipient = summary.recipient;
-        println!(
-            "Encrypted journal store at {}",
-            config.journal.path.display()
-        );
-        println!(
-            "Encryption recipient: {recipient}. Identity file: {}. Back it up; without it encrypted journal files cannot be decrypted.",
-            store.identity_path().display()
-        );
-        if passphrase.is_none() {
-            println!("This key has no passphrase — keep this device and its backups secure.");
-        }
-        super::print_warnings(&summary.warnings);
-        return Ok(());
+        (summary.recipient, summary.warnings, passphrase.is_none())
     };
 
-    let summary = store.encrypt_store(cli_progress("files"))?;
-    println!(
-        "Encrypted journal store at {}",
-        config.journal.path.display()
-    );
+    println!("Encrypted journal store at {}", store.root().display());
     println!(
         "Encryption recipient: {recipient}. Identity file: {}. Back it up; without it encrypted journal files cannot be decrypted.",
         store.identity_path().display()
     );
-    super::print_warnings(&summary.warnings);
+    if minted_without_passphrase {
+        println!("This key has no passphrase — keep this device and its backups secure.");
+    }
+    super::print_warnings(&warnings);
     Ok(())
 }
 
-pub(crate) fn decrypt_store(mut store: JournalStore, config: &Config) -> AppResult<()> {
-    if !store.unlock_available() {
-        bail!(
-            "age identity not found at {}; encrypted entries cannot be decrypted on this machine",
-            store.identity_path().display()
-        );
-    }
-    let passphrase = if store.identity_needs_passphrase()? {
-        Some(prompts::prompt_unlock_passphrase()?)
-    } else {
-        None
-    };
-    store.unlock(passphrase.as_ref())?;
+pub(crate) fn decrypt_store(mut store: JournalStore) -> AppResult<()> {
+    super::unlock_identity(&mut store)?;
     let summary = store.decrypt_store(cli_progress("files"))?;
-    println!(
-        "Decrypted journal store at {}",
-        config.journal.path.display()
-    );
+    println!("Decrypted journal store at {}", store.root().display());
     if let Some(backup) = summary.backup_path {
         println!("Backup written to {}", backup.display());
     }

@@ -261,13 +261,11 @@ fn handle_command(cli: &Cli, command: &CliCommand, stdin_is_pipe: bool) -> AppRe
 fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResult<()> {
     match command {
         EncryptionCommand::Enable(args) => {
-            let startup::Startup { config, store, .. } =
-                startup::load_existing(cli.config.as_deref())?;
-            encryption::encrypt_store(&store, &config, args.name.as_deref(), args.no_passphrase)
+            let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
+            encryption::encrypt_store(&store, args.name.as_deref(), args.no_passphrase)
         }
         EncryptionCommand::Disable(args) => {
-            let startup::Startup { config, store, .. } =
-                startup::load_existing(cli.config.as_deref())?;
+            let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
             if !prompts::confirm(
                 "Decrypt every entry and turn encryption off for this journal?",
                 args.yes,
@@ -275,7 +273,7 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
                 println!("Aborted.");
                 return Ok(());
             }
-            encryption::decrypt_store(store, &config)
+            encryption::decrypt_store(store)
         }
         EncryptionCommand::Device { command } => handle_device_command(cli, command),
     }
@@ -294,17 +292,14 @@ fn handle_device_command(cli: &Cli, command: &DeviceCommand) -> AppResult<()> {
     }
 }
 
-/// Open the store and unlock this device's identity, prompting for a passphrase
-/// only when the identity is passphrase-protected. Returns the passphrase too
-/// (for rotation, which re-wraps the new key with it). Used by the device
-/// operations that must decrypt to re-encrypt.
-fn open_unlocked_store_with_passphrase(
-    cli: &Cli,
-) -> AppResult<(JournalStore, Option<SecretString>)> {
-    let startup::Startup { mut store, .. } = startup::load_existing(cli.config.as_deref())?;
+/// Unlock this device's identity, prompting for a passphrase only when the key
+/// is passphrase-protected. Returns the passphrase too (for rotation, which
+/// re-wraps the new key with it). Bails when this device has no key.
+fn unlock_identity(store: &mut JournalStore) -> AppResult<Option<SecretString>> {
     if !store.unlock_available() {
         bail!(
-            "no encryption identity on this device; run `{}` first",
+            "this journal is encrypted but this device has no key at {}; run `{}` first",
+            store.identity_path().display(),
             crate::ENROLL_CMD
         );
     }
@@ -314,6 +309,16 @@ fn open_unlocked_store_with_passphrase(
         None
     };
     store.unlock(passphrase.as_ref())?;
+    Ok(passphrase)
+}
+
+/// Open the store and unlock this device's identity. Used by the device
+/// operations that must decrypt to re-encrypt.
+fn open_unlocked_store_with_passphrase(
+    cli: &Cli,
+) -> AppResult<(JournalStore, Option<SecretString>)> {
+    let startup::Startup { mut store, .. } = startup::load_existing(cli.config.as_deref())?;
+    let passphrase = unlock_identity(&mut store)?;
     Ok((store, passphrase))
 }
 
@@ -327,18 +332,8 @@ pub(super) fn unlock_if_encrypted(store: &mut JournalStore) -> AppResult<()> {
     if !store.encryption_enabled() {
         return Ok(());
     }
-    if !store.unlock_available() {
-        bail!(
-            "this journal is encrypted but this device has no key; run `{}` first",
-            crate::ENROLL_CMD
-        );
-    }
-    let passphrase = if store.identity_needs_passphrase()? {
-        Some(prompts::prompt_unlock_passphrase()?)
-    } else {
-        None
-    };
-    store.unlock(passphrase.as_ref())
+    unlock_identity(store)?;
+    Ok(())
 }
 
 /// Mount the whole journal store as a decrypted filesystem. Journals appear as
@@ -361,13 +356,6 @@ fn mount_command(cli: &Cli, mountpoint: Option<&Path>) -> AppResult<()> {
              Enable encryption with `notema encryption enable`, or open the files directly."
         );
     }
-    if !store.unlock_available() {
-        bail!(
-            "this journal is encrypted but this device has no key; run `{}` first",
-            crate::ENROLL_CMD
-        );
-    }
-
     // Resolve the mount point. An explicit path is created if missing; with none,
     // fall back to a fresh temp directory. `created` tracks whether we made the
     // directory so we can remove it again on unmount and leave nothing behind.
@@ -391,12 +379,7 @@ fn mount_command(cli: &Cli, mountpoint: Option<&Path>) -> AppResult<()> {
         }
     };
 
-    let passphrase = if store.identity_needs_passphrase()? {
-        Some(prompts::prompt_unlock_passphrase()?)
-    } else {
-        None
-    };
-    store.unlock(passphrase.as_ref())?;
+    unlock_identity(&mut store)?;
 
     println!(
         "Mounting journal at {}. Unmount with `umount {}` (macOS: `diskutil unmount`) or Ctrl-C.",
@@ -484,12 +467,7 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
         // Unlock to tell the states apart: already a recipient, request still
         // queued, or request denied/lost — that last one re-requests with the
         // existing key rather than minting a new identity.
-        let passphrase = if store.identity_needs_passphrase()? {
-            Some(prompts::prompt_unlock_passphrase()?)
-        } else {
-            None
-        };
-        store.unlock(passphrase.as_ref())?;
+        unlock_identity(&mut store)?;
         if store.is_current_recipient()? {
             bail!("this device can already read this journal as '{name}'");
         }
