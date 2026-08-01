@@ -60,6 +60,8 @@ enum KeyMaterial {
     Encrypted(Zeroizing<String>),
     /// plaintext bundle, stored mode 0600 and opened without a passphrase.
     Plain(Zeroizing<String>),
+    /// plaintext file bundle
+    PlainFile(String),
 }
 
 /// This device's stored identity: the label it stores itself under and its key
@@ -85,6 +87,8 @@ struct StoredIdentityWire {
     encrypted_keys: Option<Zeroizing<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     plain_keys: Option<Zeroizing<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    plain_keys_file: Option<String>,
 }
 
 impl TryFrom<StoredIdentityWire> for StoredIdentity {
@@ -94,13 +98,19 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
         if wire.schema_version != 1 {
             return Err("journal identity file has an unsupported schema version");
         }
-        let key = match (wire.encrypted_keys, wire.plain_keys) {
-            (Some(armor), None) => KeyMaterial::Encrypted(armor),
-            (None, Some(plain)) => KeyMaterial::Plain(plain),
-            (Some(_), Some(_)) => {
+        let key = match (wire.encrypted_keys, wire.plain_keys, wire.plain_keys_file) {
+            (Some(armor), None, None) => KeyMaterial::Encrypted(armor),
+            (None, Some(plain), None) => KeyMaterial::Plain(plain),
+            (None, None, Some(path)) => KeyMaterial::PlainFile(path),
+            (Some(_), Some(_), Some(_)) | (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
                 return Err("journal identity file has both encrypted and plaintext key material");
             }
-            (None, None) => return Err("journal identity file has no key material"),
+            (None, Some(_), Some(_)) => {
+                return Err(
+                    "journal identity file has both plaintext key and plaintext key file material",
+                );
+            }
+            (None, None, None) => return Err("journal identity file has no key material"),
         };
         Ok(Self {
             device_name: wire.device_name,
@@ -241,6 +251,7 @@ pub(crate) fn write_stored_identity(
         device_name: name.to_string(),
         encrypted_keys,
         plain_keys,
+        plain_keys_file: None,
     };
     // The serialized document carries the plaintext key bundle in the
     // no-passphrase case; zeroize the buffer once it's on disk.
@@ -269,6 +280,17 @@ fn decrypt_identity(
             })?)
         }
         KeyMaterial::Plain(plain) => plain.clone(),
+        KeyMaterial::PlainFile(path) => {
+            let plaintext = fs::read_to_string(path).map_err(|error| {
+                EncryptionError::Io(std::io::Error::other(format!(
+                    "plaintext key file load failed: {error}",
+                )))
+            })?;
+            Zeroizing::new(String::from_utf8(plaintext.into_bytes()).map_err(|error| {
+                drop(Zeroizing::new(error.into_bytes()));
+                EncryptionError::MalformedStoredIdentity
+            })?)
+        }
     };
     // toml::de::Error's Display echoes the offending input line — here the
     // decrypted secret bundle — and would retain it unzeroized; report the
