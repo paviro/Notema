@@ -5,8 +5,10 @@ use super::paths::{
     ENTRY_ID_LEN, encrypted_entry_path_with_id, entry_assets_dir, entry_path_with_id, random_id,
 };
 use crate::AppResult;
+use crate::storage::dates::to_offset_rfc3339;
 use anyhow::bail;
-use chrono::{DateTime, FixedOffset, Local};
+use jiff::Zoned;
+use jiff::tz::TimeZone;
 use notema_domain::{AirQuality, Celestial, ImportSource, Location, Weather};
 use std::{
     fs::{self, OpenOptions},
@@ -32,8 +34,8 @@ pub struct EntryDraft<'a> {
     pub journal: &'a str,
     pub body: &'a str,
     pub metadata: &'a Metadata,
-    pub created_at: Option<DateTime<FixedOffset>>,
-    pub edited_at: Option<DateTime<FixedOffset>>,
+    pub created_at: Option<Zoned>,
+    pub edited_at: Option<Zoned>,
     pub timezone: Option<&'a str>,
     pub location: Option<&'a Location>,
     pub weather: Option<&'a Weather>,
@@ -92,11 +94,10 @@ fn create_entry_inner(
     assets: EntryAssetOptions,
 ) -> AppResult<EntryCreateOutcome> {
     let native_timestamp = draft.created_at.is_none();
-    let created_at = draft
-        .created_at
-        .unwrap_or_else(|| Local::now().fixed_offset());
-    let edited_at = draft.edited_at.unwrap_or(created_at);
-    let local_timezone = native_timestamp.then(|| iana_time_zone::get_timezone().ok());
+    let created_at = draft.created_at.unwrap_or_else(Zoned::now);
+    let edited_at = draft.edited_at.unwrap_or_else(|| created_at.clone());
+    let local_timezone =
+        native_timestamp.then(|| TimeZone::system().iana_name().map(str::to_string));
     let timezone = draft
         .timezone
         .or_else(|| local_timezone.as_ref().and_then(Option::as_deref));
@@ -104,9 +105,9 @@ fn create_entry_inner(
     for _ in 0..ENTRY_CREATE_ATTEMPTS {
         let id = random_id(ENTRY_ID_LEN);
         let path = if codec.encrypts_new_entries() {
-            encrypted_entry_path_with_id(root, draft.journal, created_at, &id)
+            encrypted_entry_path_with_id(root, draft.journal, &created_at, &id)
         } else {
-            entry_path_with_id(root, draft.journal, created_at, &id)
+            entry_path_with_id(root, draft.journal, &created_at, &id)
         };
         if path.exists() || entry_assets_dir(&path).is_some_and(|assets| assets.exists()) {
             continue;
@@ -130,8 +131,8 @@ fn create_entry_inner(
         let rewritten_body = staged.ingest(&source_body, encryption, assets)?;
         let body = rewritten_body.as_deref().unwrap_or(&source_body);
         let content = entry_content(
-            created_at,
-            edited_at,
+            &created_at,
+            &edited_at,
             body,
             draft.metadata,
             timezone,
@@ -198,8 +199,8 @@ fn clone_entry_assets(
 
 #[allow(clippy::too_many_arguments)]
 fn entry_content(
-    created_at: DateTime<FixedOffset>,
-    edited_at: DateTime<FixedOffset>,
+    created_at: &Zoned,
+    edited_at: &Zoned,
     body: &str,
     metadata: &Metadata,
     timezone: Option<&str>,
@@ -214,8 +215,8 @@ fn entry_content(
         schema_version: crate::markdown::ENTRY_SCHEMA_VERSION,
         metadata: metadata.clone(),
         datetime: crate::markdown::EntryTimestamps {
-            created_at: Some(created_at.to_rfc3339()),
-            edited_at: Some(edited_at.to_rfc3339()),
+            created_at: Some(to_offset_rfc3339(created_at)),
+            edited_at: Some(to_offset_rfc3339(edited_at)),
             timezone: timezone.map(str::to_string),
             writing_seconds,
         },
@@ -242,7 +243,7 @@ pub(crate) fn create_entry_file(
     codec: &EntryCodec<'_>,
     root: &Path,
     journal: &str,
-    now: DateTime<FixedOffset>,
+    now: &Zoned,
     content: &str,
     mut id_generator: impl FnMut() -> String,
 ) -> AppResult<PathBuf> {

@@ -13,8 +13,9 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, FixedOffset};
-use notema_domain::{Celestial, ImportSource, Location, Metadata, Weather};
+use jiff::Zoned;
+use jiff::tz::TimeZone;
+use notema_domain::{Celestial, ImportSource, Location, Metadata, Timestamp, Weather};
 use thiserror::Error;
 
 /// Map Day One's parsed location onto the store's [`Location`], keeping only the
@@ -79,9 +80,9 @@ fn map_celestial(weather: &dayone::model::Weather) -> Celestial {
 /// Seconds between two RFC3339 instants (sunset − sunrise), or `None` when either
 /// fails to parse or sunset precedes sunrise.
 fn day_length_seconds(sunrise: &str, sunset: &str) -> Option<u64> {
-    let rise = DateTime::parse_from_rfc3339(sunrise).ok()?;
-    let set = DateTime::parse_from_rfc3339(sunset).ok()?;
-    u64::try_from(set.signed_duration_since(rise).num_seconds()).ok()
+    let rise = Timestamp::parse(sunrise).parsed?;
+    let set = Timestamp::parse(sunset).parsed?;
+    u64::try_from(set.timestamp().as_second() - rise.timestamp().as_second()).ok()
 }
 
 use dayone::model::DayOneExport;
@@ -94,12 +95,12 @@ use dayone::text::{
 /// Re-zone Day One's UTC timestamp into the entry's IANA zone so the stored
 /// RFC3339 carries the offset it was written at (e.g. `+02:00` for a summer
 /// `Europe/Berlin` entry). Falls back to UTC when the zone is missing/unknown.
-fn zoned_timestamp(rfc3339_utc: &str, tz: Option<&str>) -> Option<DateTime<FixedOffset>> {
-    let instant = DateTime::parse_from_rfc3339(rfc3339_utc).ok()?;
-    match tz.and_then(|name| name.parse::<chrono_tz::Tz>().ok()) {
-        Some(zone) => Some(instant.with_timezone(&zone).fixed_offset()),
-        None => Some(instant.fixed_offset()),
-    }
+fn zoned_timestamp(rfc3339_utc: &str, tz: Option<&str>) -> Option<Zoned> {
+    let instant = Timestamp::parse(rfc3339_utc).parsed?.timestamp();
+    let zone = tz
+        .and_then(|name| TimeZone::get(name).ok())
+        .unwrap_or(TimeZone::UTC);
+    Some(instant.to_zoned(zone))
 }
 
 #[derive(Debug, Error)]
@@ -135,8 +136,8 @@ pub struct ImportedEntry {
     pub provenance: ImportSource,
     pub body: String,
     pub metadata: Metadata,
-    pub created_at: DateTime<FixedOffset>,
-    pub edited_at: DateTime<FixedOffset>,
+    pub created_at: Zoned,
+    pub edited_at: Zoned,
     pub timezone: Option<String>,
     pub location: Option<Location>,
     pub weather: Option<Weather>,
@@ -173,7 +174,7 @@ pub fn parse_dayone(json_path: &Path) -> Result<ImportBatch, ImportError> {
         // its raw UTC offset by `zoned_timestamp`; surface that so the wrong wall
         // clock isn't a mystery.
         if let Some(name) = tz
-            && name.parse::<chrono_tz::Tz>().is_err()
+            && TimeZone::get(name).is_err()
         {
             batch.warnings.push(ImportWarning {
                 entry_id: entry.uuid.clone(),
@@ -195,7 +196,7 @@ pub fn parse_dayone(json_path: &Path) -> Result<ImportBatch, ImportError> {
             .modified_date
             .as_deref()
             .and_then(|value| zoned_timestamp(value, tz))
-            .unwrap_or(created_at);
+            .unwrap_or_else(|| created_at.clone());
 
         let media = MediaIndex::build(entry, media_root);
         // Prefer Day One's structured `richText` (clean, faithful) when present;

@@ -5,7 +5,8 @@
 //! celestial data can be filled in instantly and offline the moment a location is
 //! set, independent of the (networked) weather fetch.
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, Utc};
+use jiff::Zoned;
 use notema_domain::{Celestial, Coordinates};
 use sunrise::{Coordinates as SolarCoordinates, SolarDay, SolarEvent};
 
@@ -19,18 +20,21 @@ const REFERENCE_NEW_MOON_UNIX: f64 = 947_182_440.0;
 /// `moon_phase`/`moon_phase_name` come from the instant. Sunrise/sunset are left
 /// `None` when the sun never crosses the horizon that day (polar day/night) or
 /// the coordinates are out of range.
-pub fn compute_celestial(coordinates: Coordinates, datetime: DateTime<FixedOffset>) -> Celestial {
+pub fn compute_celestial(coordinates: Coordinates, datetime: Zoned) -> Celestial {
     let lat = coordinates.latitude();
     let lon = coordinates.longitude();
-    let (sunrise_utc, sunset_utc) = match SolarCoordinates::new(lat, lon) {
-        Some(coord) => {
-            let day = SolarDay::new(coord, datetime.date_naive());
+    // `sunrise` is chrono-typed: feed it a `chrono::NaiveDate` and read back
+    // `chrono::DateTime<Utc>`, converting to jiff at the boundary. This bridge is
+    // why `notema-context` keeps a minimal direct `chrono` dependency.
+    let (sunrise_utc, sunset_utc) = match (SolarCoordinates::new(lat, lon), solar_date(&datetime)) {
+        (Some(coord), Some(date)) => {
+            let day = SolarDay::new(coord, date);
             (
                 day.event_time(SolarEvent::Sunrise),
                 day.event_time(SolarEvent::Sunset),
             )
         }
-        None => (None, None),
+        _ => (None, None),
     };
     // Daylight duration: only when both events occur (not polar day/night).
     let day_length_seconds = match (sunrise_utc, sunset_utc) {
@@ -40,11 +44,16 @@ pub fn compute_celestial(coordinates: Coordinates, datetime: DateTime<FixedOffse
         _ => None,
     };
     // Render each event at the entry's own UTC offset, matching its wall clock.
+    let offset = datetime.offset();
     let render = |event: Option<DateTime<Utc>>| {
-        event.map(|utc| utc.with_timezone(datetime.offset()).to_rfc3339())
+        event.and_then(|utc| {
+            jiff::Timestamp::from_second(utc.timestamp())
+                .ok()
+                .map(|instant| instant.display_with_offset(offset).to_string())
+        })
     };
 
-    let phase = moon_phase_fraction(datetime.with_timezone(&Utc));
+    let phase = moon_phase_fraction(datetime.timestamp().as_second());
     Celestial {
         moon_phase: Some(phase),
         moon_phase_name: Some(moon_phase_name(phase).to_string()),
@@ -54,11 +63,23 @@ pub fn compute_celestial(coordinates: Coordinates, datetime: DateTime<FixedOffse
     }
 }
 
+/// The entry's civil date at its own offset, as the `chrono::NaiveDate` the
+/// `sunrise` crate expects. `None` only if the calendar date is somehow out of
+/// chrono's range, which a real entry never hits.
+fn solar_date(datetime: &Zoned) -> Option<chrono::NaiveDate> {
+    let date = datetime.date();
+    chrono::NaiveDate::from_ymd_opt(
+        i32::from(date.year()),
+        u32::from(date.month().unsigned_abs()),
+        u32::from(date.day().unsigned_abs()),
+    )
+}
+
 /// The moon's position in its cycle as a fraction in `[0, 1)`: 0 is new, 0.5 is
 /// full. Derived from the time elapsed since a known new moon, folded onto one
 /// synodic month.
-fn moon_phase_fraction(instant: DateTime<Utc>) -> f64 {
-    let elapsed_days = (instant.timestamp() as f64 - REFERENCE_NEW_MOON_UNIX) / 86_400.0;
+fn moon_phase_fraction(unix_seconds: i64) -> f64 {
+    let elapsed_days = (unix_seconds as f64 - REFERENCE_NEW_MOON_UNIX) / 86_400.0;
     (elapsed_days / SYNODIC_MONTH_DAYS).rem_euclid(1.0)
 }
 
@@ -80,12 +101,11 @@ fn moon_phase_name(fraction: f64) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
-    fn utc(y: i32, m: u32, d: u32) -> DateTime<FixedOffset> {
-        FixedOffset::east_opt(0)
-            .unwrap()
-            .with_ymd_and_hms(y, m, d, 12, 0, 0)
+    fn utc(y: i16, m: i8, d: i8) -> Zoned {
+        jiff::civil::date(y, m, d)
+            .at(12, 0, 0, 0)
+            .to_zoned(jiff::tz::TimeZone::UTC)
             .unwrap()
     }
 
@@ -128,7 +148,11 @@ mod tests {
     #[test]
     fn moon_phase_fraction_is_near_full_at_a_known_full_moon() {
         // 2026-01-03 was a full moon; the fraction should sit near 0.5.
-        let fraction = moon_phase_fraction(Utc.with_ymd_and_hms(2026, 1, 3, 10, 0, 0).unwrap());
+        let instant = jiff::civil::date(2026, 1, 3)
+            .at(10, 0, 0, 0)
+            .to_zoned(jiff::tz::TimeZone::UTC)
+            .unwrap();
+        let fraction = moon_phase_fraction(instant.timestamp().as_second());
         assert!((fraction - 0.5).abs() < 0.05, "fraction was {fraction}");
     }
 }

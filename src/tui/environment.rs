@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use chrono::{DateTime, FixedOffset};
+use jiff::Zoned;
 use notema_context::{EnvironmentReport, EnvironmentWants, fetch_environment};
 use notema_domain::{Coordinates, MetadataField};
 
@@ -33,7 +33,7 @@ pub(crate) enum EnvironmentTarget {
 pub(crate) struct EnvironmentRequest {
     pub(crate) id: u64,
     pub(crate) coordinates: Coordinates,
-    pub(crate) datetime: DateTime<FixedOffset>,
+    pub(crate) datetime: Zoned,
     pub(crate) target: EnvironmentTarget,
 }
 
@@ -49,7 +49,7 @@ pub(crate) struct EnvironmentResult {
 /// failure (the caller can't do anything with the error mid-save).
 pub(crate) fn fetch_entry_environment(
     coordinates: Coordinates,
-    datetime: DateTime<FixedOffset>,
+    datetime: Zoned,
 ) -> Environment {
     fetch_environment(coordinates, datetime, EnvironmentWants::all())
 }

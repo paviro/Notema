@@ -1,4 +1,4 @@
-use chrono::{DateTime, FixedOffset};
+use jiff::Zoned;
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
@@ -18,27 +18,22 @@ pub(crate) fn random_id(len: usize) -> String {
 }
 
 #[cfg(test)]
-pub(crate) fn entry_path(root: &Path, journal: &str, now: DateTime<FixedOffset>) -> PathBuf {
+pub(crate) fn entry_path(root: &Path, journal: &str, now: &Zoned) -> PathBuf {
     entry_path_with_id(root, journal, now, &random_id(ENTRY_ID_LEN))
 }
 
-pub(crate) fn entry_path_with_id(
-    root: &Path,
-    journal: &str,
-    now: DateTime<FixedOffset>,
-    id: &str,
-) -> PathBuf {
+pub(crate) fn entry_path_with_id(root: &Path, journal: &str, now: &Zoned, id: &str) -> PathBuf {
     root.join(journal)
-        .join(now.format("%Y").to_string())
-        .join(now.format("%m").to_string())
-        .join(now.format("%d").to_string())
-        .join(format!("{}-{id}.md", now.format("%Y-%m-%dT%H-%M-%S")))
+        .join(now.strftime("%Y").to_string())
+        .join(now.strftime("%m").to_string())
+        .join(now.strftime("%d").to_string())
+        .join(format!("{}-{id}.md", now.strftime("%Y-%m-%dT%H-%M-%S")))
 }
 
 pub(crate) fn encrypted_entry_path_with_id(
     root: &Path,
     journal: &str,
-    now: DateTime<FixedOffset>,
+    now: &Zoned,
     id: &str,
 ) -> PathBuf {
     entry_path_with_id(root, journal, now, id).with_extension("md.age")

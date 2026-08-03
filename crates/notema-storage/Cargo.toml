@@ -12,10 +12,9 @@ notema-domain.workspace = true
 notema-encryption.workspace = true
 notema-timing.workspace = true
 anyhow.workspace = true
-chrono.workspace = true
 getrandom.workspace = true
 hex.workspace = true
-iana-time-zone.workspace = true
+jiff.workspace = true
 image = { workspace = true, features = ["jpeg", "png", "gif", "webp", "bmp"] }
 moxcms.workspace = true
 rand.workspace = true

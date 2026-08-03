@@ -6,7 +6,7 @@
 
 #![forbid(unsafe_code)]
 
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 use notema_domain::{Entry, entry_group_date};
 
 mod cadence;
@@ -67,15 +67,15 @@ pub struct Tally {
 /// Aggregate `entries` into an [`Analytics`] snapshot. `today` anchors the
 /// "current streak" calculation and is passed in (not read from the clock) so
 /// the function stays pure and testable.
-pub fn analyze(entries: &[&Entry], today: NaiveDate) -> Analytics {
+pub fn analyze(entries: &[&Entry], today: Date) -> Analytics {
     // Resolve each entry's grouping date once; every family reuses it.
-    let dates: Vec<Option<NaiveDate>> = entries
+    let dates: Vec<Option<Date>> = entries
         .iter()
         .map(|entry| entry_group_date(entry))
         .collect();
     // Decide the period granularity once from the whole span so the cadence
     // histogram and the mood series always agree on year-vs-month buckets.
-    let by_year = multi_year(dates.iter().flatten().map(|date| date.year()));
+    let by_year = multi_year(dates.iter().flatten().map(|date| i32::from(date.year())));
 
     let correlations = correlations::build_correlations(entries);
     let lifts_person = pick_extreme(correlations.people.iter(), today, true);
@@ -90,7 +90,7 @@ pub fn analyze(entries: &[&Entry], today: NaiveDate) -> Analytics {
         today,
         false,
     );
-    let top_feeling_this_year = top_feeling_in_year(entries, &dates, today.year());
+    let top_feeling_this_year = top_feeling_in_year(entries, &dates, i32::from(today.year()));
 
     Analytics {
         cadence: cadence::build(entries, &dates, by_year, today),
@@ -112,7 +112,7 @@ pub fn analyze(entries: &[&Entry], today: NaiveDate) -> Analytics {
 /// changes day to day. `None` when nothing pulls mood in the requested direction.
 fn pick_extreme<'a>(
     correlates: impl Iterator<Item = &'a Correlation>,
-    today: NaiveDate,
+    today: Date,
     positive: bool,
 ) -> Option<String> {
     let want = |delta: f32| if positive { delta > 0.0 } else { delta < 0.0 };
@@ -138,22 +138,29 @@ fn pick_extreme<'a>(
         }
     });
     candidates.sort_by(|a, b| a.name.cmp(&b.name));
-    let index = today.num_days_from_ce().rem_euclid(candidates.len() as i32) as usize;
+    let index = (day_ordinal(today).rem_euclid(candidates.len() as i64)) as usize;
     candidates
         .get(index)
         .map(|correlate| correlate.name.clone())
+}
+
+/// A per-day-monotonic counter used only to rotate the daily pick: its absolute
+/// value is irrelevant, only that it advances by one each calendar day.
+fn day_ordinal(date: Date) -> i64 {
+    date.since((jiff::Unit::Day, jiff::civil::date(1, 1, 1)))
+        .map_or(0, |span| i64::from(span.get_days()))
 }
 
 /// The feeling logged on the most entries dated in `year`; ties break
 /// alphabetically. `None` when no this-year entry carries a feeling.
 fn top_feeling_in_year(
     entries: &[&Entry],
-    dates: &[Option<NaiveDate>],
+    dates: &[Option<Date>],
     year: i32,
 ) -> Option<String> {
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for (entry, date) in entries.iter().zip(dates) {
-        if date.map(|date| date.year()) == Some(year) {
+        if date.map(|date| i32::from(date.year())) == Some(year) {
             for feeling in &entry.feelings {
                 *counts.entry(feeling.as_str()).or_default() += 1;
             }
@@ -176,11 +183,11 @@ pub(crate) fn multi_year(years: impl Iterator<Item = i32>) -> bool {
 
 /// The sort key for one period bucket: `(year, month)`, with month `0` in the
 /// per-year mode so the key stays chronological either way.
-pub(crate) fn period_key(date: NaiveDate, by_year: bool) -> (i32, u32) {
+pub(crate) fn period_key(date: Date, by_year: bool) -> (i32, u32) {
     if by_year {
-        (date.year(), 0)
+        (i32::from(date.year()), 0)
     } else {
-        (date.year(), date.month())
+        (i32::from(date.year()), u32::from(date.month().unsigned_abs()))
     }
 }
 
@@ -216,7 +223,7 @@ pub(crate) fn month_abbrev(month: u32) -> &'static str {
 pub(crate) mod test_support {
     use std::path::PathBuf;
 
-    use chrono::NaiveDate;
+    use jiff::civil::Date;
     use notema_domain::{Entry, EntryEncryptionState, Timestamp};
 
     /// Build a plain entry from defaults, letting the caller set only the fields
@@ -263,8 +270,8 @@ pub(crate) mod test_support {
         entries.iter().collect()
     }
 
-    pub(crate) fn date(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    pub(crate) fn date(year: i16, month: i8, day: i8) -> Date {
+        jiff::civil::date(year, month, day)
     }
 }
 

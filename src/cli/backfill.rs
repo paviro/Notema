@@ -7,7 +7,7 @@
 
 use std::{thread, time::Duration};
 
-use chrono::Local;
+use jiff::Zoned;
 use notema_context::{EnvironmentWants, compute_celestial, fetch_environment, reverse_geocode};
 use notema_domain::{EntryEncryptionState, MetadataField};
 
@@ -44,9 +44,7 @@ pub(super) fn run(cli: &Cli) -> AppResult<()> {
             .location
             .as_ref()
             .expect("coordinates imply a location");
-        let datetime = entry
-            .created_time()
-            .unwrap_or_else(|| Local::now().fixed_offset());
+        let datetime = entry.created_time().unwrap_or_else(Zoned::now);
 
         let mut fields: Vec<MetadataField> = Vec::new();
         let mut hit_network = false;

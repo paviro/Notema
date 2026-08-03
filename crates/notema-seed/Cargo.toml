@@ -9,8 +9,8 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-chrono.workspace = true
 clap.workspace = true
+jiff.workspace = true
 notema-domain.workspace = true
 notema-storage.workspace = true
 rand.workspace = true

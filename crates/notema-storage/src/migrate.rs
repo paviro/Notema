@@ -1,6 +1,6 @@
 use crate::{AppResult, JournalStore, storage};
 use anyhow::{Context, bail};
-use chrono::Local;
+use jiff::Zoned;
 use notema_encryption::{self as crypto, KeyPaths};
 use std::{
     ffi::OsStr,
@@ -645,9 +645,20 @@ fn backup_siblings(
 /// Sibling backup path for a single file: `<file_name>.backup-<timestamp>`,
 /// matching the naming the startup scan looks for.
 pub(crate) fn file_backup_path(file: &Path) -> PathBuf {
-    let timestamp = Local::now().format("%Y%m%d%H%M%S%f");
+    let timestamp = now_stamp_nanos();
     let name = file.file_name().and_then(OsStr::to_str).unwrap_or("notema");
     file.with_file_name(format!("{name}.backup-{timestamp}"))
+}
+
+/// A `YYYYMMDDhhmmss` stamp with a nine-digit sub-second suffix, for backup and
+/// disabled-file names that need to sort and stay unique down to the nanosecond.
+fn now_stamp_nanos() -> String {
+    let now = Zoned::now();
+    format!(
+        "{}{:09}",
+        now.strftime("%Y%m%d%H%M%S"),
+        now.subsec_nanosecond()
+    )
 }
 
 /// Backups must live on the root's filesystem so [`restore_store`]'s renames
@@ -655,7 +666,7 @@ pub(crate) fn file_backup_path(file: &Path) -> PathBuf {
 /// the root's *parent* is inside a synced tree, a mid-migration plaintext
 /// snapshot syncs too — the startup scan at least surfaces any leftover.
 fn backup_path(root: &Path) -> PathBuf {
-    let timestamp = Local::now().format("%Y%m%d%H%M%S%f");
+    let timestamp = now_stamp_nanos();
     let name = root
         .file_name()
         .and_then(|name| name.to_str())
@@ -709,8 +720,8 @@ fn rename_aside(path: &Path, stem: &str, ext: &str) -> AppResult<PathBuf> {
 }
 
 fn disabled_path(path: &Path, stem: &str, ext: &str) -> PathBuf {
-    let timestamp = Local::now().format("%Y%m%d%H%M%S");
-    disabled_path_for_timestamp(path, stem, ext, &timestamp.to_string())
+    let timestamp = Zoned::now().strftime("%Y%m%d%H%M%S").to_string();
+    disabled_path_for_timestamp(path, stem, ext, &timestamp)
 }
 
 fn disabled_path_for_timestamp(path: &Path, stem: &str, ext: &str, timestamp: &str) -> PathBuf {
@@ -732,7 +743,7 @@ fn disabled_path_for_timestamp(path: &Path, stem: &str, ext: &str, timestamp: &s
 
     parent.join(format!(
         "{stem}.disabled-{timestamp}-{}.{ext}",
-        Local::now().timestamp_nanos_opt().unwrap_or_default()
+        Zoned::now().timestamp().as_nanosecond()
     ))
 }
 

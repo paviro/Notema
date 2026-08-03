@@ -270,7 +270,7 @@ impl AppModel {
     /// the date instead would rebuild the whole aggregate every frame after
     /// midnight for no real benefit.
     pub(crate) fn cached_analytics(&self) -> Option<Rc<Analytics>> {
-        let today = chrono::Local::now().date_naive();
+        let today = jiff::Zoned::now().date();
         match self.nav.insights_scope {
             InsightsScope::Journal => {
                 let name = self.selected_journal()?.name.clone();
@@ -298,7 +298,7 @@ impl AppModel {
     /// `nav.insights_timeframe`. `None` in `Journal` scope with no journal selected.
     /// Powers the Drivers ranking.
     pub(crate) fn cached_windowed_correlations(&self) -> Option<Rc<Correlations>> {
-        let today = chrono::Local::now().date_naive();
+        let today = jiff::Zoned::now().date();
         let timeframe = self.nav.insights_timeframe;
         let (scope_key, entries): (String, Vec<&Entry>) = match self.nav.insights_scope {
             InsightsScope::Journal => (

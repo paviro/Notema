@@ -1,5 +1,5 @@
 use crate::AppResult;
-use chrono::Local;
+use jiff::Zoned;
 use notema_domain::{EntryEncryptionState, Location, MetadataField};
 use notema_storage::EditOutcome;
 use std::path::{Path, PathBuf};
@@ -298,12 +298,14 @@ pub(super) fn save_internal_editor(app: &mut AppModel) -> AppResult<()> {
                 draft.writing_seconds = Some(elapsed.as_secs());
                 // Stamp the entry with its place's timezone rather than the system's,
                 // when one was resolved for the location (see set_editor_location).
-                if let Some(zone) = app.editor.as_ref().and_then(|editor| editor.zone) {
-                    let created_at = notema_context::rezone(Local::now().fixed_offset(), zone);
+                let mut zone_name: Option<String> = None;
+                if let Some(zone) = app.editor.as_ref().and_then(|editor| editor.zone.clone()) {
+                    let created_at = notema_context::rezone(Zoned::now(), zone.clone());
+                    draft.edited_at = Some(created_at.clone());
                     draft.created_at = Some(created_at);
-                    draft.edited_at = Some(created_at);
-                    draft.timezone = Some(zone.name());
+                    zone_name = zone.iana_name().map(str::to_string);
                 }
+                draft.timezone = zone_name.as_deref();
                 Some(app.services.store.create_entry(draft, asset_options(app))?)
             };
             match created {
@@ -1058,7 +1060,7 @@ mod tests {
 
         let (_dir, mut app, _path) = app_with_entry("+++\nschema_version = 1\n+++\n\n# A\n");
 
-        let datetime = chrono::Local::now().fixed_offset();
+        let datetime = jiff::Zoned::now();
         let mut editor = EntryEditor::for_new("work".to_string());
         editor.textarea.insert_str("Located entry");
         editor.metadata.location = Some(Location {
@@ -1100,7 +1102,7 @@ mod tests {
             ..Location::default()
         });
         // The resolved zone the location dialog would have stored for this place.
-        editor.zone = Some(chrono_tz::Tz::Asia__Tokyo);
+        editor.zone = Some(jiff::tz::TimeZone::get("Asia/Tokyo").unwrap());
         app.editor = Some(editor);
         save_internal_editor(&mut app).unwrap();
 
@@ -1112,7 +1114,7 @@ mod tests {
             .expect("entry created");
         // The timestamp carries Tokyo's offset, not the machine's.
         assert_eq!(
-            entry.created_time().unwrap().offset().local_minus_utc(),
+            entry.created_time().unwrap().offset().seconds(),
             9 * 3600
         );
         // And the IANA name is recorded on disk.

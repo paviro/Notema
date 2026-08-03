@@ -3,10 +3,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{Datelike, NaiveDate, Timelike};
+use jiff::civil::Date;
 use notema_domain::Entry;
 
 use crate::{Tally, period_key, period_label};
+
+/// Total whole days from `from` to `to` (negative if `to` precedes `from`).
+/// Forces day units so the count is correct across month and year boundaries.
+fn day_diff(from: Date, to: Date) -> i64 {
+    from.until((jiff::Unit::Day, to))
+        .map_or(0, |span| i64::from(span.get_days()))
+}
 
 /// Cadence and volume of the writing itself.
 #[derive(Debug, Clone, PartialEq)]
@@ -18,7 +25,7 @@ pub struct Cadence {
     /// Distinct calendar days that carry at least one entry.
     pub active_days: usize,
     /// Earliest and latest entry date, or `None` when nothing is dated.
-    pub date_span: Option<(NaiveDate, NaiveDate)>,
+    pub date_span: Option<(Date, Date)>,
     /// Length of the consecutive run of active days ending on `today` or
     /// yesterday; `0` when the most recent entry is older than that.
     pub current_streak: usize,
@@ -38,16 +45,16 @@ pub struct Cadence {
 
 pub(crate) fn build(
     entries: &[&Entry],
-    dates: &[Option<NaiveDate>],
+    dates: &[Option<Date>],
     by_year: bool,
-    today: NaiveDate,
+    today: Date,
 ) -> Cadence {
     let total_entries = entries.len();
 
     let mut word_counts: Vec<usize> = Vec::with_capacity(total_entries);
     let mut by_weekday = [0usize; 7];
     let mut by_hour = [0usize; 24];
-    let mut days: BTreeSet<NaiveDate> = BTreeSet::new();
+    let mut days: BTreeSet<Date> = BTreeSet::new();
     let mut periods: BTreeMap<(i32, u32), usize> = BTreeMap::new();
 
     for (entry, date) in entries.iter().zip(dates) {
@@ -55,7 +62,7 @@ pub(crate) fn build(
 
         if let Some(date) = date {
             days.insert(*date);
-            by_weekday[date.weekday().num_days_from_monday() as usize] += 1;
+            by_weekday[date.weekday().to_monday_zero_offset() as usize] += 1;
             *periods.entry(period_key(*date, by_year)).or_insert(0) += 1;
         }
         if let Some(time) = entry.created_time() {
@@ -70,7 +77,7 @@ pub(crate) fn build(
         0.0
     };
 
-    let day_list: Vec<NaiveDate> = days.iter().copied().collect();
+    let day_list: Vec<Date> = days.iter().copied().collect();
     let (longest_streak, longest_gap_days) = streak_and_gap(&day_list);
     let current_streak = current_streak(&day_list, today);
 
@@ -115,7 +122,7 @@ fn median(values: &mut [usize]) -> usize {
 
 /// The longest run of consecutive days and the largest empty gap between two
 /// active days, in one pass over the sorted distinct days.
-fn streak_and_gap(days: &[NaiveDate]) -> (usize, usize) {
+fn streak_and_gap(days: &[Date]) -> (usize, usize) {
     if days.is_empty() {
         return (0, 0);
     }
@@ -123,7 +130,7 @@ fn streak_and_gap(days: &[NaiveDate]) -> (usize, usize) {
     let mut run = 1usize;
     let mut longest_gap = 0usize;
     for window in days.windows(2) {
-        let delta = (window[1] - window[0]).num_days();
+        let delta = day_diff(window[0], window[1]);
         if delta == 1 {
             run += 1;
             longest_streak = longest_streak.max(run);
@@ -138,17 +145,17 @@ fn streak_and_gap(days: &[NaiveDate]) -> (usize, usize) {
 
 /// Length of the consecutive run of active days ending at `today` or yesterday.
 /// A journal last written two or more days ago has no current streak.
-fn current_streak(days: &[NaiveDate], today: NaiveDate) -> usize {
+fn current_streak(days: &[Date], today: Date) -> usize {
     let Some(&last) = days.last() else {
         return 0;
     };
-    if (today - last).num_days() > 1 {
+    if day_diff(last, today) > 1 {
         return 0;
     }
     let mut streak = 1usize;
     let mut prev = last;
     for &day in days.iter().rev().skip(1) {
-        if (prev - day).num_days() == 1 {
+        if day_diff(day, prev) == 1 {
             streak += 1;
             prev = day;
         } else {

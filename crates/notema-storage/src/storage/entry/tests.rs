@@ -2,19 +2,21 @@ use super::codec::EntryCodec;
 use super::create::create_entry_file;
 use super::paths::entry_path_with_id;
 use super::*;
-use chrono::{DateTime, FixedOffset, Local, LocalResult, TimeZone};
+use jiff::Zoned;
 use notema_encryption::{self as crypto, KeyPaths};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
-fn local_time(y: i32, m: u32, d: u32, h: u32, min: u32) -> DateTime<FixedOffset> {
-    let local = match Local.with_ymd_and_hms(y, m, d, h, min, 0) {
-        LocalResult::Single(dt) => dt,
-        LocalResult::Ambiguous(dt, _) => dt,
-        LocalResult::None => panic!("invalid local test time"),
-    };
-    local.fixed_offset()
+/// A fixed-offset instant at the given wall-clock time. The offset is irrelevant
+/// to these tests — only the wall-clock components (which drive the date folder
+/// and filename) are asserted — and a fixed offset is never ambiguous, so there
+/// is no DST disambiguation to handle.
+fn local_time(y: i16, m: i8, d: i8, h: i8, min: i8) -> Zoned {
+    jiff::civil::date(y, m, d)
+        .at(h, min, 0, 0)
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .unwrap()
 }
 
 fn create_test_entry(
@@ -39,7 +41,7 @@ fn entry_path_uses_year_month_day_folder_and_datetime_short_id_filename() {
     let dir = tempdir().unwrap();
     let now = local_time(2026, 7, 1, 23, 30);
 
-    let path = entry_path(dir.path(), "work", now);
+    let path = entry_path(dir.path(), "work", &now);
 
     assert!(path.starts_with(dir.path().join("work").join("2026").join("07").join("01")));
     let stem = path.file_stem().unwrap().to_str().unwrap();
@@ -76,7 +78,7 @@ fn journal_sidecar_is_not_collected_as_an_entry() {
 fn create_entry_file_retries_without_overwriting_existing_path() {
     let dir = tempdir().unwrap();
     let now = local_time(2026, 7, 1, 23, 30);
-    let existing = entry_path_with_id(dir.path(), "work", now, "existing");
+    let existing = entry_path_with_id(dir.path(), "work", &now, "existing");
     fs::create_dir_all(existing.parent().unwrap()).unwrap();
     fs::write(&existing, "keep me").unwrap();
     let mut ids = ["existing", "fresh"].into_iter();
@@ -85,7 +87,7 @@ fn create_entry_file_retries_without_overwriting_existing_path() {
         &EntryCodec::plain(),
         dir.path(),
         "work",
-        now,
+        &now,
         "new content",
         || ids.next().unwrap().to_string(),
     )
@@ -93,7 +95,7 @@ fn create_entry_file_retries_without_overwriting_existing_path() {
 
     assert_eq!(
         created,
-        entry_path_with_id(dir.path(), "work", now, "fresh")
+        entry_path_with_id(dir.path(), "work", &now, "fresh")
     );
     assert_eq!(fs::read_to_string(existing).unwrap(), "keep me");
     assert_eq!(fs::read_to_string(created).unwrap(), "new content");
@@ -120,7 +122,7 @@ fn create_entry_writes_body_after_front_matter() {
     // A native entry captures this machine's IANA zone name, when resolvable.
     assert_eq!(
         fields.datetime.timezone,
-        iana_time_zone::get_timezone().ok()
+        jiff::tz::TimeZone::system().iana_name().map(str::to_string)
     );
     assert_eq!(body.trim_start_matches('\n'), "Some text\n");
 }
@@ -592,7 +594,7 @@ fn scan_entries_returns_locked_placeholder_for_encrypted_entry_without_key() {
     assert_eq!(entries[0].body, "Encryption identity not available");
     assert_eq!(
         notema_domain::entry_group_date(&entries[0]),
-        Some(chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap())
+        Some(jiff::civil::date(2026, 7, 1))
     );
 }
 

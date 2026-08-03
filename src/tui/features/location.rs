@@ -5,7 +5,7 @@ use crate::tui::{
     state::{Overlay, ToastVariant},
     text_input::TextInput,
 };
-use chrono::{DateTime, FixedOffset};
+use jiff::Zoned;
 use notema_context::{DeviceFix, GeocodeHit};
 use notema_domain::Location;
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ const MAX_PRESETS: usize = 20;
 /// Running aggregate for one distinct location while building presets.
 struct PresetAgg {
     count: usize,
-    last: Option<DateTime<FixedOffset>>,
+    last: Option<Zoned>,
     /// The location from the most-recent entry with this key, so the label and
     /// stored value reflect the latest naming.
     location: Location,

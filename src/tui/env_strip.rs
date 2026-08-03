@@ -360,9 +360,9 @@ fn moon_phase_slug(fraction: f64) -> &'static str {
 /// An RFC3339 timestamp as wall-clock `HH:MM` at its own stored offset — the
 /// entry's local time, no zone math.
 fn local_time(rfc3339: &str) -> Option<String> {
-    chrono::DateTime::parse_from_rfc3339(rfc3339)
-        .ok()
-        .map(|instant| instant.format("%H:%M").to_string())
+    notema_domain::Timestamp::parse(rfc3339)
+        .parsed
+        .map(|instant| instant.strftime("%H:%M").to_string())
 }
 
 #[cfg(test)]

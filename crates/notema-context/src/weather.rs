@@ -8,7 +8,8 @@
 
 use crate::Result;
 use crate::http::get;
-use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
+use jiff::Zoned;
+use jiff::civil::DateTime;
 use notema_domain::{Coordinates, Weather};
 use serde::Deserialize;
 
@@ -26,34 +27,31 @@ const SOURCE: &str = "Open-Meteo";
 /// Fetch the weather for a point at an instant. `Ok(None)` when Open-Meteo has no
 /// usable sample there/then (out-of-range date, or a gap in the data). Errors are
 /// transport/HTTP failures — the caller drops them silently so a save never fails.
-pub fn fetch_weather(
-    coordinates: Coordinates,
-    datetime: DateTime<FixedOffset>,
-) -> Result<Option<Weather>> {
-    let age = Utc::now().signed_duration_since(datetime.with_timezone(&Utc));
+pub fn fetch_weather(coordinates: Coordinates, datetime: Zoned) -> Result<Option<Weather>> {
+    let age_days = (jiff::Timestamp::now().as_second() - datetime.timestamp().as_second()) / 86_400;
     // The archive/forecast handoff sits right on ERA5's ~5-day lag, and that lag
     // drifts, so an entry near the boundary can hit the endpoint that has no data
     // yet. Try the age-appropriate endpoint first, then fall back to the other on
     // an empty sample rather than silently returning no weather.
-    let (primary, fallback) = if age.num_days() >= ARCHIVE_CUTOFF_DAYS {
+    let (primary, fallback) = if age_days >= ARCHIVE_CUTOFF_DAYS {
         (ENDPOINT_ARCHIVE, ENDPOINT_FORECAST)
     } else {
         (ENDPOINT_FORECAST, ENDPOINT_ARCHIVE)
     };
-    if let Some(weather) = fetch_weather_from(primary, coordinates, datetime)? {
+    if let Some(weather) = fetch_weather_from(primary, coordinates, &datetime)? {
         return Ok(Some(weather));
     }
-    fetch_weather_from(fallback, coordinates, datetime)
+    fetch_weather_from(fallback, coordinates, &datetime)
 }
 
 fn fetch_weather_from(
     endpoint: &str,
     coordinates: Coordinates,
-    datetime: DateTime<FixedOffset>,
+    datetime: &Zoned,
 ) -> Result<Option<Weather>> {
     let lat = coordinates.latitude();
     let lon = coordinates.longitude();
-    let date = datetime.format("%Y-%m-%d");
+    let date = datetime.strftime("%Y-%m-%d");
     let url = format!(
         "{endpoint}?latitude={lat}&longitude={lon}&timezone=auto&wind_speed_unit=kmh\
          &start_date={date}&end_date={date}&hourly={HOURLY}"
@@ -61,7 +59,7 @@ fn fetch_weather_from(
     let response: OpenMeteoResponse = serde_json::from_str(&get(&url)?)?;
     Ok(response
         .hourly
-        .and_then(|hourly| extract_weather(&hourly, datetime.naive_local())))
+        .and_then(|hourly| extract_weather(&hourly, datetime.datetime())))
 }
 
 /// The hourly block of an Open-Meteo response. Every series is optional and holds
@@ -92,7 +90,7 @@ struct Hourly {
 /// Pull the sample nearest `target` from the hourly series and map it onto
 /// [`Weather`]. `None` when there is no parseable hour or the nearest one carries
 /// no data at all (so we don't persist a table holding only the attribution).
-fn extract_weather(hourly: &Hourly, target: NaiveDateTime) -> Option<Weather> {
+fn extract_weather(hourly: &Hourly, target: DateTime) -> Option<Weather> {
     let index = nearest_hour_index(&hourly.time, target)?;
     let at = |series: &Option<Vec<Option<f64>>>| {
         series
@@ -138,17 +136,27 @@ pub(crate) const OPEN_METEO_HOUR_FORMAT: &str = "%Y-%m-%dT%H:%M";
 
 /// The index of the hourly sample whose timestamp is closest to `target`. Shared
 /// with the air-quality fetch, which uses the same hourly-series shape.
-pub(crate) fn nearest_hour_index(times: &[String], target: NaiveDateTime) -> Option<usize> {
+pub(crate) fn nearest_hour_index(times: &[String], target: DateTime) -> Option<usize> {
+    let target_secs = civil_seconds(target);
     times
         .iter()
         .enumerate()
         .filter_map(|(index, time)| {
-            NaiveDateTime::parse_from_str(time, OPEN_METEO_HOUR_FORMAT)
+            DateTime::strptime(OPEN_METEO_HOUR_FORMAT, time)
                 .ok()
                 .map(|parsed| (index, parsed))
         })
-        .min_by_key(|(_, parsed)| parsed.signed_duration_since(target).num_seconds().abs())
+        .min_by_key(|(_, parsed)| (civil_seconds(*parsed) - target_secs).abs())
         .map(|(index, _)| index)
+}
+
+/// A civil datetime as a UTC-anchored second count, for measuring how far apart
+/// two same-zone hourly timestamps are. The anchor zone is irrelevant — only the
+/// difference between two such counts is used.
+fn civil_seconds(datetime: DateTime) -> i64 {
+    datetime
+        .to_zoned(jiff::tz::TimeZone::UTC)
+        .map_or(0, |zoned| zoned.timestamp().as_second())
 }
 
 /// Map a WMO weather-interpretation code to a condition slug in the same
@@ -174,8 +182,8 @@ fn map_wmo_code(code: Option<i64>) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn naive(text: &str) -> NaiveDateTime {
-        NaiveDateTime::parse_from_str(text, OPEN_METEO_HOUR_FORMAT).unwrap()
+    fn naive(text: &str) -> DateTime {
+        DateTime::strptime(OPEN_METEO_HOUR_FORMAT, text).unwrap()
     }
 
     // A minimal two-hour forecast response covering 13:00 and 14:00 local.

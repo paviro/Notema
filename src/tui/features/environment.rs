@@ -4,7 +4,7 @@ use crate::tui::app::AppModel;
 use crate::tui::editor_state::EditorTarget;
 use crate::tui::environment::{EnvironmentRequest, EnvironmentTarget, environment_fields};
 use crate::tui::state::ToastVariant;
-use chrono::{DateTime, FixedOffset, Local};
+use jiff::Zoned;
 use notema_domain::{Coordinates, Location};
 
 /// The `(lat, lon)` of a location, or `None` when it isn't pinned to coordinates.
@@ -15,13 +15,13 @@ pub(crate) fn coords(location: &Location) -> Option<Coordinates> {
 impl AppModel {
     /// The time a fetched environment should be dated to: now for a new entry, the
     /// edited entry's own creation time otherwise.
-    fn editor_context_datetime(&self) -> DateTime<FixedOffset> {
+    fn editor_context_datetime(&self) -> Zoned {
         match self.editor.as_ref().map(|editor| &editor.target) {
             Some(EditorTarget::Existing { .. }) => self
                 .resolved_selected_entry()
                 .and_then(|entry| entry.created_time())
-                .unwrap_or_else(|| Local::now().fixed_offset()),
-            _ => Local::now().fixed_offset(),
+                .unwrap_or_else(Zoned::now),
+            _ => Zoned::now(),
         }
     }
 
@@ -39,7 +39,7 @@ impl AppModel {
             };
             // Date the fetch to the place's local day when the entry is timezoned,
             // so sunrise/sunset and the weather sample match where it was written.
-            if let Some(zone) = editor.zone {
+            if let Some(zone) = editor.zone.clone() {
                 datetime = notema_context::rezone(datetime, zone);
             }
             coordinates
@@ -66,7 +66,7 @@ impl AppModel {
         &mut self,
         path: PathBuf,
         coordinates: Coordinates,
-        datetime: DateTime<FixedOffset>,
+        datetime: Zoned,
     ) -> EnvironmentRequest {
         self.next_environment_id += 1;
         let id = self.next_environment_id;
@@ -85,7 +85,7 @@ impl AppModel {
         &mut self,
         path: PathBuf,
         location: &Location,
-        datetime: DateTime<FixedOffset>,
+        datetime: Zoned,
     ) -> Option<EnvironmentRequest> {
         coords(location)
             .map(|coordinates| self.prepare_entry_environment_request(path, coordinates, datetime))
@@ -174,7 +174,7 @@ mod tests {
             .send(EnvironmentRequest {
                 id: 3,
                 coordinates: notema_domain::Coordinates::try_new(52.5, 13.4).unwrap(),
-                datetime: chrono::Local::now().fixed_offset(),
+                datetime: jiff::Zoned::now(),
                 target: super::EnvironmentTarget::Editor,
             });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);

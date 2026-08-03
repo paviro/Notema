@@ -6,7 +6,7 @@
 //! time and returns a `notema-domain` value; none of this is local storage, so it
 //! lives outside `notema-storage`.
 
-use chrono::{DateTime, FixedOffset};
+use jiff::Zoned;
 use notema_domain::{AirQuality, Celestial, Coordinates, Weather};
 
 mod air;
@@ -72,16 +72,16 @@ pub struct EnvironmentReport {
 
 pub fn fetch_environment(
     coordinates: Coordinates,
-    datetime: DateTime<FixedOffset>,
+    datetime: Zoned,
     wants: EnvironmentWants,
 ) -> EnvironmentReport {
-    let celestial = compute_celestial(coordinates, datetime);
+    let celestial = compute_celestial(coordinates, datetime.clone());
     let mut warnings = Vec::new();
     let mut requests = 0;
 
     let weather = wants.weather.then(|| {
         requests += 1;
-        fetch_weather(coordinates, datetime).unwrap_or_else(|error| {
+        fetch_weather(coordinates, datetime.clone()).unwrap_or_else(|error| {
             warnings.push(EnvironmentWarning {
                 provider: EnvironmentProvider::Weather,
                 message: error.to_string(),
@@ -90,9 +90,9 @@ pub fn fetch_environment(
         })
     });
     // Skip air outside its coverage rather than spend a request on a certain 400.
-    let air_quality = (wants.air_quality && air::covers(datetime)).then(|| {
+    let air_quality = (wants.air_quality && air::covers(&datetime)).then(|| {
         requests += 1;
-        fetch_air_quality(coordinates, datetime).unwrap_or_else(|error| {
+        fetch_air_quality(coordinates, datetime.clone()).unwrap_or_else(|error| {
             warnings.push(EnvironmentWarning {
                 provider: EnvironmentProvider::AirQuality,
                 message: error.to_string(),
@@ -118,8 +118,8 @@ mod tests {
         Coordinates::try_new(52.52, 13.4).unwrap()
     }
 
-    fn at(text: &str) -> DateTime<FixedOffset> {
-        DateTime::parse_from_rfc3339(text).unwrap()
+    fn at(text: &str) -> Zoned {
+        notema_domain::Timestamp::parse(text).parsed.unwrap()
     }
 
     #[test]

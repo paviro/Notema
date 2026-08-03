@@ -258,9 +258,8 @@ fn extreme_weekday(mood: &MoodAnalytics, best: bool) -> Option<usize> {
 }
 
 /// The journal's date span as `2023 – 2024`, or `None` when undated.
-fn date_span(span: Option<(chrono::NaiveDate, chrono::NaiveDate)>) -> Option<String> {
+fn date_span(span: Option<(jiff::civil::Date, jiff::civil::Date)>) -> Option<String> {
     let (first, last) = span?;
-    use chrono::Datelike;
     if first.year() == last.year() {
         Some(first.year().to_string())
     } else {

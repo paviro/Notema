@@ -26,8 +26,6 @@ age = { version = "0.12.1", default-features = false, features = ["armor"] }
 anyhow = "1"
 async-io = "2"
 cc = "1"
-chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
 crossterm = "0.29"
 dirs = "6"
@@ -35,8 +33,8 @@ ed25519-dalek = { version = "3", features = ["zeroize"] }
 flate2 = "1"
 futures-lite = "2"
 getrandom = "0.4"
+jiff = { version = "0.2", features = ["serde"] }
 hex = "0.4"
-iana-time-zone = "0.1"
 image = { version = "0.25", default-features = false }
 indicatif = "0.18.4"
 libc = "0.2"
@@ -123,8 +121,6 @@ undocumented_unsafe_blocks = "deny"
 
 [dependencies]
 anyhow.workspace = true
-chrono.workspace = true
-chrono-tz.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 dirs.workspace = true
@@ -137,6 +133,7 @@ flate2.workspace = true
 notema-fuse = { workspace = true, optional = true }
 image.workspace = true
 indicatif.workspace = true
+jiff.workspace = true
 notema-analytics.workspace = true
 notema-context.workspace = true
 notema-domain.workspace = true

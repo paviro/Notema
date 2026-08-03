@@ -1,23 +1,24 @@
 use std::path::Path;
 
-use chrono::{Datelike, Days, Months, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use crate::Entry;
 
 /// The date an entry is grouped under: its creation timestamp when present,
 /// otherwise the date encoded in its filename.
-pub fn entry_group_date(entry: &Entry) -> Option<NaiveDate> {
+pub fn entry_group_date(entry: &Entry) -> Option<Date> {
     entry
         .created_time()
-        .map(|timestamp| timestamp.date_naive())
+        .map(|timestamp| timestamp.date())
         .or_else(|| entry_date_from_path(&entry.path))
 }
 
 /// Parse the leading `YYYY-MM-DD` of an entry filename stem into a date.
-pub fn entry_date_from_path(path: &Path) -> Option<NaiveDate> {
+pub fn entry_date_from_path(path: &Path) -> Option<Date> {
     let stem = path.file_stem()?.to_str()?;
     let date = stem.get(..10)?;
-    NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()
+    Date::strptime("%Y-%m-%d", date).ok()
 }
 
 /// How a [`DateSpec`] is compared against an entry's date.
@@ -74,34 +75,44 @@ pub struct DateFilter {
 }
 
 impl DatePattern {
-    fn matches(&self, date: NaiveDate) -> bool {
-        self.year.is_none_or(|year| date.year() == year)
-            && self.month.is_none_or(|month| date.month() == month)
-            && self.day.is_none_or(|day| date.day() == day)
+    fn matches(&self, date: Date) -> bool {
+        self.year.is_none_or(|year| i32::from(date.year()) == year)
+            && self.month.is_none_or(|month| u32::from(date.month().unsigned_abs()) == month)
+            && self.day.is_none_or(|day| u32::from(date.day().unsigned_abs()) == day)
     }
 
     /// The inclusive span this pattern covers, or `None` when it has an open
     /// component and so recurs rather than naming one stretch of time.
-    fn range(&self) -> Option<(NaiveDate, NaiveDate)> {
+    fn range(&self) -> Option<(Date, Date)> {
         let year = self.year?;
         let Some(month) = self.month else {
             // An open month with a fixed day (`2026-*-25`) recurs monthly.
             return self.day.is_none().then(|| {
                 (
-                    NaiveDate::from_ymd_opt(year, 1, 1).unwrap(),
-                    NaiveDate::from_ymd_opt(year, 12, 31).unwrap(),
+                    ymd(year, 1, 1).unwrap(),
+                    ymd(year, 12, 31).unwrap(),
                 )
             });
         };
-        let start = NaiveDate::from_ymd_opt(year, month, 1)?;
+        let start = ymd(year, month, 1)?;
         match self.day {
             Some(day) => {
-                let date = NaiveDate::from_ymd_opt(year, month, day)?;
+                let date = ymd(year, month, day)?;
                 Some((date, date))
             }
-            None => Some((start, start.checked_add_months(Months::new(1))?.pred_opt()?)),
+            None => Some((start, start.checked_add(1.months()).ok()?.yesterday().ok()?)),
         }
     }
+}
+
+/// Build a civil [`Date`] from the pattern's wider integer components, narrowing
+/// to jiff's `i16`/`i8` and returning `None` when the values fall outside a real
+/// calendar date.
+fn ymd(year: i32, month: u32, day: u32) -> Option<Date> {
+    let year = i16::try_from(year).ok()?;
+    let month = i8::try_from(month).ok()?;
+    let day = i8::try_from(day).ok()?;
+    Date::new(year, month, day).ok()
 }
 
 impl DateSpec {
@@ -149,7 +160,7 @@ impl DateSpec {
 
     /// The inclusive range this spec covers, or `None` when it recurs and so has
     /// no single range.
-    pub fn range(&self, today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
+    pub fn range(&self, today: Date) -> Option<(Date, Date)> {
         match *self {
             Self::Pattern(pattern) => pattern.range(),
             Self::Relative { count, unit } => {
@@ -158,7 +169,7 @@ impl DateSpec {
             }
             Self::Today => Some((today, today)),
             Self::Yesterday => {
-                let date = today.checked_sub_days(Days::new(1))?;
+                let date = today.yesterday().ok()?;
                 Some((date, date))
             }
         }
@@ -168,7 +179,7 @@ impl DateSpec {
 impl DateFilter {
     /// Whether `date` satisfies this filter. `today` is passed in rather than
     /// read from the clock so the comparison stays pure and testable.
-    pub fn matches(&self, date: NaiveDate, today: NaiveDate) -> bool {
+    pub fn matches(&self, date: Date, today: Date) -> bool {
         // A pattern compares component-wise, which is what lets an open
         // component match across years or months.
         if let (DateBound::On, DateSpec::Pattern(pattern)) = (self.bound, self.spec) {
@@ -215,14 +226,10 @@ fn parse_two_digit(raw: &str) -> Option<u32> {
 
 /// Days in `month`, using a leap year when the year is open so `*-02-29` holds.
 fn days_in_month(year: Option<i32>, month: u32) -> u32 {
-    let start = match NaiveDate::from_ymd_opt(year.unwrap_or(2024), month, 1) {
-        Some(start) => start,
-        None => return 0,
-    };
-    start
-        .checked_add_months(Months::new(1))
-        .and_then(|next| next.pred_opt())
-        .map_or(0, |last| last.day())
+    match ymd(year.unwrap_or(2024), month, 1) {
+        Some(start) => u32::from(start.days_in_month().unsigned_abs()),
+        None => 0,
+    }
 }
 
 fn parse_relative(raw: &str) -> Option<DateSpec> {
@@ -240,13 +247,15 @@ fn parse_relative(raw: &str) -> Option<DateSpec> {
     Some(DateSpec::Relative { count, unit })
 }
 
-fn shift_back(today: NaiveDate, count: u32, unit: DateUnit) -> Option<NaiveDate> {
-    match unit {
-        DateUnit::Days => today.checked_sub_days(Days::new(count.into())),
-        DateUnit::Weeks => today.checked_sub_days(Days::new(u64::from(count) * 7)),
-        DateUnit::Months => today.checked_sub_months(Months::new(count)),
-        DateUnit::Years => today.checked_sub_months(Months::new(count.checked_mul(12)?)),
-    }
+fn shift_back(today: Date, count: u32, unit: DateUnit) -> Option<Date> {
+    let count = i64::from(count);
+    let span = match unit {
+        DateUnit::Days => count.days(),
+        DateUnit::Weeks => count.weeks(),
+        DateUnit::Months => count.months(),
+        DateUnit::Years => count.years(),
+    };
+    today.checked_sub(span).ok()
 }
 
 #[cfg(test)]
@@ -255,8 +264,8 @@ mod tests {
     use crate::{EntryEncryptionState, Timestamp};
     use std::path::PathBuf;
 
-    fn date(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    fn date(year: i16, month: i8, day: i8) -> Date {
+        jiff::civil::date(year, month, day)
     }
 
     fn entry(created_at: Option<&str>, path: &str) -> Entry {
@@ -290,20 +299,14 @@ mod tests {
     fn group_date_prefers_created_timestamp() {
         let entry = entry(Some("2026-07-01T10:23:00+02:00"), "work/2026-01-01/id.md");
 
-        assert_eq!(
-            entry_group_date(&entry),
-            Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap())
-        );
+        assert_eq!(entry_group_date(&entry), Some(jiff::civil::date(2026, 7, 1)));
     }
 
     #[test]
     fn group_date_falls_back_to_filename_date() {
         let entry = entry(None, "work/2026/07/01/2026-07-01T10-23-00-id.md");
 
-        assert_eq!(
-            entry_group_date(&entry),
-            Some(NaiveDate::from_ymd_opt(2026, 7, 1).unwrap())
-        );
+        assert_eq!(entry_group_date(&entry), Some(jiff::civil::date(2026, 7, 1)));
     }
 
     fn pattern(year: Option<i32>, month: Option<u32>, day: Option<u32>) -> Option<DateSpec> {

@@ -10,7 +10,8 @@ pub(crate) mod suggest;
 
 use std::time::Instant;
 
-use chrono::{Local, NaiveDate};
+use jiff::Zoned;
+use jiff::civil::Date;
 use notema_domain::{DateFilter, DateSpec, Entry, MOOD_RANGE, SearchHit};
 
 use crate::tui::{
@@ -156,7 +157,7 @@ impl AppModel {
     /// with no known prefix is full-text, AND-ed with the filters and supplying
     /// the ranking.
     pub(crate) fn search_results(&self) -> Vec<SearchHit> {
-        let today = Local::now().date_naive();
+        let today = Zoned::now().date();
 
         let mut predicates: Vec<EntryPredicate> = Vec::new();
         let mut text_parts: Vec<&str> = Vec::new();
@@ -216,7 +217,7 @@ enum SegmentKind<'a> {
 }
 
 /// Classify one query segment. `today` is threaded in so date matching stays pure.
-fn classify_segment(segment: &str, today: NaiveDate) -> SegmentKind<'_> {
+fn classify_segment(segment: &str, today: Date) -> SegmentKind<'_> {
     let Some((prefix, value)) = split_prefix(segment) else {
         return SegmentKind::Text(segment);
     };

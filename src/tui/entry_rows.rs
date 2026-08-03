@@ -143,8 +143,8 @@ fn spacer_row() -> BoxRow {
 fn search_hit_lines(theme: &Theme, hit: &SearchHit, text_width: u16) -> Vec<Line<'static>> {
     let (date, time) = match hit.created_at.as_deref().and_then(parse_entry_timestamp) {
         Some(timestamp) => (
-            Some(timestamp.format("%a %d %b %Y").to_string()),
-            timestamp.format("%H:%M").to_string(),
+            Some(timestamp.strftime("%a %d %b %Y").to_string()),
+            timestamp.strftime("%H:%M").to_string(),
         ),
         None => (None, String::new()),
     };
@@ -470,11 +470,11 @@ pub(crate) fn visible_box_items(
 }
 
 pub(crate) fn entry_month_label(entry: &Entry) -> Option<String> {
-    entry_group_date(entry).map(|date| date.format("%B %Y").to_string())
+    entry_group_date(entry).map(|date| date.strftime("%B %Y").to_string())
 }
 
 pub(crate) fn entry_day_label(entry: &Entry) -> Option<String> {
-    entry_group_date(entry).map(|date| date.format("%A %d").to_string())
+    entry_group_date(entry).map(|date| date.strftime("%A %d").to_string())
 }
 
 /// Max preview lines shown inside an entry's box.
@@ -491,7 +491,7 @@ pub(crate) fn entry_list_lines(
 ) -> Vec<Line<'static>> {
     let time = entry
         .created_time()
-        .map(|timestamp| timestamp.format("%H:%M").to_string())
+        .map(|timestamp| timestamp.strftime("%H:%M").to_string())
         .unwrap_or_default();
 
     entry_box_lines(

@@ -9,8 +9,10 @@ publish.workspace = true
 
 [dependencies]
 notema-domain.workspace = true
-chrono.workspace = true
-chrono-tz.workspace = true
+jiff.workspace = true
+# Bridge only: the `sunrise` crate's public API is chrono-typed (NaiveDate in,
+# DateTime<Utc> out). Converted to jiff at the boundary in celestial.rs.
+chrono = { version = "0.4", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 sunrise.workspace = true

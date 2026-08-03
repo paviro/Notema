@@ -1,5 +1,5 @@
 use crate::Coordinates;
-use chrono::{DateTime, FixedOffset};
+use jiff::Zoned;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
@@ -466,17 +466,32 @@ pub struct Timestamp {
     pub raw: String,
     /// The parsed value keeps the RFC3339 offset it was written with rather than
     /// normalizing to the machine's local zone, so an entry always renders at the
-    /// wall-clock time it was written in — regardless of where it is now read.
-    pub parsed: Option<DateTime<FixedOffset>>,
+    /// wall-clock time it was written in — regardless of where it is now read. A
+    /// fixed-offset `Zoned` freezes that offset (no DST-safe arithmetic), which is
+    /// exactly the stored-instant semantics wanted here.
+    pub parsed: Option<Zoned>,
 }
 
 impl Timestamp {
     /// Parse `raw` as RFC3339 once, keeping the original string regardless.
     pub fn parse(raw: impl Into<String>) -> Self {
         let raw = raw.into();
-        let parsed = DateTime::parse_from_rfc3339(&raw).ok();
+        let parsed = parse_offset_rfc3339(&raw);
         Self { raw, parsed }
     }
+}
+
+/// Parse an offset-carrying RFC3339 string into a fixed-offset [`Zoned`],
+/// preserving the written offset. `Z` collapses to UTC; a string with no offset
+/// yields `None` (mirroring the old `DateTime::parse_from_rfc3339`, which also
+/// requires an offset). `Zoned`'s own `FromStr` is unusable here: it rejects
+/// offset-only strings that lack a `[zone]` annotation.
+pub(crate) fn parse_offset_rfc3339(raw: &str) -> Option<Zoned> {
+    let pieces = jiff::fmt::temporal::Pieces::parse(raw).ok()?;
+    let time = pieces.time().unwrap_or_else(jiff::civil::Time::midnight);
+    let datetime = pieces.date().to_datetime(time);
+    let offset = pieces.to_numeric_offset()?;
+    jiff::tz::TimeZone::fixed(offset).to_zoned(datetime).ok()
 }
 
 // Not `Eq`: `Location` carries `f64` coordinates.
@@ -532,10 +547,10 @@ impl Entry {
     }
 
     /// The creation timestamp parsed once at load, if present and well-formed.
-    pub fn created_time(&self) -> Option<DateTime<FixedOffset>> {
+    pub fn created_time(&self) -> Option<Zoned> {
         self.created_at
             .as_ref()
-            .and_then(|timestamp| timestamp.parsed)
+            .and_then(|timestamp| timestamp.parsed.clone())
     }
 
     /// The entry's metadata cloned into a [`Metadata`] bundle — the shape the
@@ -731,6 +746,33 @@ impl SearchScope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn timestamp_parse_preserves_the_written_offset() {
+        let timestamp = Timestamp::parse("2026-07-01T10:23:00+02:00");
+        let parsed = timestamp.parsed.expect("offset RFC3339 parses");
+        // The stored instant keeps the +02:00 the entry was written with, not the
+        // reader's local zone: 10:23 wall clock at a +7200s offset.
+        assert_eq!(parsed.offset().seconds(), 2 * 3600);
+        assert_eq!(parsed.hour(), 10);
+        assert_eq!(parsed.date(), jiff::civil::date(2026, 7, 1));
+    }
+
+    #[test]
+    fn timestamp_parse_collapses_zulu_and_rejects_offsetless() {
+        // `Z` is accepted and read as UTC.
+        assert_eq!(
+            Timestamp::parse("2026-07-01T10:23:00Z")
+                .parsed
+                .map(|z| z.offset().seconds()),
+            Some(0)
+        );
+        // A string with no offset is not valid RFC3339 here, matching the old
+        // `parse_from_rfc3339`; the raw string is still kept.
+        let bare = Timestamp::parse("2026-07-01T10:23:00");
+        assert!(bare.parsed.is_none());
+        assert_eq!(bare.raw, "2026-07-01T10:23:00");
+    }
 
     #[test]
     fn location_display_label_sets_off_name_and_omits_coarse_fields() {

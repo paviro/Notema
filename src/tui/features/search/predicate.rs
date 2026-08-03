@@ -1,6 +1,6 @@
 //! Entry matchers: what a parsed filter value selects.
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use notema_domain::{
     DateFilter, Entry, FeelingMatch, Location, entry_group_date, feeling_matches_search,
 };
@@ -21,7 +21,7 @@ fn all_groups_match<T>(groups: &[Vec<T>], mut matches: impl FnMut(&T) -> bool) -
 /// timestamp nor a dated filename have no date to compare, so they never match.
 pub(super) fn date_predicate(
     filter: DateFilter,
-    today: NaiveDate,
+    today: Date,
 ) -> impl Fn(&Entry) -> bool + use<> {
     move |entry| entry_group_date(entry).is_some_and(|date| filter.matches(date, today))
 }

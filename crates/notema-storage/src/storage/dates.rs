@@ -1,15 +1,26 @@
-use chrono::{DateTime, FixedOffset, NaiveDate};
+use jiff::Zoned;
+use jiff::civil::Date;
 use notema_domain::entry_date_from_path;
 
 use notema_domain::Entry;
 
 /// Parse an RFC3339 timestamp, preserving its original offset.
-pub fn parse_entry_timestamp(value: &str) -> Option<DateTime<FixedOffset>> {
-    DateTime::parse_from_rfc3339(value).ok()
+pub fn parse_entry_timestamp(value: &str) -> Option<Zoned> {
+    notema_domain::Timestamp::parse(value).parsed
 }
 
-fn format_date_human(date: NaiveDate) -> String {
-    date.format("%A, %-d %B %Y").to_string()
+/// Render a [`Zoned`] as a plain RFC3339 string carrying its offset (e.g.
+/// `2026-07-01T10:23:00+02:00`), with no RFC 9557 zone/offset annotation — the
+/// exact shape front matter stores and `parse_entry_timestamp` reads back.
+pub(crate) fn to_offset_rfc3339(datetime: &Zoned) -> String {
+    datetime
+        .timestamp()
+        .display_with_offset(datetime.offset())
+        .to_string()
+}
+
+fn format_date_human(date: Date) -> String {
+    date.strftime("%A, %-d %B %Y").to_string()
 }
 
 pub fn entry_timestamp_label(entry: &Entry) -> String {
@@ -18,8 +29,8 @@ pub fn entry_timestamp_label(entry: &Entry) -> String {
         .map(|timestamp| {
             format!(
                 "{}, {}",
-                format_date_human(timestamp.date_naive()),
-                timestamp.format("%H:%M")
+                format_date_human(timestamp.date()),
+                timestamp.strftime("%H:%M")
             )
         })
         .or_else(|| entry_date_from_path(&entry.path).map(format_date_human))

@@ -5,7 +5,8 @@
 //! crate; this file is only the UI side that `insights/` renders and the
 //! event layer drives.
 
-use chrono::{Duration, NaiveDate};
+use jiff::ToSpan;
+use jiff::civil::Date;
 
 use crate::tui::app::AppModel;
 
@@ -141,14 +142,17 @@ impl InsightsTimeframe {
     /// The inclusive `(start, today)` date range this timeframe covers, or `None`
     /// for `Overall` (no filtering). Rolling windows: 365 / 30 / 7 days ending on
     /// (and including) `today`.
-    pub(crate) fn window(self, today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
-        let days = match self {
+    pub(crate) fn window(self, today: Date) -> Option<(Date, Date)> {
+        let days: i64 = match self {
             Self::Overall => return None,
             Self::Year => 365,
             Self::Month => 30,
             Self::Week => 7,
         };
-        Some((today - Duration::days(days - 1), today))
+        today
+            .checked_sub((days - 1).days())
+            .ok()
+            .map(|start| (start, today))
     }
 }
 

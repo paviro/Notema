@@ -73,7 +73,7 @@ pub(crate) struct EntryEditor {
     /// The timezone of the current location, when `use_location_timezone` resolved
     /// one (new entries only). Re-zones the environment datetime and, on save,
     /// stamps `created_at`/`edited_at`/`timezone` to the place rather than the system.
-    pub(crate) zone: Option<chrono_tz::Tz>,
+    pub(crate) zone: Option<jiff::tz::TimeZone>,
     /// The body text the syntax highlighting was last computed for, so the map is
     /// only recomputed when the body actually changes rather than every frame.
     last_highlight_src: Option<String>,

@@ -14,7 +14,7 @@
 //! attaches good/bad judgment to a feeling (see `notema-domain/src/feelings.rs`).
 
 use anyhow::Result as AppResult;
-use chrono::{Duration, Local};
+use jiff::{ToSpan, Zoned};
 use notema_domain::{FEELING_GROUPS, ImportSource, MOOD_RANGE, Metadata, feelings};
 use notema_storage::JournalStore;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -154,7 +154,7 @@ pub fn generate(store: &JournalStore, config: &SeedConfig) -> AppResult<usize> {
     let curve = MoodCurve::draw(&mut rng);
     let feelings = FeelingPools::build();
 
-    let anchor = Local::now().fixed_offset();
+    let anchor = Zoned::now();
     let window_secs = config.days.max(0) * 86_400;
 
     for _ in 0..config.count {
@@ -163,7 +163,9 @@ pub fn generate(store: &JournalStore, config: &SeedConfig) -> AppResult<usize> {
         } else {
             0
         };
-        let created_at = anchor - Duration::seconds(offset);
+        let created_at = anchor
+            .checked_sub(offset.seconds())
+            .expect("seeded timestamp stays in range");
 
         // Position within the window drives the mood curve. Derived from the
         // rng-drawn `offset`, never the timestamp, to keep bodies reproducible.
@@ -188,7 +190,7 @@ pub fn generate(store: &JournalStore, config: &SeedConfig) -> AppResult<usize> {
                 journal: &config.journal,
                 body: &body,
                 metadata: &metadata,
-                created_at: Some(created_at),
+                created_at: Some(created_at.clone()),
                 edited_at: Some(created_at),
                 timezone: None,
                 location: None,
@@ -471,14 +473,14 @@ mod tests {
         let entries = store.scan_entries().unwrap();
         assert_eq!(entries.len(), 25);
 
-        let now = Local::now().fixed_offset();
-        let window_start = now - Duration::days(180);
+        let now = Zoned::now();
+        let window_start = now.checked_sub(180.days()).unwrap();
         for entry in &entries {
             assert_eq!(entry.import.as_ref().unwrap().source, SEED_SOURCE);
             let created = entry
                 .created_at
                 .as_ref()
-                .and_then(|ts| ts.parsed)
+                .and_then(|ts| ts.parsed.clone())
                 .expect("created_at parses");
             assert!(created >= window_start && created <= now);
         }

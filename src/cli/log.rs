@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use chrono::Local;
+use jiff::Zoned;
 use notema_context::{
     EnvironmentProvider, EnvironmentWants, fetch_environment, resolve_zone, rezone,
 };
@@ -109,7 +109,7 @@ pub(super) fn run(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<(
     // A located entry adopts its place's timezone (config-gated) so its timestamp
     // and date-folder match where it was written, and captures the ambient
     // weather/air/celestial there — the same enrichment the TUI performs.
-    let mut created_at = Local::now().fixed_offset();
+    let mut created_at = Zoned::now();
     timing::mark("log:now");
     let mut timezone = None;
     let mut environment = None;
@@ -117,10 +117,10 @@ pub(super) fn run(cli: &Cli, args: &LogArgs, stdin_is_pipe: bool) -> AppResult<(
         if config.location.use_location_timezone
             && let Some(zone) = resolve_zone(coordinates, osm_timezone.as_deref())
         {
+            timezone = zone.iana_name().map(str::to_string);
             created_at = rezone(created_at, zone);
-            timezone = Some(zone.name().to_string());
         }
-        let report = fetch_environment(coordinates, created_at, EnvironmentWants::all());
+        let report = fetch_environment(coordinates, created_at.clone(), EnvironmentWants::all());
         for warning in &report.warnings {
             eprintln!(
                 "note: {} unavailable ({})",

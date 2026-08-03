@@ -9,7 +9,8 @@
 use crate::Result;
 use crate::http::get;
 use crate::weather::nearest_hour_index;
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime};
+use jiff::Zoned;
+use jiff::civil::{Date, DateTime, date};
 use notema_domain::{AirQuality, Coordinates};
 use serde::Deserialize;
 
@@ -22,12 +23,12 @@ const SOURCE: &str = "Open-Meteo";
 /// First date the CAMS reanalysis covers. Asking for anything earlier is not an
 /// empty result but an HTTP 400 (`start_date is out of allowed range`), so the
 /// bound has to be enforced here rather than discovered from the response.
-const COVERAGE_START: NaiveDate = NaiveDate::from_ymd_opt(2013, 1, 1).expect("valid date");
+const COVERAGE_START: Date = date(2013, 1, 1);
 
 /// Whether Open-Meteo has air-quality data for a date at all. Callers use this to
 /// skip a request that could only ever fail.
-pub(crate) fn covers(datetime: DateTime<FixedOffset>) -> bool {
-    datetime.date_naive() >= COVERAGE_START
+pub(crate) fn covers(datetime: &Zoned) -> bool {
+    datetime.date() >= COVERAGE_START
 }
 
 /// Fetch the air quality for a point at an instant. `Ok(None)` when Open-Meteo
@@ -36,22 +37,22 @@ pub(crate) fn covers(datetime: DateTime<FixedOffset>) -> bool {
 /// silently so a save never fails.
 pub fn fetch_air_quality(
     coordinates: Coordinates,
-    datetime: DateTime<FixedOffset>,
+    datetime: Zoned,
 ) -> Result<Option<AirQuality>> {
-    if !covers(datetime) {
+    if !covers(&datetime) {
         return Ok(None);
     }
     let lat = coordinates.latitude();
     let lon = coordinates.longitude();
-    let date = datetime.format("%Y-%m-%d");
+    let day = datetime.strftime("%Y-%m-%d");
     let url = format!(
         "{ENDPOINT}?latitude={lat}&longitude={lon}&timezone=auto\
-         &start_date={date}&end_date={date}&hourly={HOURLY}"
+         &start_date={day}&end_date={day}&hourly={HOURLY}"
     );
     let response: OpenMeteoResponse = serde_json::from_str(&get(&url)?)?;
     Ok(response
         .hourly
-        .and_then(|hourly| extract_air_quality(&hourly, datetime.naive_local())))
+        .and_then(|hourly| extract_air_quality(&hourly, datetime.datetime())))
 }
 
 /// The hourly block of an air-quality response. Every series is optional and
@@ -83,7 +84,7 @@ struct Hourly {
 /// Pull the sample nearest `target` from the hourly series and map it onto
 /// [`AirQuality`]. `None` when there is no parseable hour or the nearest one
 /// carries no data at all (so we don't persist a table holding only attribution).
-fn extract_air_quality(hourly: &Hourly, target: NaiveDateTime) -> Option<AirQuality> {
+fn extract_air_quality(hourly: &Hourly, target: DateTime) -> Option<AirQuality> {
     let index = nearest_hour_index(&hourly.time, target)?;
     let at = |series: &Option<Vec<Option<f64>>>| {
         series
@@ -122,8 +123,8 @@ fn extract_air_quality(hourly: &Hourly, target: NaiveDateTime) -> Option<AirQual
 mod tests {
     use super::*;
 
-    fn naive(text: &str) -> NaiveDateTime {
-        NaiveDateTime::parse_from_str(text, crate::weather::OPEN_METEO_HOUR_FORMAT).unwrap()
+    fn naive(text: &str) -> DateTime {
+        DateTime::strptime(crate::weather::OPEN_METEO_HOUR_FORMAT, text).unwrap()
     }
 
     // A minimal two-hour response covering 13:00 and 14:00 local. Pollen is
@@ -143,14 +144,14 @@ mod tests {
         }
     }"#;
 
-    fn at(text: &str) -> DateTime<FixedOffset> {
-        DateTime::parse_from_rfc3339(text).unwrap()
+    fn at(text: &str) -> Zoned {
+        notema_domain::Timestamp::parse(text).parsed.unwrap()
     }
 
     #[test]
     fn coverage_starts_in_2013() {
-        assert!(!covers(at("2012-12-31T23:00:00+00:00")));
-        assert!(covers(at("2013-01-01T00:00:00+00:00")));
+        assert!(!covers(&at("2012-12-31T23:00:00+00:00")));
+        assert!(covers(&at("2013-01-01T00:00:00+00:00")));
     }
 
     #[test]

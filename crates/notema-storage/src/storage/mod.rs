@@ -7,6 +7,7 @@ mod journal_metadata;
 mod journals;
 
 pub use dates::{entry_timestamp_label, parse_entry_timestamp};
+pub(crate) use dates::to_offset_rfc3339;
 pub use entry::entry_id;
 pub use entry::is_entry_file;
 pub use entry::{

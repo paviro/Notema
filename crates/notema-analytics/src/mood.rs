@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 use notema_domain::Entry;
 
 use crate::{MoodBucket, Tally, period_key, period_label, sort_by_count_desc};
@@ -57,9 +57,9 @@ impl Sentiment {
 
 pub(crate) fn build(
     entries: &[&Entry],
-    dates: &[Option<NaiveDate>],
+    dates: &[Option<Date>],
     by_year: bool,
-    today: NaiveDate,
+    today: Date,
 ) -> MoodAnalytics {
     let mut moods: Vec<i8> = Vec::new();
     let mut series_acc: BTreeMap<(i32, u32), (i64, usize)> = BTreeMap::new();
@@ -81,10 +81,10 @@ pub(crate) fn build(
                     .or_insert((0, 0));
                 slot.0 += i64::from(mood);
                 slot.1 += 1;
-                let year = year_acc.entry(date.year()).or_insert((0, 0));
+                let year = year_acc.entry(i32::from(date.year())).or_insert((0, 0));
                 year.0 += i64::from(mood);
                 year.1 += 1;
-                let weekday = date.weekday().num_days_from_monday() as usize;
+                let weekday = date.weekday().to_monday_zero_offset() as usize;
                 weekday_acc[weekday].0 += i64::from(mood);
                 weekday_acc[weekday].1 += 1;
                 let month = (date.month() - 1) as usize;
@@ -100,7 +100,8 @@ pub(crate) fn build(
                         add_mood_valence(&mut sentiment_windows[1], mood);
                     }
                 }
-                if date.iso_week() == today.iso_week() {
+                let (week, today_week) = (date.iso_week_date(), today.iso_week_date());
+                if (week.year(), week.week()) == (today_week.year(), today_week.week()) {
                     add_mood_valence(&mut sentiment_windows[2], mood);
                 }
             }

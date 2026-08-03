@@ -254,7 +254,7 @@ fn render_edited_content(
                 .saturating_add(secs),
         );
     }
-    parsed.datetime.edited_at = Some(chrono::Local::now().to_rfc3339());
+    parsed.datetime.edited_at = Some(crate::storage::to_offset_rfc3339(&jiff::Zoned::now()));
     Ok(crate::markdown::render_entry(&parsed, body))
 }
 
