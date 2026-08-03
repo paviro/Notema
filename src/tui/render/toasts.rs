@@ -53,13 +53,22 @@ fn toast_style(theme: &Theme, variant: ToastVariant) -> Style {
 /// never miss what's painted. Stacking stops once a toast no longer fits the
 /// remaining height.
 pub(crate) fn toast_rects(app: &AppModel, area: Rect) -> Vec<Rect> {
+    laid_out_toasts(app, area)
+        .into_iter()
+        .map(|(rect, _)| rect)
+        .collect()
+}
+
+/// Each visible toast's rect paired with the message already wrapped to it —
+/// sizing a card *is* wrapping its message, so the draw takes both from one pass.
+fn laid_out_toasts(app: &AppModel, area: Rect) -> Vec<(Rect, Vec<String>)> {
     let width = card_width(area.width);
     if width <= 4 {
         return Vec::new();
     }
     let x = area.right().saturating_sub(TOAST_RIGHT_INSET + width);
     let mut y = area.y + 1;
-    let mut rects = Vec::new();
+    let mut laid_out = Vec::new();
     for toast in app.toasts.items() {
         let lines = crate::tui::entry_rows::wrap_text(
             &toast.message,
@@ -74,10 +83,10 @@ pub(crate) fn toast_rects(app: &AppModel, area: Rect) -> Vec<Rect> {
         if y + height > area.bottom() {
             break;
         }
-        rects.push(Rect::new(x, y, width, height));
+        laid_out.push((Rect::new(x, y, width, height), lines));
         y += height + 1;
     }
-    rects
+    laid_out
 }
 
 /// The index of the toast under `(col, row)`, if any.
@@ -92,18 +101,13 @@ pub(crate) fn toast_at_point(app: &AppModel, area: Rect, col: u16, row: u16) -> 
 /// the scrim — so notifications stay readable over everything.
 pub(crate) fn draw_toasts(theme: &Theme, frame: &mut Frame<'_>, app: &AppModel) {
     let area = frame.area();
-    for (index, (toast, rect)) in app
+    for (index, (toast, (rect, lines))) in app
         .toasts
         .items()
         .iter()
-        .zip(toast_rects(app, area))
+        .zip(laid_out_toasts(app, area))
         .enumerate()
     {
-        let lines = crate::tui::entry_rows::wrap_text(
-            &toast.message,
-            rect.width.saturating_sub(4) as usize,
-            TOAST_MAX_LINES,
-        );
         let hovered = app.hover == crate::tui::state::HoverTarget::Toast(index);
         draw_toast(
             theme,

@@ -273,7 +273,10 @@ fn rendering_keeps_navigation_state_and_records_effective_scroll_in_the_view() {
         )
     );
     assert!(view.reader.scroll < u16::MAX);
-    assert_eq!(view.journal_offset, Some(0));
+    assert_eq!(
+        view.journals.as_ref().map(|journals| journals.offset),
+        Some(0)
+    );
     assert_eq!(view.entry_offset, Some(0));
 }
 

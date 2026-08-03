@@ -26,7 +26,7 @@ pub(super) fn draw(
         Action::ViewRendered {
             reader_scroll: (view.reader.line_count > 0).then_some(view.reader.scroll),
             insights_scroll: (view.insights.total > 0).then_some(view.insights.scroll),
-            journal_offset: view.journal_offset,
+            journal_offset: view.journals.as_ref().map(|journals| journals.offset),
             entry_offset: view.entry_offset,
             reader_hints: std::mem::take(&mut view.reader.hints),
             reader_openable: view.reader.openable,

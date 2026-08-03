@@ -81,7 +81,7 @@ pub(crate) use entries::search_suggestions_list_rect;
 pub(crate) use footer::{Hint, HintId, footer_height, footer_hint_id_at_point, footer_lines};
 #[cfg(test)]
 pub(crate) use footer::{
-    footer_hint_id_at, footer_text, hint_grid_text, hint_height, hint_id_at_wrapped,
+    footer_hint_id_at, footer_text, hint_grid_text, hint_height, hint_regions,
 };
 pub(crate) use frames::{draw_editor_discard_confirm, draw_modal_frame};
 use image_viewer::draw_image_viewer;
@@ -198,10 +198,15 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut AppModel, context: &mut Rend
     if let Some(area) = layout.journals {
         // Register rows against the clamped offset the rows were drawn with, not
         // the raw nav offset, so an over-max offset can't misplace click regions.
-        let offset = draw_journals(theme, frame, area, app);
-        context.view.journal_offset = Some(offset);
-        let (_, rows, list) = app.journal_rows(area.content);
-        register_rows(context, list, &rows, offset, PanelId::Journals);
+        let journals = draw_journals(theme, frame, area, app);
+        register_rows(
+            context,
+            journals.list_area,
+            &journals.meta,
+            journals.offset,
+            PanelId::Journals,
+        );
+        context.view.journals = Some(journals);
     }
     if let Some(area) = layout.entries {
         let offset = draw_entry_list(theme, frame, area, app);
@@ -389,21 +394,18 @@ fn register_view_interactions(
     }
     if app.nav.mode == Mode::Browse
         && let Some(area) = layout.and_then(|layout| layout.journals)
+        && let Some(journals) = context.view.journals.take()
     {
-        let (_, meta, list_area) = app.journal_rows(area.content);
-        let total_height = crate::tui::entry_rows::total_row_height(&meta);
-        let scroll = context
-            .view
-            .journal_offset
-            .unwrap_or_else(|| app.nav.journal_list.offset());
+        let total_height = crate::tui::entry_rows::total_row_height(&journals.meta);
         register_scrollbar(
             context,
             ScrollbarDrag::Journals,
             area.area,
             total_height,
-            list_area.height,
-            scroll,
+            journals.list_area.height,
+            journals.offset,
         );
+        context.view.journals = Some(journals);
     }
 
     let crate::tui::ui::ViewState {
@@ -822,26 +824,21 @@ fn register_hint_regions(
     area: ratatui::layout::Rect,
     hints: &[Hint],
 ) {
-    // Lay the grid out at the very origin and width `render_hint_line` draws at:
-    // the gaps absorb leftover width, so an inset probe shifts every chip.
-    let hint_at = |x, y| footer::hint_id_at_wrapped(hints, area.x, area.y, area.width, x, y);
-    for y in area.y..area.bottom() {
-        let mut x = area.x;
-        while x < area.right() {
-            let Some(id) = hint_at(x, y) else {
-                x += 1;
-                continue;
-            };
-            let start = x;
-            x += 1;
-            while x < area.right() && hint_at(x, y) == Some(id) {
-                x += 1;
-            }
-            context.view.interactions.push(
-                ratatui::layout::Rect::new(start, y, x - start, 1),
-                InteractionKind::Hint(id),
-            );
+    // Laid out at the very origin and width `render_hint_line` draws at: the gaps
+    // absorb leftover width, so an inset would shift every chip.
+    for (row, start, width, id) in footer::hint_regions(hints, area.width) {
+        if row >= area.height {
+            break;
         }
+        let x = area.x + start;
+        let width = width.min(area.right().saturating_sub(x));
+        if width == 0 {
+            continue;
+        }
+        context.view.interactions.push(
+            ratatui::layout::Rect::new(x, area.y + row, width, 1),
+            InteractionKind::Hint(id),
+        );
     }
 }
 

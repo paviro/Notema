@@ -219,20 +219,6 @@ pub(crate) fn hint_grid_text(hints: &[Hint], width: u16) -> String {
         .join("\n")
 }
 
-pub(crate) fn hint_id_at_wrapped(
-    hints: &[Hint],
-    origin_x: u16,
-    origin_y: u16,
-    width: u16,
-    col: u16,
-    row: u16,
-) -> Option<HintId> {
-    let relative_row = row.checked_sub(origin_y)? as usize;
-    let lines = rendered_hint_lines(hints, width);
-    let line = lines.get(relative_row)?;
-    placement_at(&line.placements, origin_x, col)
-}
-
 /// Lay the hints out as a column grid: pick a column count that fits, then align
 /// every row to the same column x-positions (each hint left-aligned in its column)
 /// so wrapped rows line up vertically. Leftover width is spread across the gaps so
@@ -388,10 +374,18 @@ pub(crate) fn footer_hint_id_at_point(
 }
 
 pub(crate) fn footer_hint_regions(app: &AppModel, width: u16) -> Vec<(u16, u16, u16, HintId)> {
-    let Some(line) = active_footer_line(app) else {
-        return Vec::new();
-    };
-    line.rendered_lines(width)
+    match active_footer_line(app) {
+        Some(line) => hint_regions(&line.hints, width),
+        None => Vec::new(),
+    }
+}
+
+/// Where every chip lands in the grid `render_hint_line` draws, as `(row, start
+/// column, width, id)` relative to the grid's origin. One layout pass for the
+/// whole grid, so hit regions and drawn chips are the same placement rather than
+/// two computations that have to agree.
+pub(crate) fn hint_regions(hints: &[Hint], width: u16) -> Vec<(u16, u16, u16, HintId)> {
+    rendered_hint_lines(hints, width)
         .into_iter()
         .enumerate()
         .flat_map(|(row, line)| {

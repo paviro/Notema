@@ -169,13 +169,23 @@ impl InteractionMap {
     }
 }
 
+/// What the journals column drew this frame: the clamped scroll offset the rows
+/// were drawn with, their metadata, and the rect they went into. Kept so the
+/// click-region and scrollbar passes read the drawn geometry instead of building
+/// the rows again — the column has no row memo of its own.
+pub(crate) struct JournalListFrame {
+    pub(crate) offset: usize,
+    pub(crate) meta: Vec<crate::tui::entry_rows::RowMeta>,
+    pub(crate) list_area: ratatui::layout::Rect,
+}
+
 #[derive(Default)]
 pub(crate) struct ViewState {
     pub(crate) interactions: InteractionMap,
     pub(crate) layout: Option<crate::tui::render::TuiLayout>,
     pub(crate) reader: crate::tui::app::ReaderHits,
     pub(crate) insights: crate::tui::app::InsightsScrollGeometry,
-    pub(crate) journal_offset: Option<usize>,
+    pub(crate) journals: Option<JournalListFrame>,
     pub(crate) entry_offset: Option<usize>,
 }
 
@@ -185,7 +195,7 @@ impl ViewState {
         self.layout = None;
         self.reader = crate::tui::app::ReaderHits::default();
         self.insights = crate::tui::app::InsightsScrollGeometry::default();
-        self.journal_offset = None;
+        self.journals = None;
         self.entry_offset = None;
     }
 

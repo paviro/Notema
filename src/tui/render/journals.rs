@@ -12,6 +12,7 @@ use crate::tui::{
         render_centered_notice, render_scrollbar_if_needed,
     },
     theme::Theme,
+    ui::JournalListFrame,
 };
 
 /// Rows occupied by one journal's bordered box (top border, name, bottom border).
@@ -43,12 +44,15 @@ pub(crate) fn journal_list_rect(content: Rect) -> Rect {
     }
 }
 
+/// Draw the journals column, returning what it drew — the rows are built here and
+/// nowhere else in the frame, so the caller passes this on to the click-region and
+/// scrollbar registrations.
 pub(crate) fn draw_journals(
     active_theme: &Theme,
     frame: &mut Frame<'_>,
     geometry: PanelGeometry,
     app: &AppModel,
-) -> usize {
+) -> JournalListFrame {
     let focused = app.nav.focus == Focus::Journals;
     // An all-journals search covers everything, so highlight every journal
     // rather than implying it's scoped to the selected one. A journal-scoped
@@ -134,5 +138,9 @@ pub(crate) fn draw_journals(
     if app.library.journals.is_empty() {
         render_centered_notice(active_theme, frame, geometry.content, "No journals");
     }
-    pixel_offset
+    JournalListFrame {
+        offset: pixel_offset,
+        meta,
+        list_area,
+    }
 }

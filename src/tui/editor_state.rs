@@ -137,17 +137,23 @@ impl EntryEditor {
 
     /// Recompute what the whole body has to be re-scanned for — syntax
     /// highlighting and the word count — but only when it changed since the last
-    /// call. Cheap to call every frame.
+    /// call. Called every frame, so the unchanged case compares the buffer in
+    /// place rather than joining it into a fresh `String` first.
     pub(crate) fn refresh_for_body(&mut self, theme: &Theme) {
-        let body = self.text();
-        if self.last_highlight_src.as_deref() != Some(body.as_str()) {
-            let spans = super::editor_highlight::highlight_body(theme, &body);
-            self.textarea.set_syntax_spans(spans);
-            // Counted like the entry index does it, so the editor's tally and the
-            // viewer's agree once saved.
-            self.word_count = body.split_whitespace().count();
-            self.last_highlight_src = Some(body);
+        if self
+            .last_highlight_src
+            .as_deref()
+            .is_some_and(|previous| lines_join_to(self.textarea.lines(), previous))
+        {
+            return;
         }
+        let body = self.text();
+        let spans = super::editor_highlight::highlight_body(theme, &body);
+        self.textarea.set_syntax_spans(spans);
+        // Counted like the entry index does it, so the editor's tally and the
+        // viewer's agree once saved.
+        self.word_count = body.split_whitespace().count();
+        self.last_highlight_src = Some(body);
     }
 
     /// The context tables the metadata strip should show: a fetch of this
@@ -218,6 +224,25 @@ impl EntryEditor {
     }
 }
 
+/// Whether `lines` joined by `\n` would equal `text`, walked in place so the
+/// common "nothing changed" case allocates nothing.
+fn lines_join_to(lines: &[String], text: &str) -> bool {
+    let mut rest = text;
+    for (index, line) in lines.iter().enumerate() {
+        if index > 0 {
+            match rest.strip_prefix('\n') {
+                Some(tail) => rest = tail,
+                None => return false,
+            }
+        }
+        match rest.strip_prefix(line.as_str()) {
+            Some(tail) => rest = tail,
+            None => return false,
+        }
+    }
+    rest.is_empty()
+}
+
 fn new_textarea(body: &str, placeholder: Option<&str>) -> TextArea<'static> {
     let theme = Theme::terminal_default();
     let mut textarea = TextArea::new(body.split('\n').map(str::to_string).collect());
@@ -237,4 +262,40 @@ fn new_textarea(body: &str, placeholder: Option<&str>) -> TextArea<'static> {
         textarea.set_placeholder_style(theme.placeholder());
     }
     textarea
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A false positive here means the editor keeps painting a stale highlight,
+    /// so the in-place comparison has to agree with `lines.join("\n")` exactly.
+    #[test]
+    fn joining_lines_in_place_matches_the_allocated_join() {
+        let cases = [
+            vec![""],
+            vec!["one"],
+            vec!["one", "two"],
+            vec!["", "leading blank"],
+            vec!["trailing blank", ""],
+            vec!["", "", ""],
+            vec!["ünïcödé", "second"],
+        ];
+        for lines in cases {
+            let lines: Vec<String> = lines.into_iter().map(str::to_string).collect();
+            let joined = lines.join("\n");
+            assert!(lines_join_to(&lines, &joined), "{lines:?}");
+            for altered in [
+                format!("{joined} "),
+                format!(" {joined}"),
+                joined.replace('\n', ""),
+                format!("{joined}\n"),
+            ] {
+                if altered == joined {
+                    continue;
+                }
+                assert!(!lines_join_to(&lines, &altered), "{lines:?} vs {altered:?}");
+            }
+        }
+    }
 }

@@ -1,7 +1,7 @@
 pub(crate) mod interaction;
 
 pub(crate) use interaction::{
-    ConfirmId, DialogId, DialogInputId, InteractionKind, TextFieldId, ViewState,
+    ConfirmId, DialogId, DialogInputId, InteractionKind, JournalListFrame, TextFieldId, ViewState,
 };
 
 pub(crate) struct RenderContext<'a> {

@@ -246,6 +246,7 @@ fn fullscreen_reader_footer_routes_via_the_shared_hit_test() {
 /// Every hint is clickable at its own rendered position, whatever row the grid
 /// places it on.
 fn assert_hints_routable(hints: &[Hint], width: u16) {
+    let regions = hint_regions(hints, width);
     let text = hint_grid_text(hints, width);
     for (row_index, line) in text.split('\n').enumerate() {
         for hint in hints {
@@ -253,8 +254,15 @@ fn assert_hints_routable(hints: &[Hint], width: u16) {
             // be a substring of another hint's text).
             let needle = format!("{}  {}", hint.key_hint, hint.label);
             if let Some(col) = line.find(&needle) {
+                let (col, row) = (col as u16, row_index as u16);
+                let covering = regions
+                    .iter()
+                    .find(|(region_row, start, width, _)| {
+                        *region_row == row && col >= *start && col < start + width
+                    })
+                    .map(|(_, _, _, id)| *id);
                 assert_eq!(
-                    hint_id_at_wrapped(hints, 0, 0, width, col as u16, row_index as u16),
+                    covering,
                     Some(hint.id),
                     "hint {:?} on row {row_index}",
                     hint.label

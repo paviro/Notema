@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Range;
 
 use notema_domain::{Entry, EntryEncryptionState, SearchHit};
@@ -572,40 +573,34 @@ impl AppModel {
             && (single_panel_is_active(width) || self.nav.insights_fullscreen)
     }
 
-    pub(crate) fn selected_reader(&self) -> Option<(String, String)> {
+    /// The reader pane's title and body for the selected entry. The body is
+    /// borrowed in the common case — it is only read on a render-cache miss, and
+    /// copying it per frame would defeat that memo — and owned for the states
+    /// whose text is synthesized rather than stored.
+    pub(crate) fn selected_reader(&self) -> Option<(String, Cow<'_, str>)> {
         let entry = self.resolved_selected_entry()?;
-        match entry.encryption_state {
-            EntryEncryptionState::EncryptedLocked => {
-                return Some((
-                    entry_timestamp_label(entry),
-                    "Encryption identity not available".to_string(),
-                ));
-            }
+        let unavailable = match entry.encryption_state {
+            EntryEncryptionState::EncryptedLocked => Some("Encryption identity not available"),
             EntryEncryptionState::EncryptedUnreadable => {
-                return Some((
-                    entry_timestamp_label(entry),
-                    "Encrypted entry could not be decrypted".to_string(),
-                ));
+                Some("Encrypted entry could not be decrypted")
             }
-            EntryEncryptionState::Unreadable => {
-                return Some((
-                    entry_timestamp_label(entry),
-                    "Entry could not be read".to_string(),
-                ));
-            }
-            EntryEncryptionState::Plain | EntryEncryptionState::EncryptedUnlocked => {}
+            EntryEncryptionState::Unreadable => Some("Entry could not be read"),
+            EntryEncryptionState::Plain | EntryEncryptionState::EncryptedUnlocked => None,
+        };
+        if let Some(notice) = unavailable {
+            return Some((entry_timestamp_label(entry), Cow::Borrowed(notice)));
         }
         let title = entry_timestamp_label(entry);
         if let Some(warning) = &entry.warning {
             return Some((
                 format!("! {title}"),
-                format!(
+                Cow::Owned(format!(
                     "> [!WARNING]\n> {warning}. Editing is disabled.\n\n{}",
                     entry.body
-                ),
+                )),
             ));
         }
-        Some((title, entry.body.clone()))
+        Some((title, Cow::Borrowed(entry.body.as_str())))
     }
 
     pub(crate) fn select_journal_by_name(&mut self, name: &str) {
