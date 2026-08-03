@@ -58,6 +58,15 @@ impl BoxRow {
     fn height(&self) -> u16 {
         self.lines.len().min(u16::MAX as usize) as u16
     }
+
+    /// The row's rendered text, for tests that identify a row by what it says.
+    #[cfg(test)]
+    pub(crate) fn text(&self) -> String {
+        self.lines
+            .iter()
+            .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+            .collect()
+    }
 }
 
 /// The per-row metadata (index + height) for a built row list, used by the
@@ -89,25 +98,41 @@ pub(crate) struct EntryRowCache {
 /// change), so its O(entries) cost is paid at most once per such change rather
 /// than several times per frame.
 pub(crate) fn build_entry_row_cache(app: &AppModel, text_width: u16) -> EntryRowCache {
-    let rows = entry_list_rows(app, text_width);
-    let meta: Vec<RowMeta> = rows
-        .iter()
-        .map(|row| RowMeta {
-            item_index: row.item_index,
-            height: row.height(),
-        })
-        .collect();
-    let total_height = meta.iter().map(|row| row.height as usize).sum();
-    let month_sections = entry_month_sections(app, text_width);
+    let (rows, sections) = entry_list_rows(app, text_width);
+    let meta = rows_meta(&rows);
+    let total_height = total_row_height(&meta);
     EntryRowCache {
+        month_sections: section_offsets(&meta, sections),
         rows,
         meta,
-        month_sections,
         total_height,
     }
 }
 
-pub(crate) fn entry_list_rows(app: &AppModel, text_width: u16) -> Vec<BoxRow> {
+/// Convert the row indices the build pass reports into the pixel offsets the
+/// sticky header reads, by running the heights already measured in `meta`.
+/// `sections` is ascending, so one walk covers them all.
+fn section_offsets(meta: &[RowMeta], sections: Vec<(usize, String)>) -> Vec<(usize, String)> {
+    let mut offsets = Vec::with_capacity(sections.len());
+    let mut row = 0usize;
+    let mut offset = 0usize;
+    for (start, month) in sections {
+        while row < start {
+            offset += meta[row].height as usize;
+            row += 1;
+        }
+        offsets.push((offset, month));
+    }
+    offsets
+}
+
+/// The list's rows, paired with the row index each month section starts at (its
+/// divider, or the leading blank line for the first month). Search mode has no
+/// sections.
+pub(crate) fn entry_list_rows(
+    app: &AppModel,
+    text_width: u16,
+) -> (Vec<BoxRow>, Vec<(usize, String)>) {
     let theme = &app.appearance.theme;
     match app.nav.mode {
         Mode::Search => {
@@ -124,7 +149,7 @@ pub(crate) fn entry_list_rows(app: &AppModel, text_width: u16) -> Vec<BoxRow> {
                     lines: search_hit_lines(theme, hit, text_width),
                 });
             }
-            rows
+            (rows, Vec::new())
         }
         Mode::Browse => browse_entry_rows(theme, app, text_width),
     }
@@ -166,9 +191,16 @@ fn search_hit_lines(theme: &Theme, hit: &SearchHit, text_width: u16) -> Vec<Line
     )
 }
 
-fn browse_entry_rows(theme: &Theme, app: &AppModel, text_width: u16) -> Vec<BoxRow> {
+/// Build the browse list, reporting where each month section starts so the
+/// sticky border label can be placed without walking the entries a second time.
+fn browse_entry_rows(
+    theme: &Theme,
+    app: &AppModel,
+    text_width: u16,
+) -> (Vec<BoxRow>, Vec<(usize, String)>) {
     let box_width = text_width as usize + 4;
     let mut rows = Vec::new();
+    let mut sections = Vec::new();
     let mut current_month = None;
     let mut current_day = None;
     let mut prev_was_entry = false;
@@ -186,9 +218,11 @@ fn browse_entry_rows(theme: &Theme, app: &AppModel, text_width: u16) -> Vec<BoxR
                 // padded by a blank line above and below, and take over the
                 // border once it scrolls above the top.
                 if is_first_month {
+                    sections.push((rows.len(), month));
                     rows.push(spacer_row());
                 } else {
                     rows.push(spacer_row());
+                    sections.push((rows.len(), month.clone()));
                     rows.push(BoxRow {
                         item_index: None,
                         lines: vec![section_divider(
@@ -226,68 +260,7 @@ fn browse_entry_rows(theme: &Theme, app: &AppModel, text_width: u16) -> Vec<BoxR
         prev_was_entry = true;
     }
 
-    rows
-}
-
-/// Month sections in the browse list's pixel space: the row offset of each
-/// month's divider (or, for the first month, its leading blank line), paired
-/// with its label. Mirrors the row sequencing in [`browse_entry_rows`] so the
-/// sticky border label switches over in step with the scrolled list. Empty
-/// outside browse mode.
-pub(crate) fn entry_month_sections(app: &AppModel, text_width: u16) -> Vec<(usize, String)> {
-    if app.nav.mode != Mode::Browse {
-        return Vec::new();
-    }
-
-    let mut sections = Vec::new();
-    let mut current_month = None;
-    let mut current_day = None;
-    let mut prev_was_entry = false;
-    let mut is_first_month = true;
-    let mut y = 0usize;
-
-    for entry in app.selected_entries().iter() {
-        let month = entry_month_label(entry);
-        if month != current_month {
-            current_month = month.clone();
-            current_day = None;
-            if let Some(month) = month {
-                if is_first_month {
-                    sections.push((y, month)); // leading blank line
-                    y += 1;
-                } else {
-                    y += 1; // blank line above the divider
-                    sections.push((y, month)); // the divider row
-                    y += 2; // divider + blank line below
-                }
-                is_first_month = false;
-                prev_was_entry = false;
-            }
-        }
-
-        if prev_was_entry {
-            y += 1; // blank spacer between consecutive entries
-        }
-
-        let day = entry_day_label(entry);
-        let day_label = if day != current_day {
-            current_day = day.clone();
-            day
-        } else {
-            None
-        };
-
-        y += entry_list_lines(
-            &app.appearance.theme,
-            entry,
-            day_label.as_deref(),
-            text_width,
-        )
-        .len();
-        prev_was_entry = true;
-    }
-
-    sections
+    (rows, sections)
 }
 
 /// A section separator with the label pinned to the right edge over a heavy rule:
@@ -414,13 +387,7 @@ pub(crate) fn journal_list_rows(app: &AppModel, inner_width: usize) -> Vec<BoxRo
 
 #[cfg(test)]
 pub(crate) fn entry_row_metadata(app: &AppModel, text_width: u16) -> Vec<RowMeta> {
-    entry_list_rows(app, text_width)
-        .into_iter()
-        .map(|row| RowMeta {
-            item_index: row.item_index,
-            height: row.height(),
-        })
-        .collect()
+    rows_meta(&entry_list_rows(app, text_width).0)
 }
 
 /// Returns the visible `ListItem`s, the 0-based index of the selected item within

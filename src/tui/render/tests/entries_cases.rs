@@ -142,6 +142,101 @@ fn first_month_rides_border_and_next_month_takes_over_after_scrolling() {
     assert!(top.contains("June 2026"), "top border was: {top:?}");
 }
 
+/// The sticky label is placed from offsets derived from the built rows, so it has
+/// to hand over on exactly the row its divider scrolls past: not one row early
+/// (the divider would be pinned and listed at once), not one row late.
+#[test]
+fn the_border_label_takes_over_on_the_row_its_divider_scrolls_past() {
+    let dir = month_boundary_journal();
+
+    // The row the divider is drawn on, measured from the rows themselves rather
+    // than from the section offsets under test.
+    let app = app_for(&dir);
+    let cache = app.entry_rows(entry_text_width(&dir));
+    let mut divider_top = 0usize;
+    for (row, meta) in cache.rows.iter().zip(&cache.meta) {
+        if row.text().contains("June 2026") {
+            break;
+        }
+        divider_top += meta.height as usize;
+    }
+    // The label takes over once the divider has scrolled strictly above the top.
+    let expected = divider_top + 1;
+
+    let mut switched_at = None;
+    for offset in 0..expected + 4 {
+        let (border, body) = border_and_body(&dir, offset);
+        let pinned_june = border.contains("June 2026");
+        assert!(
+            !(pinned_june && body.contains("June 2026")),
+            "June is pinned to the border while its divider is still listed \
+             at offset {offset}: {border:?}"
+        );
+        if pinned_june && switched_at.is_none() {
+            switched_at = Some(offset);
+        }
+        assert_eq!(
+            pinned_june,
+            offset >= expected,
+            "border label at offset {offset} (divider sits at {divider_top}): {border:?}"
+        );
+    }
+    assert_eq!(switched_at, Some(expected));
+}
+
+/// The text width the entry panel renders at, read back from the layout so the
+/// row cache under test is the one the render used.
+fn entry_text_width(dir: &tempfile::TempDir) -> u16 {
+    let mut app = app_for(dir);
+    let mut view = crate::tui::ui::ViewState::default();
+    render_to_text(57, 12, |frame| draw_app(frame, &mut app, &mut view));
+    view.layout
+        .and_then(|layout| layout.entries)
+        .expect("entry list rendered")
+        .text_width
+}
+
+/// A `work` journal of two July entries above ten June ones — enough rows below
+/// the June divider to scroll it clear of the top.
+fn month_boundary_journal() -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    let mut days = vec![
+        ("2026-07-02", "2026-07-02T10:00:00+02:00"),
+        ("2026-07-01", "2026-07-01T10:00:00+02:00"),
+    ];
+    for day in 1..=10 {
+        days.push((
+            Box::leak(format!("2026-06-{day:02}").into_boxed_str()),
+            Box::leak(format!("2026-06-{day:02}T10:00:00+02:00").into_boxed_str()),
+        ));
+    }
+    for (index, (dir_day, ts)) in days.iter().enumerate() {
+        let entry_dir = dir.path().join("work").join(dir_day);
+        fs::create_dir_all(&entry_dir).unwrap();
+        fs::write(
+            entry_dir.join(format!("e{index}.md")),
+            format!("+++\nschema_version = 1\n[time]\ncreated_at = \"{ts}\"\n+++\n\n# e{index}\nBody text\n"),
+        )
+        .unwrap();
+    }
+    dir
+}
+
+/// The entry panel's top border row and its body rows, scrolled to `offset`.
+fn border_and_body(dir: &tempfile::TempDir, offset: usize) -> (String, String) {
+    const WIDTH: u16 = 57;
+    const HEIGHT: u16 = 12;
+    let mut app = app_for(dir);
+    *app.nav.entry_list.offset_mut() = offset;
+    let backend = render_app(app, WIDTH, HEIGHT);
+    let row = |y: u16| {
+        (0..WIDTH)
+            .map(|x| backend.buffer().cell((x, y)).unwrap().symbol().to_string())
+            .collect::<String>()
+    };
+    (row(0), (1..HEIGHT).map(row).collect::<Vec<_>>().join("\n"))
+}
+
 fn app_for(dir: &tempfile::TempDir) -> AppModel {
     let mut app = new_app(Config::new(dir.path().to_path_buf()));
     app.select_journal_by_name("work");
