@@ -13,11 +13,13 @@ use super::{
     Syntax, Theme, WeatherGlyphs,
 };
 
+const THEME_SCHEMA_VERSION: u32 = 1;
+
 pub(super) fn parse(text: &str, mode: Mode) -> Result<Theme> {
     let file: ThemeFile = toml::from_str(text).context("parsing theme TOML")?;
-    if file.schema_version != 1 {
+    if file.schema_version != THEME_SCHEMA_VERSION {
         bail!(
-            "unsupported theme schema version {}; expected 1",
+            "unsupported theme schema version {}; expected {THEME_SCHEMA_VERSION}",
             file.schema_version
         );
     }
