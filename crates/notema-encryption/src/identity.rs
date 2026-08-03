@@ -506,14 +506,27 @@ pub fn set_key_location(
     };
 
     // Read it back from where it now lives and confirm the same key comes out.
-    let readback = unwrap_key(&fetch_stored(&moved)?, passphrase)?;
-    if readback.public_key() != current.public_key()
-        || readback.signing_public() != current.signing_public()
-    {
-        return Err(EncryptionError::KeySourceMismatch);
+    // Everything from here until the identity file names the new location can
+    // leave a copy of the key somewhere nothing points at, so each failure
+    // unwinds the write it just made.
+    let verified = (|| {
+        let readback = unwrap_key(&fetch_stored(&moved)?, passphrase)?;
+        if readback.public_key() != current.public_key()
+            || readback.signing_public() != current.signing_public()
+        {
+            return Err(EncryptionError::KeySourceMismatch);
+        }
+        write_identity_file(&paths.identity_file, &wire_for(&stored.device_name, &moved))
+    })();
+    if let Err(error) = verified {
+        // A keychain item we minted moments ago and never recorded. Leaving it
+        // would strand a full copy of the key in the OS keychain under an
+        // account nothing references and nothing will ever clean up.
+        if let KeyLocation::Keyring(account) = &moved.location {
+            keyring::delete(account);
+        }
+        return Err(error);
     }
-
-    write_identity_file(&paths.identity_file, &wire_for(&stored.device_name, &moved))?;
 
     // Nothing references the old keychain item now.
     if let KeyLocation::Keyring(account) = &stored.key.location
