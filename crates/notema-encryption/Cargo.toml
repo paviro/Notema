@@ -24,3 +24,24 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+# The OS keychain backends, one per platform so the targets without a keychain
+# (Android/Termux, the iSH build, and the embedded Linux artifacts) pull in none
+# of it and fall back to `keys_command`. Linux/BSD use the async Secret Service
+# backend because it speaks D-Bus through zbus — pure Rust, unlike the sync one,
+# which needs the libdbus C library and would not cross-compile to musl, i686,
+# armv7 or riscv64.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, features = ["windows-native"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+keyring = { workspace = true, features = [
+    "async-secret-service",
+    "crypto-rust",
+    # zbus would otherwise pull in tokio; async-io is the executor the Linux
+    # side of notema-context already uses.
+    "async-io",
+] }

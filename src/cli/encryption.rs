@@ -62,15 +62,31 @@ pub(crate) fn encrypt_store(
         }
         println!("No journal encryption identity configured; generating an age identity.");
         let (name, passphrase) = prompts::resolve_new_identity_options(device_name, no_passphrase)?;
+        let use_keyring = prompts::prompt_keyring_choice(notema_encryption::keyring_available())?;
         let summary = store.enable_encryption(&name, passphrase.as_ref(), cli_progress("files"))?;
+        // Minted inline, then moved: the move verifies the keychain hands the
+        // key back before the local copy goes away, which a keychain-first path
+        // could not do.
+        if use_keyring {
+            store.set_key_location(&notema_encryption::KeyTarget::Keyring, passphrase.as_ref())?;
+        }
         (summary.recipient, summary.warnings, passphrase.is_none())
     };
 
     println!("Encrypted journal store at {}", store.root().display());
-    println!(
-        "Encryption recipient: {recipient}. Identity file: {}. Back it up; without it encrypted journal files cannot be decrypted.",
-        store.identity_path().display()
-    );
+    println!("Encryption recipient: {recipient}.");
+    match store.this_device()? {
+        // Telling someone to back up a file that only points at the keychain
+        // would hand them a backup that cannot decrypt anything.
+        Some(info) if info.source != notema_encryption::KeySource::File => println!(
+            "This device's key is kept in {}. Back it up with `notema encryption device export-key <path>`; without it encrypted journal files cannot be decrypted.",
+            info.source.label()
+        ),
+        _ => println!(
+            "Identity file: {}. Back it up; without it encrypted journal files cannot be decrypted.",
+            store.identity_path().display()
+        ),
+    }
     if minted_without_passphrase {
         println!("This key has no passphrase — keep this device and its backups secure.");
     }

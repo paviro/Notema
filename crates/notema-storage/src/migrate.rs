@@ -693,7 +693,18 @@ fn copy_dir_all(source: &Path, target: &Path) -> AppResult<()> {
 /// `identity.toml` aside as `identity.disabled-<timestamp>.toml` — a recoverable
 /// copy, not a delete. Returns the new path.
 fn disable_identity_file(paths: &KeyPaths) -> AppResult<PathBuf> {
-    rename_aside(&paths.identity_file, "identity", "toml")
+    // A key kept in the keychain or a secret manager would leave the retired
+    // copy pointing at something nothing references any more, so inline it
+    // first: this rename is meant to be recoverable, not a delete. Best effort —
+    // a key we can no longer fetch shouldn't block turning encryption off.
+    let snapshot = crypto::snapshot_identity(paths).ok();
+    let aside = rename_aside(&paths.identity_file, "identity", "toml")?;
+    if let Some(snapshot) = snapshot.filter(crypto::IdentitySnapshot::is_external) {
+        crypto::atomic_write_private(&aside, &snapshot.portable_bytes()?)?;
+        // Only once the recoverable copy is on disk.
+        snapshot.forget_stored_key();
+    }
+    Ok(aside)
 }
 
 /// Retire this device's roster trust pins the same way as its key, renaming
