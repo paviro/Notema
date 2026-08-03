@@ -53,7 +53,7 @@ fn confirm_delete_area(theme: &Theme, frame_area: Rect, ctx: &DeleteContext) -> 
     let width = CONFIRM_DIALOG_WIDTH.max(
         message
             .lines()
-            .map(|line| surface_outer_width(theme, line.len() as u16))
+            .map(|line| surface_outer_width(theme, line.width() as u16))
             .max()
             .unwrap_or(0),
     );

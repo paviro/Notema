@@ -42,6 +42,13 @@ fn sort_casing(map: BTreeMap<String, CasingCount>) -> Vec<(String, usize)> {
     pairs
 }
 
+/// Case-insensitive equality via full Unicode folding, matching how the master
+/// value list is deduped (`to_lowercase`) — `eq_ignore_ascii_case` would fork
+/// non-ASCII casings like `Ärger`/`ärger`.
+fn eq_ignore_case(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
+}
+
 /// A list of `(display value, usage count)` pairs, sorted by count descending.
 pub(crate) type MetadataCounts = Vec<(String, usize)>;
 
@@ -230,7 +237,7 @@ impl EditMetadataState {
         if let Some(pos) = self
             .filtered
             .iter()
-            .position(|&i| self.all_values[i].0.eq_ignore_ascii_case(only))
+            .position(|&i| eq_ignore_case(&self.all_values[i].0, only))
         {
             self.select_index(pos);
         }
@@ -261,11 +268,7 @@ impl EditMetadataState {
     pub(crate) fn toggle_selected(&mut self) {
         if let Some(tag_idx) = self.selected_value_index() {
             let tag = self.all_values[tag_idx].0.clone();
-            if let Some(pos) = self
-                .selected
-                .iter()
-                .position(|t| t.eq_ignore_ascii_case(&tag))
-            {
+            if let Some(pos) = self.selected.iter().position(|t| eq_ignore_case(t, &tag)) {
                 self.selected.remove(pos);
             } else {
                 self.selected.push(tag);
@@ -286,15 +289,11 @@ impl EditMetadataState {
             let tag = self
                 .all_values
                 .iter()
-                .find(|(t, _)| t.eq_ignore_ascii_case(input))
+                .find(|(t, _)| eq_ignore_case(t, input))
                 .map_or_else(|| input.to_string(), |(t, _)| t.clone());
-            if !self.selected.iter().any(|t| t.eq_ignore_ascii_case(&tag)) {
+            if !self.selected.iter().any(|t| eq_ignore_case(t, &tag)) {
                 self.selected.push(tag.clone());
-                if !self
-                    .all_values
-                    .iter()
-                    .any(|(t, _)| t.eq_ignore_ascii_case(&tag))
-                {
+                if !self.all_values.iter().any(|(t, _)| eq_ignore_case(t, &tag)) {
                     self.all_values.insert(self.active_len, (tag, 0));
                     self.active_len += 1;
                 }
@@ -329,6 +328,24 @@ mod tests {
             .collect();
         let filtered: Vec<usize> = (0..count).collect();
         EditMetadataState::new(MetadataKind::Tags, all_values, filtered, Vec::new(), count)
+    }
+
+    #[test]
+    fn adding_a_non_ascii_value_folds_case_instead_of_forking() {
+        // The master list holds "Ärger"; typing "ärger" must reuse it, not create a
+        // second casing variant — `eq_ignore_ascii_case` would fork non-ASCII case.
+        let mut state = EditMetadataState::new(
+            MetadataKind::Tags,
+            vec![("Ärger".to_string(), 3)],
+            vec![0],
+            Vec::new(),
+            1,
+        );
+        state.input = TextInput::from("ärger");
+        state.add_from_input();
+
+        assert_eq!(state.selected, vec!["Ärger".to_string()]);
+        assert_eq!(state.all_values.len(), 1, "no forked casing variant added");
     }
 
     #[test]

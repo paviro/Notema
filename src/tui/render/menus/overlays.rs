@@ -89,7 +89,10 @@ pub(crate) fn draw_metadata_menu(
 
 pub(crate) fn metadata_menu_interactions(theme: &Theme, frame_area: Rect) -> MenuInteractions {
     let layout = metadata_menu_layout(theme, frame_area);
-    let rows = (0..METADATA_MENU_ITEMS.len())
+    // Only the rows the clamped list actually draws are hittable; a short
+    // terminal that clips the list must not leave click regions off-screen.
+    let visible = METADATA_MENU_ITEMS.len().min(layout.list.height as usize);
+    let rows = (0..visible)
         .map(|index| {
             (
                 Rect {

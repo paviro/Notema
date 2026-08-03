@@ -179,8 +179,15 @@ impl Toasts {
     }
 
     fn enforce_cap(&mut self) {
-        if self.items.len() > TOAST_CAP {
-            self.items.drain(..self.items.len() - TOAST_CAP);
+        // Evict the oldest transient toast first: a persistent one marks ongoing
+        // state, so a burst of passing notifications must not push it off.
+        while self.items.len() > TOAST_CAP {
+            let victim = self
+                .items
+                .iter()
+                .position(|toast| !toast.persistent)
+                .unwrap_or(0);
+            self.items.remove(victim);
         }
     }
 
@@ -805,4 +812,28 @@ pub(crate) enum Overlay {
     /// fetch. The `Instant` is when it opened, driving both the animated dots and
     /// the timeout after which the save proceeds without the data.
     FetchingEnvironment(Instant),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persistent_toast_survives_a_transient_burst() {
+        let mut toasts = Toasts::default();
+        toasts.push_persistent(ToastVariant::Warning, "ongoing state");
+        // Overflow the cap with transient toasts; the persistent one must remain.
+        for i in 0..TOAST_CAP + 2 {
+            toasts.push(ToastVariant::Info, format!("transient {i}"));
+        }
+
+        assert_eq!(toasts.items().len(), TOAST_CAP);
+        assert!(
+            toasts
+                .items()
+                .iter()
+                .any(|toast| toast.persistent && toast.message == "ongoing state"),
+            "the persistent toast should not be evicted by transient churn"
+        );
+    }
 }

@@ -459,7 +459,11 @@ pub(crate) fn visible_box_items(
         let lines = row.lines[start..end].to_vec();
         remaining_height = remaining_height.saturating_sub(visible_height);
 
-        if selection_visible && selected_visible_idx.is_none() && row.item_index == selected_index {
+        if selection_visible
+            && selected_visible_idx.is_none()
+            && row.item_index.is_some()
+            && row.item_index == selected_index
+        {
             selected_visible_idx = Some(items.len());
         }
         items.push(ListItem::new(lines));
@@ -909,6 +913,24 @@ mod tests {
         let mut scroll = 20usize;
         ensure_row_visible(&mut scroll, &rows, Some(1), 6);
         assert_eq!(scroll, 4);
+    }
+
+    #[test]
+    fn no_divider_is_marked_selected_when_nothing_is_selected() {
+        // A leading spacer/divider (item_index: None) followed by entries. With no
+        // selection, `None == None` must not latch the divider as the selected row.
+        let rows = vec![
+            BoxRow::new(None, vec![Line::from(String::new())]),
+            BoxRow::new(Some(0), vec![Line::from("first")]),
+            BoxRow::new(Some(1), vec![Line::from("second")]),
+        ];
+        let (_, selected, _) = visible_box_items(&rows, 0, 20, None, true);
+        assert_eq!(selected, None);
+
+        // A real selection still resolves to its visible row (index 1 here, after
+        // the spacer at visible position 0).
+        let (_, selected, _) = visible_box_items(&rows, 0, 20, Some(1), true);
+        assert_eq!(selected, Some(2));
     }
 
     fn line_text(line: &Line<'_>) -> String {

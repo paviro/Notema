@@ -24,7 +24,23 @@ use super::theme::Theme;
 /// or `234344` select whole). Punctuation and whitespace are boundaries, so a
 /// double-click on `test,` selects just `test`.
 fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric()
+    c.is_alphanumeric() || is_combining_mark(c)
+}
+
+/// A combining diacritical mark, which attaches to the preceding base character.
+/// Treated as word-internal so a double-click on decomposed (NFD) text — what
+/// macOS produces on paste, e.g. `e` + U+0301 for `é` — selects the whole
+/// grapheme instead of splitting it mid-cluster.
+fn is_combining_mark(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0300..=0x036F   // Combining Diacritical Marks
+        | 0x0483..=0x0489 // Cyrillic combining marks
+        | 0x1AB0..=0x1AFF // Combining Diacritical Marks Extended
+        | 0x1DC0..=0x1DFF // Combining Diacritical Marks Supplement
+        | 0x20D0..=0x20FF // Combining Diacritical Marks for Symbols
+        | 0xFE20..=0xFE2F // Combining Half Marks
+    )
 }
 
 /// The word (a maximal run of [`is_word_char`]) that a caret at char index `col`
@@ -503,6 +519,18 @@ mod tests {
         assert_eq!(word(17), Some("A24"));
         // Caret at end-of-line selects the trailing token.
         assert_eq!(word(line.chars().count()), Some("A24"));
+    }
+
+    #[test]
+    fn word_bounds_keeps_decomposed_graphemes_whole() {
+        // NFD `café`: base `e` + combining acute (U+0301). The mark must not split
+        // the word, so a double-click anywhere in it selects the whole token. The
+        // returned range is in char indices, spanning `cafe` + the mark (0..5).
+        let line = "cafe\u{0301} test";
+        assert_eq!(word_bounds(line, 0), Some((0, 5)));
+        // Caret on the combining mark, and just past it, still grab the word.
+        assert_eq!(word_bounds(line, 4), Some((0, 5)));
+        assert_eq!(word_bounds(line, 5), Some((0, 5)));
     }
 
     #[test]

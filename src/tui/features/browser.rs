@@ -618,7 +618,10 @@ impl AppModel {
             let changed = self.selected_journal_index() != index;
             self.nav.journal_list.select(Some(index));
             *self.nav.journal_list.offset_mut() = self.journal_row_top(index);
-            self.nav.selected_entry_index = Some(0);
+            // An empty journal has no entry to land on; leave it deselected so the
+            // right pane shows its insights rather than "No entry selected".
+            let has_entries = self.library.range(name).is_some_and(|r| !r.is_empty());
+            self.nav.selected_entry_index = has_entries.then_some(0);
             self.reset_entry_scroll();
             self.nav.focus = Focus::Entries;
             if changed {

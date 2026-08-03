@@ -115,15 +115,19 @@ pub(crate) fn draw_journals(
     frame.render_widget(block, geometry.area);
     super::panel_focus_stripe(active_theme, frame, geometry.area, focused);
     frame.render_stateful_widget(list, list_area, &mut render_state);
-    render_scrollbar_if_needed(
-        active_theme,
-        frame,
-        geometry.area,
-        total_height,
-        viewport_height,
-        pixel_offset,
-        focused,
-    );
+    // Search mode registers no drag/wheel/click path for this scrollbar, so drawing
+    // one would promise an interaction nothing honors; only show it while browsing.
+    if app.nav.mode == Mode::Browse {
+        render_scrollbar_if_needed(
+            active_theme,
+            frame,
+            geometry.area,
+            total_height,
+            viewport_height,
+            pixel_offset,
+            focused,
+        );
+    }
 
     // With no journals the column would otherwise be blank; a centered notice
     // matches the overview and entry list so it reads as intentional.
