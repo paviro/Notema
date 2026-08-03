@@ -63,6 +63,9 @@ pub struct LibraryLoadReport {
     pub removed_records: usize,
     pub cache_status: CacheStatus,
     pub cache_warning: Option<String>,
+    /// One message per entry that was degraded to an unreadable placeholder
+    /// during the source read, so a single bad file never fails the whole load.
+    pub source_failures: Vec<String>,
 }
 
 impl LibraryLoadReport {
@@ -81,12 +84,18 @@ impl LibraryLoadReport {
     /// One-line breakdown for `NOTEMA_TIMING`.
     pub fn timing_summary(&self) -> String {
         let ms = |duration: Duration| duration.as_secs_f64() * 1000.0;
+        let unreadable = if self.source_failures.is_empty() {
+            String::new()
+        } else {
+            format!(", {} unreadable", self.source_failures.len())
+        };
         format!(
-            "library: {:?} {} entries ({} hit / {} miss), total {:.1} ms; components: cache-read {:.1}, discovery {:.1}, source-read {:.1}, cache-write {:.1}",
+            "library: {:?} {} entries ({} hit / {} miss{}), total {:.1} ms; components: cache-read {:.1}, discovery {:.1}, source-read {:.1}, cache-write {:.1}",
             self.cache_status,
             self.entries,
             self.cache_hits,
             self.cache_misses,
+            unreadable,
             ms(self.total),
             ms(self.cache_read),
             ms(self.discovery),

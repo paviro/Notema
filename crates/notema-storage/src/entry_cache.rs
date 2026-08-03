@@ -308,11 +308,12 @@ pub(super) fn validate_discovery(
             });
         }
     };
-    entries.extend(storage::read_entries_with_progress(
+    let (source_entries, source_failures) = storage::read_entries_with_progress(
         misses,
         identity,
         progress.map(|_| &report_miss as &(dyn Fn(usize, usize) + Sync)),
-    )?);
+    )?;
+    entries.extend(source_entries);
     entries.sort_by(|left, right| right.path.cmp(&left.path));
     let source_read = source_started.elapsed();
 
@@ -330,6 +331,7 @@ pub(super) fn validate_discovery(
             CacheStatus::Rebuilt
         },
         cache_warning,
+        source_failures,
         ..LibraryLoadReport::default()
     };
 
@@ -622,6 +624,30 @@ mod tests {
             validated.report.timing_summary().contains("1 hit / 1 miss"),
             "{}",
             validated.report.timing_summary()
+        );
+    }
+
+    /// A source read that hits one unreadable entry degrades it to a placeholder
+    /// and records the failure in the report rather than failing the whole load.
+    #[test]
+    fn the_report_carries_unreadable_source_failures() {
+        let dir = tempdir().unwrap();
+        let store = store_with_entries(
+            &dir.path().join("journals"),
+            &dir.path().join("config"),
+            &["first", "second"],
+        );
+        let corrupt = store.scan_entries().unwrap()[0].path.clone();
+        fs::write(&corrupt, [0xff, 0xfe, 0x00, 0xff]).unwrap();
+
+        let snapshot = store.load_library(CachePolicy::Rebuild).unwrap();
+
+        assert_eq!(snapshot.entries.len(), 2, "the readable entry still loads");
+        assert_eq!(snapshot.report.source_failures.len(), 1);
+        assert!(
+            snapshot.report.timing_summary().contains("1 unreadable"),
+            "{}",
+            snapshot.report.timing_summary()
         );
     }
 

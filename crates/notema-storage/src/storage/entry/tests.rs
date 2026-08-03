@@ -554,6 +554,39 @@ fn scan_entries_returns_locked_placeholder_for_encrypted_entry_without_key() {
     );
 }
 
+/// One unreadable plaintext entry must degrade to a placeholder rather than
+/// failing the whole scan, so a reload still surfaces every other entry and the
+/// failure is reported.
+#[test]
+fn scan_degrades_unreadable_plaintext_entry_and_reports_it() {
+    let dir = tempdir().unwrap();
+    let day = dir.path().join("work").join("2026").join("07").join("01");
+    fs::create_dir_all(&day).unwrap();
+    fs::write(
+        day.join("2026-07-01T09-00-00-good1.md"),
+        "+++\nschema_version = 1\n+++\n\n# Readable\n",
+    )
+    .unwrap();
+    // Invalid UTF-8 fails the plaintext decode the same way a torn write would.
+    let bad = day.join("2026-07-01T10-00-00-bad00.md");
+    fs::write(&bad, [0xff, 0xfe, 0x00, 0xff]).unwrap();
+
+    let (entries, failures) = scan_entries_with_failures(dir.path(), None).unwrap();
+
+    assert_eq!(entries.len(), 2, "the good entry still loads");
+    let unreadable = entries
+        .iter()
+        .find(|entry| entry.encryption_state == EntryEncryptionState::Unreadable)
+        .expect("the bad entry degrades to an unreadable placeholder");
+    assert_eq!(unreadable.preview, "[unreadable] Entry");
+    assert_eq!(failures.len(), 1, "the failure is reported");
+    assert!(
+        failures[0].contains("bad00"),
+        "the failure names the offending file, got: {}",
+        failures[0]
+    );
+}
+
 #[test]
 fn scan_entries_marks_encrypted_entry_unlocked_with_identity() {
     let dir = tempdir().unwrap();

@@ -231,6 +231,9 @@ fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
         if let Some(warning) = snapshot.report.cache_warning {
             writeln!(stdout, "Warning: {warning}")?;
         }
+        for failure in &snapshot.report.source_failures {
+            writeln!(stdout, "Warning: unreadable entry — {failure}")?;
+        }
     }
     Ok((config, store))
 }

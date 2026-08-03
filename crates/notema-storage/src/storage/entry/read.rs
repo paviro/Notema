@@ -111,11 +111,12 @@ fn collect_paths(
 }
 
 /// Read and parse (and, when encrypted, decrypt) the given entry paths in
-/// parallel, returning them sorted newest-first.
+/// parallel, returning them sorted newest-first alongside a message for every
+/// entry that had to be degraded to an unreadable placeholder.
 pub(crate) fn read_entries(
     paths: Vec<EntryPath>,
     identity: Option<&crypto::UnlockedIdentity>,
-) -> AppResult<Vec<Entry>> {
+) -> AppResult<(Vec<Entry>, Vec<String>)> {
     read_entries_with_progress(paths, identity, None)
 }
 
@@ -123,22 +124,69 @@ pub(crate) fn read_entries_with_progress(
     paths: Vec<EntryPath>,
     identity: Option<&crypto::UnlockedIdentity>,
     progress: Option<&(dyn Fn(usize, usize) + Sync)>,
-) -> AppResult<Vec<Entry>> {
+) -> AppResult<(Vec<Entry>, Vec<String>)> {
     let total = paths.len();
     let completed = AtomicUsize::new(0);
-    let mut entries = paths
+    let outcomes = paths
         .par_iter()
         .map(|entry| {
-            let result = read_entry(&entry.journal, &entry.path, identity);
+            let outcome = read_scan_entry(&entry.journal, &entry.path, identity);
             let current = completed.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(progress) = progress {
                 progress(current, total);
             }
-            result
+            outcome
         })
-        .collect::<AppResult<Vec<Entry>>>()?;
+        .collect::<Vec<ScanOutcome>>();
+
+    let mut entries = Vec::with_capacity(outcomes.len());
+    let mut failures = Vec::new();
+    for outcome in outcomes {
+        match outcome {
+            ScanOutcome::Loaded(entry) => entries.push(entry),
+            ScanOutcome::Failed { entry, message } => {
+                if let Some(entry) = entry {
+                    entries.push(entry);
+                }
+                failures.push(message);
+            }
+        }
+    }
     entries.sort_by(|a, b| b.path.cmp(&a.path));
-    Ok(entries)
+    Ok((entries, failures))
+}
+
+/// One entry's scan result: a usable entry (real or a locked/unreadable
+/// placeholder) or a hard per-file failure degraded to a placeholder plus a
+/// message aggregated into the load report.
+enum ScanOutcome {
+    Loaded(Entry),
+    Failed {
+        entry: Option<Entry>,
+        message: String,
+    },
+}
+
+/// Read one entry for a scan. A per-file read/parse failure degrades to an
+/// unreadable placeholder rather than aborting the whole scan — mirroring how a
+/// locked or undecryptable encrypted entry already degrades. The edit path
+/// [`read_entry_with_revision`] keeps hard-failing: a real edit must not open a
+/// placeholder.
+fn read_scan_entry(
+    journal: &str,
+    path: &Path,
+    identity: Option<&crypto::UnlockedIdentity>,
+) -> ScanOutcome {
+    match read_entry(journal, path, identity) {
+        Ok(entry) => ScanOutcome::Loaded(entry),
+        Err(error) => {
+            let message = format!("{}: {error:#}", path.display());
+            // A placeholder needs the entry id; if even that is unavailable the
+            // entry is dropped, but the failure is still reported.
+            let entry = plaintext_unreadable_entry(journal, path).ok();
+            ScanOutcome::Failed { entry, message }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +194,14 @@ pub(super) fn scan_entries(
     root: &Path,
     identity: Option<&crypto::UnlockedIdentity>,
 ) -> AppResult<Vec<Entry>> {
+    read_entries(collect_entry_paths(root)?, identity).map(|(entries, _)| entries)
+}
+
+#[cfg(test)]
+pub(super) fn scan_entries_with_failures(
+    root: &Path,
+    identity: Option<&crypto::UnlockedIdentity>,
+) -> AppResult<(Vec<Entry>, Vec<String>)> {
     read_entries(collect_entry_paths(root)?, identity)
 }
 
@@ -326,6 +382,19 @@ fn unreadable_entry(journal: &str, path: &Path) -> AppResult<Entry> {
         EntryEncryptionState::EncryptedUnreadable,
         "[unreadable] Encrypted entry",
         "Encrypted entry could not be decrypted",
+    )
+}
+
+/// A stand-in for a non-encrypted entry whose file could not be read or parsed
+/// during a scan, so the failure degrades to a placeholder instead of failing
+/// the whole library load.
+fn plaintext_unreadable_entry(journal: &str, path: &Path) -> AppResult<Entry> {
+    placeholder_entry(
+        journal,
+        path,
+        EntryEncryptionState::Unreadable,
+        "[unreadable] Entry",
+        "Entry could not be read",
     )
 }
 

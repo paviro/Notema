@@ -465,7 +465,9 @@ impl AppModel {
             title: entry_timestamp_label(entry),
             locked: matches!(
                 entry.encryption_state,
-                EntryEncryptionState::EncryptedLocked | EntryEncryptionState::EncryptedUnreadable
+                EntryEncryptionState::EncryptedLocked
+                    | EntryEncryptionState::EncryptedUnreadable
+                    | EntryEncryptionState::Unreadable
             ),
         })
     }
@@ -583,6 +585,12 @@ impl AppModel {
                 return Some((
                     entry_timestamp_label(entry),
                     "Encrypted entry could not be decrypted".to_string(),
+                ));
+            }
+            EntryEncryptionState::Unreadable => {
+                return Some((
+                    entry_timestamp_label(entry),
+                    "Entry could not be read".to_string(),
                 ));
             }
             EntryEncryptionState::Plain | EntryEncryptionState::EncryptedUnlocked => {}

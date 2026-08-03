@@ -640,6 +640,10 @@ pub enum EntryEncryptionState {
     EncryptedUnlocked,
     EncryptedLocked,
     EncryptedUnreadable,
+    /// A non-encrypted entry whose file could not be read or parsed during a
+    /// scan (unreadable bytes, permissions). Degraded to a placeholder so one
+    /// bad file never fails the whole library load.
+    Unreadable,
 }
 
 /// One front-matter metadata field paired with its new value, for targeted
@@ -714,7 +718,9 @@ impl SearchScope {
     pub fn covers(&self, entry: &Entry) -> bool {
         !matches!(
             entry.encryption_state,
-            EntryEncryptionState::EncryptedLocked | EntryEncryptionState::EncryptedUnreadable
+            EntryEncryptionState::EncryptedLocked
+                | EntryEncryptionState::EncryptedUnreadable
+                | EntryEncryptionState::Unreadable
         ) && match self {
             Self::AllJournals => true,
             Self::Journal(journal) => entry.journal == *journal,

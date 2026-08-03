@@ -28,10 +28,10 @@ pub(crate) use edit::{
 pub(super) use paths::entry_path;
 pub use paths::{entry_id, is_entry_file};
 pub(crate) use paths::{is_encrypted_entry_file, is_plain_entry_file, random_id};
-#[cfg(test)]
-use read::scan_entries;
 pub(crate) use read::{
     collect_discovered_entries_with_progress, collect_entry_paths, read_entries,
     read_entries_with_progress, read_entry, read_entry_content, read_entry_with_revision,
     scan_import_sources,
 };
+#[cfg(test)]
+use read::{scan_entries, scan_entries_with_failures};

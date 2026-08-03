@@ -820,7 +820,9 @@ impl JournalStore {
     }
 
     pub fn read_entries(&self, paths: Vec<EntryPath>) -> AppResult<Vec<Entry>> {
-        storage::read_entries(paths, self.identity.as_ref())
+        // A per-file read failure degrades to an unreadable placeholder rather
+        // than failing the whole refresh; the placeholder itself is the signal.
+        storage::read_entries(paths, self.identity.as_ref()).map(|(entries, _)| entries)
     }
 
     pub fn scan_entries(&self) -> AppResult<Vec<Entry>> {

@@ -45,7 +45,9 @@ pub(crate) fn search_loaded_entries_where(
         }
         if matches!(
             entry.encryption_state,
-            EntryEncryptionState::EncryptedLocked | EntryEncryptionState::EncryptedUnreadable
+            EntryEncryptionState::EncryptedLocked
+                | EntryEncryptionState::EncryptedUnreadable
+                | EntryEncryptionState::Unreadable
         ) {
             continue;
         }

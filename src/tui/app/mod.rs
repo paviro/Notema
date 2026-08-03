@@ -905,6 +905,7 @@ impl AppModel {
             match result.snapshot {
                 Ok(snapshot) => {
                     let entries = snapshot.entries.len();
+                    let unreadable = snapshot.report.source_failures.len();
                     let rebuilt = result.reason.rebuilds();
                     self.install_library_snapshot(snapshot);
                     if result.reason.is_manual() {
@@ -916,6 +917,15 @@ impl AppModel {
                             "Refreshed from disk".to_string()
                         };
                         self.toast(ToastVariant::Success, message);
+                        // Only on an explicit refresh, so a background reload never
+                        // loops this warning; the placeholders carry it otherwise.
+                        if unreadable > 0 {
+                            let noun = if unreadable == 1 { "entry" } else { "entries" };
+                            self.toast(
+                                ToastVariant::Warning,
+                                format!("{unreadable} {noun} could not be read"),
+                            );
+                        }
                     }
                 }
                 Err(error) => {
