@@ -205,15 +205,21 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
         if let Some(account) = wire.keyring_account {
             present.push(("keyring_account", KeyLocation::Keyring(account), None));
         }
+        let store_command = wire.keys_store_command;
         if let Some(read) = wire.keys_command {
             present.push((
                 "keys_command",
                 KeyLocation::Command {
                     read,
-                    store: wire.keys_store_command,
+                    store: store_command,
                 },
                 None,
             ));
+        } else if store_command.is_some() {
+            // Only meaningful as the write half of `keys_command`. On its own it
+            // would be dropped here and erased from the file by the next write,
+            // silently turning a writable key source into a read-only one.
+            return Err(EncryptionError::OrphanedStoreCommand);
         }
 
         if present.len() > 1 {
@@ -784,8 +790,24 @@ fn read_stored_identity(path: &Path) -> Result<StoredIdentity> {
     // instead of being flattened into a serde error.
     let raw = Zeroizing::new(fs::read_to_string(path)?);
     let wire: StoredIdentityWire =
-        toml::from_str(&raw).map_err(|_| EncryptionError::MalformedStoredIdentity)?;
+        toml::from_str(&raw).map_err(|error| EncryptionError::UnparsableIdentityFile {
+            path: path.to_path_buf(),
+            line: error_line(&raw, &error),
+        })?;
     StoredIdentity::try_from(wire)
+}
+
+/// The 1-based line a parse error points at, for a message that can say *where*
+/// without saying *what*.
+///
+/// `toml::de::Error`'s own `Display` quotes the offending source line, so it can
+/// never be passed on: that line may be the key, and it is a failed parse, so
+/// nothing about the file's shape can be trusted to rule that out. The span is
+/// just an offset, which is safe.
+fn error_line(raw: &str, error: &toml::de::Error) -> usize {
+    error.span().map_or(1, |span| {
+        raw[..span.start.min(raw.len())].lines().count().max(1)
+    })
 }
 
 fn encrypt_secret(plaintext: &[u8], passphrase: &SecretString) -> Result<Zeroizing<String>> {

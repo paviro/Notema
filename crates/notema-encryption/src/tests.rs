@@ -348,11 +348,69 @@ fn malformed_identity_file_error_does_not_echo_contents() {
         Ok(_) => panic!("malformed identity must not unlock"),
         Err(error) => error,
     };
-    assert!(matches!(error, EncryptionError::MalformedStoredIdentity));
+    assert!(matches!(
+        error,
+        EncryptionError::UnparsableIdentityFile { .. }
+    ));
+    // toml's own Display quotes the offending source line, and that line can be
+    // the key. Naming the line number is the most the error may say.
     assert!(
         !error.to_string().contains("MARKER"),
         "parse error must not echo the identity file: {error}"
     );
+    assert!(
+        format!("{error:?}").find("MARKER").is_none(),
+        "Debug must not echo the identity file either: {error:?}"
+    );
+    assert!(
+        error.to_string().contains("line 1"),
+        "the error should still say where to look: {error}"
+    );
+}
+
+#[test]
+fn a_pointer_only_identity_file_is_not_reported_as_corrupt_key_material() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
+    // A hand-edited fetch command, with the quoting botched. The file holds no
+    // key material at all, so "key material is malformed" would point at the
+    // wrong thing entirely.
+    fs::write(
+        &paths.identity_file,
+        "schema_version = 1\ndevice_name = \"laptop\"\nkeys_command = op read op://vault/key\n",
+    )
+    .unwrap();
+
+    let error = match unlock_identity(&paths, None) {
+        Ok(_) => panic!("an unparsable identity must not unlock"),
+        Err(error) => error,
+    };
+    assert!(
+        matches!(error, EncryptionError::UnparsableIdentityFile { line, .. } if line == 3),
+        "expected an unparsable-file error naming line 3, got {error:?}"
+    );
+}
+
+#[test]
+fn a_store_command_without_a_fetch_command_is_refused() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
+    // Parses cleanly and names exactly one location, so nothing else would
+    // catch it: the store command would be dropped on read and erased from the
+    // file on the next write, quietly making a writable key source read-only.
+    fs::write(
+        &paths.identity_file,
+        "schema_version = 1\ndevice_name = \"laptop\"\n\
+         keyring_account = \"abc123\"\nkeys_store_command = \"tee /tmp/key\"\nkeys_encrypted = false\n",
+    )
+    .unwrap();
+
+    assert!(matches!(
+        unlock_identity(&paths, None),
+        Err(EncryptionError::OrphanedStoreCommand)
+    ));
 }
 
 #[test]
