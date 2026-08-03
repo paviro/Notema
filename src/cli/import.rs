@@ -46,7 +46,7 @@ pub(super) fn run_dayone(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
             report.skipped_duplicate += 1;
             continue;
         }
-        let created = store.create_entry(
+        let created = match store.create_entry(
             notema_storage::EntryDraft {
                 journal: &journal,
                 body: &entry.body,
@@ -65,7 +65,18 @@ pub(super) fn run_dayone(cli: &Cli, args: &DayoneArgs) -> AppResult<()> {
                 download_remote: args.download_images,
                 replace_offline: args.download_images,
             },
-        )?;
+        ) {
+            Ok(created) => created,
+            // One entry's failure must not discard the report for everything
+            // already imported; record it and carry on.
+            Err(error) => {
+                report.entries_failed += 1;
+                report
+                    .failures
+                    .push(format!("{}: {error:#}", entry.provenance.id));
+                continue;
+            }
+        };
         report.imported += 1;
         report.attachments_copied += created.assets.attachments_stored;
         report.images_stored += created.assets.images_stored();
@@ -170,12 +181,20 @@ fn import_report_summary(report: &ImportReport, journal: &str, download_images: 
             plural(report.cleanup_incomplete, "entry", "entries")
         ));
     }
+    if report.entries_failed > 0 {
+        parts.push(format!(
+            "{} {} not imported",
+            report.entries_failed,
+            plural(report.entries_failed, "entry", "entries")
+        ));
+    }
     parts.join("; ")
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct ImportReport {
     imported: usize,
+    entries_failed: usize,
     skipped_duplicate: usize,
     images_stored: usize,
     images_failed: usize,

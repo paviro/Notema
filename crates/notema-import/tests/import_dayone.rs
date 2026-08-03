@@ -250,6 +250,36 @@ fn imports_zone_into_offset_and_keeps_iana_name() {
 }
 
 #[test]
+fn unknown_time_zone_is_reported_and_kept_at_utc_offset() {
+    let (dir, store) = plaintext_store();
+    let json = r#"{
+        "entries": [
+            {
+                "uuid": "BADZONE",
+                "text": "Where am I",
+                "creationDate": "2026-07-01T12:30:00Z",
+                "timeZone": "Mars/Olympus_Mons"
+            }
+        ]
+    }"#;
+
+    let report = import_dayone(&store, "diary", &write_export(&dir, json), false).unwrap();
+
+    assert_eq!(report.imported, 1, "the entry still imports");
+    assert!(
+        report
+            .failures
+            .iter()
+            .any(|failure| failure.contains("BADZONE") && failure.contains("Mars/Olympus_Mons")),
+        "the unknown zone is surfaced: {:?}",
+        report.failures
+    );
+    let entry = &store.scan_entries().unwrap()[0];
+    let raw = std::fs::read_to_string(&entry.path).unwrap();
+    assert!(raw.contains("created_at = \"2026-07-01T12:30:00+00:00\""));
+}
+
+#[test]
 fn imports_without_zone_fall_back_to_utc_offset() {
     let (dir, store) = plaintext_store();
     let json = r#"{

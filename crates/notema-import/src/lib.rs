@@ -169,6 +169,17 @@ pub fn parse_dayone(json_path: &Path) -> Result<ImportBatch, ImportError> {
         };
 
         let tz = entry.time_zone.as_deref();
+        // A zone Day One recorded but chrono can't resolve is silently kept at
+        // its raw UTC offset by `zoned_timestamp`; surface that so the wrong wall
+        // clock isn't a mystery.
+        if let Some(name) = tz
+            && name.parse::<chrono_tz::Tz>().is_err()
+        {
+            batch.warnings.push(ImportWarning {
+                entry_id: entry.uuid.clone(),
+                message: format!("unknown time zone '{name}'; kept the recorded UTC offset"),
+            });
+        }
         let Some(created_at) = entry
             .creation_date
             .as_deref()
