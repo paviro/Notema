@@ -4,6 +4,12 @@
 
 use std::collections::HashMap;
 
+/// Entries a value needs before its mood delta is worth showing: one lucky good
+/// day shouldn't crown an activity as a lifter. A delta that clears this is still
+/// only co-occurrence — the value and the mood rode together, which says nothing
+/// about which caused which, or whether a third thing caused both.
+pub const MIN_CORRELATION_COUNT: usize = 3;
+
 use notema_domain::Entry;
 
 use crate::sort_by_count_desc;

@@ -15,7 +15,8 @@ mod mood;
 
 pub use cadence::Cadence;
 pub use correlations::{
-    Correlation, Correlations, build_correlations, by_mood_delta_asc, by_mood_delta_desc,
+    Correlation, Correlations, MIN_CORRELATION_COUNT, build_correlations, by_mood_delta_asc,
+    by_mood_delta_desc,
 };
 pub use mood::{MoodAnalytics, Sentiment};
 
@@ -109,7 +110,9 @@ pub fn analyze(entries: &[&Entry], today: Date) -> Analytics {
 /// Pick a value from `correlates` whose mood sits farthest from average — the
 /// strongest lift when `positive`, the strongest drain otherwise. Chosen from
 /// those within 15% of that extreme and rotated by `today`'s ordinal so the pick
-/// changes day to day. `None` when nothing pulls mood in the requested direction.
+/// changes day to day. Values logged fewer than [`MIN_CORRELATION_COUNT`] times
+/// are ignored, so the headline can't name someone the ranked list drops. `None`
+/// when nothing pulls mood in the requested direction.
 fn pick_extreme<'a>(
     correlates: impl Iterator<Item = &'a Correlation>,
     today: Date,
@@ -117,7 +120,9 @@ fn pick_extreme<'a>(
 ) -> Option<String> {
     let want = |delta: f32| if positive { delta > 0.0 } else { delta < 0.0 };
     let mut candidates: Vec<&Correlation> = correlates
-        .filter(|correlate| correlate.mood_delta.is_some_and(&want))
+        .filter(|correlate| {
+            correlate.count >= MIN_CORRELATION_COUNT && correlate.mood_delta.is_some_and(&want)
+        })
         .collect();
     // The extreme is the max lift or the min (most negative) drain; both stay
     // within 15% of it in magnitude.
@@ -353,10 +358,19 @@ mod tests {
         let entries = [
             dated("2024-01-01T00:00:00Z", -3, |_| {}),
             dated("2024-01-02T00:00:00Z", -3, |_| {}),
+            // Each value is logged often enough to clear MIN_CORRELATION_COUNT.
             dated("2024-01-03T00:00:00Z", 5, |e| {
                 e.people = vec!["gym-buddy".into()]
             }),
-            dated("2024-01-04T00:00:00Z", 5, |e| e.tags = vec!["sun".into()]),
+            dated("2024-01-04T00:00:00Z", 5, |e| {
+                e.people = vec!["gym-buddy".into()]
+            }),
+            dated("2024-01-05T00:00:00Z", 5, |e| {
+                e.people = vec!["gym-buddy".into()]
+            }),
+            dated("2024-01-06T00:00:00Z", 5, |e| e.tags = vec!["sun".into()]),
+            dated("2024-01-07T00:00:00Z", 5, |e| e.tags = vec!["sun".into()]),
+            dated("2024-01-08T00:00:00Z", 5, |e| e.tags = vec!["sun".into()]),
         ];
         // A companion comes from people, the thing from activities/tags.
         let analytics = analyze(&refs(&entries), date(2024, 1, 5));
@@ -383,11 +397,59 @@ mod tests {
             dated("2024-01-01T00:00:00Z", 4, |_| {}),
             dated("2024-01-02T00:00:00Z", 4, |_| {}),
             dated("2024-01-03T00:00:00Z", -5, |e| e.people = vec!["ex".into()]),
-            dated("2024-01-04T00:00:00Z", -5, |e| e.tags = vec!["rain".into()]),
+            dated("2024-01-04T00:00:00Z", -5, |e| e.people = vec!["ex".into()]),
+            dated("2024-01-05T00:00:00Z", -5, |e| e.people = vec!["ex".into()]),
+            dated("2024-01-06T00:00:00Z", -5, |e| e.tags = vec!["rain".into()]),
+            dated("2024-01-07T00:00:00Z", -5, |e| e.tags = vec!["rain".into()]),
+            dated("2024-01-08T00:00:00Z", -5, |e| e.tags = vec!["rain".into()]),
         ];
-        let analytics = analyze(&refs(&entries), date(2024, 1, 5));
+        let analytics = analyze(&refs(&entries), date(2024, 1, 9));
         assert_eq!(analytics.highlights.drains_person.as_deref(), Some("ex"));
         assert_eq!(analytics.highlights.drains_thing.as_deref(), Some("rain"));
+    }
+
+    /// A value seen once can swing the average hardest of all, which is exactly
+    /// why it must not headline: the ranked Drivers list drops it too.
+    #[test]
+    fn a_one_off_value_never_headlines_however_strong_its_delta() {
+        use super::test_support::entry_with;
+        use notema_domain::Timestamp;
+
+        let dated = |created: &str, mood: i8, configure: fn(&mut notema_domain::Entry)| {
+            entry_with(|entry| {
+                entry.created_at = Some(Timestamp::parse(created));
+                entry.mood = Some(mood);
+                configure(entry);
+            })
+        };
+        let mut entries = vec![
+            dated("2024-01-01T00:00:00Z", -3, |_| {}),
+            dated("2024-01-02T00:00:00Z", -3, |_| {}),
+            // Seen once, on the best day there is.
+            dated("2024-01-03T00:00:00Z", 5, |e| {
+                e.people = vec!["stranger".into()];
+                e.tags = vec!["fluke".into()];
+            }),
+        ];
+        let analytics = analyze(&refs(&entries), date(2024, 1, 4));
+        assert_eq!(analytics.highlights.lifts_person, None);
+        assert_eq!(analytics.highlights.lifts_thing, None);
+
+        // Two more sightings clear the floor, and the same value headlines.
+        entries.push(dated("2024-01-04T00:00:00Z", 5, |e| {
+            e.people = vec!["stranger".into()];
+            e.tags = vec!["fluke".into()];
+        }));
+        entries.push(dated("2024-01-05T00:00:00Z", 5, |e| {
+            e.people = vec!["stranger".into()];
+            e.tags = vec!["fluke".into()];
+        }));
+        let analytics = analyze(&refs(&entries), date(2024, 1, 6));
+        assert_eq!(
+            analytics.highlights.lifts_person.as_deref(),
+            Some("stranger")
+        );
+        assert_eq!(analytics.highlights.lifts_thing.as_deref(), Some("fluke"));
     }
 
     #[test]
@@ -413,7 +475,11 @@ mod tests {
                 e.mood = Some(-3);
             }),
             with_person("2024-01-03T00:00:00Z", 5, "aaa"),
-            with_person("2024-01-04T00:00:00Z", 5, "bbb"),
+            with_person("2024-01-04T00:00:00Z", 5, "aaa"),
+            with_person("2024-01-05T00:00:00Z", 5, "aaa"),
+            with_person("2024-01-06T00:00:00Z", 5, "bbb"),
+            with_person("2024-01-07T00:00:00Z", 5, "bbb"),
+            with_person("2024-01-08T00:00:00Z", 5, "bbb"),
         ];
         // `aaa` and `bbb` lift equally, so consecutive days name different people.
         let day1 = analyze(&refs(&entries), date(2024, 1, 1))
