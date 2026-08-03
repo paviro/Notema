@@ -37,6 +37,10 @@ jiff = { version = "0.2", features = ["serde"] }
 hex = "0.4"
 image = { version = "0.25", default-features = false }
 indicatif = "0.18.4"
+# OS keychain for this device's encryption key. No default features: each
+# platform opts into its own backend in notema-encryption, and the targets with
+# no keychain get none of it. See crates/notema-encryption/src/keyring.rs.
+keyring = { version = "3", default-features = false }
 libc = "0.2"
 moxcms = "0.8"
 notify = "8.2.0"

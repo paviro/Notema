@@ -149,6 +149,20 @@ notema encryption device key-source keyring    # the OS keychain
 notema encryption device key-source command --read '<cmd>' [--store '<cmd>']
 ```
 
+New identities default to the keychain where one is reachable — macOS Keychain,
+Windows Credential Manager, or the Secret Service on Linux and the BSDs —
+because it keeps the key out of a file that backups and sync tools will happily
+copy. `encryption enable` asks, and falls through to the identity file without
+asking where there is no keychain: Android, the iSH build, and a headless Linux
+session with no D-Bus. Existing devices are left alone; move one over with
+`key-source keyring` when you want to.
+
+> [!NOTE]
+> On macOS the keychain grants access to the exact binary that created the item,
+> so a release build is asked about once and not again. A binary you built
+> yourself is unsigned and has no stable identity, so macOS re-asks after every
+> rebuild.
+
 `--read` prints the key on stdout whenever it's needed. `--store` takes it on
 stdin whenever it changes — piping rather than passing an argument keeps the key
 out of `ps`. Both are recorded, and both are needed for a complete setup:

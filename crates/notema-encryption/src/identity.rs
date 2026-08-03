@@ -551,16 +551,6 @@ fn new_keyring_account() -> Result<String> {
     Ok(hex::encode(bytes))
 }
 
-/// Forget this device's keychain item, if it had one. Best effort: used when the
-/// identity is being retired anyway.
-pub fn forget_keyring_item(paths: &KeyPaths) {
-    if let Ok(stored) = read_stored_identity(&paths.identity_file)
-        && let KeyLocation::Keyring(account) = &stored.key.location
-    {
-        keyring::delete(account);
-    }
-}
-
 /// Everything needed to put this device's identity back as it was: the exact
 /// identity file, plus the key itself retrieved from wherever it was kept.
 ///
@@ -590,6 +580,21 @@ impl IdentitySnapshot {
             &inline,
         ))?);
         Ok(Zeroizing::new(text.as_bytes().to_vec()))
+    }
+
+    /// Whether the key is kept somewhere other than the identity file, so a copy
+    /// of that file alone would only be a pointer at it.
+    pub fn is_external(&self) -> bool {
+        !matches!(self.location, KeyLocation::Inline(_))
+    }
+
+    /// Drop the stored copy this snapshot came from, once the snapshot itself
+    /// has been written somewhere self-contained. Best effort: a keychain we
+    /// can't reach is not a reason to fail the retirement that called this.
+    pub fn forget_stored_key(&self) {
+        if let KeyLocation::Keyring(account) = &self.location {
+            keyring::delete(account);
+        }
     }
 }
 

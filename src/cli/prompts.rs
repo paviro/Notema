@@ -109,3 +109,33 @@ pub(crate) fn prompt_unlock_passphrase() -> AppResult<SecretString> {
         "Journal encryption passphrase: ",
     )?))
 }
+
+/// Ask where to keep this device's key, when the keychain is an option at all.
+///
+/// Returns `true` for the keychain. Defaults to it: it keeps the key out of a
+/// file that backups and sync tools will happily copy. Falls through to the
+/// identity file without asking when there is no keychain to reach — which is
+/// the case on Android, iSH, and a headless Linux session with no D-Bus.
+pub(crate) fn prompt_keyring_choice(keyring_available: bool) -> AppResult<bool> {
+    if !keyring_available {
+        return Ok(false);
+    }
+    if !io::stdin().is_terminal() {
+        return Ok(true);
+    }
+    let mut stdout = io::stdout();
+    writeln!(stdout, "Where should this device's key be kept?")?;
+    writeln!(
+        stdout,
+        "  Keychain — held by the operating system, so no copy sits in a file backups can pick up."
+    )?;
+    writeln!(
+        stdout,
+        "  File     — inside identity.toml, readable only by you. Works everywhere, including over SSH."
+    )?;
+    write!(stdout, "Use the keychain? [Y/n]: ")?;
+    stdout.flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(!matches!(input.trim(), "n" | "N" | "no" | "NO" | "No"))
+}

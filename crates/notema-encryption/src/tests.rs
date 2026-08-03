@@ -867,3 +867,73 @@ fn an_exported_identity_restores_into_a_fresh_config_dir() {
         before
     );
 }
+
+// -- OS keyring ---------------------------------------------------------------
+
+#[test]
+fn a_keyring_identity_round_trips_and_leaves_no_key_in_the_file() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+    set_key_location(&paths, &KeyTarget::Keyring, None).unwrap();
+
+    let on_disk = fs::read_to_string(&paths.identity_file).unwrap();
+    assert!(!on_disk.contains("AGE-SECRET-KEY-"), "{on_disk}");
+    assert!(on_disk.contains("keyring_account"), "{on_disk}");
+
+    let info = device_identity_info(&paths).unwrap().unwrap();
+    assert_eq!(info.source, KeySource::Keyring);
+    assert_eq!(unlock_identity(&paths, None).unwrap().public_key(), before);
+}
+
+#[test]
+fn a_keyring_identity_can_be_re_wrapped_with_a_passphrase() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let pw = SecretString::from("pw");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+    set_key_location(&paths, &KeyTarget::Keyring, None).unwrap();
+
+    // The keychain is writable, so this must work rather than refuse — and the
+    // re-wrapped key belongs back in the keychain, not inline.
+    set_identity_passphrase(&paths, None, Some(&pw)).unwrap();
+
+    let info = device_identity_info(&paths).unwrap().unwrap();
+    assert_eq!(info.source, KeySource::Keyring);
+    assert!(info.passphrase_protected);
+    assert!(
+        !fs::read_to_string(&paths.identity_file)
+            .unwrap()
+            .contains("AGE-SECRET-KEY-")
+    );
+    assert!(unlock_identity(&paths, None).is_err());
+    assert_eq!(
+        unlock_identity(&paths, Some(&pw)).unwrap().public_key(),
+        before
+    );
+}
+
+#[test]
+fn a_missing_keyring_item_says_so_rather_than_looking_corrupt() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    // An account nothing ever stored, as if the item had been deleted.
+    fs::write(
+        &paths.identity_file,
+        "schema_version = 1\ndevice_name = \"laptop\"\nkeyring_account = \"neverstored\"\nkeys_encrypted = false\n",
+    )
+    .unwrap();
+
+    let error = unlock_identity(&paths, None)
+        .err()
+        .expect("must not unlock");
+    assert!(
+        matches!(error, EncryptionError::KeyringItemMissing { .. }),
+        "{error}"
+    );
+}
