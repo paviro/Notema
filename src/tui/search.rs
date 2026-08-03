@@ -454,10 +454,9 @@ mod tests {
 
     // --- Seeded stress corpus ---------------------------------------------
     //
-    // A large deterministic corpus of common-word bodies. Because those words
-    // share letters with any query, the old subsequence matcher lit up a huge
-    // fraction of the corpus for a single unique word; these guard that a query
-    // now only surfaces entries that actually contain it.
+    // A large deterministic corpus of common-word bodies. Those words share
+    // letters with any query, so a matcher that accepts scattered letters would
+    // hit most of the corpus. A query must only surface entries containing it.
 
     use rand::{RngExt, SeedableRng, rngs::StdRng};
 
@@ -508,8 +507,8 @@ mod tests {
         let (entries, _) = seeded_corpus(5_000, 42);
 
         // "kldsc" is a subsequence of "kaleidoscope" but appears as a
-        // contiguous substring nowhere — the old matcher would have matched the
-        // sentinel entry (and others); the word matcher matches none.
+        // contiguous substring nowhere, so it must match nothing — not even the
+        // sentinel entry.
         let hits = search_loaded_entries(&entries, "kldsc", &SearchScope::AllJournals);
 
         assert!(hits.is_empty());

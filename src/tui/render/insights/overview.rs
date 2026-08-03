@@ -399,7 +399,8 @@ mod tests {
     #[test]
     fn short_panels_fall_back_instead_of_overflowing() {
         // A two-column grid needs the title box plus three four-row cards; a
-        // one-column grid needs six. Both used to draw past the panel bottom.
+        // one-column grid needs six. Anything shorter must fall back rather than
+        // draw past the panel bottom.
         assert!(card_grid(area(80, 16), false, STATS).is_none());
         assert!(card_grid(area(80, 17), false, STATS).is_some());
         assert!(card_grid(area(40, 28), false, STATS).is_none());

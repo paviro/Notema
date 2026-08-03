@@ -564,8 +564,8 @@ fn reader_renders_the_environment_strip_from_front_matter() {
 }
 
 /// The mouse path must feed the hit-test the same environment items the
-/// viewer drew: the strip's rows shift every chip row below them, so omitting
-/// the strip (the old `location: None`) lands clicks on the wrong row.
+/// viewer drew: the strip's rows shift every chip row below them, so a hit-test
+/// that omits the strip lands clicks on the wrong row.
 #[test]
 fn chip_hit_test_accounts_for_the_environment_strip_rows() {
     let dir = tempdir().unwrap();

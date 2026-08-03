@@ -1156,8 +1156,8 @@ mod tests {
             longitude: Some(13.405),
             ..Location::default()
         };
-        // Setting a location on an entry captures its environment there and then —
-        // this live capture is what replaces the old automatic sweep.
+        // Setting a location on an entry captures its environment there and then,
+        // so the call hands back a fetch request.
         let request = set_location_on_entry(&mut app, Some(location)).unwrap();
         assert!(request.is_some());
     }

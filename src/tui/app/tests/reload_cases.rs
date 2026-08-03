@@ -356,10 +356,9 @@ fn a_reload_built_against_a_superseded_library_is_asked_for_again() {
 
 #[test]
 fn refresh_preserves_journal_pixel_scroll_offset() {
-    // The journal list scrolls in pixels, not item indices. A refresh must clamp
-    // only the selection and leave the offset alone; the old index-based normalize
-    // treated the pixel offset as an index and snapped it to `len - 1`, jumping
-    // the scroll on every reload.
+    // The journal list scrolls in pixels, not item indices. A refresh clamps the
+    // selection and leaves the offset alone; clamping the offset like an index
+    // would snap it to `len - 1` and jump the scroll on every reload.
     let mut app = app_with_journals(&["a", "b", "c"]);
     // A pixel offset far above the 3-journal count — an index clamp would shrink it.
     *app.nav.journal_list.offset_mut() = 15;

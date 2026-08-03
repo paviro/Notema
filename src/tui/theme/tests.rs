@@ -130,14 +130,15 @@ fn new_tokens_chain_to_their_parents() {
     assert_eq!(theme.cursor_line(), Style::default());
     // Accents: secondary chains to primary (here still the cyan default).
     assert_eq!(theme.secondary(), theme.primary());
-    // Structural furniture keeps the ink it has always used.
+    // Structural furniture chains to muted, except the card border's own grey.
     assert_eq!(theme.divider(), theme.muted());
     assert_eq!(theme.tab_separator(), theme.muted());
     assert_eq!(
         theme.card_border(),
         Style::default().fg(Color::Indexed(244))
     );
-    // Interaction polish defaults preserve the old hardcoded behavior.
+    // Interaction polish carries no colour: hover underlines, and the scrollbar
+    // arrows take the thumb's style.
     assert_eq!(
         theme.button_hover(),
         Style::default().add_modifier(Modifier::UNDERLINED)

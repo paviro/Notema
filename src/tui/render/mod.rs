@@ -339,9 +339,8 @@ fn register_view_interactions(
     use crate::tui::app::{Mode, ScrollbarDrag};
 
     // Scrollbars first: rows and panels are registered earlier in `draw`, so
-    // these later pushes win the bar-adjacent columns (matching the old
-    // probe-scrollbar-before-panels click order), while the reader link hits
-    // pushed below keep beating the widened grab column.
+    // these later pushes win the bar-adjacent columns, while the reader link
+    // hits pushed below keep beating the widened grab column.
     let layout = context.view.layout;
     if let Some(panel) = layout.and_then(|layout| layout.reader) {
         let (line_count, viewport, scroll) = {
