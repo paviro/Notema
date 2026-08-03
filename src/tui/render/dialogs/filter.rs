@@ -15,6 +15,8 @@ use crate::tui::features::filter::FilterState;
 use crate::tui::features::filter::FilterTab;
 use crate::tui::render::tab_strip::{StripTab, full_strip_width, tab_strip_line};
 use crate::tui::state::{HoverTarget, ListNav};
+
+use super::lift_hovered_row;
 use crate::tui::theme::Theme;
 
 use super::super::chrome::{
@@ -140,12 +142,8 @@ pub(in crate::tui::render) fn draw_filter_dialog(
         SearchScope::Journal(name) => name.clone(),
     };
 
-    state.normalize_list_state();
     let rows_len = state.current_rows().len();
-    let max_visible = layout.list.height;
-    let max_offset = rows_len.saturating_sub(max_visible as usize);
-    let scroll = state.offset().min(max_offset);
-    state.list.set_offset(scroll);
+    let scroll = state.clamp_offset(layout.list.height);
 
     draw_dialog_frame_wide(
         theme,
@@ -196,16 +194,13 @@ pub(in crate::tui::render) fn draw_filter_dialog(
                 layout.list.width,
                 Some(index) == selected,
             ));
-            if Some(index) == hovered_row && Some(index) != selected {
-                item.style(theme.hover())
-            } else {
-                item
-            }
+            lift_hovered_row(item, theme, index, hovered_row, selected)
         })
         .collect();
 
     let list = List::new(items).highlight_style(theme.selection());
-    let mut render_state = list_state_for_render(state.selected_index(), scroll, max_visible, true);
+    let mut render_state =
+        list_state_for_render(state.selected_index(), scroll, layout.list.height, true);
     frame.render_stateful_widget(list, layout.list, &mut render_state);
 
     render_dialog_list_scrollbar(theme, frame, layout.list, rows_len, scroll, true);

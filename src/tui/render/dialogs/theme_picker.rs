@@ -114,12 +114,8 @@ pub(crate) fn draw_theme_picker(
     let hint_inputs = state.hint_state(chrome_override, color_mode);
     let layout = theme_picker_layout(theme, frame.area(), state.entries.len(), hint_inputs);
 
-    state.normalize_list_state();
     let len = state.entries.len();
-    let max_visible = layout.list.height;
-    let max_offset = len.saturating_sub(max_visible as usize);
-    let scroll = state.offset().min(max_offset);
-    state.list.set_offset(scroll);
+    let scroll = state.clamp_offset(layout.list.height);
 
     let items: Vec<ListItem<'_>> = if state.entries.is_empty() {
         vec![ListItem::new(Line::from("(no themes found)"))]
@@ -155,13 +151,7 @@ pub(crate) fn draw_theme_picker(
                         theme.error(),
                     ))),
                 };
-                // The selection highlight patches over the hover lift, so the
-                // hovered-and-selected row still reads as selected.
-                if Some(index) == hovered_row && Some(index) != state.selected_index() {
-                    item.style(theme.hover())
-                } else {
-                    item
-                }
+                lift_hovered_row(item, theme, index, hovered_row, state.selected_index())
             })
             .collect()
     };

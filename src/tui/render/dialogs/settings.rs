@@ -120,12 +120,8 @@ pub(in crate::tui::render) fn draw_settings_dialog(
 ) {
     let layout = settings_dialog_layout(theme, frame.area(), state);
 
-    state.normalize_list_state();
     let rows_len = state.items.len();
-    let max_visible = layout.list.height;
-    let max_offset = rows_len.saturating_sub(max_visible as usize);
-    let scroll = state.offset().min(max_offset);
-    state.list.set_offset(scroll);
+    let scroll = state.clamp_offset(layout.list.height);
 
     draw_dialog_frame_wide(theme, frame, layout.area, "Settings", true);
 
@@ -165,11 +161,7 @@ pub(in crate::tui::render) fn draw_settings_dialog(
                     layout.list.width,
                     Some(index) == selected,
                 ));
-                if Some(index) == hovered_row && Some(index) != selected {
-                    item.style(theme.hover())
-                } else {
-                    item
-                }
+                lift_hovered_row(item, theme, index, hovered_row, selected)
             }
         })
         .collect();

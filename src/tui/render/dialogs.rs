@@ -626,6 +626,23 @@ pub(super) fn hovered_dialog_row(hover: HoverTarget) -> Option<usize> {
     }
 }
 
+/// Style `item` as hovered when the mouse is over row `index`. `selected` is the
+/// selection as actually drawn, which the lift defers to so a row doesn't carry
+/// both styles; pass `None` from lists that draw no selection.
+pub(super) fn lift_hovered_row<'a>(
+    item: ListItem<'a>,
+    theme: &Theme,
+    index: usize,
+    hovered: Option<usize>,
+    selected: Option<usize>,
+) -> ListItem<'a> {
+    if hovered == Some(index) && selected != Some(index) {
+        item.style(theme.hover())
+    } else {
+        item
+    }
+}
+
 // ── Dialog draw functions ─────────────────────────────────────────────────────
 
 /// The "Fetching weather and air quality…" modal shown while a save waits on its

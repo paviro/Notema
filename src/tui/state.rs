@@ -364,6 +364,17 @@ pub(crate) trait ListNav {
         let len = self.item_count();
         self.list_mut().ensure_visible(len, viewport_height);
     }
+
+    /// Normalize, then clamp the stored offset to what `viewport_height` can
+    /// show, and return it. Renderers draw from the returned scroll, so a list
+    /// that shrank since the last frame can't be scrolled past its end.
+    fn clamp_offset(&mut self, viewport_height: u16) -> usize {
+        self.normalize_list_state();
+        let max_offset = self.item_count().saturating_sub(viewport_height as usize);
+        let scroll = self.offset().min(max_offset);
+        self.list_mut().set_offset(scroll);
+        scroll
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

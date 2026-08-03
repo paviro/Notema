@@ -16,6 +16,7 @@ use crate::tui::surface::surface_outer_width;
 use crate::tui::theme::Theme;
 
 use super::chrome::{centered_rect_fixed_size, render_dialog_list_scrollbar};
+use super::dialogs::lift_hovered_row;
 use super::footer::{Hint, HintId, hint_height, hint_lines, key_chip_style, key_chip_text};
 use super::frames::{
     dialog_content_full, dialog_frame_rows, dialog_hints_rect, dialog_list_width, dialog_row,

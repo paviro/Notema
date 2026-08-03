@@ -144,12 +144,7 @@ pub(in crate::tui::render) fn draw_edit_metadata_dialog(
     let list_focused = state.focus == EditMetadataFocus::List;
     let input_focused = state.focus == EditMetadataFocus::Input;
 
-    state.normalize_list_state();
-    let list_lines = state.filtered.len();
-    let max_visible = layout.list.height;
-    let max_offset = list_lines.saturating_sub(max_visible as usize);
-    let scroll = state.offset().min(max_offset);
-    state.list.set_offset(scroll);
+    let scroll = state.clamp_offset(layout.list.height);
 
     let items: Vec<ListItem<'_>> = if state.filtered.is_empty() {
         let text = if state.input.is_empty() {
@@ -179,11 +174,7 @@ pub(in crate::tui::render) fn draw_edit_metadata_dialog(
                     layout.list.width,
                     Some(index) == shown_selection,
                 ));
-                if Some(index) == hovered_row && Some(index) != shown_selection {
-                    item.style(theme.hover())
-                } else {
-                    item
-                }
+                lift_hovered_row(item, theme, index, hovered_row, shown_selection)
             })
             .collect()
     };
@@ -223,7 +214,14 @@ pub(in crate::tui::render) fn draw_edit_metadata_dialog(
         layout.hints,
         hover,
     );
-    render_dialog_list_scrollbar(theme, frame, layout.list, list_lines, scroll, true);
+    render_dialog_list_scrollbar(
+        theme,
+        frame,
+        layout.list,
+        state.filtered.len(),
+        scroll,
+        true,
+    );
 }
 
 pub(in crate::tui::render) fn draw_edit_mood_dialog(
@@ -301,11 +299,7 @@ pub(in crate::tui::render) fn draw_edit_location_dialog(
     // Size the dialog to the wrapped row span so multi-line rows aren't clipped.
     let layout = location_dialog_layout(theme, frame.area(), &labels);
 
-    state.normalize_list_state();
-    let max_visible = layout.list.height;
-    let max_offset = item_count.saturating_sub(max_visible as usize);
-    let scroll = state.offset().min(max_offset);
-    state.list.set_offset(scroll);
+    let scroll = state.clamp_offset(layout.list.height);
 
     let list_focused = state.focus == EditLocationFocus::List;
     let dim = theme.muted();
@@ -400,11 +394,7 @@ pub(in crate::tui::render) fn draw_edit_location_dialog(
                     .map(Line::from)
                     .collect();
                 let item = ListItem::new(lines);
-                if Some(index) == hovered_row && Some(index) != shown_selection {
-                    item.style(theme.hover())
-                } else {
-                    item
-                }
+                lift_hovered_row(item, theme, index, hovered_row, shown_selection)
             })
             .collect()
     };
@@ -440,12 +430,7 @@ pub(in crate::tui::render) fn draw_edit_feelings_dialog(
     let list_focused = state.focus == EditMetadataFocus::List;
     let input_focused = state.focus == EditMetadataFocus::Input;
 
-    state.normalize_list_state();
-    let list_lines = rows.len();
-    let max_visible = layout.list.height;
-    let max_offset = list_lines.saturating_sub(max_visible as usize);
-    let scroll = state.offset().min(max_offset);
-    state.list.set_offset(scroll);
+    let scroll = state.clamp_offset(layout.list.height);
 
     let hovered_row = hovered_dialog_row(hover);
     // Defer only to a drawn selection: with the search field focused, the
@@ -503,11 +488,7 @@ pub(in crate::tui::render) fn draw_edit_feelings_dialog(
                         }
                     }
                 };
-                if Some(index) == hovered_row && Some(index) != shown_selection {
-                    item.style(theme.hover())
-                } else {
-                    item
-                }
+                lift_hovered_row(item, theme, index, hovered_row, shown_selection)
             })
             .collect()
     };
@@ -575,5 +556,5 @@ pub(in crate::tui::render) fn draw_edit_feelings_dialog(
         layout.hints,
         hover,
     );
-    render_dialog_list_scrollbar(theme, frame, layout.list, list_lines, scroll, true);
+    render_dialog_list_scrollbar(theme, frame, layout.list, rows.len(), scroll, true);
 }

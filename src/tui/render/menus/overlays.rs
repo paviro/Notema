@@ -67,11 +67,8 @@ pub(crate) fn draw_metadata_menu(
                 Span::styled(key_chip_text(key), key_chip_style(theme)),
                 Span::raw(format!(" {label}")),
             ]));
-            if hovered_row == Some(index) {
-                item.style(theme.hover())
-            } else {
-                item
-            }
+            // No selection in this menu, so every hovered row lifts.
+            lift_hovered_row(item, theme, index, hovered_row, None)
         })
         .collect();
     frame.render_widget(List::new(items), layout.list);
