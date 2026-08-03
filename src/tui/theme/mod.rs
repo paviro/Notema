@@ -12,6 +12,79 @@
 //! in code, not read from theme data, so no theme file can make a positive
 //! value render as plain body text on eclipse.
 
+// ── Shared schema lists ───────────────────────────────────────────────────────
+//
+// Each list below is expanded by whichever emitter macro is passed to it: the
+// resolved types in this module, and the matching TOML section in `schema`.
+// Defined ahead of `mod schema;` so that module can expand them too.
+
+/// The syntax categories. The `[markdown.syntax]` key is spelled out rather
+/// than derived from the field name because `stringify!(r#type)` keeps the
+/// raw-identifier prefix.
+macro_rules! with_syntax_categories {
+    ($emit:ident) => {
+        $emit! {
+            Comment      => comment,       "comment";
+            Keyword      => keyword,       "keyword";
+            Str          => string,        "string";
+            StringEscape => string_escape, "string_escape";
+            Number       => number,        "number";
+            Constant     => constant,      "constant";
+            Function     => function,      "function";
+            Type         => r#type,        "type";
+            Variable     => variable,      "variable";
+            Property     => property,      "property";
+            Operator     => operator,      "operator";
+            Punctuation  => punctuation,   "punctuation";
+            Attribute    => attribute,     "attribute";
+            Tag          => tag,           "tag";
+            Label        => label,         "label";
+            Error        => error,         "error";
+        }
+    };
+}
+
+/// The weather-condition slugs the context provider emits, with the glyph a
+/// theme gets when it overrides nothing. Slugs are kebab-case where the field
+/// names cannot be, so both are listed.
+macro_rules! with_weather_glyphs {
+    ($emit:ident) => {
+        $emit! {
+            WeatherGlyphs, WeatherGlyphsSection, "metadata.glyphs.weather",
+            "The environment strip's weather glyph per condition slug the context \
+provider emits (`[metadata.glyphs.weather]`).";
+            clear         "clear"         '☀';
+            mostly_clear  "mostly-clear"  '☼';
+            partly_cloudy "partly-cloudy" '☁';
+            cloudy        "cloudy"        '☁';
+            fog           "fog"           '≡';
+            drizzle       "drizzle"       '☂';
+            rain          "rain"          '☂';
+            snow          "snow"          '❄';
+            thunderstorm  "thunderstorm"  '↯';
+        }
+    };
+}
+
+/// The moon-phase slugs the celestial provider emits, and their default glyphs.
+macro_rules! with_moon_glyphs {
+    ($emit:ident) => {
+        $emit! {
+            MoonGlyphs, MoonGlyphsSection, "metadata.glyphs.moon",
+            "The environment strip's moon glyph per phase slug the celestial \
+provider emits (`[metadata.glyphs.moon]`).";
+            new              "new"              '○';
+            waxing_crescent  "waxing-crescent"  '☽';
+            first_quarter    "first-quarter"    '◐';
+            waxing_gibbous   "waxing-gibbous"   '◐';
+            full             "full"             '●';
+            waning_gibbous   "waning-gibbous"   '◑';
+            last_quarter     "last-quarter"     '◑';
+            waning_crescent  "waning-crescent"  '☾';
+        }
+    };
+}
+
 mod accessors;
 mod loading;
 mod schema;
@@ -303,11 +376,9 @@ impl BorderGlyphs {
     }
 }
 
-/// Declares the syntax categories once, deriving [`Category`], the resolved
-/// [`Syntax`] struct, and the lookup between them from the same list. The
-/// `[markdown.syntax]` key is spelled out rather than derived from the field
-/// name because `stringify!(r#type)` keeps the raw-identifier prefix.
-macro_rules! syntax_categories {
+/// Emits [`Category`], the resolved [`Syntax`] struct, and the lookup between
+/// them from [`with_syntax_categories`].
+macro_rules! syntax_category_types {
     ($($variant:ident => $field:ident, $key:literal;)+) => {
         /// One highlightable category of code. The highlighter maps every
         /// tree-sitter capture it recognizes onto one of these.
@@ -346,24 +417,7 @@ macro_rules! syntax_categories {
     };
 }
 
-syntax_categories! {
-    Comment      => comment,       "comment";
-    Keyword      => keyword,       "keyword";
-    Str          => string,        "string";
-    StringEscape => string_escape, "string_escape";
-    Number       => number,        "number";
-    Constant     => constant,      "constant";
-    Function     => function,      "function";
-    Type         => r#type,        "type";
-    Variable     => variable,      "variable";
-    Property     => property,      "property";
-    Operator     => operator,      "operator";
-    Punctuation  => punctuation,   "punctuation";
-    Attribute    => attribute,     "attribute";
-    Tag          => tag,           "tag";
-    Label        => label,         "label";
-    Error        => error,         "error";
-}
+with_syntax_categories!(syntax_category_types);
 
 impl Syntax {
     /// Whether the theme colors any category at all. Plain themes skip the
@@ -473,70 +527,34 @@ pub(crate) struct EnvGlyphs {
     pub(crate) moon: MoonGlyphs,
 }
 
-/// The environment strip's weather glyph per condition slug the context
-/// provider emits (`[metadata.glyphs.weather]`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct WeatherGlyphs {
-    pub(super) clear: char,
-    pub(super) mostly_clear: char,
-    pub(super) partly_cloudy: char,
-    pub(super) cloudy: char,
-    pub(super) fog: char,
-    pub(super) drizzle: char,
-    pub(super) rain: char,
-    pub(super) snow: char,
-    pub(super) thunderstorm: char,
+/// Emits a glyph struct and its slug lookup from a glyph list. The section
+/// type and token prefix are the schema side's business and are ignored here.
+macro_rules! glyph_lookup {
+    (
+        $Struct:ident, $Section:ident, $prefix:literal, $doc:literal;
+        $($field:ident $slug:literal $default:literal;)+
+    ) => {
+        #[doc = $doc]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub(crate) struct $Struct {
+            $(pub(super) $field: char,)+
+        }
+
+        impl $Struct {
+            /// The glyph for a stored slug; `None` for slugs this build doesn't
+            /// know (future providers), which render without a glyph.
+            pub(crate) fn for_slug(self, slug: &str) -> Option<char> {
+                Some(match slug {
+                    $($slug => self.$field,)+
+                    _ => return None,
+                })
+            }
+        }
+    };
 }
 
-impl WeatherGlyphs {
-    /// The glyph for a stored condition slug; `None` for slugs this build
-    /// doesn't know (future providers), which render without a glyph.
-    pub(crate) fn for_slug(self, slug: &str) -> Option<char> {
-        Some(match slug {
-            "clear" => self.clear,
-            "mostly-clear" => self.mostly_clear,
-            "partly-cloudy" => self.partly_cloudy,
-            "cloudy" => self.cloudy,
-            "fog" => self.fog,
-            "drizzle" => self.drizzle,
-            "rain" => self.rain,
-            "snow" => self.snow,
-            "thunderstorm" => self.thunderstorm,
-            _ => return None,
-        })
-    }
-}
-
-/// The environment strip's moon glyph per phase slug the celestial provider
-/// emits (`[metadata.glyphs.moon]`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MoonGlyphs {
-    pub(super) new: char,
-    pub(super) waxing_crescent: char,
-    pub(super) first_quarter: char,
-    pub(super) waxing_gibbous: char,
-    pub(super) full: char,
-    pub(super) waning_gibbous: char,
-    pub(super) last_quarter: char,
-    pub(super) waning_crescent: char,
-}
-
-impl MoonGlyphs {
-    /// The glyph for a stored phase slug; `None` for unknown slugs.
-    pub(crate) fn for_slug(self, slug: &str) -> Option<char> {
-        Some(match slug {
-            "new" => self.new,
-            "waxing-crescent" => self.waxing_crescent,
-            "first-quarter" => self.first_quarter,
-            "waxing-gibbous" => self.waxing_gibbous,
-            "full" => self.full,
-            "waning-gibbous" => self.waning_gibbous,
-            "last-quarter" => self.last_quarter,
-            "waning-crescent" => self.waning_crescent,
-            _ => return None,
-        })
-    }
-}
+with_weather_glyphs!(glyph_lookup);
+with_moon_glyphs!(glyph_lookup);
 
 /// The theme's identity glyphs — every meaning-free character the UI repeats.
 /// Meaning-carrying glyph *variance* (heavy vs light at a zero mood, distinct

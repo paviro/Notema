@@ -470,56 +470,36 @@ struct AlertGlyphsSection {
     caution: Option<String>,
 }
 
-/// Syntax-highlight colors for fenced code blocks, one key per category the
-/// markdown renderer distinguishes. Omitted categories render as plain code —
-/// an empty table is exactly the classic un-highlighted look.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct SyntaxSection {
-    comment: Option<ColorSpec>,
-    keyword: Option<ColorSpec>,
-    string: Option<ColorSpec>,
-    string_escape: Option<ColorSpec>,
-    number: Option<ColorSpec>,
-    constant: Option<ColorSpec>,
-    function: Option<ColorSpec>,
-    r#type: Option<ColorSpec>,
-    variable: Option<ColorSpec>,
-    property: Option<ColorSpec>,
-    operator: Option<ColorSpec>,
-    punctuation: Option<ColorSpec>,
-    attribute: Option<ColorSpec>,
-    tag: Option<ColorSpec>,
-    label: Option<ColorSpec>,
-    error: Option<ColorSpec>,
+/// Emits the `[markdown.syntax]` section and its resolve from
+/// [`with_syntax_categories`]. Every category defaults to `Reset`, so an
+/// omitted key renders as plain code — an empty table is exactly the classic
+/// un-highlighted look.
+macro_rules! syntax_section {
+    ($($variant:ident => $field:ident, $key:literal;)+) => {
+        /// Syntax-highlight colors for fenced code blocks, one key per category
+        /// the markdown renderer distinguishes.
+        #[derive(Debug, Clone, Default, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct SyntaxSection {
+            $($field: Option<ColorSpec>,)+
+        }
+
+        impl SyntaxSection {
+            fn resolve(&self, mode: Mode, palette: &Palette) -> Result<Syntax> {
+                Ok(Syntax {
+                    $($field: match &self.$field {
+                        Some(spec) => {
+                            spec.resolve(mode, palette, concat!("markdown.syntax.", $key))?
+                        }
+                        None => Color::Reset,
+                    },)+
+                })
+            }
+        }
+    };
 }
 
-impl SyntaxSection {
-    fn resolve(&self, mode: Mode, palette: &Palette) -> Result<Syntax> {
-        let color = |spec: &Option<ColorSpec>, token: &str| -> Result<Color> {
-            spec.as_ref()
-                .map_or(Ok(Color::Reset), |spec| spec.resolve(mode, palette, token))
-        };
-        Ok(Syntax {
-            comment: color(&self.comment, "markdown.syntax.comment")?,
-            keyword: color(&self.keyword, "markdown.syntax.keyword")?,
-            string: color(&self.string, "markdown.syntax.string")?,
-            string_escape: color(&self.string_escape, "markdown.syntax.string_escape")?,
-            number: color(&self.number, "markdown.syntax.number")?,
-            constant: color(&self.constant, "markdown.syntax.constant")?,
-            function: color(&self.function, "markdown.syntax.function")?,
-            r#type: color(&self.r#type, "markdown.syntax.type")?,
-            variable: color(&self.variable, "markdown.syntax.variable")?,
-            property: color(&self.property, "markdown.syntax.property")?,
-            operator: color(&self.operator, "markdown.syntax.operator")?,
-            punctuation: color(&self.punctuation, "markdown.syntax.punctuation")?,
-            attribute: color(&self.attribute, "markdown.syntax.attribute")?,
-            tag: color(&self.tag, "markdown.syntax.tag")?,
-            label: color(&self.label, "markdown.syntax.label")?,
-            error: color(&self.error, "markdown.syntax.error")?,
-        })
-    }
-}
+with_syntax_categories!(syntax_section);
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -621,34 +601,39 @@ struct MetadataGlyphsSection {
     moon: MoonGlyphsSection,
 }
 
-/// One key per weather-condition slug the context provider emits.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct WeatherGlyphsSection {
-    clear: Option<String>,
-    mostly_clear: Option<String>,
-    partly_cloudy: Option<String>,
-    cloudy: Option<String>,
-    fog: Option<String>,
-    drizzle: Option<String>,
-    rain: Option<String>,
-    snow: Option<String>,
-    thunderstorm: Option<String>,
+/// Emits a `[metadata.glyphs.*]` section and its resolve from a glyph list.
+/// The slug is the reader's business (see `glyph_lookup`); the TOML key is the
+/// field name, as everywhere else in the schema.
+macro_rules! glyph_section {
+    (
+        $Struct:ident, $Section:ident, $prefix:literal, $doc:literal;
+        $($field:ident $slug:literal $default:literal;)+
+    ) => {
+        #[doc = $doc]
+        #[derive(Debug, Clone, Default, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct $Section {
+            $($field: Option<String>,)+
+        }
+
+        impl $Section {
+            fn resolve(&self) -> Result<$Struct> {
+                Ok($Struct {
+                    $($field: match &self.$field {
+                        Some(spec) => parse_glyph(
+                            spec,
+                            concat!($prefix, ".", stringify!($field)),
+                        )?,
+                        None => $default,
+                    },)+
+                })
+            }
+        }
+    };
 }
 
-/// One key per moon-phase slug the celestial provider emits.
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct MoonGlyphsSection {
-    new: Option<String>,
-    waxing_crescent: Option<String>,
-    first_quarter: Option<String>,
-    waxing_gibbous: Option<String>,
-    full: Option<String>,
-    waning_gibbous: Option<String>,
-    last_quarter: Option<String>,
-    waning_crescent: Option<String>,
-}
+with_weather_glyphs!(glyph_section);
+with_moon_glyphs!(glyph_section);
 
 /// A single-character glyph value.
 fn parse_glyph(spec: &str, token: &str) -> Result<char> {
@@ -1007,73 +992,8 @@ impl ThemeFile {
         };
         let scrollbar_glyphs = &self.scrollbar.glyphs;
         let metadata_glyphs = &self.metadata.glyphs;
-        let weather_glyphs = &metadata_glyphs.weather;
-        let moon_glyphs = &metadata_glyphs.moon;
-        let weather = WeatherGlyphs {
-            clear: glyph(&weather_glyphs.clear, '☀', "metadata.glyphs.weather.clear")?,
-            mostly_clear: glyph(
-                &weather_glyphs.mostly_clear,
-                '☼',
-                "metadata.glyphs.weather.mostly_clear",
-            )?,
-            partly_cloudy: glyph(
-                &weather_glyphs.partly_cloudy,
-                '☁',
-                "metadata.glyphs.weather.partly_cloudy",
-            )?,
-            cloudy: glyph(
-                &weather_glyphs.cloudy,
-                '☁',
-                "metadata.glyphs.weather.cloudy",
-            )?,
-            fog: glyph(&weather_glyphs.fog, '≡', "metadata.glyphs.weather.fog")?,
-            drizzle: glyph(
-                &weather_glyphs.drizzle,
-                '☂',
-                "metadata.glyphs.weather.drizzle",
-            )?,
-            rain: glyph(&weather_glyphs.rain, '☂', "metadata.glyphs.weather.rain")?,
-            snow: glyph(&weather_glyphs.snow, '❄', "metadata.glyphs.weather.snow")?,
-            thunderstorm: glyph(
-                &weather_glyphs.thunderstorm,
-                '↯',
-                "metadata.glyphs.weather.thunderstorm",
-            )?,
-        };
-        let moon = MoonGlyphs {
-            new: glyph(&moon_glyphs.new, '○', "metadata.glyphs.moon.new")?,
-            waxing_crescent: glyph(
-                &moon_glyphs.waxing_crescent,
-                '☽',
-                "metadata.glyphs.moon.waxing_crescent",
-            )?,
-            first_quarter: glyph(
-                &moon_glyphs.first_quarter,
-                '◐',
-                "metadata.glyphs.moon.first_quarter",
-            )?,
-            waxing_gibbous: glyph(
-                &moon_glyphs.waxing_gibbous,
-                '◐',
-                "metadata.glyphs.moon.waxing_gibbous",
-            )?,
-            full: glyph(&moon_glyphs.full, '●', "metadata.glyphs.moon.full")?,
-            waning_gibbous: glyph(
-                &moon_glyphs.waning_gibbous,
-                '◑',
-                "metadata.glyphs.moon.waning_gibbous",
-            )?,
-            last_quarter: glyph(
-                &moon_glyphs.last_quarter,
-                '◑',
-                "metadata.glyphs.moon.last_quarter",
-            )?,
-            waning_crescent: glyph(
-                &moon_glyphs.waning_crescent,
-                '☾',
-                "metadata.glyphs.moon.waning_crescent",
-            )?,
-        };
+        let weather = metadata_glyphs.weather.resolve()?;
+        let moon = metadata_glyphs.moon.resolve()?;
         // `focus_stripe` and `divider` live under `[borders.glyphs]` but resolve
         // out-of-band — they are standalone furniture, not part of the box set
         // the `[borders.glyphs]` overlay assembles.

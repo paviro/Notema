@@ -11,6 +11,28 @@ fn bundled(name: &str) -> &'static str {
         .expect("bundled theme exists")
 }
 
+/// The `[metadata.glyphs.*]` and `[markdown.syntax]` tokens are assembled by
+/// the emitter macros from the shared lists, so nothing else would notice if a
+/// key stopped naming itself in the error the user actually reads.
+#[test]
+fn generated_sections_name_their_own_token_when_a_value_is_rejected() {
+    let err = parse(
+        "[metadata.glyphs.weather]\nmostly_clear = \"xy\"",
+        Mode::Dark,
+    )
+    .unwrap_err();
+    assert!(
+        format!("{err:#}").contains("metadata.glyphs.weather.mostly_clear"),
+        "{err:#}"
+    );
+
+    let err = parse("[markdown.syntax]\ntype = \"not-a-color\"", Mode::Dark).unwrap_err();
+    assert!(
+        format!("{err:#}").contains("markdown.syntax.type"),
+        "{err:#}"
+    );
+}
+
 #[test]
 fn every_bundled_theme_parses_in_both_modes() {
     for (name, text) in BUNDLED {
