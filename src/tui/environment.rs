@@ -14,11 +14,6 @@ use crate::tui::runtime::worker::Worker;
 /// The background environment worker, spawned on first use.
 pub(crate) type EnvironmentWorker = Worker<EnvironmentRequest, EnvironmentResult>;
 
-/// The captured environment for one located entry: celestial is computed
-/// offline, weather and air quality come from Open-Meteo (either may be absent
-/// when there's no data for that place/time).
-pub(crate) type Environment = EnvironmentReport;
-
 /// Where a finished lookup's data belongs, so the drain step can route it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum EnvironmentTarget {
@@ -41,19 +36,19 @@ pub(crate) struct EnvironmentRequest {
 pub(crate) struct EnvironmentResult {
     pub(crate) id: u64,
     pub(crate) target: EnvironmentTarget,
-    pub(crate) environment: Environment,
+    pub(crate) environment: EnvironmentReport,
 }
 
-/// Fetch the full environment for a place and time. Celestial is offline and always
-/// present; weather/air quality are dropped to `None` on no-data or transport
-/// failure (the caller can't do anything with the error mid-save).
-pub(crate) fn fetch_entry_environment(coordinates: Coordinates, datetime: Zoned) -> Environment {
-    fetch_environment(coordinates, datetime, EnvironmentWants::all())
-}
-
-/// Resolve one environment request. Runs on the worker thread.
+/// Resolve one environment request. Runs on the worker thread. Celestial is
+/// offline and always present; weather/air quality are dropped to `None` on
+/// no-data or transport failure (the caller can't do anything with the error
+/// mid-save).
 pub(crate) fn resolve(request: EnvironmentRequest) -> EnvironmentResult {
-    let environment = fetch_entry_environment(request.coordinates, request.datetime);
+    let environment = fetch_environment(
+        request.coordinates,
+        request.datetime,
+        EnvironmentWants::all(),
+    );
     EnvironmentResult {
         id: request.id,
         target: request.target,
@@ -63,7 +58,7 @@ pub(crate) fn resolve(request: EnvironmentRequest) -> EnvironmentResult {
 
 /// The metadata fields to persist for a fetched environment — only the parts that
 /// came back present, so an absent weather/air reading isn't written as cleared.
-pub(crate) fn environment_fields(environment: &Environment) -> Vec<MetadataField> {
+pub(crate) fn environment_fields(environment: &EnvironmentReport) -> Vec<MetadataField> {
     let mut fields = Vec::new();
     fields.push(MetadataField::Celestial(Some(Box::new(
         environment.celestial.clone(),

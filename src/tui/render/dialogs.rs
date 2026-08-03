@@ -132,16 +132,9 @@ const LOCATION_DIALOG_QUERY_HINTS: [Hint; 5] = [
     Hint::new("cancel", "esc", HintId::CancelOverlay),
 ];
 
-/// Query-field hints once the query is resolved: Enter now saves.
-const LOCATION_DIALOG_QUERY_RESOLVED_HINTS: [Hint; 5] = [
-    Hint::new("save", "enter", HintId::LocationSave),
-    Hint::new("locate", "^l", HintId::LocationGrabDevice),
-    Hint::new("next", "tab", HintId::LocationSwitchFocus),
-    Hint::new("select all", "^a", HintId::InputSelectAll),
-    Hint::new("cancel", "esc", HintId::CancelOverlay),
-];
-
-const LOCATION_DIALOG_NAME_HINTS: [Hint; 5] = [
+/// Hints for either input field once Enter saves rather than looks up: the name
+/// field always does, the query field once it has been resolved.
+const LOCATION_DIALOG_SAVE_HINTS: [Hint; 5] = [
     Hint::new("save", "enter", HintId::LocationSave),
     Hint::new("locate", "^l", HintId::LocationGrabDevice),
     Hint::new("next", "tab", HintId::LocationSwitchFocus),
@@ -231,9 +224,9 @@ pub(crate) fn location_dialog_hints(
     query_looked_up: bool,
 ) -> &'static [Hint] {
     match focus {
-        EditLocationFocus::Query if query_looked_up => &LOCATION_DIALOG_QUERY_RESOLVED_HINTS,
+        EditLocationFocus::Query if query_looked_up => &LOCATION_DIALOG_SAVE_HINTS,
         EditLocationFocus::Query => &LOCATION_DIALOG_QUERY_HINTS,
-        EditLocationFocus::Name => &LOCATION_DIALOG_NAME_HINTS,
+        EditLocationFocus::Name => &LOCATION_DIALOG_SAVE_HINTS,
         EditLocationFocus::List => &LOCATION_DIALOG_LIST_HINTS,
     }
 }
@@ -337,8 +330,7 @@ fn location_dialog_hint_height(theme: &Theme, frame_area: Rect) -> u16 {
     // Reserve the tallest focus state so the layout doesn't shift as focus moves.
     let width = dialog_hint_width(theme, frame_area, LOCATION_DIALOG_WIDTH);
     hint_height(&LOCATION_DIALOG_QUERY_HINTS, width)
-        .max(hint_height(&LOCATION_DIALOG_QUERY_RESOLVED_HINTS, width))
-        .max(hint_height(&LOCATION_DIALOG_NAME_HINTS, width))
+        .max(hint_height(&LOCATION_DIALOG_SAVE_HINTS, width))
         .max(hint_height(&LOCATION_DIALOG_LIST_HINTS, width))
 }
 

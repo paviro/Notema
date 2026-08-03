@@ -1054,8 +1054,7 @@ mod tests {
 
     #[test]
     fn new_entry_attaches_prefetched_environment() {
-        use crate::tui::environment::Environment;
-        use notema_context::compute_celestial;
+        use notema_context::{EnvironmentReport, compute_celestial};
         use notema_domain::Location;
 
         let (_dir, mut app, _path) = app_with_entry("+++\nschema_version = 1\n+++\n\n# A\n");
@@ -1069,12 +1068,12 @@ mod tests {
             ..Location::default()
         });
         // The background fetch already landed (celestial is offline, always present).
-        editor.environment = Some(Environment {
+        editor.environment = Some(EnvironmentReport {
             celestial: compute_celestial(
                 notema_domain::Coordinates::try_new(52.52, 13.405).unwrap(),
                 datetime,
             ),
-            ..Environment::default()
+            ..EnvironmentReport::default()
         });
         app.editor = Some(editor);
         save_internal_editor(&mut app).unwrap();

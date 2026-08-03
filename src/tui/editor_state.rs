@@ -65,7 +65,7 @@ pub(crate) struct EntryEditor {
     /// or `None` when nothing is outstanding.
     pub(crate) pending_environment: Option<u64>,
     /// The landed environment for the current location, attached to the entry on save.
-    pub(crate) environment: Option<crate::tui::environment::Environment>,
+    pub(crate) environment: Option<notema_context::EnvironmentReport>,
     /// The entry's environment as loaded, so the metadata strip shows it until a
     /// fetch of this session's own lands. Display-only — never written back, or an
     /// untouched save would re-stamp it.
