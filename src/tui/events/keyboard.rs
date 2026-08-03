@@ -102,13 +102,6 @@ fn handle_editor_key(
     app: &mut AppModel,
     key: KeyEvent,
 ) -> AppResult<DispatchOutcome> {
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    // Clipboard ops accept either Ctrl or Cmd (Super), so `Cmd+C/X/V` behave
-    // exactly like `^C/^X/^V`. Super is only reported when the terminal supports
-    // the keyboard-enhancement protocol (see `runtime::terminal`); elsewhere it
-    // stays Ctrl-only with no regression.
-    let clip = ctrl || key.modifiers.contains(KeyModifiers::SUPER);
-
     if let Some(EditorPrompt::ConfirmDiscard { discard_selected }) = editor_prompt(app) {
         let selected = *discard_selected;
         let action = match key.code {
@@ -162,84 +155,63 @@ fn handle_editor_key(
         return Ok(DispatchOutcome::Continue);
     }
 
-    match key.code {
-        // Save takes Ctrl or Cmd (Super), so `Cmd+S` works on macOS.
-        KeyCode::Char('s') if clip => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::Save));
-        }
-        // The editor is a text field, so commands take a modifier (bare letters
-        // type). Ctrl+A select-all, Ctrl/Cmd+Z undo/redo, Ctrl/Cmd+X/C cut/copy,
-        // Ctrl+V paste; Ctrl+K and Ctrl+W (cut-to-line-end, delete-word) fall
-        // through to the textarea. Home covers line-start; Esc discards. Cmd+A is
-        // left to the terminal (it binds it to "select the whole window").
-        KeyCode::Char('a') if ctrl => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::SelectAll));
-        }
-        // Undo/redo take Ctrl (^Z/^Y) or Cmd (Super), so macOS `Cmd+Z` undoes and
-        // `Cmd+Shift+Z` redoes. A shifted `z` reaches us as uppercase `Z` or as
-        // `z` with Shift held depending on the terminal's keyboard protocol, so
-        // match both; Ctrl+Y stays as the emacs-ish redo alias.
-        KeyCode::Char('Z') if clip => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::Redo));
-        }
-        KeyCode::Char('z') if clip && key.modifiers.contains(KeyModifiers::SHIFT) => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::Redo));
-        }
-        KeyCode::Char('z') if clip => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::Undo));
-        }
-        KeyCode::Char('y') if ctrl => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::Redo));
-        }
-        KeyCode::Char('x') if clip => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::Cut));
-        }
-        KeyCode::Char('c') if clip => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::Copy));
-        }
-        // Ctrl+V pastes the system clipboard (native read on desktop, internal yank
-        // as the fallback). `Cmd+V` isn't bound here: the terminal owns it as a paste
-        // gesture, delivering the same system clipboard as a bracketed paste — so
-        // both routes land the one clipboard, not two competing pastes.
-        KeyCode::Char('v') if ctrl => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::Paste));
-        }
-        // Fullscreen is on Ctrl+O, not Ctrl+F: the textarea binds Ctrl+F to
-        // forward-char (emacs), which we leave to it.
-        KeyCode::Char('o') if ctrl => {
-            return super::dispatch_action(
-                terminal,
-                app,
-                Action::Editor(EditorAction::ToggleFullscreen),
-            );
-        }
-        // Ctrl+G and Ctrl+T open the metadata chooser and shortcut overlay. Both
-        // avoid the textarea's Ctrl bindings and Alt+letter (eaten on macOS and
-        // Termux); the overlays are handled at the top of this function.
-        KeyCode::Char('g') if ctrl => {
-            return super::dispatch_action(
-                terminal,
-                app,
-                Action::Editor(EditorAction::OpenMetadataMenu),
-            );
-        }
-        KeyCode::Char('t') if ctrl => {
-            return super::dispatch_action(terminal, app, Action::Editor(EditorAction::OpenHelp));
-        }
-        KeyCode::Esc => {
-            return super::dispatch_action(
-                terminal,
-                app,
-                Action::Editor(EditorAction::RequestDiscard),
-            );
-        }
-        _ => {}
+    if let Some(action) = editor_key_to_action(key) {
+        return super::dispatch_action(terminal, app, Action::Editor(action));
     }
 
     // Rewrite macOS Option/Cmd navigation chords the textarea doesn't bind into
     // the equivalent key it does, then feed that through the same Input path.
     let key = macos_nav_alias(key).unwrap_or(key);
     super::dispatch_action(terminal, app, Action::Editor(EditorAction::Input(key)))
+}
+
+/// The editor command a keystroke maps to, or `None` when it is text (or a chord
+/// the textarea binds itself) and belongs to the textarea instead.
+pub(super) fn editor_key_to_action(key: KeyEvent) -> Option<EditorAction> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    // Clipboard ops accept either Ctrl or Cmd (Super), so `Cmd+C/X/V` behave
+    // exactly like `^C/^X/^V`. Super is only reported when the terminal supports
+    // the keyboard-enhancement protocol (see `runtime::terminal`); elsewhere it
+    // stays Ctrl-only with no regression.
+    let clip = ctrl || key.modifiers.contains(KeyModifiers::SUPER);
+
+    match key.code {
+        // Save takes Ctrl or Cmd (Super), so `Cmd+S` works on macOS.
+        KeyCode::Char('s') if clip => Some(EditorAction::Save),
+        // The editor is a text field, so commands take a modifier (bare letters
+        // type). Ctrl+A select-all, Ctrl/Cmd+Z undo/redo, Ctrl/Cmd+X/C cut/copy,
+        // Ctrl+V paste; Ctrl+K and Ctrl+W (cut-to-line-end, delete-word) fall
+        // through to the textarea. Home covers line-start; Esc discards. Cmd+A is
+        // left to the terminal (it binds it to "select the whole window").
+        KeyCode::Char('a') if ctrl => Some(EditorAction::SelectAll),
+        // Undo/redo take Ctrl (^Z/^Y) or Cmd (Super), so macOS `Cmd+Z` undoes and
+        // `Cmd+Shift+Z` redoes. A shifted `z` reaches us as uppercase `Z` or as
+        // `z` with Shift held depending on the terminal's keyboard protocol, so
+        // match both; Ctrl+Y stays as the emacs-ish redo alias.
+        KeyCode::Char('Z') if clip => Some(EditorAction::Redo),
+        KeyCode::Char('z') if clip && key.modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(EditorAction::Redo)
+        }
+        KeyCode::Char('z') if clip => Some(EditorAction::Undo),
+        KeyCode::Char('y') if ctrl => Some(EditorAction::Redo),
+        KeyCode::Char('x') if clip => Some(EditorAction::Cut),
+        KeyCode::Char('c') if clip => Some(EditorAction::Copy),
+        // Ctrl+V pastes the system clipboard (native read on desktop, internal yank
+        // as the fallback). `Cmd+V` isn't bound here: the terminal owns it as a paste
+        // gesture, delivering the same system clipboard as a bracketed paste — so
+        // both routes land the one clipboard, not two competing pastes.
+        KeyCode::Char('v') if ctrl => Some(EditorAction::Paste),
+        // Fullscreen is on Ctrl+O, not Ctrl+F: the textarea binds Ctrl+F to
+        // forward-char (emacs), which we leave to it.
+        KeyCode::Char('o') if ctrl => Some(EditorAction::ToggleFullscreen),
+        // Ctrl+G and Ctrl+T open the metadata chooser and shortcut overlay. Both
+        // avoid the textarea's Ctrl bindings and Alt+letter (eaten on macOS and
+        // Termux); the prompts they open are handled by the caller.
+        KeyCode::Char('g') if ctrl => Some(EditorAction::OpenMetadataMenu),
+        KeyCode::Char('t') if ctrl => Some(EditorAction::OpenHelp),
+        KeyCode::Esc => Some(EditorAction::RequestDiscard),
+        _ => None,
+    }
 }
 
 /// Alias the macOS Option/Cmd editing chords the textarea leaves unbound onto the
@@ -438,6 +410,9 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
     {
         return Some(action);
     }
+    if let Some(action) = reader_focus_key_to_action(app, key, reader_available) {
+        return Some(action);
+    }
     match key.code {
         // The one deliberate chord on this surface; must precede the guard below.
         KeyCode::Char('g')
@@ -484,26 +459,8 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
             Some(Action::Browser(BrowserAction::ViewSelected))
         }
         KeyCode::Right => Some(Action::Browser(BrowserAction::FocusRight)),
-        // Second Enter on the focused viewer expands it to full screen (multi-column
-        // only; single-column already renders it full screen).
-        KeyCode::Enter
-            if app.nav.focus == Focus::Reader && reader_available && !app.nav.reader_fullscreen =>
-        {
-            Some(Action::Reader(ReaderAction::SetFullscreen(true)))
-        }
-        // Enter again closes the full-screen viewer: back to the focused pane in
-        // multi-column, or out to the entries column in single-column.
-        KeyCode::Enter if app.nav.focus == Focus::Reader && app.nav.reader_fullscreen => {
-            Some(Action::Reader(ReaderAction::SetFullscreen(false)))
-        }
-        KeyCode::Enter if app.nav.focus == Focus::Reader => {
-            Some(Action::Browser(BrowserAction::FocusLeft))
-        }
-        // Esc collapses full screen back to the focused pane; otherwise it exits the
-        // viewer to the entries column.
-        KeyCode::Esc if app.nav.focus == Focus::Reader && app.nav.reader_fullscreen => {
-            Some(Action::Reader(ReaderAction::SetFullscreen(false)))
-        }
+        // Esc leaves the viewer for the entries column; the full-screen collapse
+        // was already handled above.
         KeyCode::Esc if app.nav.focus == Focus::Reader => {
             Some(Action::Browser(BrowserAction::FocusLeft))
         }
@@ -668,6 +625,38 @@ fn suggestion_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
     }
 }
 
+/// The Enter/Esc moves a focused reader answers identically from browse and
+/// search: expand to full screen, collapse back out of it, or leave the viewer.
+/// A bare Esc outside full screen is deliberately not here — browse falls back to
+/// the entries column, search exits the search.
+fn reader_focus_key_to_action(
+    app: &AppModel,
+    key: KeyEvent,
+    reader_available: bool,
+) -> Option<Action> {
+    if app.nav.focus != Focus::Reader {
+        return None;
+    }
+    match key.code {
+        // Second Enter on the focused viewer expands it to full screen (multi-column
+        // only; single-column already renders it full screen).
+        KeyCode::Enter if reader_available && !app.nav.reader_fullscreen => {
+            Some(Action::Reader(ReaderAction::SetFullscreen(true)))
+        }
+        // Enter again closes the full-screen viewer: back to the focused pane in
+        // multi-column, or out to the list in single-column.
+        KeyCode::Enter if app.nav.reader_fullscreen => {
+            Some(Action::Reader(ReaderAction::SetFullscreen(false)))
+        }
+        KeyCode::Enter => Some(Action::Browser(BrowserAction::FocusLeft)),
+        // Esc collapses full screen back to the focused pane.
+        KeyCode::Esc if app.nav.reader_fullscreen => {
+            Some(Action::Reader(ReaderAction::SetFullscreen(false)))
+        }
+        _ => None,
+    }
+}
+
 fn search_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -> Option<Action> {
     if app.nav.focus == Focus::Reader {
         // Ahead of the scroll and reader keys for the same reason as in browse:
@@ -688,25 +677,11 @@ fn search_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
     if let Some(action) = suggestion_key_to_action(app, key) {
         return Some(action);
     }
+    if let Some(action) = reader_focus_key_to_action(app, key, reader_available) {
+        return Some(action);
+    }
     match key.code {
-        // Second Enter on the focused viewer expands it to full screen (multi-column).
-        KeyCode::Enter
-            if app.nav.focus == Focus::Reader && reader_available && !app.nav.reader_fullscreen =>
-        {
-            Some(Action::Reader(ReaderAction::SetFullscreen(true)))
-        }
-        // Enter again closes the full-screen viewer (collapse in multi-column, or
-        // back to the results list in single-column).
-        KeyCode::Enter if app.nav.focus == Focus::Reader && app.nav.reader_fullscreen => {
-            Some(Action::Reader(ReaderAction::SetFullscreen(false)))
-        }
-        KeyCode::Enter if app.nav.focus == Focus::Reader => {
-            Some(Action::Browser(BrowserAction::FocusLeft))
-        }
-        // Esc collapses full screen back to the focused pane before it exits search.
-        KeyCode::Esc if app.nav.focus == Focus::Reader && app.nav.reader_fullscreen => {
-            Some(Action::Reader(ReaderAction::SetFullscreen(false)))
-        }
+        // A bare Esc leaves search; the full-screen collapse was handled above.
         KeyCode::Esc => Some(Action::Search(SearchAction::Exit)),
         KeyCode::Char('q') if app.nav.focus != Focus::Entries => Some(Action::Quit),
         // `?` opens the cheatsheet from the panes, but types into the search field.

@@ -304,6 +304,70 @@ fn editor_footer_hints_route_to_editor_actions() {
 }
 
 #[test]
+fn editor_commands_take_a_modifier_and_cmd_mirrors_ctrl_for_the_clipboard() {
+    use keyboard::editor_key_to_action;
+    let cmd = KeyModifiers::SUPER;
+    let ctrl = KeyModifiers::CONTROL;
+
+    // Bare letters type; only the modified forms are commands.
+    assert_eq!(editor_key_to_action(key(KeyCode::Char('s'))), None);
+    assert_eq!(editor_key_to_action(key(KeyCode::Char('c'))), None);
+
+    // Clipboard and save take either Ctrl or Cmd.
+    for mods in [ctrl, cmd] {
+        assert_eq!(
+            editor_key_to_action(KeyEvent::new(KeyCode::Char('s'), mods)),
+            Some(EditorAction::Save)
+        );
+        assert_eq!(
+            editor_key_to_action(KeyEvent::new(KeyCode::Char('c'), mods)),
+            Some(EditorAction::Copy)
+        );
+        assert_eq!(
+            editor_key_to_action(KeyEvent::new(KeyCode::Char('x'), mods)),
+            Some(EditorAction::Cut)
+        );
+        assert_eq!(
+            editor_key_to_action(KeyEvent::new(KeyCode::Char('z'), mods)),
+            Some(EditorAction::Undo)
+        );
+    }
+
+    // Paste and select-all stay Ctrl-only: the terminal owns Cmd+V and Cmd+A.
+    assert_eq!(
+        editor_key_to_action(KeyEvent::new(KeyCode::Char('v'), ctrl)),
+        Some(EditorAction::Paste)
+    );
+    assert_eq!(
+        editor_key_to_action(KeyEvent::new(KeyCode::Char('v'), cmd)),
+        None
+    );
+    assert_eq!(
+        editor_key_to_action(KeyEvent::new(KeyCode::Char('a'), ctrl)),
+        Some(EditorAction::SelectAll)
+    );
+    assert_eq!(
+        editor_key_to_action(KeyEvent::new(KeyCode::Char('a'), cmd)),
+        None
+    );
+
+    // Redo has three spellings, since terminals disagree on how they report a
+    // shifted `z`.
+    for key_event in [
+        KeyEvent::new(KeyCode::Char('Z'), cmd),
+        KeyEvent::new(KeyCode::Char('z'), cmd | KeyModifiers::SHIFT),
+        KeyEvent::new(KeyCode::Char('y'), ctrl),
+    ] {
+        assert_eq!(editor_key_to_action(key_event), Some(EditorAction::Redo));
+    }
+
+    assert_eq!(
+        editor_key_to_action(key(KeyCode::Esc)),
+        Some(EditorAction::RequestDiscard)
+    );
+}
+
+#[test]
 fn right_past_entries_focuses_insights_and_arrows_cycle_tabs() {
     let mut app = app_with_entries(1);
     app.nav.focus = Focus::Entries;
@@ -743,6 +807,52 @@ fn arrows_in_metadata_input_move_the_caret_for_mid_string_edits() {
         app.edit_metadata_state().unwrap().input.as_str(),
         "rust",
         "insert lands at the caret, not the end"
+    );
+}
+
+/// Search and browse answer a focused reader the same way, so the four shared
+/// arms live in one place — but the bare Esc does not: browse backs out to the
+/// entries column, search leaves search altogether.
+#[test]
+fn search_mode_shares_the_readers_fullscreen_arms_but_not_its_esc() {
+    let mut app = app_with_entries(1);
+    app.begin_search();
+    for ch in "Preview".chars() {
+        app.search_input_key(key(KeyCode::Char(ch)));
+    }
+    // Hits are debounced behind the event loop's tick, and the results list
+    // opens on its first row.
+    app.update_search_results();
+    assert!(!app.search.hits.is_empty());
+    view_selected(&mut app).unwrap();
+    assert_eq!(app.nav.focus, Focus::Reader);
+
+    // Enter expands, then collapses.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::Reader(ReaderAction::SetFullscreen(true)))
+    );
+    app.nav.reader_fullscreen = true;
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), true),
+        Some(Action::Reader(ReaderAction::SetFullscreen(false)))
+    );
+    // Esc collapses full screen before it can exit the search.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::Reader(ReaderAction::SetFullscreen(false)))
+    );
+
+    app.nav.reader_fullscreen = false;
+    // Single-column: the viewer is already full screen, so Enter leaves it.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Enter), false),
+        Some(Action::Browser(BrowserAction::FocusLeft))
+    );
+    // Where browse would fall back to the entries column, search exits.
+    assert_eq!(
+        keyboard::key_to_action(&app, key(KeyCode::Esc), true),
+        Some(Action::Search(SearchAction::Exit))
     );
 }
 
