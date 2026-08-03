@@ -30,14 +30,29 @@ pub fn fetch_weather(
     coordinates: Coordinates,
     datetime: DateTime<FixedOffset>,
 ) -> Result<Option<Weather>> {
+    let age = Utc::now().signed_duration_since(datetime.with_timezone(&Utc));
+    // The archive/forecast handoff sits right on ERA5's ~5-day lag, and that lag
+    // drifts, so an entry near the boundary can hit the endpoint that has no data
+    // yet. Try the age-appropriate endpoint first, then fall back to the other on
+    // an empty sample rather than silently returning no weather.
+    let (primary, fallback) = if age.num_days() >= ARCHIVE_CUTOFF_DAYS {
+        (ENDPOINT_ARCHIVE, ENDPOINT_FORECAST)
+    } else {
+        (ENDPOINT_FORECAST, ENDPOINT_ARCHIVE)
+    };
+    if let Some(weather) = fetch_weather_from(primary, coordinates, datetime)? {
+        return Ok(Some(weather));
+    }
+    fetch_weather_from(fallback, coordinates, datetime)
+}
+
+fn fetch_weather_from(
+    endpoint: &str,
+    coordinates: Coordinates,
+    datetime: DateTime<FixedOffset>,
+) -> Result<Option<Weather>> {
     let lat = coordinates.latitude();
     let lon = coordinates.longitude();
-    let age = Utc::now().signed_duration_since(datetime.with_timezone(&Utc));
-    let endpoint = if age.num_days() >= ARCHIVE_CUTOFF_DAYS {
-        ENDPOINT_ARCHIVE
-    } else {
-        ENDPOINT_FORECAST
-    };
     let date = datetime.format("%Y-%m-%d");
     let url = format!(
         "{endpoint}?latitude={lat}&longitude={lon}&timezone=auto&wind_speed_unit=kmh\
