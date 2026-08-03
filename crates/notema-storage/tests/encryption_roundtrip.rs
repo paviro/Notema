@@ -1195,3 +1195,65 @@ fn a_wrong_passphrase_keeps_the_prefetched_key() {
     );
 }
 
+/// Turning encryption off while the key lives outside the identity file must
+/// leave a retired copy that still *contains* the key. The file on its own is
+/// only a pointer, and `disable` drops what it points at, so inlining has to
+/// happen first — otherwise the retired copy is a pointer at nothing and the
+/// journal's own history becomes unreadable.
+#[cfg(unix)]
+#[test]
+fn disabling_encryption_inlines_an_external_key_before_retiring_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault");
+
+    let mut store = store_at(dir.path());
+    store.ensure().unwrap();
+    store.initialize_encryption("laptop", None).unwrap();
+    store.unlock(None).unwrap();
+    store.create_journal("diary").unwrap();
+    create_entry(&store, "diary", "# Secret\nhidden body");
+
+    // A fetch command is the portable stand-in for the keychain here: these
+    // tests run against notema-encryption built without `cfg(test)`, so its
+    // in-memory keyring double is not in play and a keyring source would reach
+    // the developer's own login keychain.
+    store
+        .set_key_location(
+            &notema_encryption::KeyTarget::Command {
+                read: notema_encryption::KeyCommand::Shell(format!("cat {}", vault.display())),
+                store: notema_encryption::KeyCommand::Shell(format!("cat > {}", vault.display()))
+                    .into(),
+            },
+            None,
+        )
+        .unwrap();
+
+    let identity_file = dir.path().join("identity.toml");
+    let pointer = std::fs::read_to_string(&identity_file).unwrap();
+    assert!(
+        !pointer.contains("AGE-SECRET-KEY-"),
+        "the key should have left the identity file: {pointer}"
+    );
+
+    let summary = store.decrypt_store(|_, _| {}).unwrap();
+    let retired = summary.disabled_identity_file;
+    assert!(retired.exists(), "retired identity copy should remain");
+
+    let retired_text = std::fs::read_to_string(&retired).unwrap();
+    assert!(
+        retired_text.contains("AGE-SECRET-KEY-"),
+        "the retired copy must carry the key itself, not a pointer at it: {retired_text}"
+    );
+    assert!(
+        !retired_text.contains("keys_command"),
+        "the retired copy must not still point at the fetch command: {retired_text}"
+    );
+
+    // And it is a real identity: restored into a fresh config dir, it opens.
+    let fresh = dir.path().join("fresh");
+    std::fs::create_dir_all(&fresh).unwrap();
+    std::fs::copy(&retired, fresh.join("identity.toml")).unwrap();
+    let mut restored = JournalStore::new(dir.path().join("journals"), &fresh);
+    restored.ensure().unwrap();
+    restored.unlock(None).unwrap();
+}
