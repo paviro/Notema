@@ -13,7 +13,7 @@ Where the major areas live. The rest of this file is TUI-focused; these exist to
 - Insights / analytics — `crates/notema-analytics`, `src/tui/features/insights.rs`.
 - Entry metadata & location/weather/celestial — `src/tui/features/metadata.rs`, `src/tui/features/location.rs`, `crates/notema-context`, `crates/notema-locate`; `notema backfill` fills these in.
 - Day One import — `crates/notema-import`, `src/cli/import.rs`.
-- Themes & hot reload — `src/tui/runtime/reload.rs`.
+- Themes & hot reload — `src/tui/theme/`, watched and dispatched from `src/tui/runtime/watcher.rs` and `src/tui/runtime/mod.rs`.
 - Image viewer / terminal graphics — `src/tui/image/`.
 
 ## UI Intent
@@ -40,7 +40,7 @@ Where the major areas live. The rest of this file is TUI-focused; these exist to
 - When focus moves back to Journals, do not keep the entry row visually selected, even though the internal selected entry index may remain unchanged.
 - Mouse wheel events should scroll only the panel under the cursor and must not change row selection.
 - Wheel scrolling over the Reader or Insights should also make that panel active. Wheel scrolling over Journals or Entries should not change the active panel.
-- Dialogs, confirmations, and new-journal input remain keyboard-only unless intentionally redesigned.
+- Dialogs are mouse-driven like the rest of the UI, through the same interaction map and dispatcher (`src/tui/events/mouse/overlay.rs`): rows, focus, scrollbar drags, wheel, and text selection in dialog inputs. Hover only highlights; the click commits.
 
 ## Event Dispatch
 
