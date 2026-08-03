@@ -270,7 +270,15 @@ pub(crate) fn create_entry_file(
     bail!("could not create a unique entry path after {ENTRY_CREATE_ATTEMPTS} attempts")
 }
 
+/// Write a brand-new entry, keeping `create_new` as the id reservation. Unlike an
+/// edit (which routes through the atomic write-then-rename), a fresh entry writes
+/// straight to its final name, so it must fsync the file and its parent directory
+/// itself — otherwise a crash right after "saved" can strand a torn entry.
 fn write_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(bytes)
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    drop(file);
+    notema_encryption::sync_parent_dir(path);
+    Ok(())
 }

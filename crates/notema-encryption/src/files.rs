@@ -84,7 +84,11 @@ where
     Ok(())
 }
 
-fn sync_parent_dir(path: &Path) {
+/// Best-effort fsync of `path`'s parent directory, so a fresh file's directory
+/// entry survives a crash. Silent no-op off Unix. Callers that reserve a name
+/// with `create_new` (entry and asset writes) rather than routing through the
+/// atomic write-then-rename reuse this to keep the same durability guarantee.
+pub fn sync_parent_dir(path: &Path) {
     #[cfg(unix)]
     if let Some(parent) = path.parent()
         && let Ok(dir) = fs::File::open(parent)

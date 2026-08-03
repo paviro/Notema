@@ -652,11 +652,17 @@ fn write_asset(ctx: &mut IngestContext<'_>, data: &AssetData, ext: &str) -> AppR
         // `create_new` reserved the path, so it is ours to roll back. Record it
         // before writing, so a failure mid-write is covered too.
         ctx.staged.push(path.clone());
-        if let Err(error) = data.write_to(&mut output, ctx.encryption.as_ref()) {
+        // A fresh asset writes straight to its final name (no atomic rename), so
+        // fsync the file and its directory to match the entry-write durability.
+        let write_result = data
+            .write_to(&mut output, ctx.encryption.as_ref())
+            .and_then(|()| output.sync_all().map_err(Into::into));
+        if let Err(error) = write_result {
             drop(output);
             let _ = fs::remove_file(&path);
             return Err(error);
         }
+        crypto::sync_parent_dir(&path);
         return Ok(link_name);
     }
 
