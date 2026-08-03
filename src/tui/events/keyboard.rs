@@ -439,6 +439,21 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
         return Some(action);
     }
     match key.code {
+        // The one deliberate chord on this surface; must precede the guard below.
+        KeyCode::Char('g')
+            if key.modifiers.contains(KeyModifiers::CONTROL) && app.can_act_on_selected_entry() =>
+        {
+            Some(Action::Metadata(MetadataAction::OpenMenu))
+        }
+        // Bare letters are the commands here; a Ctrl/Alt/Super variant is never one
+        // (crossterm reports Ctrl+S as Char('s')+CONTROL), so it must not fire them.
+        KeyCode::Char(_)
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+        {
+            None
+        }
         KeyCode::Char('q') => Some(Action::Quit),
         KeyCode::Char('r') => Some(Action::ReloadLibrary { rebuild: false }),
         KeyCode::Char('R') => Some(Action::ReloadLibrary { rebuild: true }),
@@ -542,11 +557,6 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
         {
             Some(Action::Settings(SettingsAction::ToggleArchiveJournal))
         }
-        KeyCode::Char('g')
-            if key.modifiers.contains(KeyModifiers::CONTROL) && app.can_act_on_selected_entry() =>
-        {
-            Some(Action::Metadata(MetadataAction::OpenMenu))
-        }
         KeyCode::Char('t') if app.can_act_on_selected_entry() => Some(Action::Metadata(
             MetadataAction::BeginEdit(MetadataKind::Tags),
         )),
@@ -594,11 +604,21 @@ fn browse_key_to_action(app: &AppModel, key: KeyEvent, reader_available: bool) -
 /// apply the shared focus+target guard once rather than on every key.
 fn reader_key_to_action(app: &AppModel, key: KeyEvent) -> Option<Action> {
     match key.code {
-        KeyCode::Char('e') => Some(Action::Browser(BrowserAction::EditSelected)),
-        KeyCode::Char('d') => Some(Action::Browser(BrowserAction::BeginDelete)),
+        // The one deliberate chord on this surface; must precede the guard below.
         KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(Action::Metadata(MetadataAction::OpenMenu))
         }
+        // Bare letters are the commands here; a Ctrl/Alt/Super variant is never one
+        // (crossterm reports Ctrl+S as Char('s')+CONTROL), so it must not fire them.
+        KeyCode::Char(_)
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER) =>
+        {
+            None
+        }
+        KeyCode::Char('e') => Some(Action::Browser(BrowserAction::EditSelected)),
+        KeyCode::Char('d') => Some(Action::Browser(BrowserAction::BeginDelete)),
         KeyCode::Char('t') => Some(Action::Metadata(MetadataAction::BeginEdit(
             MetadataKind::Tags,
         ))),
@@ -930,6 +950,58 @@ mod tests {
         assert_ne!(
             key_to_action(&app, key, true),
             Some(Action::Filter(FilterAction::Open))
+        );
+    }
+
+    #[test]
+    fn ctrl_chords_do_not_fire_bare_letter_commands() {
+        let mut app = crate::tui::test_support::app_with_entry();
+        app.nav.focus = Focus::Entries;
+
+        // A Ctrl variant of a bare command must not fire it (Ctrl+S is a save
+        // reflex that used to toggle starred and rewrite front matter on disk).
+        for ch in ['s', 'd', 'q'] {
+            assert_eq!(
+                key_to_action(&app, ev(KeyCode::Char(ch), KeyModifiers::CONTROL), true),
+                None,
+                "Ctrl+{ch} must map to no action"
+            );
+        }
+
+        // The bare letters still work.
+        assert_eq!(
+            key_to_action(&app, ev(KeyCode::Char('s'), KeyModifiers::NONE), true),
+            Some(Action::Browser(BrowserAction::ToggleStarred))
+        );
+        assert_eq!(
+            key_to_action(&app, ev(KeyCode::Char('q'), KeyModifiers::NONE), true),
+            Some(Action::Quit)
+        );
+        // And the one deliberate chord survives the guard.
+        assert_eq!(
+            key_to_action(&app, ev(KeyCode::Char('g'), KeyModifiers::CONTROL), true),
+            Some(Action::Metadata(MetadataAction::OpenMenu))
+        );
+    }
+
+    #[test]
+    fn reader_surface_ignores_ctrl_chords_except_the_metadata_menu() {
+        let app = crate::tui::test_support::app_with_entry();
+
+        for ch in ['s', 'd'] {
+            assert_eq!(
+                reader_key_to_action(&app, ev(KeyCode::Char(ch), KeyModifiers::CONTROL)),
+                None,
+                "Ctrl+{ch} must not fire a reader command"
+            );
+        }
+        assert_eq!(
+            reader_key_to_action(&app, ev(KeyCode::Char('d'), KeyModifiers::NONE)),
+            Some(Action::Browser(BrowserAction::BeginDelete))
+        );
+        assert_eq!(
+            reader_key_to_action(&app, ev(KeyCode::Char('g'), KeyModifiers::CONTROL)),
+            Some(Action::Metadata(MetadataAction::OpenMenu))
         );
     }
 
