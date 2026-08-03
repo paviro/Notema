@@ -22,7 +22,7 @@ pub(crate) use entry::{
     scan_import_sources,
 };
 pub use entry::{SoleStoredImage, sole_stored_image};
-pub use entry::{resolve_entry_asset_path, stored_asset_reference, stored_asset_reference_for};
+pub use entry::{resolve_entry_asset_path, stored_asset_reference_for};
 pub use journal_metadata::JournalTheme;
 pub(crate) use journal_metadata::set_theme as set_journal_theme;
 pub use journals::{ARCHIVED_SUFFIX, Journal, is_archived_name, journal_display_name};

@@ -33,8 +33,7 @@ pub use storage::{
     ARCHIVED_SUFFIX, AssetFailure, AssetReport, EditOutcome, EntryAssetOptions, EntryCreateOutcome,
     EntryDraft, EntryEdit, EntryEditOutcome, Journal, JournalTheme, SoleStoredImage, entry_id,
     entry_timestamp_label, is_archived_name, is_entry_file, journal_display_name,
-    parse_entry_timestamp, resolve_entry_asset_path, sole_stored_image, stored_asset_reference,
-    stored_asset_reference_for,
+    parse_entry_timestamp, resolve_entry_asset_path, sole_stored_image, stored_asset_reference_for,
 };
 pub use store_id::StoreId;
 

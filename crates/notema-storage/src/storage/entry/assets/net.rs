@@ -2,7 +2,7 @@
 //! downloads, with a per-run host-reachability probe so a dead host referenced
 //! by many links is only waited on once.
 
-use super::{expand_user, image_extension, is_url, url_path};
+use super::refs::{expand_user, image_extension, is_url, url_path};
 use notema_http::is_ish;
 use std::{
     collections::HashMap,

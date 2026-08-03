@@ -14,7 +14,7 @@ pub(crate) use notema_domain::{
 
 pub use assets::{
     AssetFailure, AssetReport, SoleStoredImage, resolve_entry_asset_path, sole_stored_image,
-    stored_asset_reference, stored_asset_reference_for,
+    stored_asset_reference_for,
 };
 pub(crate) use codec::EntryCodec;
 pub use create::{EntryAssetOptions, EntryCreateOutcome, EntryDraft};
