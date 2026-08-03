@@ -43,9 +43,16 @@ whether to protect the key with a passphrase; pass `--no-passphrase` to skip tha
 prompt.
 
 > [!IMPORTANT]
-> **Back up your key.** `~/.config/notema/identity.toml` is the only thing that
-> can decrypt this device's view of the journal. If you lose every trusted
-> device's key, encrypted entries are unrecoverable.
+> **Back up your key.** It is the only thing that can decrypt this device's view
+> of the journal. If you lose every trusted device's key, encrypted entries are
+> unrecoverable.
+> ```bash
+> notema encryption device export-key ~/notema-key-backup.toml
+> ```
+> That writes a standalone copy, mode 0600, still passphrase-protected if the key
+> is. Restoring it is copying the file back into a config directory as
+> `identity.toml`. Copying `~/.config/notema/identity.toml` works too — but only
+> while the key is stored there; see [Where your key lives](#where-your-key-lives).
 
 ## Add a new device
 
@@ -114,6 +121,8 @@ notema encryption device revoke <name>         # revoke a device and re-encrypt 
 notema encryption device rotate                # replace this device's key, retire the old one
 notema encryption device passphrase            # add / change this device's key passphrase
 notema encryption device passphrase --remove   # store the key unprotected
+notema encryption device key-source            # show where this device's key is kept
+notema encryption device export-key <path>     # write a standalone copy, for safekeeping
 ```
 
 Revocation is **forward-only**: re-encryption excludes the revoked device from
@@ -127,6 +136,51 @@ those too — but don't count on that.
 If encryption is disabled on one device (`notema encryption disable`), the other
 devices notice on next launch, retire their local key material, and fall back to
 reading the now-plaintext journal.
+
+## Where your key lives
+
+Two independent choices. **Format** — cleartext, or wrapped with a passphrase
+(`device passphrase`). **Location** — where the bytes sit. Every location holds
+either format, and moving the key never changes its format.
+
+```bash
+notema encryption device key-source file       # inline in identity.toml, mode 0600
+notema encryption device key-source keyring    # the OS keychain
+notema encryption device key-source command --read '<cmd>' [--store '<cmd>']
+```
+
+`--read` prints the key on stdout whenever it's needed. `--store` takes it on
+stdin whenever it changes — piping rather than passing an argument keeps the key
+out of `ps`. Both are recorded, and both are needed for a complete setup:
+without `--store` the key can be fetched but never replaced, so `device rotate`
+and `device passphrase` have nowhere to write.
+
+Before it drops the old copy, notema writes the key to its new home, reads it
+back, and checks the same key comes out. A store command that quietly did nothing
+can't leave you locked out.
+
+Retrieval happens before the app takes over the terminal, so a command that
+prompts — Touch ID, a GPG pin, a hardware token — works normally. `notema log
+"…"` never retrieves the key at all: writing an entry needs only the public
+roster.
+
+### Recipes
+
+The command is a shell line, so anything that prints the bundle works. For the
+macOS Keychain and the Secret Service, use `key-source keyring` instead — it
+talks to them directly.
+
+| store | `--read` | `--store` |
+| --- | --- | --- |
+| 1Password | `op read op://Private/notema/identity` | `op document create --title notema/identity` |
+| pass | `pass show notema/identity` | `pass insert -m notema/identity` |
+| HashiCorp Vault | `vault kv get -field=identity secret/notema` | `vault kv put secret/notema identity=-` |
+| a mounted secret | `cat /run/secrets/notema-identity` | `cat > /run/secrets/notema-identity` |
+
+`device rotate` and `device passphrase` mint new key material and write it back
+to wherever the key is kept, so they work the same in every location — provided
+there's a way to write. A `--read` without a `--store` is the one case that
+can't, and it refuses up front rather than part-way through a rotation.
 
 ## Disable encryption
 
@@ -143,7 +197,12 @@ Encrypted entries decrypt with the standard [`age`](https://age-encryption.org)
 tool and the age secret key from `identity.toml`, so you're never locked into
 Notema to read your journal.
 
-**1. Get the age secret key** (`AGE-SECRET-KEY-1…`):
+**1. Get the age secret key** (`AGE-SECRET-KEY-1…`).
+
+If the key isn't inline — `identity.toml` has `keyring_account` or `keys_command`
+instead of `plain_keys`/`encrypted_keys` — get it out first, either with
+`notema encryption device export-key backup.toml` (which inlines it) or by
+running the `keys_command` yourself. Then, from the inline form:
 
 - *No passphrase* — copy the `x25519` value from the `plain_keys` block into a
   keyfile:
