@@ -41,3 +41,12 @@ pub(crate) const ENROLL_CMD: &str = "notema encryption device enroll";
 /// device name is appended when one is known. Shared by the CLI prompts and the
 /// TUI awaiting-approval notice so the wording lives in one place.
 pub(crate) const APPROVE_CMD: &str = "notema encryption device approve";
+
+/// The command that writes a standalone copy of this device's key. Named
+/// wherever a backup is advised, since the identity file is only the backup
+/// while the key is actually in it.
+pub(crate) const EXPORT_KEY_CMD: &str = "notema encryption key export";
+
+/// The command that moves this device's key into the OS keychain, offered when
+/// an automatic move could not complete.
+pub(crate) const KEY_SOURCE_KEYRING_CMD: &str = "notema encryption key source keyring";

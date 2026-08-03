@@ -207,7 +207,7 @@ pub enum EncryptionError {
     /// bundle — the shape a secret manager most often already holds. Carries
     /// nothing: the offending text is the secret.
     #[error(
-        "the stored key material is a bare age secret key, but the whole secret bundle is needed (schema_version, x25519, ed25519). Write one with `notema encryption device export-key`"
+        "the stored key material is a bare age secret key, but the whole secret bundle is needed (schema_version, x25519, ed25519). Write one with `notema encryption key export`"
     )]
     BareAgeKeyNotBundle,
 
@@ -221,7 +221,7 @@ pub enum EncryptionError {
     /// The key is fetched by a command with no matching store command, so it can
     /// be read but never replaced.
     #[error(
-        "this device's key is fetched by '{command}', which can read it but not replace it. Re-run `notema encryption device key-source command` with `--store` so new key material has somewhere to go, or bring the key back with `notema encryption device key-source file`"
+        "this device's key is fetched by '{command}', which can read it but not replace it. Re-run `notema encryption key source command` with `--store` so new key material has somewhere to go, or bring the key back with `notema encryption key source file`"
     )]
     KeySourceReadOnly { command: String },
 
@@ -250,6 +250,12 @@ pub enum EncryptionError {
     #[error("no OS keyring is available here: {detail}")]
     KeyringUnavailable { detail: String },
 
+    /// A keyring is there but refused the request, typically because it is
+    /// locked. Distinct from [`Self::KeyringUnavailable`]: the key is still
+    /// where it should be, and unlocking the keychain is all that is needed.
+    #[error("the OS keyring is locked or refused access: {detail}. Unlock it and try again")]
+    KeyringLocked { detail: String },
+
     /// The identity file points at a keyring item that isn't there.
     #[error("the OS keyring has no key for this device (account '{account}')")]
     KeyringItemMissing { account: String },
@@ -271,12 +277,6 @@ pub enum EncryptionError {
 
     #[error("unsupported {kind} schema version {version}; expected 1")]
     UnsupportedSchema { kind: &'static str, version: u32 },
-    /// A keyring is there but refused the request, typically because it is
-    /// locked. Distinct from [`Self::KeyringUnavailable`]: the key is still
-    /// where it should be, and unlocking the keychain is all that is needed.
-    #[error("the OS keyring is locked or refused access: {detail}. Unlock it and try again")]
-    KeyringLocked { detail: String },
-
 
     /// A file expected to be binary age v1 ciphertext has a header or length
     /// that doesn't fit the format, so its plaintext size cannot be derived.

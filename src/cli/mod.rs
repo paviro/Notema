@@ -10,7 +10,7 @@ pub(crate) mod prompts;
 use anyhow::Context;
 use anyhow::bail;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use notema_encryption::{KeyCommand, KeyTarget, PendingRequest, SecretString};
+use notema_encryption::{KeyTarget, PendingRequest, SecretString};
 use notema_storage::JournalStore;
 use notema_timing as timing;
 #[cfg(feature = "fuse")]
@@ -57,7 +57,8 @@ enum CliCommand {
     /// Fill in missing location names, weather, air quality, and celestial data
     /// for existing located entries (fetched on demand, one request per second)
     Backfill,
-    /// Manage journal encryption: enable/disable and the device keystore
+    /// Manage journal encryption: turn it on or off, the devices that can read
+    /// it, and this device's own key
     #[command(alias = "enc")]
     Encryption {
         #[command(subcommand)]
@@ -86,13 +87,23 @@ enum EncryptionCommand {
     Enable(NewIdentityArgs),
     /// Decrypt every encrypted entry, turning encryption off
     Disable(ConfirmArgs),
+    /// Show whether encryption is on, who can read this journal, and where this device's key is
+    Status,
     /// Manage the devices that can read this encrypted journal
     Device {
         #[command(subcommand)]
         command: DeviceCommand,
     },
+    /// Manage this device's own key: where it is kept, how it is protected
+    Key {
+        #[command(subcommand)]
+        command: KeyCommand,
+    },
 }
 
+/// The roster: which devices may read this journal. Everything here is about
+/// *other* devices, or about this one's place among them. This device's own key
+/// is [`KeyCommand`].
 #[derive(Debug, Subcommand)]
 enum DeviceCommand {
     /// Request access for this device to an already-encrypted journal (approve it from an existing device)
@@ -117,14 +128,23 @@ enum DeviceCommand {
     Approve(RequestSelectionArgs),
     /// Reject pending device-access requests without granting access
     Reject(RequestSelectionArgs),
+}
+
+/// This device's key. Two independent choices live here: its *format* (whether a
+/// passphrase protects it) and its *location* (which store holds the bytes).
+/// Every location holds either format.
+#[derive(Debug, Subcommand)]
+enum KeyCommand {
+    /// Show where this device's key is kept and whether a passphrase protects it
+    Status,
+    /// Change where this device's key is kept
+    Source(KeySourceArgs),
     /// Add, remove, or change this device's key passphrase
     Passphrase(PassphraseArgs),
     /// Replace this device's key and re-encrypt, retiring the old key
     Rotate,
-    /// Show or change where this device's key is kept
-    KeySource(KeySourceArgs),
     /// Write a standalone copy of this device's key, for safekeeping
-    ExportKey(ExportKeyArgs),
+    Export(ExportKeyArgs),
 }
 
 /// Where a device's key is kept. Independent of whether it is
@@ -141,16 +161,17 @@ enum KeySourceChoice {
 
 #[derive(Debug, Args)]
 struct KeySourceArgs {
-    /// Where to keep the key. Omit to show where it is kept now.
+    /// Where to keep the key
     #[arg(value_name = "LOCATION")]
-    location: Option<KeySourceChoice>,
+    location: KeySourceChoice,
 
-    /// Command that prints the key on stdout, for `command`
-    #[arg(long, value_name = "COMMAND")]
+    /// Command that prints the key on stdout. Required for `command`.
+    #[arg(long, value_name = "COMMAND", required_if_eq("location", "command"))]
     read: Option<String>,
 
-    /// Command that stores the key, given it on stdin. Run once, and not
-    /// recorded — only `--read` is kept.
+    /// Command that stores the key, given it on stdin. Recorded alongside
+    /// `--read`; without it the key can be fetched but never replaced, so
+    /// `rotate` and `passphrase` have nowhere to write.
     #[arg(long, value_name = "COMMAND", requires = "read")]
     store: Option<String>,
 }
@@ -194,6 +215,22 @@ struct NewIdentityArgs {
     /// asked interactively whether to protect the key with a passphrase.
     #[arg(long)]
     no_passphrase: bool,
+
+    /// Where to keep the new key. Omit to be asked interactively; without a
+    /// terminal to ask on, the key stays in the identity file.
+    #[arg(long, value_name = "LOCATION")]
+    key_source: Option<NewKeySource>,
+}
+
+/// Where a *newly minted* key can go. `command` is absent deliberately: it needs
+/// a fetch command to be named, which `notema encryption key source command`
+/// exists to do once the key is there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum NewKeySource {
+    /// Inline in `identity.toml`, readable only by you
+    File,
+    /// An item in the operating system's keychain
+    Keyring,
 }
 
 /// Which pending join requests a command acts on. Shared by `approve` and
@@ -303,7 +340,13 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
     match command {
         EncryptionCommand::Enable(args) => {
             let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
-            encryption::encrypt_store(&store, args.name.as_deref(), args.no_passphrase)
+            encryption::encrypt_store(
+                &store,
+                args.name.as_deref(),
+                args.no_passphrase,
+                args.key_source
+                    .map(|source| source == NewKeySource::Keyring),
+            )
         }
         EncryptionCommand::Disable(args) => {
             let startup::Startup { mut store, .. } = startup::load_existing(cli.config.as_deref())?;
@@ -323,7 +366,9 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
             unlock_identity(&mut store)?;
             encryption::decrypt_store(store)
         }
+        EncryptionCommand::Status => encryption_status_command(cli),
         EncryptionCommand::Device { command } => handle_device_command(cli, command),
+        EncryptionCommand::Key { command } => handle_key_command(cli, command),
     }
 }
 
@@ -335,10 +380,16 @@ fn handle_device_command(cli: &Cli, command: &DeviceCommand) -> AppResult<()> {
         DeviceCommand::Rename { old, new } => device_rename_command(cli, old, new),
         DeviceCommand::Approve(args) => device_approve_command(cli, args),
         DeviceCommand::Reject(args) => device_reject_command(cli, args),
-        DeviceCommand::Passphrase(args) => device_passphrase_command(cli, args),
-        DeviceCommand::Rotate => device_rotate_command(cli),
-        DeviceCommand::KeySource(args) => device_key_source_command(cli, args),
-        DeviceCommand::ExportKey(args) => device_export_key_command(cli, args),
+    }
+}
+
+fn handle_key_command(cli: &Cli, command: &KeyCommand) -> AppResult<()> {
+    match command {
+        KeyCommand::Status => key_status_command(cli),
+        KeyCommand::Source(args) => key_source_command(cli, args),
+        KeyCommand::Passphrase(args) => device_passphrase_command(cli, args),
+        KeyCommand::Rotate => device_rotate_command(cli),
+        KeyCommand::Export(args) => key_export_command(cli, args),
     }
 }
 
@@ -353,37 +404,66 @@ fn this_device_or_bail(store: &JournalStore) -> AppResult<notema_encryption::Dev
     }
 }
 
-fn device_key_source_command(cli: &Cli, args: &KeySourceArgs) -> AppResult<()> {
+/// Where this device's key lives and how it is protected, printed the same way
+/// wherever it is asked for.
+fn print_key_location(info: &notema_encryption::DeviceIdentityInfo) {
+    println!("This device's key is kept in {}.", info.source.label());
+    println!(
+        "It is {}.",
+        if info.passphrase_protected {
+            "protected by a passphrase"
+        } else {
+            "stored unprotected, so it opens automatically"
+        }
+    );
+}
+
+fn key_status_command(cli: &Cli) -> AppResult<()> {
+    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
+    print_key_location(&this_device_or_bail(&store)?);
+    Ok(())
+}
+
+/// The one place that answers "what is my encryption state" — whether it is on,
+/// who can read the journal, and where this device's key sits. Split across
+/// `device list` and `key show` otherwise.
+fn encryption_status_command(cli: &Cli) -> AppResult<()> {
+    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
+    if !store.encryption_enabled() {
+        println!("Encryption is off for this journal.");
+        println!("Turn it on with `notema encryption enable`.");
+        return Ok(());
+    }
+    println!("Encryption is on for {}.", store.root().display());
+    match store.this_device()? {
+        Some(info) => print_key_location(&info),
+        None => println!(
+            "This device has no key yet; run `{}` to request access.",
+            crate::ENROLL_CMD
+        ),
+    }
+    println!();
+    print_device_roster(&store)
+}
+
+fn key_source_command(cli: &Cli, args: &KeySourceArgs) -> AppResult<()> {
+    // Checked before anything is loaded: clap requires `--read` for `command`,
+    // but the reverse is not expressible there, and the flags are meaningless
+    // anywhere else. Silently ignoring them would hide a mistyped invocation.
+    if args.location != KeySourceChoice::Command && args.read.is_some() {
+        bail!("`--read` and `--store` describe a fetch command, so they only apply to `command`");
+    }
+
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     let info = this_device_or_bail(&store)?;
 
-    let Some(location) = args.location else {
-        println!("This device's key is kept in {}.", info.source.label());
-        println!(
-            "It is {}.",
-            if info.passphrase_protected {
-                "protected by a passphrase"
-            } else {
-                "stored unprotected, so it opens automatically"
-            }
-        );
-        return Ok(());
-    };
-
-    let target = match location {
+    let target = match args.location {
         KeySourceChoice::File => KeyTarget::File,
         KeySourceChoice::Keyring => KeyTarget::Keyring,
-        KeySourceChoice::Command => {
-            let Some(read) = args.read.as_deref() else {
-                bail!(
-                    "`--read` names the command that prints the key, and is required for `key-source command`"
-                );
-            };
-            KeyTarget::Command {
-                read: KeyCommand::Shell(read.to_string()),
-                store: args.store.clone().map(KeyCommand::Shell),
-            }
-        }
+        KeySourceChoice::Command => KeyTarget::Command {
+            read: notema_encryption::KeyCommand::Shell(args.read.clone().unwrap_or_default()),
+            store: args.store.clone().map(notema_encryption::KeyCommand::Shell),
+        },
     };
 
     // Only to open what is stored now — moving it never changes the format, so
@@ -392,19 +472,28 @@ fn device_key_source_command(cli: &Cli, args: &KeySourceArgs) -> AppResult<()> {
         .passphrase_protected
         .then(prompts::prompt_unlock_passphrase)
         .transpose()?;
+    let leaving = info.source;
     store.set_key_location(&target, passphrase.as_ref())?;
 
     let now = this_device_or_bail(&store)?;
     println!("This device's key is now kept in {}.", now.source.label());
     if now.source == notema_encryption::KeySource::Command && args.store.is_none() {
         println!(
-            "Without `--store` this is read-only: `device rotate` and `device passphrase` will have nowhere to write the new key."
+            "Without `--store` this is read-only: `notema encryption key rotate` and `notema encryption key passphrase` will have nowhere to write the new key."
+        );
+    }
+    // The keychain item is ours to clean up, so it already is. A secret manager
+    // is the user's, and deleting from it uninvited would be worse than leaving
+    // a copy behind — but a copy they don't know about is worse still.
+    if leaving == notema_encryption::KeySource::Command {
+        println!(
+            "The old copy is still wherever the previous fetch command read it from; remove it there if you no longer want it."
         );
     }
     Ok(())
 }
 
-fn device_export_key_command(cli: &Cli, args: &ExportKeyArgs) -> AppResult<()> {
+fn key_export_command(cli: &Cli, args: &ExportKeyArgs) -> AppResult<()> {
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     let info = this_device_or_bail(&store)?;
 
@@ -643,10 +732,17 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
 
     let (name, passphrase) =
         prompts::resolve_new_identity_options(args.name.as_deref(), args.no_passphrase)?;
+    // Asked before the key exists, answered after it does — enroll mints an
+    // identity just as `enable` does, so it offers the same choice.
+    let use_keyring =
+        encryption::resolve_key_source(args.key_source.map(|src| src == NewKeySource::Keyring))?;
 
     // Joining a store that already exists (its recipients synced here): drop a
     // request for a device that can decrypt to approve.
     let recipient = store.request_access(&name, passphrase.as_ref())?;
+    if use_keyring {
+        encryption::move_key_to_keyring(&store, passphrase.as_ref());
+    }
     println!("Requested access as '{name}'. Your public recipient (safe to share):");
     println!("  {}", recipient.encryption_key);
     println!(
@@ -657,10 +753,7 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
         "On a device that can already read this journal, approve it — this request\nappears in `notema encryption device list` and a modal at launch — then run there:"
     );
     println!("  {} {name}", crate::APPROVE_CMD);
-    println!(
-        "Identity file: {}. Back it up; without it encrypted entries cannot be decrypted.",
-        store.identity_path().display()
-    );
+    encryption::print_backup_advice(&store)?;
     if passphrase.is_none() {
         println!("This key has no passphrase — keep this device and its backups secure.");
     }
@@ -669,7 +762,12 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
 
 fn device_list_command(cli: &Cli) -> AppResult<()> {
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
+    print_device_roster(&store)
+}
 
+/// The roster and any pending requests. Shared by `device list` and the roster
+/// half of `encryption status`.
+fn print_device_roster(store: &JournalStore) -> AppResult<()> {
     let recipients = store.recipients()?;
     if recipients.is_empty() {
         println!("This journal is not encrypted.");

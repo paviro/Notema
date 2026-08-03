@@ -112,16 +112,18 @@ pub(crate) fn prompt_unlock_passphrase() -> AppResult<SecretString> {
 
 /// Ask where to keep this device's key, when the keychain is an option at all.
 ///
-/// Returns `true` for the keychain. Defaults to it: it keeps the key out of a
-/// file that backups and sync tools will happily copy. Falls through to the
-/// identity file without asking when there is no keychain to reach — which is
-/// the case on Android, iSH, and a headless Linux session with no D-Bus.
+/// Returns `true` for the keychain. Interactively it defaults to that: it keeps
+/// the key out of a file that backups and sync tools will happily copy. Falls
+/// through to the identity file without asking when there is no keychain to
+/// reach — Android, iSH, a headless Linux session with no D-Bus.
+///
+/// Without a terminal it answers the identity file, the portable choice. A
+/// script or provisioning run cannot see a prompt, and a keychain it silently
+/// picked may be unreachable in the session that has to open the key; callers
+/// pass `--key-source` to ask for the keychain deliberately.
 pub(crate) fn prompt_keyring_choice(keyring_available: bool) -> AppResult<bool> {
-    if !keyring_available {
+    if !keyring_available || !io::stdin().is_terminal() {
         return Ok(false);
-    }
-    if !io::stdin().is_terminal() {
-        return Ok(true);
     }
     let mut stdout = io::stdout();
     writeln!(stdout, "Where should this device's key be kept?")?;

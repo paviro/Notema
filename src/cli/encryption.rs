@@ -3,6 +3,7 @@ use crate::AppResult;
 use super::prompts;
 use anyhow::bail;
 use indicatif::{ProgressBar, ProgressStyle};
+use notema_encryption::SecretString;
 use notema_storage::JournalStore;
 
 /// A progress sink for CLI migrations that drives an `indicatif` bar. A fresh
@@ -29,10 +30,59 @@ pub(crate) fn cli_progress(unit: &'static str) -> impl FnMut(usize, usize) {
     }
 }
 
+/// Whether a newly minted key goes to the OS keychain: an explicit
+/// `--key-source` wins, otherwise ask (and, with no terminal to ask on, keep it
+/// in the identity file).
+pub(crate) fn resolve_key_source(explicit: Option<bool>) -> AppResult<bool> {
+    match explicit {
+        Some(want_keyring) => Ok(want_keyring),
+        None => prompts::prompt_keyring_choice(notema_encryption::keyring_available()),
+    }
+}
+
+/// Move a freshly minted key into the OS keychain, reporting a failure without
+/// failing the command.
+///
+/// The key is minted inline and then moved, so the move can verify the keychain
+/// hands the key back before the local copy goes away — a keychain-first path
+/// could not. If the keychain turns out to be unreachable the caller is already
+/// in a complete, working state: the identity exists and its key is safely in
+/// the identity file. Erroring here would report failure for a journal that is
+/// fine, and no availability probe is reliable enough to rule the case out in
+/// advance.
+pub(crate) fn move_key_to_keyring(store: &JournalStore, passphrase: Option<&SecretString>) {
+    if let Err(error) = store.set_key_location(&notema_encryption::KeyTarget::Keyring, passphrase) {
+        println!(
+            "Could not move this device's key to the keychain: {error}\nIt is in {} instead; move it later with `{}`.",
+            store.identity_path().display(),
+            crate::KEY_SOURCE_KEYRING_CMD,
+        );
+    }
+}
+
+/// Tell the user what to back up. Which artifact that is depends on where the
+/// key ended up: naming the identity file for a key that only points at the
+/// keychain would hand someone a backup that cannot decrypt anything.
+pub(crate) fn print_backup_advice(store: &JournalStore) -> AppResult<()> {
+    match store.this_device()? {
+        Some(info) if info.source != notema_encryption::KeySource::File => println!(
+            "This device's key is kept in {}. Back it up with `{} <path>`; without it encrypted journal files cannot be decrypted.",
+            info.source.label(),
+            crate::EXPORT_KEY_CMD,
+        ),
+        _ => println!(
+            "Identity file: {}. Back it up; without it encrypted journal files cannot be decrypted.",
+            store.identity_path().display()
+        ),
+    }
+    Ok(())
+}
+
 pub(crate) fn encrypt_store(
     store: &JournalStore,
     device_name: Option<&str>,
     no_passphrase: bool,
+    key_source: Option<bool>,
 ) -> AppResult<()> {
     let (recipient, warnings, minted_without_passphrase) = if store.encryption_enabled() {
         if !store.unlock_available() {
@@ -62,31 +112,17 @@ pub(crate) fn encrypt_store(
         }
         println!("No journal encryption identity configured; generating an age identity.");
         let (name, passphrase) = prompts::resolve_new_identity_options(device_name, no_passphrase)?;
-        let use_keyring = prompts::prompt_keyring_choice(notema_encryption::keyring_available())?;
+        let use_keyring = resolve_key_source(key_source)?;
         let summary = store.enable_encryption(&name, passphrase.as_ref(), cli_progress("files"))?;
-        // Minted inline, then moved: the move verifies the keychain hands the
-        // key back before the local copy goes away, which a keychain-first path
-        // could not do.
         if use_keyring {
-            store.set_key_location(&notema_encryption::KeyTarget::Keyring, passphrase.as_ref())?;
+            move_key_to_keyring(store, passphrase.as_ref());
         }
         (summary.recipient, summary.warnings, passphrase.is_none())
     };
 
     println!("Encrypted journal store at {}", store.root().display());
     println!("Encryption recipient: {recipient}.");
-    match store.this_device()? {
-        // Telling someone to back up a file that only points at the keychain
-        // would hand them a backup that cannot decrypt anything.
-        Some(info) if info.source != notema_encryption::KeySource::File => println!(
-            "This device's key is kept in {}. Back it up with `notema encryption device export-key <path>`; without it encrypted journal files cannot be decrypted.",
-            info.source.label()
-        ),
-        _ => println!(
-            "Identity file: {}. Back it up; without it encrypted journal files cannot be decrypted.",
-            store.identity_path().display()
-        ),
-    }
+    print_backup_advice(store)?;
     if minted_without_passphrase {
         println!("This key has no passphrase — keep this device and its backups secure.");
     }
