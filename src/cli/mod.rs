@@ -9,8 +9,8 @@ pub(crate) mod prompts;
 #[cfg(feature = "fuse")]
 use anyhow::Context;
 use anyhow::bail;
-use clap::{Args, Parser, Subcommand};
-use notema_encryption::{PendingRequest, SecretString};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use notema_encryption::{KeyCommand, KeyTarget, PendingRequest, SecretString};
 use notema_storage::JournalStore;
 use notema_timing as timing;
 #[cfg(feature = "fuse")]
@@ -121,6 +121,47 @@ enum DeviceCommand {
     Passphrase(PassphraseArgs),
     /// Replace this device's key and re-encrypt, retiring the old key
     Rotate,
+    /// Show or change where this device's key is kept
+    KeySource(KeySourceArgs),
+    /// Write a standalone copy of this device's key, for safekeeping
+    ExportKey(ExportKeyArgs),
+}
+
+/// Where a device's key is kept. Independent of whether it is
+/// passphrase-protected: every location holds either form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum KeySourceChoice {
+    /// Inline in `identity.toml`, readable only by you
+    File,
+    /// An item in the operating system's keychain
+    Keyring,
+    /// Fetched by running a command, e.g. `op read` or `pass show`
+    Command,
+}
+
+#[derive(Debug, Args)]
+struct KeySourceArgs {
+    /// Where to keep the key. Omit to show where it is kept now.
+    #[arg(value_name = "LOCATION")]
+    location: Option<KeySourceChoice>,
+
+    /// Command that prints the key on stdout, for `command`
+    #[arg(long, value_name = "COMMAND")]
+    read: Option<String>,
+
+    /// Command that stores the key, given it on stdin. Run once, and not
+    /// recorded — only `--read` is kept.
+    #[arg(long, value_name = "COMMAND", requires = "read")]
+    store: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct ExportKeyArgs {
+    /// File to write the copy to
+    #[arg(value_name = "PATH")]
+    path: PathBuf,
+    #[command(flatten)]
+    confirm: ConfirmArgs,
 }
 
 #[derive(Debug, Args)]
@@ -296,7 +337,95 @@ fn handle_device_command(cli: &Cli, command: &DeviceCommand) -> AppResult<()> {
         DeviceCommand::Reject(args) => device_reject_command(cli, args),
         DeviceCommand::Passphrase(args) => device_passphrase_command(cli, args),
         DeviceCommand::Rotate => device_rotate_command(cli),
+        DeviceCommand::KeySource(args) => device_key_source_command(cli, args),
+        DeviceCommand::ExportKey(args) => device_export_key_command(cli, args),
     }
+}
+
+/// This device's identity, or a pointer at how to create one.
+fn this_device_or_bail(store: &JournalStore) -> AppResult<notema_encryption::DeviceIdentityInfo> {
+    match store.this_device()? {
+        Some(info) => Ok(info),
+        None => bail!(
+            "no encryption identity on this device; run `{}` first",
+            crate::ENROLL_CMD
+        ),
+    }
+}
+
+fn device_key_source_command(cli: &Cli, args: &KeySourceArgs) -> AppResult<()> {
+    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
+    let info = this_device_or_bail(&store)?;
+
+    let Some(location) = args.location else {
+        println!("This device's key is kept in {}.", info.source.label());
+        println!(
+            "It is {}.",
+            if info.passphrase_protected {
+                "protected by a passphrase"
+            } else {
+                "stored unprotected, so it opens automatically"
+            }
+        );
+        return Ok(());
+    };
+
+    let target = match location {
+        KeySourceChoice::File => KeyTarget::File,
+        KeySourceChoice::Keyring => KeyTarget::Keyring,
+        KeySourceChoice::Command => {
+            let Some(read) = args.read.as_deref() else {
+                bail!(
+                    "`--read` names the command that prints the key, and is required for `key-source command`"
+                );
+            };
+            KeyTarget::Command {
+                read: KeyCommand::Shell(read.to_string()),
+                store: args.store.clone().map(KeyCommand::Shell),
+            }
+        }
+    };
+
+    // Only to open what is stored now — moving it never changes the format, so
+    // a passphrase-protected key stays that way wherever it lands.
+    let passphrase = info
+        .passphrase_protected
+        .then(prompts::prompt_unlock_passphrase)
+        .transpose()?;
+    store.set_key_location(&target, passphrase.as_ref())?;
+
+    let now = this_device_or_bail(&store)?;
+    println!("This device's key is now kept in {}.", now.source.label());
+    if now.source == notema_encryption::KeySource::Command && args.store.is_none() {
+        println!(
+            "Without `--store` this is read-only: `device rotate` and `device passphrase` will have nowhere to write the new key."
+        );
+    }
+    Ok(())
+}
+
+fn device_export_key_command(cli: &Cli, args: &ExportKeyArgs) -> AppResult<()> {
+    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
+    let info = this_device_or_bail(&store)?;
+
+    // Unprotected key material is about to be written somewhere the user chose,
+    // so say plainly what is going in the file before it goes there.
+    let warning = if info.passphrase_protected {
+        "Write a copy of this device's key, still protected by its passphrase?"
+    } else {
+        "Write a copy of this device's key? It is unprotected — anyone with the file can read this journal."
+    };
+    if !prompts::confirm(warning, args.confirm.yes)? {
+        println!("Aborted.");
+        return Ok(());
+    }
+
+    store.export_identity(&args.path)?;
+    println!("Wrote this device's key to {}.", args.path.display());
+    println!(
+        "To restore it, copy the file back into a config directory as `identity.toml`. Keep it somewhere safe."
+    );
+    Ok(())
 }
 
 /// Bail unless this device has a key that can unlock this journal.
@@ -415,12 +544,11 @@ fn mount_command(cli: &Cli, mountpoint: Option<&Path>) -> AppResult<()> {
 
 fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> {
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
-    let Some(info) = store.this_device()? else {
-        bail!(
-            "no encryption identity on this device; run `{}` first",
-            crate::ENROLL_CMD
-        );
-    };
+    let info = this_device_or_bail(&store)?;
+    // Before the confirmation and the passphrase prompt: if the re-wrapped key
+    // has nowhere to go, asking first would be asking for something we were
+    // never going to use.
+    store.check_key_is_writable()?;
 
     if args.remove
         && !prompts::confirm(
@@ -455,6 +583,12 @@ fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> 
 }
 
 fn device_rotate_command(cli: &Cli) -> AppResult<()> {
+    {
+        // Ahead of the unlock prompt, and well ahead of the roster op and
+        // re-encryption pass that a rotation would otherwise have to roll back.
+        let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
+        store.check_key_is_writable()?;
+    }
     let (mut store, passphrase) = open_unlocked_store_with_passphrase(cli)?;
     let summary = store.rotate_identity(passphrase.as_ref(), encryption::cli_progress("files"))?;
     println!(

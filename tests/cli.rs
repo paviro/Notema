@@ -1245,3 +1245,257 @@ fn encrypt_decrypt_converts_assets_and_keeps_clean_links() {
         "asset plaintext again"
     );
 }
+
+/// Run a `notema` subcommand against `config_dir` with no stdin, the way a
+/// script would.
+fn run_notema(config_dir: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(journal_bin())
+        .arg("--config")
+        .arg(config_dir)
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+/// An encrypted store with one entry and a passphrase-less key.
+fn encrypted_store_with_an_entry(dir: &Path) -> std::path::PathBuf {
+    let config = dir.join("config.toml");
+    let root = dir.join("journals");
+    fs::create_dir_all(root.join("diary")).unwrap();
+    write_config(&config, &root, Some("diary"));
+
+    assert!(
+        run_notema(
+            dir,
+            &[
+                "encryption",
+                "enable",
+                "--name",
+                "laptop",
+                "--no-passphrase"
+            ]
+        )
+        .status
+        .success()
+    );
+    assert!(run_notema(dir, &["log", "a secret entry"]).status.success());
+    dir.join("identity.toml")
+}
+
+#[cfg(unix)]
+#[test]
+fn key_source_command_takes_the_key_out_of_the_identity_file() {
+    let dir = tempdir().unwrap();
+    let identity = encrypted_store_with_an_entry(dir.path());
+    let vault = dir.path().join("vault.toml");
+
+    let output = run_notema(
+        dir.path(),
+        &[
+            "encryption",
+            "device",
+            "key-source",
+            "command",
+            "--read",
+            &format!("cat {}", vault.display()),
+            "--store",
+            &format!("cat > {}", vault.display()),
+        ],
+    );
+    assert!(output.status.success(), "{:?}", output);
+
+    // The whole point of the feature: no key left on disk where it was.
+    let on_disk = fs::read_to_string(&identity).unwrap();
+    assert!(!on_disk.contains("AGE-SECRET-KEY-"), "{on_disk}");
+    assert!(on_disk.contains("keys_command"), "{on_disk}");
+    assert!(
+        fs::read_to_string(&vault)
+            .unwrap()
+            .contains("AGE-SECRET-KEY-"),
+        "the key should have landed in the vault instead"
+    );
+
+    // And the store is still usable through it.
+    assert!(
+        run_notema(dir.path(), &["log", "written via the command"])
+            .status
+            .success()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rotate_writes_the_new_key_back_through_the_store_command() {
+    let dir = tempdir().unwrap();
+    let identity = encrypted_store_with_an_entry(dir.path());
+    let vault = dir.path().join("vault.toml");
+    run_notema(
+        dir.path(),
+        &[
+            "encryption",
+            "device",
+            "key-source",
+            "command",
+            "--read",
+            &format!("cat {}", vault.display()),
+            "--store",
+            &format!("cat > {}", vault.display()),
+        ],
+    );
+    let before = fs::read_to_string(&vault).unwrap();
+
+    let output = run_notema(dir.path(), &["encryption", "device", "rotate"]);
+    assert!(output.status.success(), "{output:?}");
+
+    // The new key went back out to the vault, and stayed out of identity.toml.
+    let after = fs::read_to_string(&vault).unwrap();
+    assert!(after.contains("AGE-SECRET-KEY-"));
+    assert_ne!(
+        after, before,
+        "rotation should have replaced the stored key"
+    );
+    assert!(
+        !fs::read_to_string(&identity)
+            .unwrap()
+            .contains("AGE-SECRET-KEY-")
+    );
+    // And the rotated key still opens the store.
+    assert!(
+        run_notema(dir.path(), &["log", "after rotating"])
+            .status
+            .success()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rotate_refuses_a_key_command_that_cannot_write() {
+    let dir = tempdir().unwrap();
+    let identity = encrypted_store_with_an_entry(dir.path());
+    let vault = dir.path().join("vault.toml");
+    run_notema(
+        dir.path(),
+        &[
+            "encryption",
+            "device",
+            "key-source",
+            "command",
+            "--read",
+            &format!("cat {}", vault.display()),
+            "--store",
+            &format!("cat > {}", vault.display()),
+        ],
+    );
+    // Drop the store command, leaving a key that can be read but not replaced.
+    let text = fs::read_to_string(&identity).unwrap();
+    fs::write(
+        &identity,
+        text.lines()
+            .filter(|line| !line.starts_with("keys_store_command"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    let before = fs::read(&identity).unwrap();
+
+    for args in [
+        vec!["encryption", "device", "rotate"],
+        vec!["encryption", "device", "passphrase"],
+    ] {
+        let output = run_notema(dir.path(), &args);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{args:?} should have refused");
+        assert!(stderr.contains("--store"), "{stderr}");
+    }
+    assert_eq!(
+        fs::read(&identity).unwrap(),
+        before,
+        "a refused command must not rewrite the identity file"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_broken_key_command_is_reported_as_such_not_as_corruption() {
+    let dir = tempdir().unwrap();
+    let identity = encrypted_store_with_an_entry(dir.path());
+    let vault = dir.path().join("vault.toml");
+    run_notema(
+        dir.path(),
+        &[
+            "encryption",
+            "device",
+            "key-source",
+            "command",
+            "--read",
+            &format!("cat {}", vault.display()),
+            "--store",
+            &format!("cat > {}", vault.display()),
+        ],
+    );
+    fs::remove_file(&vault).unwrap();
+
+    let output = run_notema(dir.path(), &["encryption", "device", "key-source", "file"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    // Naming the command and its complaint is the difference between "fix your
+    // vault path" and a user thinking their key is corrupt.
+    assert!(stderr.contains("key command"), "{stderr}");
+    assert!(stderr.contains("No such file"), "{stderr}");
+    assert!(!stderr.contains("malformed"), "{stderr}");
+    assert!(
+        fs::read_to_string(&identity)
+            .unwrap()
+            .contains("keys_command")
+    );
+}
+
+#[test]
+fn an_exported_key_restores_into_a_fresh_config_dir() {
+    let dir = tempdir().unwrap();
+    encrypted_store_with_an_entry(dir.path());
+    let backup = dir.path().join("backup.toml");
+
+    let output = run_notema(
+        dir.path(),
+        &[
+            "encryption",
+            "device",
+            "export-key",
+            backup.to_str().unwrap(),
+            "-y",
+        ],
+    );
+    assert!(output.status.success(), "{:?}", output);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&backup).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "an exported key must not be readable by others"
+        );
+    }
+
+    // Restoring is copying the file back — there is no import command.
+    let restored = dir.path().join("restored");
+    fs::create_dir_all(&restored).unwrap();
+    write_config(
+        &restored.join("config.toml"),
+        &dir.path().join("journals"),
+        Some("diary"),
+    );
+    fs::copy(&backup, restored.join("identity.toml")).unwrap();
+
+    let output = run_notema(&restored, &["encryption", "device", "key-source"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{:?}", output);
+    assert!(stdout.contains("identity file"), "{stdout}");
+    // It can actually read the store, not merely parse.
+    assert!(
+        run_notema(&restored, &["log", "written after restoring"])
+            .status
+            .success()
+    );
+}

@@ -15,7 +15,7 @@ use crossterm::{
     },
     execute,
 };
-use notema_encryption::SecretString;
+use notema_encryption::{KeySource, SecretString};
 use notema_storage::{CachedLibrary, JournalStore, LibraryDiscovery, StoreAccess};
 use notema_timing as timing;
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
@@ -41,14 +41,32 @@ use super::text_input::PassphraseInput;
 pub(crate) fn run(
     config_path: PathBuf,
     config: Config,
-    store: JournalStore,
+    mut store: JournalStore,
     discovery: Option<LibraryDiscovery>,
 ) -> AppResult<()> {
     // Before raw mode / the alternate screen: auto dark/light detection talks
     // OSC to the normal screen, and load warnings should print readably.
     let startup = theme::load_startup(&config_path, &config.ui);
+
+    // Also before raw mode, and in this order. Reconciling first means a store
+    // whose encryption was disabled elsewhere retires its key without us first
+    // prompting for one we're about to throw away. Retrieving the key can then
+    // run a command that wants the TTY (`op`, `pinentry`) — while a
+    // passphrase-protected identity prompts inside the TUI, so the two must
+    // never both be able to own the terminal.
+    let encryption_disabled = store.reconcile_disabled_encryption()?;
+    store.prefetch_key_material()?;
+
     terminal::with_terminal(|terminal| {
-        run_after_unlock(terminal, config_path, config, store, discovery, &startup)
+        run_after_unlock(
+            terminal,
+            config_path,
+            config,
+            store,
+            discovery,
+            &startup,
+            encryption_disabled,
+        )
     })
 }
 
@@ -68,7 +86,14 @@ pub(crate) fn run_compose(
 ) -> AppResult<()> {
     store.ensure()?;
     let startup = theme::load_startup(&config_path, &config.ui);
-    if store.unlock_available() && !store.identity_needs_passphrase()? {
+    // A key fetched by a command may prompt on the TTY, which is far too much
+    // ceremony for a convenience: this unlock only powers the metadata dialogs'
+    // people/tag suggestions, and writing the entry needs the roster alone. A
+    // keychain is left in because it answers silently once access is granted.
+    let key_prompts = store
+        .this_device()?
+        .is_some_and(|info| info.source == KeySource::Command);
+    if store.unlock_available() && !key_prompts && !store.identity_needs_passphrase()? {
         store.unlock(None)?;
     }
     terminal::with_terminal(|terminal| {
@@ -95,11 +120,13 @@ fn run_after_unlock(
     mut store: JournalStore,
     mut discovery: Option<LibraryDiscovery>,
     startup: &theme::StartupTheme,
+    encryption_disabled: bool,
 ) -> AppResult<()> {
-    // Pick up an encryption *disable* performed on another device before probing
-    // for a lock: if this device just fell back to plaintext (its key and pins
-    // retired), tell the user, since the change is silent and consequential.
-    if store.reconcile_disabled_encryption()? {
+    // An encryption *disable* performed on another device was reconciled before
+    // the terminal was taken over; if this device just fell back to plaintext
+    // (its key and pins retired), tell the user, since the change is silent and
+    // consequential.
+    if encryption_disabled {
         discovery = None;
         run_disable_notice(terminal, &startup.theme)?;
     }
