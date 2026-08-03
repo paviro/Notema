@@ -267,10 +267,27 @@ and private keys that never leave the device.
 
 **Local, in the config directory** (never synced):
 
-- `identity.toml` — this device's private keys: `device_name` plus either
-  `plain_keys` (mode-0600 cleartext) or `encrypted_keys` (age armor when a
-  passphrase is set). Holds `x25519` (the age secret) and `ed25519` (the signing
-  seed).
+- `identity.toml` — this device's `device_name` plus where to find its private
+  keys. Format and location are independent: the key bundle (`x25519`, the age
+  secret, and `ed25519`, the signing seed) is either cleartext or age armor, and
+  it sits in one of three places. Exactly one location field is present:
+
+  | field | where the bundle lives |
+  | --- | --- |
+  | `plain_keys` | inline, mode-0600 cleartext |
+  | `encrypted_keys` | inline, age armor (a passphrase is set) |
+  | `keyring_account` | the OS keychain, under service `de.paviro.notema` |
+  | `keys_command` | printed on stdout by this command — a string run through the shell, or an array run directly |
+
+  `keys_command` may be paired with `keys_store_command`, which is given the key
+  on stdin whenever it changes. Without it the key can be read but never
+  replaced, and rotating or re-wrapping refuses.
+
+  The two inline fields say which format they hold. The other two need
+  `keys_encrypted = true|false` alongside, so the app knows whether to ask for a
+  passphrase without having to fetch the key first. `keyring_account` and
+  `keys_command` need notema 2026.8 or newer; older versions report the file as
+  malformed.
 - `devices-trust.toml` — local trust pins (genesis + last-seen head hash).
 
 Decrypting entries by hand with the `age` CLI is covered in
