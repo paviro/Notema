@@ -4,8 +4,8 @@
 //! two paths — the structured [`richtext`] renderer when the entry carries a
 //! clean `richText`, else the [`text`] cleanup of the lossy `text` field — and
 //! both converge on `dayone-moment://` image references that the shared
-//! [`moments`] resolver rewrites against the entry's on-disk media. The
-//! orchestration lives in [`crate::import_dayone`].
+//! [`moments`] resolver rewrites against the entry's on-disk media. Writing the
+//! parsed batch into a store happens in the root binary (`src/cli/import.rs`).
 
 pub(crate) mod model;
 pub(crate) mod moments;
