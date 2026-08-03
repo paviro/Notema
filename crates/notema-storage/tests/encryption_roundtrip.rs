@@ -1133,3 +1133,65 @@ fn encrypt_then_decrypt_migration_streams_large_entry_and_asset() {
         "asset bytes must round-trip exactly"
     );
 }
+
+/// A wrong passphrase must not discard the prefetched key.
+///
+/// The TUI prefetches before it takes the terminal, precisely because fetching
+/// can want the TTY — a `keys_command` may run `pinentry`. It then retries the
+/// passphrase from *inside* raw mode. If a failed attempt dropped the prefetch,
+/// the retry would fetch again there, where the fetch command's prompt cannot
+/// reach the user.
+#[cfg(unix)]
+#[test]
+fn a_wrong_passphrase_keeps_the_prefetched_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let vault = dir.path().join("vault");
+    let fetch_log = dir.path().join("fetches");
+
+    let mut store = store_at(dir.path());
+    store.ensure().unwrap();
+    store
+        .initialize_encryption("laptop", Some(&pw("correct")))
+        .unwrap();
+    store.unlock(Some(&pw("correct"))).unwrap();
+
+    // The fetch command appends a line every time it runs, so the count is the
+    // number of retrievals.
+    store
+        .set_key_location(
+            &notema_encryption::KeyTarget::Command {
+                read: notema_encryption::KeyCommand::Shell(format!(
+                    "echo run >> {}; cat {}",
+                    fetch_log.display(),
+                    vault.display()
+                )),
+                store: notema_encryption::KeyCommand::Shell(format!("cat > {}", vault.display()))
+                    .into(),
+            },
+            Some(&pw("correct")),
+        )
+        .unwrap();
+
+    let mut store = store_at(dir.path());
+    store.ensure().unwrap();
+    store.prefetch_key_material().unwrap();
+    let after_prefetch = std::fs::read_to_string(&fetch_log).unwrap().lines().count();
+
+    assert!(
+        store.unlock(Some(&pw("wrong"))).is_err(),
+        "a wrong passphrase must not unlock"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&fetch_log).unwrap().lines().count(),
+        after_prefetch,
+        "a failed attempt must reuse the prefetched key, not fetch again"
+    );
+
+    store.unlock(Some(&pw("correct"))).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&fetch_log).unwrap().lines().count(),
+        after_prefetch,
+        "the retry must still be served by the prefetch"
+    );
+}
+

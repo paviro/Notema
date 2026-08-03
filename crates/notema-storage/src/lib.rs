@@ -807,11 +807,17 @@ impl JournalStore {
     /// and written. Pass `Some(passphrase)` for a passphrase-protected identity
     /// and `None` for a plaintext one. After this succeeds, the store
     /// transparently handles both plaintext and encrypted entries.
+    /// The prefetch is released only once an unlock succeeds. A wrong passphrase
+    /// must leave it in place: the retry would otherwise re-fetch, and the TUI
+    /// retries from inside raw mode, where a `keys_command` prompt cannot reach
+    /// the user.
     pub fn unlock(&mut self, passphrase: Option<&SecretString>) -> AppResult<()> {
-        self.identity = Some(match self.fetched_key.take() {
-            Some(fetched) => crypto::unlock_fetched(&self.paths.keys, &fetched, passphrase)?,
+        let identity = match self.fetched_key.as_ref() {
+            Some(fetched) => crypto::unlock_fetched(&self.paths.keys, fetched, passphrase)?,
             None => crypto::unlock_identity(&self.paths.keys, passphrase)?,
-        });
+        };
+        self.fetched_key = None;
+        self.identity = Some(identity);
         Ok(())
     }
 
@@ -827,14 +833,6 @@ impl JournalStore {
             self.fetched_key = Some(crypto::fetch_key_material(&self.paths.keys)?);
         }
         Ok(())
-    }
-
-    /// Whether this device's key needs retrieving from somewhere that might
-    /// prompt, so the caller knows to [`Self::prefetch_key_material`] early.
-    pub fn key_is_external(&self) -> AppResult<bool> {
-        Ok(self
-            .this_device()?
-            .is_some_and(|info| info.source != crypto::KeySource::File))
     }
 
     /// Move this device's key to another location, keeping its current format.
