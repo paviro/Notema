@@ -310,8 +310,7 @@ fn with_metadata_fields_inner(
             apply_metadata_field(fm, field);
         }
         if touch_edited {
-            fm.datetime.edited_at =
-                Some(crate::storage::to_offset_rfc3339(&jiff::Zoned::now()));
+            fm.datetime.edited_at = Some(crate::storage::to_offset_rfc3339(&jiff::Zoned::now()));
         }
     })
 }

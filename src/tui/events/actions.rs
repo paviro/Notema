@@ -1113,10 +1113,7 @@ mod tests {
             .find(|entry| entry.body.contains("In Tokyo"))
             .expect("entry created");
         // The timestamp carries Tokyo's offset, not the machine's.
-        assert_eq!(
-            entry.created_time().unwrap().offset().seconds(),
-            9 * 3600
-        );
+        assert_eq!(entry.created_time().unwrap().offset().seconds(), 9 * 3600);
         // And the IANA name is recorded on disk.
         let raw = std::fs::read_to_string(&entry.path).unwrap();
         assert!(

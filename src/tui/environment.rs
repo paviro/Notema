@@ -47,10 +47,7 @@ pub(crate) struct EnvironmentResult {
 /// Fetch the full environment for a place and time. Celestial is offline and always
 /// present; weather/air quality are dropped to `None` on no-data or transport
 /// failure (the caller can't do anything with the error mid-save).
-pub(crate) fn fetch_entry_environment(
-    coordinates: Coordinates,
-    datetime: Zoned,
-) -> Environment {
+pub(crate) fn fetch_entry_environment(coordinates: Coordinates, datetime: Zoned) -> Environment {
     fetch_environment(coordinates, datetime, EnvironmentWants::all())
 }
 

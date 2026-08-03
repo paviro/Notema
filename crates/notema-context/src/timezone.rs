@@ -83,7 +83,10 @@ mod tests {
     fn falls_back_to_the_finder_when_osm_is_absent_or_unparseable() {
         let tokyo = coords(35.68, 139.767);
         assert_eq!(resolve_zone(tokyo, None), Some(tz("Asia/Tokyo")));
-        assert_eq!(resolve_zone(tokyo, Some("Not/AZone")), Some(tz("Asia/Tokyo")));
+        assert_eq!(
+            resolve_zone(tokyo, Some("Not/AZone")),
+            Some(tz("Asia/Tokyo"))
+        );
         assert_eq!(resolve_zone(tokyo, Some("")), Some(tz("Asia/Tokyo")));
     }
 
@@ -96,6 +99,9 @@ mod tests {
         // Same instant, Tokyo's summer offset (+09:00), so the wall clock and date roll forward.
         assert_eq!(tokyo.timestamp(), utc.timestamp());
         assert_eq!(tokyo.offset().seconds(), 9 * 3600);
-        assert_eq!(tokyo.strftime("%Y-%m-%d %H:%M").to_string(), "2026-07-16 09:30");
+        assert_eq!(
+            tokyo.strftime("%Y-%m-%d %H:%M").to_string(),
+            "2026-07-16 09:30"
+        );
     }
 }

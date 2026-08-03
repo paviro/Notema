@@ -35,10 +35,7 @@ pub(crate) fn covers(datetime: &Zoned) -> bool {
 /// has no usable sample there/then (date before the 2013 reanalysis start, or a
 /// gap in the data). Errors are transport/HTTP failures — the caller drops them
 /// silently so a save never fails.
-pub fn fetch_air_quality(
-    coordinates: Coordinates,
-    datetime: Zoned,
-) -> Result<Option<AirQuality>> {
+pub fn fetch_air_quality(coordinates: Coordinates, datetime: Zoned) -> Result<Option<AirQuality>> {
     if !covers(&datetime) {
         return Ok(None);
     }

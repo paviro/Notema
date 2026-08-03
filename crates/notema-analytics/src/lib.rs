@@ -153,11 +153,7 @@ fn day_ordinal(date: Date) -> i64 {
 
 /// The feeling logged on the most entries dated in `year`; ties break
 /// alphabetically. `None` when no this-year entry carries a feeling.
-fn top_feeling_in_year(
-    entries: &[&Entry],
-    dates: &[Option<Date>],
-    year: i32,
-) -> Option<String> {
+fn top_feeling_in_year(entries: &[&Entry], dates: &[Option<Date>], year: i32) -> Option<String> {
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for (entry, date) in entries.iter().zip(dates) {
         if date.map(|date| i32::from(date.year())) == Some(year) {
@@ -187,7 +183,10 @@ pub(crate) fn period_key(date: Date, by_year: bool) -> (i32, u32) {
     if by_year {
         (i32::from(date.year()), 0)
     } else {
-        (i32::from(date.year()), u32::from(date.month().unsigned_abs()))
+        (
+            i32::from(date.year()),
+            u32::from(date.month().unsigned_abs()),
+        )
     }
 }
 

@@ -77,8 +77,12 @@ pub struct DateFilter {
 impl DatePattern {
     fn matches(&self, date: Date) -> bool {
         self.year.is_none_or(|year| i32::from(date.year()) == year)
-            && self.month.is_none_or(|month| u32::from(date.month().unsigned_abs()) == month)
-            && self.day.is_none_or(|day| u32::from(date.day().unsigned_abs()) == day)
+            && self
+                .month
+                .is_none_or(|month| u32::from(date.month().unsigned_abs()) == month)
+            && self
+                .day
+                .is_none_or(|day| u32::from(date.day().unsigned_abs()) == day)
     }
 
     /// The inclusive span this pattern covers, or `None` when it has an open
@@ -87,12 +91,10 @@ impl DatePattern {
         let year = self.year?;
         let Some(month) = self.month else {
             // An open month with a fixed day (`2026-*-25`) recurs monthly.
-            return self.day.is_none().then(|| {
-                (
-                    ymd(year, 1, 1).unwrap(),
-                    ymd(year, 12, 31).unwrap(),
-                )
-            });
+            return self
+                .day
+                .is_none()
+                .then(|| (ymd(year, 1, 1).unwrap(), ymd(year, 12, 31).unwrap()));
         };
         let start = ymd(year, month, 1)?;
         match self.day {
@@ -299,14 +301,20 @@ mod tests {
     fn group_date_prefers_created_timestamp() {
         let entry = entry(Some("2026-07-01T10:23:00+02:00"), "work/2026-01-01/id.md");
 
-        assert_eq!(entry_group_date(&entry), Some(jiff::civil::date(2026, 7, 1)));
+        assert_eq!(
+            entry_group_date(&entry),
+            Some(jiff::civil::date(2026, 7, 1))
+        );
     }
 
     #[test]
     fn group_date_falls_back_to_filename_date() {
         let entry = entry(None, "work/2026/07/01/2026-07-01T10-23-00-id.md");
 
-        assert_eq!(entry_group_date(&entry), Some(jiff::civil::date(2026, 7, 1)));
+        assert_eq!(
+            entry_group_date(&entry),
+            Some(jiff::civil::date(2026, 7, 1))
+        );
     }
 
     fn pattern(year: Option<i32>, month: Option<u32>, day: Option<u32>) -> Option<DateSpec> {

@@ -19,10 +19,7 @@ fn all_groups_match<T>(groups: &[Vec<T>], mut matches: impl FnMut(&T) -> bool) -
 
 /// Whether an entry's date satisfies `filter`. Entries with neither a creation
 /// timestamp nor a dated filename have no date to compare, so they never match.
-pub(super) fn date_predicate(
-    filter: DateFilter,
-    today: Date,
-) -> impl Fn(&Entry) -> bool + use<> {
+pub(super) fn date_predicate(filter: DateFilter, today: Date) -> impl Fn(&Entry) -> bool + use<> {
     move |entry| entry_group_date(entry).is_some_and(|date| filter.matches(date, today))
 }
 
