@@ -484,10 +484,8 @@ impl<'a> MarkdownTerminalRenderer<'a> {
             self.emit_blank_line();
         }
         self.separate_next_block = false;
-        // A `==highlight==` never spans block boundaries; without this reset an
-        // unpaired `==` (e.g. a lone one in prose) would leak the highlight style
-        // into every following block. The editor highlighter is likewise
-        // per-line-conservative, so this keeps reader and editor in agreement.
+        // A `==highlight==` never spans block boundaries. `push_highlighted_text`
+        // only opens one it can close, so this is the backstop, not the rule.
         self.highlight_open = false;
     }
 
@@ -594,12 +592,22 @@ impl<'a> MarkdownTerminalRenderer<'a> {
         }
     }
 
+    /// Emit `text`, styling `==highlight==` runs. A `==` opens a highlight only
+    /// when its closing `==` follows on the same line with something between the
+    /// two, matching the editor highlighter's rule — an unpaired `==` is prose,
+    /// and stays visible and plain in both views.
     fn push_highlighted_text(&mut self, text: &str) {
         let mut rest = text;
         while let Some(index) = rest.find("==") {
+            let after = &rest[index + 2..];
+            if !self.highlight_open && !closes_highlight(after) {
+                self.push_span(&rest[..index + 2], self.current_style());
+                rest = after;
+                continue;
+            }
             self.push_span(&rest[..index], self.highlight_style());
             self.highlight_open = !self.highlight_open;
-            rest = &rest[index + 2..];
+            rest = after;
         }
         self.push_span(rest, self.highlight_style());
     }
@@ -797,6 +805,14 @@ pub(super) fn is_openable_target(
     is_openable_link(target) || is_openable_attachment(target, attachments_openable, entry_path)
 }
 
+/// Whether `after` — the text following an opening `==` — carries that
+/// highlight's closing `==` on the same line, with at least one character
+/// between them.
+fn closes_highlight(after: &str) -> bool {
+    let line = after.split('\n').next().unwrap_or_default();
+    line.find("==").is_some_and(|close| close > 0)
+}
+
 /// Whether a link target is worth making clickable — external URLs and in-page
 /// heading anchors. Relative asset paths stay styled but non-interactive here;
 /// stored attachments are handled by [`is_openable_attachment`].
@@ -973,6 +989,29 @@ mod wrap_tests {
         assert!(!visible.iter().any(|line| line.contains("-----")));
     }
 
+    /// A table with no body rows still says something: boxed when there is room,
+    /// stacked onto one line when there isn't — but never nothing.
+    #[test]
+    fn a_header_only_table_renders_its_header_at_every_width() {
+        let source = "| Name | Count |\n|------|-------|\n";
+
+        let wide: Vec<String> = render_lines(source, 50).iter().map(text).collect();
+        assert!(
+            wide.iter().any(|line| line.contains("Name")),
+            "wide header missing: {wide:?}"
+        );
+
+        let narrow: Vec<String> = render_lines(source, 9).iter().map(text).collect();
+        assert!(
+            narrow.iter().any(|line| line.contains("Name")),
+            "narrow header missing: {narrow:?}"
+        );
+        assert!(
+            narrow.iter().any(|line| line.contains("Count")),
+            "narrow header dropped a column: {narrow:?}"
+        );
+    }
+
     #[test]
     fn lists_are_flush_left_with_hanging_continuations() {
         let source = concat!(
@@ -1140,6 +1179,51 @@ mod wrap_tests {
             .find(|span| span.content == "very important words")
             .unwrap();
         assert!(marked.style.add_modifier.contains(Modifier::REVERSED));
+    }
+
+    /// The editor leaves an unpaired `==` plain and visible, so the reader has to
+    /// as well — otherwise the same text reads differently in the two views.
+    #[test]
+    fn an_unpaired_highlight_marker_stays_plain_prose() {
+        let plain = Theme::terminal_default().text();
+        for source in [
+            "The == sign is an operator.",
+            "Trailing marker here ==",
+            "Nothing inside ====",
+        ] {
+            let lines = render_lines(source, 60);
+            assert_eq!(text(&lines[0]), source, "markers must survive: {source}");
+            for span in &lines[0].spans {
+                assert!(
+                    !span.style.add_modifier.contains(Modifier::REVERSED),
+                    "unpaired `==` highlighted {span:?} in: {source}"
+                );
+                assert_eq!(span.style, plain, "unpaired `==` restyled: {source}");
+            }
+
+            // The same text, through the editor's highlighter: no painted range.
+            let painted =
+                crate::tui::editor_highlight::highlight_body(&Theme::terminal_default(), source);
+            assert!(
+                painted.iter().all(Vec::is_empty),
+                "editor painted an unpaired `==` the reader left plain: {source}"
+            );
+        }
+    }
+
+    /// A closed highlight is still consumed and styled, and the marker that closes
+    /// it doesn't leave the rest of the block highlighted.
+    #[test]
+    fn a_closed_highlight_marks_only_the_text_between_its_markers() {
+        let lines = render_lines("a ==b== c ==d", 60);
+        assert_eq!(text(&lines[0]), "a b c ==d");
+        let marked: Vec<&str> = lines[0]
+            .spans
+            .iter()
+            .filter(|span| span.style.add_modifier.contains(Modifier::REVERSED))
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert_eq!(marked, ["b"]);
     }
 
     #[test]

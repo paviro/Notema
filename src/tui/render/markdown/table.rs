@@ -166,6 +166,22 @@ impl MarkdownTerminalRenderer<'_> {
 
     fn render_stacked_table(&mut self, rows: Vec<Vec<Line<'static>>>) {
         let headers = rows.first().cloned().unwrap_or_default();
+        // A header-only table has no `Header: value` pairs to stack, so the
+        // headers are the whole table — the wide path boxes them on their own row
+        // too. Without this it would render as nothing at all.
+        if rows.len() == 1 {
+            let mut line = Line::default();
+            for header in headers {
+                if !line.spans.is_empty() {
+                    line.spans.push(Span::styled(" · ", self.theme.muted()));
+                }
+                line.spans.extend(header.spans);
+            }
+            if !line.spans.is_empty() {
+                self.emit_wrapped_line(rich_from_line(line), None, false);
+            }
+            return;
+        }
         for (row_index, row) in rows.iter().skip(1).enumerate() {
             if row_index > 0 {
                 self.emit_blank_line();
