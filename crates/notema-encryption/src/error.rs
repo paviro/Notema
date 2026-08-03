@@ -225,6 +225,27 @@ pub enum EncryptionError {
     )]
     KeySourceReadOnly { command: String },
 
+    /// The identity file is not valid TOML, or does not have the shape of an
+    /// identity file.
+    ///
+    /// Deliberately says nothing about *what* is on the line: the file may hold
+    /// key material, and a parse that failed proves nothing about where. Distinct
+    /// from [`Self::MalformedStoredIdentity`], which is about key material that
+    /// was read successfully and then turned out not to be a key — this one is
+    /// about the file around it, and is what a hand-edited `keys_command` or a
+    /// truncated sync produces.
+    #[error(
+        "{} is not a readable identity file (parse failed at line {line}). If you edited it by hand, check that line; otherwise restore it from a backup",
+        path.display()
+    )]
+    UnparsableIdentityFile { path: PathBuf, line: usize },
+
+    /// `keys_store_command` without the `keys_command` it writes for.
+    #[error(
+        "the identity file has `keys_store_command` but no `keys_command`; a store command is the write half of a fetch command and does nothing on its own"
+    )]
+    OrphanedStoreCommand,
+
     /// No OS keyring is available on this platform or in this session.
     #[error("no OS keyring is available here: {detail}")]
     KeyringUnavailable { detail: String },
