@@ -250,6 +250,12 @@ pub enum EncryptionError {
 
     #[error("unsupported {kind} schema version {version}; expected 1")]
     UnsupportedSchema { kind: &'static str, version: u32 },
+    /// A keyring is there but refused the request, typically because it is
+    /// locked. Distinct from [`Self::KeyringUnavailable`]: the key is still
+    /// where it should be, and unlocking the keychain is all that is needed.
+    #[error("the OS keyring is locked or refused access: {detail}. Unlock it and try again")]
+    KeyringLocked { detail: String },
+
 
     /// A file expected to be binary age v1 ciphertext has a header or length
     /// that doesn't fit the format, so its plaintext size cannot be derived.
