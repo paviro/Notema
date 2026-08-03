@@ -29,6 +29,11 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
 
 /// Atomically write a file readable only by its owner (mode 0600 on Unix),
 /// creating parent directories as needed.
+///
+/// Off Unix the write is still atomic, but the owner-only part is dropped: the
+/// file gets whatever ACL its directory hands down. Under `%APPDATA%` that is
+/// already the user, SYSTEM, and Administrators. Setting an ACL directly needs
+/// unsafe Windows FFI, which this crate forbids.
 pub fn atomic_write_private(path: &Path, content: &[u8]) -> Result<()> {
     write_atomic(path, true, |file| Ok(file.write_all(content)?))
 }
