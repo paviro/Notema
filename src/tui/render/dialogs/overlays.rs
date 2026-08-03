@@ -1,5 +1,8 @@
 use super::*;
 
+/// The "Fetching weather and air quality…" modal shown while a save waits on its
+/// background context fetch. The ellipsis cycles `.`→`..`→`...` every ~400ms;
+/// dropped dots become spaces so the fixed-width box doesn't jitter.
 pub(in crate::tui::render) fn draw_fetching_environment(
     theme: &Theme,
     frame: &mut Frame<'_>,

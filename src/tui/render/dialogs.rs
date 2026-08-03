@@ -643,11 +643,6 @@ pub(super) fn lift_hovered_row<'a>(
     }
 }
 
-// ── Dialog draw functions ─────────────────────────────────────────────────────
-
-/// The "Fetching weather and air quality…" modal shown while a save waits on its
-/// background context fetch. The ellipsis cycles `.`→`..`→`...` every ~400ms;
-/// dropped dots become spaces so the fixed-width box doesn't jitter.
 #[cfg(test)]
 mod tests {
     use super::*;
