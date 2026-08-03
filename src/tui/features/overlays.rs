@@ -104,7 +104,7 @@ impl AppModel {
 
     fn begin_confirm_delete_entry(&mut self) {
         let has_body = self
-            .selected_entry()
+            .resolved_selected_entry()
             .map(|e| !e.body.trim().is_empty())
             .unwrap_or(false);
         // Default the selection to Cancel so a stray Enter never deletes.
