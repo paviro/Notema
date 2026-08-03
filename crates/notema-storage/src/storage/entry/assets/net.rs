@@ -3,11 +3,11 @@
 //! by many links is only waited on once.
 
 use super::{expand_user, image_extension, is_url, url_path};
+use notema_http::is_ish;
 use std::{
     collections::HashMap,
     fs,
     net::{TcpStream, ToSocketAddrs},
-    path::Path,
     sync::{Mutex, OnceLock, mpsc},
     thread,
     time::Duration,
@@ -15,8 +15,6 @@ use std::{
 
 /// Upper bound on a downloaded image (bytes).
 const MAX_REMOTE_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
-/// Network timeout for opt-in remote image ingestion.
-const REMOTE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Timeout for the cheap "is this host up?" probe done before a full download.
 const HOST_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -53,69 +51,15 @@ pub(super) fn fetch_source(
 fn download(url: &str) -> Result<Vec<u8>, FetchError> {
     // Probe the host first (once per host, cached). A bulk import can reference
     // hundreds of links on a server that no longer exists; without this each
-    // one would block for the full `REMOTE_TIMEOUT` before failing.
+    // one would block for the full request timeout before failing.
     if let Some((host, port)) = host_port(url)
         && !host_reachable(&host, port)
     {
         return Err(FetchError::RemoteUnavailable);
     }
 
-    if is_ish() {
-        return download_with_user_space_timeout(url);
-    }
-    download_inner(url)
-}
-
-fn download_inner(url: &str) -> Result<Vec<u8>, FetchError> {
-    let agent: ureq::Agent = agent_config_for(is_ish()).into();
-    let bytes = agent
-        .get(url)
-        .call()
-        .map_err(|error| FetchError::Ingest(error.to_string()))?
-        .body_mut()
-        .with_config()
-        .limit(MAX_REMOTE_IMAGE_BYTES)
-        .read_to_vec()
-        .map_err(|error| FetchError::Ingest(error.to_string()))?;
-    Ok(bytes)
-}
-
-fn download_with_user_space_timeout(url: &str) -> Result<Vec<u8>, FetchError> {
-    let url = url.to_string();
-    let (tx, rx) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let _ = tx.send(download_inner(&url));
-    });
-    match rx.recv_timeout(REMOTE_TIMEOUT) {
-        Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(FetchError::Ingest(format!(
-            "request timed out after {} seconds",
-            REMOTE_TIMEOUT.as_secs()
-        ))),
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(FetchError::Ingest(
-            "request worker stopped unexpectedly".to_string(),
-        )),
-    }
-}
-
-fn agent_config_for(ish: bool) -> ureq::config::Config {
-    let builder = ureq::Agent::config_builder();
-    let builder = if ish {
-        builder.no_delay(false)
-    } else {
-        builder.timeout_global(Some(REMOTE_TIMEOUT))
-    };
-    #[cfg(feature = "tls-native")]
-    let builder = builder.tls_config(
-        ureq::tls::TlsConfig::builder()
-            .provider(ureq::tls::TlsProvider::NativeTls)
-            .build(),
-    );
-    builder.build()
-}
-
-fn is_ish() -> bool {
-    cfg!(target_os = "linux") && Path::new("/proc/ish/version").exists()
+    notema_http::get_bytes(url, MAX_REMOTE_IMAGE_BYTES)
+        .map_err(|error| FetchError::Ingest(error.to_string()))
 }
 
 /// Per-process cache of host reachability (`"host:port" -> up?`), so a dead host
@@ -182,39 +126,4 @@ fn host_port(url: &str) -> Option<(String, u16)> {
         }
     };
     (!host.is_empty()).then(|| (host.to_string(), port))
-}
-
-#[cfg(test)]
-mod tests {
-    #[cfg(feature = "tls-native")]
-    #[test]
-    fn native_tls_feature_selects_native_tls_provider() {
-        assert_eq!(
-            super::agent_config_for(false).tls_config().provider(),
-            ureq::tls::TlsProvider::NativeTls
-        );
-    }
-
-    #[test]
-    fn ish_avoids_kernel_socket_options() {
-        let config = super::agent_config_for(true);
-        assert!(!config.no_delay());
-        assert_eq!(config.timeouts().global, None);
-    }
-
-    #[test]
-    fn other_platforms_keep_the_global_timeout() {
-        let config = super::agent_config_for(false);
-        assert!(config.no_delay());
-        assert_eq!(config.timeouts().global, Some(super::REMOTE_TIMEOUT));
-    }
-
-    #[cfg(all(feature = "tls-ring", not(feature = "tls-native")))]
-    #[test]
-    fn ring_feature_selects_rustls_provider() {
-        assert_eq!(
-            super::agent_config_for(false).tls_config().provider(),
-            ureq::tls::TlsProvider::Rustls
-        );
-    }
 }

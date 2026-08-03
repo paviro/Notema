@@ -38,6 +38,7 @@ The TUI lives inside the root crate:
 |---|---|---|
 | `notema-domain` | Entry values, validated coordinates, feelings, search value types, Markdown link parsing | Filesystem access, network access, terminal types |
 | `notema-analytics` | Pure aggregation over borrowed domain entries | I/O, clocks, rendering |
+| `notema-http` | The shared blocking HTTP agent, its timeouts, and iSH detection | URLs, payload shapes, retry policy |
 | `notema-context` | Geocoding, weather, air quality, celestial calculations, device location | Storage or TUI state |
 | `notema-import` | Parsing and normalizing external export formats | Journal creation, dedup policy, writes |
 | `notema-encryption` | Keys, recipients, signed roster, ciphertext and identity formats | Journal paths and entry layout |
@@ -54,9 +55,10 @@ graph (test-only `dev-dependencies` on storage, for round-trip fixtures, are
 exempt). FUSE reaches storage through its public facade.
 
 Network access is a capability, not a layer: `notema-context` (geocoding,
-weather, air quality) and `notema-storage` (remote asset download) open
-sockets; every other crate — domain, analytics, encryption, import, fuse — must
-not.
+weather, air quality) and `notema-storage` (remote asset download) are the only
+crates that reach the network, and both do it through `notema-http`, which owns
+the agent but decides nothing about what is fetched. Every other crate — domain,
+analytics, encryption, import, fuse — must not open sockets.
 
 Errors follow the anyhow + thiserror split: the domain crates expose typed
 `thiserror` enums, the application uses `anyhow` at its edges (`bail!`,

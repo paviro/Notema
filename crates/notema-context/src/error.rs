@@ -7,7 +7,7 @@ pub enum ContextError {
     #[error("{0}")]
     Message(String),
     #[error("context provider request failed: {0}")]
-    Http(#[from] ureq::Error),
+    Http(#[from] notema_http::HttpError),
     #[error("context provider response was invalid: {0}")]
     Json(#[from] serde_json::Error),
     #[error("context provider I/O failed: {0}")]

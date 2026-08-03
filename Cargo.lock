@@ -2402,13 +2402,13 @@ dependencies = [
  "futures-lite",
  "jiff",
  "notema-domain",
+ "notema-http",
  "rustix 1.1.4",
  "serde",
  "serde_json",
  "sunrise",
  "thiserror 2.0.19",
  "tzf-rs",
- "ureq",
  "zbus",
 ]
 
@@ -2449,6 +2449,14 @@ dependencies = [
  "pkg-config",
  "tempfile",
  "zeroize",
+]
+
+[[package]]
+name = "notema-http"
+version = "2026.7.8"
+dependencies = [
+ "thiserror 2.0.19",
+ "ureq",
 ]
 
 [[package]]
@@ -2500,6 +2508,7 @@ dependencies = [
  "moxcms",
  "notema-domain",
  "notema-encryption",
+ "notema-http",
  "notema-timing",
  "rand 0.10.2",
  "rayon",
@@ -2509,7 +2518,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "toml 1.1.4+spec-1.1.0",
- "ureq",
 ]
 
 [[package]]
