@@ -196,24 +196,22 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut AppModel, context: &mut Rend
     }
 
     if let Some(area) = layout.journals {
-        context.view.journal_offset = Some(draw_journals(theme, frame, area, app));
+        // Register rows against the clamped offset the rows were drawn with, not
+        // the raw nav offset, so an over-max offset can't misplace click regions.
+        let offset = draw_journals(theme, frame, area, app);
+        context.view.journal_offset = Some(offset);
         let (_, rows, list) = app.journal_rows(area.content);
-        register_rows(
-            context,
-            list,
-            &rows,
-            app.nav.journal_list.offset(),
-            PanelId::Journals,
-        );
+        register_rows(context, list, &rows, offset, PanelId::Journals);
     }
     if let Some(area) = layout.entries {
-        context.view.entry_offset = Some(draw_entry_list(theme, frame, area, app));
+        let offset = draw_entry_list(theme, frame, area, app);
+        context.view.entry_offset = Some(offset);
         let rows = app.entry_rows(area.text_width);
         register_rows(
             context,
             area.panel.content,
             &rows.meta,
-            app.nav.entry_list.offset(),
+            offset,
             PanelId::Entries,
         );
     }
