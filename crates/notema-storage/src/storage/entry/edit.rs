@@ -80,7 +80,9 @@ impl EditOutcome {
 /// Save an edited entry from the plaintext body and metadata already in memory.
 /// The entry is opened once to preserve front matter, then assets, metadata,
 /// writing time, and extra save-time fields are applied before a single final
-/// write.
+/// write. Every production caller checks the revision first; this unchecked
+/// entry point exists so the tests can exercise the save itself in isolation.
+#[cfg(test)]
 pub(crate) fn save_entry_edit(
     codec: &EntryCodec<'_>,
     path: &Path,

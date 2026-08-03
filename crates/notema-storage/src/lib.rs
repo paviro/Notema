@@ -266,13 +266,6 @@ impl JournalStore {
         migrate::kept_decrypt_backups(&self.paths.journal_root)
     }
 
-    /// Retire this device's identity after its access was revoked; see
-    /// the encryption cleanup helper. Returns the renamed-aside path, or
-    /// `None` when there was no identity to retire.
-    pub fn retire_revoked_identity(&self) -> AppResult<Option<PathBuf>> {
-        migrate::retire_revoked_identity(self)
-    }
-
     pub fn encryption_enabled(&self) -> bool {
         self.paths.keys.has_roster()
     }
@@ -444,7 +437,7 @@ impl JournalStore {
     }
 
     /// This device's unlocked identity public key, or `None` when locked.
-    pub fn identity_public_key(&self) -> Option<String> {
+    fn identity_public_key(&self) -> Option<String> {
         self.identity.as_ref().map(|identity| identity.public_key())
     }
 
@@ -502,7 +495,7 @@ impl JournalStore {
             Some(own_key) => crypto::revoked_recipient_keys(&self.paths.keys)?.contains(&own_key),
             None => false,
         };
-        let retired_key = revoked && self.retire_revoked_identity()?.is_some();
+        let retired_key = revoked && migrate::retire_revoked_identity(self)?.is_some();
         Ok(StoreAccess::NeedsEnroll {
             device_name,
             retired_key,
@@ -1057,15 +1050,6 @@ impl JournalStore {
             draft,
             assets,
         )
-    }
-
-    pub fn save_entry_edit(
-        &self,
-        path: &Path,
-        edit: EntryEdit<'_>,
-        assets: EntryAssetOptions,
-    ) -> AppResult<EntryEditOutcome> {
-        storage::save_entry_edit(&self.entry_codec(), path, edit, assets)
     }
 
     /// Save only when the source file is still the version that was opened by

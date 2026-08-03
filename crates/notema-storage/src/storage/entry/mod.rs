@@ -19,10 +19,11 @@ pub use assets::{
 pub(crate) use codec::EntryCodec;
 pub use create::{EntryAssetOptions, EntryCreateOutcome, EntryDraft};
 pub(crate) use create::{create_entry, create_entry_copy};
+#[cfg(test)]
+pub(crate) use edit::save_entry_edit;
 pub use edit::{EditOutcome, EntryEdit, EntryEditOutcome};
 pub(crate) use edit::{
-    delete_empty_entry, delete_journal, move_entry_to_trash, save_entry_edit,
-    save_entry_edit_if_revision,
+    delete_empty_entry, delete_journal, move_entry_to_trash, save_entry_edit_if_revision,
 };
 #[cfg(test)]
 pub(super) use paths::entry_path;

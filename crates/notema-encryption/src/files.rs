@@ -8,7 +8,7 @@ use std::{
 /// A unique hidden sibling temp path next to `target`, for atomic
 /// write-then-rename. Named `.notema-<pid>-<rand>.<suffix>` in the target's
 /// directory so it lands on the same filesystem as the eventual rename target.
-pub fn sibling_temp_path(target: &Path, suffix: &str) -> Result<PathBuf> {
+fn sibling_temp_path(target: &Path, suffix: &str) -> Result<PathBuf> {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     let mut noise = [0u8; 8];
     getrandom::fill(&mut noise)

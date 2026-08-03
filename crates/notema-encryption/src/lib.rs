@@ -35,9 +35,7 @@ pub use cipher::{
     encrypted_plaintext_len,
 };
 pub use error::{EncryptionError, Result};
-pub use files::{
-    atomic_write, atomic_write_private, atomic_write_with, sibling_temp_path, sync_parent_dir,
-};
+pub use files::{atomic_write, atomic_write_private, atomic_write_with, sync_parent_dir};
 pub use identity::{
     DeviceIdentityInfo, UnlockedIdentity, device_identity_info, read_identity_file_bytes,
     restore_identity_file, set_identity_passphrase, unlock_identity,

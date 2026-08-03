@@ -486,8 +486,11 @@ fn revoked_device_retires_its_identity_but_keeps_trust_pins() {
 
     let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
     phone.ensure().unwrap();
-    let phone_recipient = phone.request_access("phone", None).unwrap();
-    laptop.add_recipient(phone_recipient, |_, _| {}).unwrap();
+    phone.request_access("phone", None).unwrap();
+    // Approved the way the CLI does it, so the request file is consumed — a
+    // leftover request would read as "still awaiting approval" below.
+    let pending = laptop.pending_requests().unwrap();
+    laptop.approve_pending(&pending[0], |_, _| {}).unwrap();
     phone.unlock(None).unwrap();
 
     let phone_identity = dir.path().join("phone").join("identity.toml");
@@ -500,15 +503,17 @@ fn revoked_device_retires_its_identity_but_keeps_trust_pins() {
     laptop.revoke_recipient("phone", |_, _| {}).unwrap();
     assert!(journals.join(".age").join("devices.toml").exists());
 
-    // The phone reopens, is not a recipient, and has nothing queued — the caller
-    // retires its now-dead key.
-    let phone = JournalStore::new(&journals, dir.path().join("phone"));
+    // The phone reopens, is not a recipient, and has nothing queued, so resolving
+    // access retires its now-dead key on the way to reporting the re-enroll.
+    let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
     phone.ensure().unwrap();
-    let retired = phone
-        .retire_revoked_identity()
-        .unwrap()
-        .expect("identity retired");
-    assert!(retired.exists());
+    phone.unlock(None).unwrap();
+    match phone.resolve_access().unwrap() {
+        notema_storage::StoreAccess::NeedsEnroll { retired_key, .. } => {
+            assert!(retired_key, "a revoked key must be retired");
+        }
+        _ => panic!("phone should need enrollment"),
+    }
 
     // The identity is renamed aside; the trust pins are deliberately kept so a
     // re-enroll still validates against the unchanged roster genesis.
@@ -555,9 +560,14 @@ fn unsynced_request_keeps_identity() {
     // evidence, so the phone must keep its key and stay able to re-request.
     let pending: Vec<_> = laptop.pending_requests().unwrap();
     assert_eq!(pending.len(), 1);
+    assert_eq!(
+        pending[0].recipient.encryption_key,
+        phone_recipient.encryption_key
+    );
     laptop.deny_pending(&pending[0]).unwrap();
 
     let phone_identity = dir.path().join("phone").join("identity.toml");
+    let key_material = std::fs::read(&phone_identity).unwrap();
     match phone.resolve_access().unwrap() {
         notema_storage::StoreAccess::NeedsEnroll { retired_key, .. } => {
             assert!(!retired_key, "no revocation evidence — key must be kept");
@@ -569,8 +579,9 @@ fn unsynced_request_keeps_identity() {
         "identity must survive a lost request"
     );
     assert_eq!(
-        phone.identity_public_key().unwrap(),
-        phone_recipient.encryption_key
+        std::fs::read(&phone_identity).unwrap(),
+        key_material,
+        "the key itself must be untouched, not merely a file of the same name"
     );
 }
 
