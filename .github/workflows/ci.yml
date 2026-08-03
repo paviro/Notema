@@ -119,6 +119,38 @@ jobs:
       - run: cargo test --workspace --locked
       - run: cargo doc --workspace --no-deps --locked
 
+  # The keychain-backed key path is covered elsewhere by an in-memory double, so
+  # the platform backends and the `keyring::Error` mapping are otherwise never
+  # executed. A developer's machine is the wrong place to run this — it would
+  # write to their login keychain — so it happens here, against a throwaway
+  # gnome-keyring in a session bus that exists only for this job.
+  keyring:
+    name: Linux (real keychain)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.96.0
+      - run: sudo apt-get update && sudo apt-get install --yes gnome-keyring dbus-x11 libsecret-1-0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo build -p notema-storage --tests --locked
+      # `--unlock` reads the password off stdin and leaves the default collection
+      # unlocked, which is what stops the Secret Service prompting mid-test.
+      - name: Run the keychain tests against gnome-keyring
+        env:
+          NOTEMA_TEST_REAL_KEYRING: "1"
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n "ci" | gnome-keyring-daemon --unlock --components=secrets
+            cargo test -p notema-storage --test keyring_backend --locked -- --test-threads=1
+          '
+
   macos:
     name: macOS (check)
     runs-on: macos-latest
