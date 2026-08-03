@@ -13,7 +13,7 @@ use ratatui::{
 
 use notema_analytics::{Analytics, MoodAnalytics};
 
-use super::widgets::{Stat, columns_for, draw_stat_card};
+use super::widgets::{Stat, columns_for, draw_stat_card, draw_stats};
 use crate::tui::render::{count_label, flat_chrome, render_centered_notice};
 use crate::tui::theme::Theme;
 
@@ -36,6 +36,28 @@ const CARD_HEIGHT: u16 = 6;
 /// The full-width title box height: two borders around three inner lines, the
 /// text centred on the middle one.
 const TITLE_HEIGHT: u16 = 5;
+/// The narrowest card worth boxing; below it `draw_stat_card` collapses anyway.
+const MIN_CARD_WIDTH: u16 = 4;
+
+/// The shortest card that still shows both of its lines, plus the two border rows
+/// when the chrome draws them.
+const fn min_card_height(flat: bool) -> u16 {
+    if flat { 2 } else { 4 }
+}
+
+/// The placed title box and card grid. Nothing clips drawing back to the panel,
+/// so the block is measured against the area first and abandoned when it doesn't
+/// fit — see [`card_grid`].
+struct CardGrid {
+    title: Rect,
+    origin_x: u16,
+    grid_top: u16,
+    cols: u16,
+    card_w: u16,
+    card_h: u16,
+    gap_x: u16,
+    gap_y: u16,
+}
 
 pub(super) fn draw(
     theme: &Theme,
@@ -50,69 +72,119 @@ pub(super) fn draw(
         return;
     }
 
+    let flat = flat_chrome(theme);
+    let stats = metrics(theme, analytics);
+    let Some(grid) = card_grid(area, flat, stats.len()) else {
+        draw_compact(theme, frame, area, title, cadence, &stats);
+        return;
+    };
+
+    draw_title_box(theme, frame, grid.title, title, cadence);
+
+    for (index, stat) in stats.iter().enumerate() {
+        let col = index as u16 % grid.cols;
+        let row = index as u16 / grid.cols;
+        draw_stat_card(
+            theme,
+            frame,
+            Rect {
+                x: grid.origin_x + col * (grid.card_w + grid.gap_x),
+                y: grid.grid_top + row * (grid.card_h + grid.gap_y),
+                width: grid.card_w,
+                height: grid.card_h,
+            },
+            stat,
+        );
+    }
+}
+
+/// Place the title box and the card grid inside `area`, or `None` when the cards
+/// would come out too small to read — the caller then falls back to compact rows.
+/// Every returned rect lies within `area`: card heights take whole rows only, so
+/// the division remainder stays as outer margin rather than spilling past the
+/// panel bottom.
+fn card_grid(area: Rect, flat: bool, stats: usize) -> Option<CardGrid> {
+    if stats == 0 {
+        return None;
+    }
     // Blank cells left between adjacent boxes. Flat cards carry no border, so they
     // need their own separation — a blank row between rows and a wider gutter
     // between columns to stay balanced; bordered cards keep the tighter spacing.
     // Flat cards are also trimmed a column: filled solid, the full-width tile reads
     // heavier than the hollow bordered box, so shrink it to compensate.
-    let flat = flat_chrome(theme);
     let (gap_x, gap_y) = if flat { (2, 1) } else { (1, 0) };
     let card_w_max = if flat { CARD_WIDTH - 1 } else { CARD_WIDTH };
-    let card_h_max = CARD_HEIGHT;
 
-    let stats = metrics(theme, analytics);
     // Prefer the widest column count that divides the cards evenly, so the grid
     // stays balanced (6 → 2×3 rather than 3×2). Capped at two so the paired cards
     // read as rows and the block keeps its familiar width rather than spreading.
-    let max_cols = columns_for(area).min(stats.len()).clamp(1, 2);
+    let max_cols = columns_for(area).min(stats).clamp(1, 2);
     let cols = (1..=max_cols)
         .rev()
-        .find(|c| stats.len().is_multiple_of(*c))
+        .find(|c| stats.is_multiple_of(*c))
         .unwrap_or(max_cols) as u16;
-    let rows = stats.len().div_ceil(cols as usize) as u16;
+    let rows = stats.div_ceil(cols as usize) as u16;
 
     // Cards are narrower than the panel; the title box above spans their combined
     // width. The whole block is centred so the slack becomes an outer margin.
     let card_w = card_w_max.min(area.width.saturating_sub(gap_x * (cols - 1)) / cols);
-    let block_w = card_w * cols + gap_x * (cols - 1);
-    let origin_x = area.x + (area.width.saturating_sub(block_w)) / 2;
-
     let grid_h = area
         .height
         .saturating_sub(TITLE_HEIGHT + gap_y + (rows - 1) * gap_y);
-    let card_h = (grid_h / rows).clamp(3, card_h_max);
-    let block_h = TITLE_HEIGHT + gap_y + card_h * rows + (rows - 1) * gap_y;
-    let origin_y = area.y + (area.height.saturating_sub(block_h)) / 2;
+    let card_h = (grid_h / rows).min(CARD_HEIGHT);
+    if card_w < MIN_CARD_WIDTH || card_h < min_card_height(flat) {
+        return None;
+    }
 
-    draw_title_box(
-        theme,
-        frame,
-        Rect {
+    let block_w = card_w * cols + gap_x * (cols - 1);
+    let block_h = TITLE_HEIGHT + gap_y + card_h * rows + (rows - 1) * gap_y;
+    let origin_x = area.x + area.width.saturating_sub(block_w) / 2;
+    let origin_y = area.y + area.height.saturating_sub(block_h) / 2;
+
+    Some(CardGrid {
+        title: Rect {
             x: origin_x,
             y: origin_y,
             width: block_w,
             height: TITLE_HEIGHT,
         },
-        title,
-        cadence,
-    );
+        origin_x,
+        grid_top: origin_y + TITLE_HEIGHT + gap_y,
+        cols,
+        card_w,
+        card_h,
+        gap_x,
+        gap_y,
+    })
+}
 
-    let grid_top = origin_y + TITLE_HEIGHT + gap_y;
-    for (index, stat) in stats.iter().enumerate() {
-        let col = index as u16 % cols;
-        let row = index as u16 / cols;
-        draw_stat_card(
-            theme,
-            frame,
-            Rect {
-                x: origin_x + col * (card_w + gap_x),
-                y: grid_top + row * (card_h + gap_y),
-                width: card_w,
-                height: card_h,
-            },
-            stat,
-        );
+/// The same figures for a panel too small to box them: the title as a plain line
+/// and the stats as compact rows, both bounded by `area`.
+fn draw_compact(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    cadence: &notema_analytics::Cadence,
+    stats: &[Stat],
+) {
+    if area.height == 0 {
+        return;
     }
+    frame.render_widget(
+        Paragraph::new(Line::from(title_spans(theme, title, cadence))),
+        Rect { height: 1, ..area },
+    );
+    draw_stats(
+        theme,
+        frame,
+        Rect {
+            y: area.y + 1,
+            height: area.height - 1,
+            ..area
+        },
+        stats,
+    );
 }
 
 /// A full-width bordered box holding the journal name, its date span, and the
@@ -124,18 +196,7 @@ fn draw_title_box(
     title: &str,
     cadence: &notema_analytics::Cadence,
 ) {
-    let mut spans = vec![Span::styled(title.to_string(), theme.heading())];
-    if let Some(span) = date_span(cadence.date_span) {
-        spans.push(Span::styled(format!(" · {span}"), theme.muted()));
-    }
-    spans.push(Span::styled(
-        format!(
-            " · {} · {}",
-            count_label(cadence.total_entries, "entry", "entries"),
-            count_label(cadence.total_words, "word", "words"),
-        ),
-        theme.muted(),
-    ));
+    let spans = title_spans(theme, title, cadence);
     // Flat mode fills the tile with the card surface colour and drops the border so
     // it matches the flat cards below; bordered mode keeps the drawn box. The text
     // sits on the middle row: with a border the two border rows plus one leading
@@ -160,6 +221,28 @@ fn draw_title_box(
             .block(block),
         area,
     );
+}
+
+/// The journal name, its date span, and the headline totals — the title box's
+/// contents, and the compact fallback's first line.
+fn title_spans(
+    theme: &Theme,
+    title: &str,
+    cadence: &notema_analytics::Cadence,
+) -> Vec<Span<'static>> {
+    let mut spans = vec![Span::styled(title.to_string(), theme.heading())];
+    if let Some(span) = date_span(cadence.date_span) {
+        spans.push(Span::styled(format!(" · {span}"), theme.muted()));
+    }
+    spans.push(Span::styled(
+        format!(
+            " · {} · {}",
+            count_label(cadence.total_entries, "entry", "entries"),
+            count_label(cadence.total_words, "word", "words"),
+        ),
+        theme.muted(),
+    ));
+    spans
 }
 
 /// The six headline figures, paired so the grid reads as lift/drain, best/worst
@@ -264,5 +347,69 @@ fn date_span(span: Option<(jiff::civil::Date, jiff::civil::Date)>) -> Option<Str
         Some(first.year().to_string())
     } else {
         Some(format!("{} – {}", first.year(), last.year()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const STATS: usize = 6;
+
+    fn area(width: u16, height: u16) -> Rect {
+        // Offset the origin so a layout that ignores it shows up as an overflow.
+        Rect {
+            x: 3,
+            y: 2,
+            width,
+            height,
+        }
+    }
+
+    /// The bottom row the grid's last card would occupy, exclusive.
+    fn grid_bottom(grid: &CardGrid, stats: usize) -> u16 {
+        let rows = stats.div_ceil(grid.cols as usize) as u16;
+        grid.grid_top + rows * (grid.card_h + grid.gap_y) - grid.gap_y
+    }
+
+    #[test]
+    fn every_placed_grid_stays_inside_the_panel() {
+        for flat in [false, true] {
+            for width in [20u16, 34, 40, 56, 80, 120] {
+                for height in 0u16..40 {
+                    let area = area(width, height);
+                    let Some(grid) = card_grid(area, flat, STATS) else {
+                        continue;
+                    };
+                    assert!(
+                        grid.title.y >= area.y && grid_bottom(&grid, STATS) <= area.bottom(),
+                        "grid overflows {width}x{height} (flat: {flat})",
+                    );
+                    let block_right =
+                        grid.origin_x + grid.cols * (grid.card_w + grid.gap_x) - grid.gap_x;
+                    assert!(
+                        grid.title.x >= area.x && block_right <= area.right(),
+                        "grid overflows {width}x{height} horizontally (flat: {flat})",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn short_panels_fall_back_instead_of_overflowing() {
+        // A two-column grid needs the title box plus three four-row cards; a
+        // one-column grid needs six. Both used to draw past the panel bottom.
+        assert!(card_grid(area(80, 16), false, STATS).is_none());
+        assert!(card_grid(area(80, 17), false, STATS).is_some());
+        assert!(card_grid(area(40, 28), false, STATS).is_none());
+        assert!(card_grid(area(40, 29), false, STATS).is_some());
+    }
+
+    #[test]
+    fn narrow_panels_fall_back_rather_than_boxing_slivers() {
+        // Narrower than a box with anything inside it — `draw_stat_card` would
+        // collapse to a centred line anyway, which the compact rows do better.
+        assert!(card_grid(area(3, 40), false, STATS).is_none());
     }
 }

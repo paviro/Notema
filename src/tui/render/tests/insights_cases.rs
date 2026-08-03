@@ -242,6 +242,67 @@ fn insights_feelings_tab_renders_mood_breakdowns() {
     );
 }
 
+/// Nothing clips a tab body back to its panel, so every tab has to fit the area
+/// it is handed: on a terminal too short for its full layout it must degrade, not
+/// draw over the panel's bottom border (Overview's card grid used to).
+#[test]
+fn insights_tabs_stay_inside_their_panel_on_tiny_terminals() {
+    // The panel under test is the focused one, so it carries the thick border set.
+    let default_theme = theme::Theme::terminal_default();
+    let borders = default_theme.glyphs().block_set(true);
+    for tab in [
+        InsightsTab::Overview,
+        InsightsTab::Writing,
+        InsightsTab::Feelings,
+        InsightsTab::Drivers,
+    ] {
+        for (width, height) in [(140u16, 16u16), (80, 15), (80, 12), (60, 12), (40, 10)] {
+            for fullscreen in [false, true] {
+                let mut app = app_with_metadata_entry();
+                focus_insights(&mut app, tab);
+                app.nav.insights_fullscreen = fullscreen;
+
+                let mut view = crate::tui::ui::ViewState::default();
+                let rows =
+                    render_to_rows(width, height, |frame| draw_app(frame, &mut app, &mut view));
+
+                // The insights body renders into its own column, or into the
+                // reader pane when the layout has no room for one.
+                let layout = view.layout.expect("layout recorded");
+                let Some(panel) = layout.insights.or(layout.reader) else {
+                    continue;
+                };
+                let bottom: Vec<char> = rows[panel.area.bottom() as usize - 1].chars().collect();
+                let left = panel.area.x as usize;
+                let right = panel.area.right() as usize - 1;
+                let case = format!("{tab:?} at {width}x{height} (fullscreen: {fullscreen})");
+                assert_eq!(
+                    bottom[left].to_string(),
+                    borders.bottom_left,
+                    "{case}: panel corner overdrawn: {:?}",
+                    bottom.iter().collect::<String>()
+                );
+                assert_eq!(
+                    bottom[right].to_string(),
+                    borders.bottom_right,
+                    "{case}: panel corner overdrawn: {:?}",
+                    bottom.iter().collect::<String>()
+                );
+                // The border between the corners carries only the rule and the
+                // panel's own footnote — never a tab's content.
+                assert!(
+                    !bottom[left..=right]
+                        .iter()
+                        .collect::<String>()
+                        .contains("Active days"),
+                    "{case}: a stat card spilled onto the border: {:?}",
+                    bottom.iter().collect::<String>()
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn insights_tab_hit_test_maps_border_columns_to_tabs() {
     // Inner width 47 fits all four full labels: " Overview · Writing · Mood /
