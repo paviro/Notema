@@ -2,48 +2,12 @@ use crossterm::event::KeyEvent;
 
 use crate::tui::features::filter::FilterTab;
 use crate::tui::{
-    features::{insights::InsightsTab, location::EditLocationFocus},
+    features::{insights::InsightsTab, location::EditLocationFocus, metadata::EditMetadataFocus},
     state::{HelpTab, HoverTarget, MetadataKind},
-    ui::interaction::{PanelId, TextFieldId},
+    ui::interaction::PanelId,
 };
 
-pub(crate) use crate::tui::ui::interaction::ScrollbarMetrics;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TextFieldTarget {
-    Search,
-    NewJournal,
-    Metadata,
-    Feelings,
-    LocationQuery,
-    LocationName,
-}
-
-impl From<TextFieldId> for TextFieldTarget {
-    fn from(value: TextFieldId) -> Self {
-        match value {
-            TextFieldId::Search => Self::Search,
-            TextFieldId::NewJournal => Self::NewJournal,
-            TextFieldId::Metadata => Self::Metadata,
-            TextFieldId::Feelings => Self::Feelings,
-            TextFieldId::LocationQuery => Self::LocationQuery,
-            TextFieldId::LocationName => Self::LocationName,
-        }
-    }
-}
-
-impl From<TextFieldTarget> for TextFieldId {
-    fn from(value: TextFieldTarget) -> Self {
-        match value {
-            TextFieldTarget::Search => Self::Search,
-            TextFieldTarget::NewJournal => Self::NewJournal,
-            TextFieldTarget::Metadata => Self::Metadata,
-            TextFieldTarget::Feelings => Self::Feelings,
-            TextFieldTarget::LocationQuery => Self::LocationQuery,
-            TextFieldTarget::LocationName => Self::LocationName,
-        }
-    }
-}
+pub(crate) use crate::tui::ui::interaction::{ScrollbarMetrics, TextFieldId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DialogListTarget {
@@ -66,11 +30,11 @@ pub(crate) enum MetadataSearchTarget {
 pub(crate) enum MouseAction {
     DismissToast(usize),
     TextFieldPress {
-        target: TextFieldTarget,
+        target: TextFieldId,
         column: u16,
     },
     TextFieldSelectWord {
-        target: TextFieldTarget,
+        target: TextFieldId,
         column: u16,
     },
     TextFieldDrag {
@@ -114,7 +78,7 @@ pub(crate) enum MouseAction {
         target: DialogListTarget,
         index: usize,
     },
-    DialogFocusMetadata(EditMetadataFocusTarget),
+    DialogFocusMetadata(EditMetadataFocus),
     DialogFocusLocation(EditLocationFocus),
     DialogScroll {
         target: DialogListTarget,
@@ -122,12 +86,6 @@ pub(crate) enum MouseAction {
         viewport: u16,
     },
     SetMood(i8),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum EditMetadataFocusTarget {
-    List,
-    Input,
 }
 
 /// Which live reload a failed watcher registration costs the user. Named for

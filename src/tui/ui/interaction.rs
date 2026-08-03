@@ -17,6 +17,19 @@ pub(crate) struct ScrollbarMetrics {
     pub(crate) position: usize,
 }
 
+impl ScrollbarMetrics {
+    /// The thumb's `(top, len)` rows, replicating ratatui so it matches what's drawn.
+    pub(crate) fn thumb(&self) -> (u16, u16) {
+        crate::tui::scroll::scrollbar_thumb(
+            self.bar,
+            self.content_length,
+            self.viewport,
+            self.position,
+        )
+        .unwrap_or((self.bar.y.saturating_add(1), 1))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PanelId {
     Journals,

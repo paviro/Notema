@@ -210,7 +210,7 @@ fn dialog_row_action(dialog: DialogId, index: usize) -> Option<Action> {
 fn dialog_list_focus_action(dialog: DialogId) -> Option<Action> {
     match dialog {
         DialogId::Metadata | DialogId::Feelings => Some(Action::Mouse(
-            MouseAction::DialogFocusMetadata(EditMetadataFocusTarget::List),
+            MouseAction::DialogFocusMetadata(EditMetadataFocus::List),
         )),
         DialogId::Location => Some(Action::Mouse(MouseAction::DialogFocusLocation(
             EditLocationFocus::List,
@@ -222,7 +222,7 @@ fn dialog_list_focus_action(dialog: DialogId) -> Option<Action> {
 fn dialog_input_focus_action(input: DialogInputId) -> Option<Action> {
     match input {
         DialogInputId::Metadata | DialogInputId::Feelings => Some(Action::Mouse(
-            MouseAction::DialogFocusMetadata(EditMetadataFocusTarget::Input),
+            MouseAction::DialogFocusMetadata(EditMetadataFocus::Input),
         )),
         DialogInputId::LocationQuery => Some(Action::Mouse(MouseAction::DialogFocusLocation(
             EditLocationFocus::Query,
@@ -297,7 +297,7 @@ pub(super) fn text_field_mouse_action(
         }
         MouseEventKind::Drag(MouseButton::Left) if app.nav.input_selecting => {
             let target = active_text_field_target(app)?;
-            let rect = view.interactions.area_for_text_field(target.into())?;
+            let rect = view.interactions.area_for_text_field(target)?;
             let last = rect.x + rect.width.saturating_sub(1);
             let clamped = mouse.column.clamp(rect.x, last);
             Some(MouseAction::TextFieldDrag {
@@ -314,25 +314,25 @@ pub(super) fn text_field_mouse_action(
 
 /// The text field under `(col, row)`, if any: focuses it and returns the click
 /// column within the field.
-fn text_field_at(col: u16, row: u16, view: &ViewState) -> Option<(TextFieldTarget, u16)> {
+fn text_field_at(col: u16, row: u16, view: &ViewState) -> Option<(TextFieldId, u16)> {
     let InteractionKind::TextField(id) = view.interactions.hit(col, row)? else {
         return None;
     };
     let area = view.interactions.area_for_text_field(*id)?;
-    Some(((*id).into(), col - area.x))
+    Some((*id, col - area.x))
 }
 
-fn active_text_field_target(app: &AppModel) -> Option<TextFieldTarget> {
+fn active_text_field_target(app: &AppModel) -> Option<TextFieldId> {
     match &app.overlay {
-        Overlay::NewJournal(_) => Some(TextFieldTarget::NewJournal),
-        Overlay::EditMetadata(_) => Some(TextFieldTarget::Metadata),
-        Overlay::EditFeelings(_) => Some(TextFieldTarget::Feelings),
+        Overlay::NewJournal(_) => Some(TextFieldId::NewJournal),
+        Overlay::EditMetadata(_) => Some(TextFieldId::Metadata),
+        Overlay::EditFeelings(_) => Some(TextFieldId::Feelings),
         Overlay::EditLocation(state) => match state.focus {
-            EditLocationFocus::Query => Some(TextFieldTarget::LocationQuery),
-            EditLocationFocus::Name => Some(TextFieldTarget::LocationName),
+            EditLocationFocus::Query => Some(TextFieldId::LocationQuery),
+            EditLocationFocus::Name => Some(TextFieldId::LocationName),
             EditLocationFocus::List => None,
         },
-        Overlay::None if app.nav.mode == Mode::Search => Some(TextFieldTarget::Search),
+        Overlay::None if app.nav.mode == Mode::Search => Some(TextFieldId::Search),
         _ => None,
     }
 }

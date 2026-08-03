@@ -18,10 +18,9 @@ use crate::tui::{
 
 use super::DispatchOutcome;
 use super::action::{
-    Action, BrowserAction, DialogListTarget, EditMetadataFocusTarget, EditorAction, FilterAction,
-    ImageAction, InsightsAction, LocationAction, MetadataAction, MetadataSearchTarget, MouseAction,
-    OverlayAction, ReaderHintAction, ScrollbarMetrics, SearchAction, SettingsAction,
-    TextFieldTarget,
+    Action, BrowserAction, DialogListTarget, EditorAction, FilterAction, ImageAction,
+    InsightsAction, LocationAction, MetadataAction, MetadataSearchTarget, MouseAction,
+    OverlayAction, ReaderHintAction, ScrollbarMetrics, SearchAction, SettingsAction, TextFieldId,
 };
 
 mod overlay;
@@ -273,45 +272,6 @@ pub(crate) fn handle_scroll(
     Ok(())
 }
 
-/// A pane's scrollbar geometry, resolved from the live layout and caches so both a
-/// press and an ongoing drag map against the current content.
-struct ScrollbarTarget {
-    which: ScrollbarDrag,
-    /// The full bar column (`scrollbar_bar_rect`); its first/last rows are the arrows.
-    bar: Rect,
-    max_scroll: usize,
-    content_length: usize,
-    viewport: u16,
-    /// Current scrollbar position, for locating the thumb.
-    position: usize,
-}
-
-impl ScrollbarTarget {
-    /// The thumb's `(top, len)` rows, replicating ratatui so it matches what's drawn.
-    fn thumb(&self) -> (u16, u16) {
-        crate::tui::scroll::scrollbar_thumb(
-            self.bar,
-            self.content_length,
-            self.viewport,
-            self.position,
-        )
-        .unwrap_or((self.bar.y.saturating_add(1), 1))
-    }
-}
-
-impl From<ScrollbarMetrics> for ScrollbarTarget {
-    fn from(metrics: ScrollbarMetrics) -> Self {
-        Self {
-            which: metrics.which,
-            bar: metrics.bar,
-            max_scroll: metrics.max_scroll,
-            content_length: metrics.content_length,
-            viewport: metrics.viewport,
-            position: metrics.position,
-        }
-    }
-}
-
 /// Set a pane's scroll offset directly (already clamped to its `max_scroll`).
 fn set_pane_scroll(app: &mut AppModel, which: ScrollbarDrag, offset: usize) {
     match which {
@@ -379,7 +339,7 @@ fn scroll_suggestions(
 }
 
 /// Step a pane's scroll by one line, reusing the same setters the wheel uses.
-fn step_pane_scroll(app: &mut AppModel, target: &ScrollbarTarget, delta: i16) {
+fn step_pane_scroll(app: &mut AppModel, target: &ScrollbarMetrics, delta: i16) {
     match target.which {
         ScrollbarDrag::Journals => {
             app.scroll_journal_list(delta, target.content_length, target.viewport);
@@ -420,7 +380,7 @@ fn step_dialog_scroll(app: &mut AppModel, dialog: DialogId, delta: i16, viewport
 /// Map the dragged cursor row to a scroll offset so the grabbed point of the thumb
 /// (`scrollbar.grab` rows below its top) tracks the cursor. The cursor column is
 /// ignored, so the drag survives drifting off the narrow bar.
-fn apply_thumb_drag(app: &mut AppModel, target: &ScrollbarTarget, row: u16) {
+fn apply_thumb_drag(app: &mut AppModel, target: &ScrollbarMetrics, row: u16) {
     let (_, thumb_len) = target.thumb();
     let track_top = target.bar.y.saturating_add(1);
     let track_len = target.bar.height.saturating_sub(2);
@@ -685,11 +645,10 @@ pub(super) fn apply_mouse_action(
             }
         },
         MouseAction::ScrollbarPress { metrics, row } => {
-            apply_scrollbar_press(app, metrics.into(), row);
+            apply_scrollbar_press(app, metrics, row);
         }
         MouseAction::ScrollbarDrag { metrics, row } => {
-            let target = ScrollbarTarget::from(metrics);
-            apply_thumb_drag(app, &target, row);
+            apply_thumb_drag(app, &metrics, row);
         }
         MouseAction::ScrollbarRelease => app.scrollbar.active = None,
         MouseAction::DialogRow { target, index } => match target {
@@ -736,10 +695,6 @@ pub(super) fn apply_mouse_action(
             }
         },
         MouseAction::DialogFocusMetadata(focus) => {
-            let focus = match focus {
-                EditMetadataFocusTarget::List => EditMetadataFocus::List,
-                EditMetadataFocusTarget::Input => EditMetadataFocus::Input,
-            };
             if let Some(state) = app.edit_metadata_state_mut() {
                 state.focus = focus;
             } else if let Some(state) = app.edit_feeling_state_mut() {
@@ -799,53 +754,51 @@ pub(super) fn apply_mouse_action(
     Ok(None)
 }
 
-fn focus_text_field(app: &mut AppModel, target: TextFieldTarget) {
+fn focus_text_field(app: &mut AppModel, target: TextFieldId) {
     match target {
-        TextFieldTarget::Search => app.nav.focus = Focus::Entries,
-        TextFieldTarget::Metadata => {
+        TextFieldId::Search => app.nav.focus = Focus::Entries,
+        TextFieldId::Metadata => {
             if let Some(state) = app.edit_metadata_state_mut() {
                 state.focus = EditMetadataFocus::Input;
             }
         }
-        TextFieldTarget::Feelings => {
+        TextFieldId::Feelings => {
             if let Some(state) = app.edit_feeling_state_mut() {
                 state.focus = EditMetadataFocus::Input;
             }
         }
-        TextFieldTarget::LocationQuery => {
+        TextFieldId::LocationQuery => {
             if let Some(state) = app.edit_location_state_mut() {
                 state.focus = EditLocationFocus::Query;
             }
         }
-        TextFieldTarget::LocationName => {
+        TextFieldId::LocationName => {
             if let Some(state) = app.edit_location_state_mut() {
                 state.focus = EditLocationFocus::Name;
             }
         }
-        TextFieldTarget::NewJournal => {}
+        TextFieldId::NewJournal => {}
     }
 }
 
 fn text_field_mut(
     app: &mut AppModel,
-    target: TextFieldTarget,
+    target: TextFieldId,
 ) -> Option<&mut crate::tui::text_input::TextInput> {
     match target {
-        TextFieldTarget::Search => Some(&mut app.search.query),
-        TextFieldTarget::NewJournal => match &mut app.overlay {
+        TextFieldId::Search => Some(&mut app.search.query),
+        TextFieldId::NewJournal => match &mut app.overlay {
             Overlay::NewJournal(input) => Some(input),
             _ => None,
         },
-        TextFieldTarget::Metadata => app.edit_metadata_state_mut().map(|state| &mut state.input),
-        TextFieldTarget::Feelings => app.edit_feeling_state_mut().map(|state| &mut state.input),
-        TextFieldTarget::LocationQuery => {
-            app.edit_location_state_mut().map(|state| &mut state.query)
-        }
-        TextFieldTarget::LocationName => app.edit_location_state_mut().map(|state| &mut state.name),
+        TextFieldId::Metadata => app.edit_metadata_state_mut().map(|state| &mut state.input),
+        TextFieldId::Feelings => app.edit_feeling_state_mut().map(|state| &mut state.input),
+        TextFieldId::LocationQuery => app.edit_location_state_mut().map(|state| &mut state.query),
+        TextFieldId::LocationName => app.edit_location_state_mut().map(|state| &mut state.name),
     }
 }
 
-fn apply_scrollbar_press(app: &mut AppModel, target: ScrollbarTarget, row: u16) {
+fn apply_scrollbar_press(app: &mut AppModel, target: ScrollbarMetrics, row: u16) {
     let bar = target.bar;
     if row == bar.y {
         step_pane_scroll(app, &target, -1);

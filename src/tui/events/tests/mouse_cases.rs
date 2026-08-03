@@ -928,7 +928,7 @@ fn clicking_into_an_earlier_filter_retargets_the_suggestions() {
         &mut terminal,
         &mut app,
         Action::Mouse(action::MouseAction::TextFieldPress {
-            target: action::TextFieldTarget::Search,
+            target: action::TextFieldId::Search,
             column: 6,
         }),
     )
