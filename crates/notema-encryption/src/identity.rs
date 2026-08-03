@@ -1,6 +1,9 @@
 use crate::files::atomic_write_private;
+use crate::key_command::KeyCommand;
 use crate::signing::{generate_signing_key, signing_public};
-use crate::{EncryptionError, KeyPaths, Recipient, Result, cipher, recipients};
+use crate::{
+    EncryptionError, KeyPaths, Recipient, Result, cipher, key_command, keyring, recipients,
+};
 use age::secrecy::{ExposeSecret, SecretString};
 use age::x25519;
 use ed25519_dalek::SigningKey;
@@ -35,17 +38,42 @@ impl UnlockedIdentity {
     }
 }
 
+/// Where this device's key is kept. Independent of whether it is
+/// passphrase-encrypted: every source holds either form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeySource {
+    /// Inline in `identity.toml`, mode 0600.
+    File,
+    /// An item in the OS keychain.
+    Keyring,
+    /// Fetched by running a command.
+    Command,
+}
+
+impl KeySource {
+    /// How to name this source in a message aimed at the user.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::File => "the identity file",
+            Self::Keyring => "the OS keychain",
+            Self::Command => "an external command",
+        }
+    }
+}
+
 /// The non-secret facts about this device's stored identity, readable without a
-/// passphrase: how it labels itself and whether unlocking needs a passphrase.
+/// passphrase and without retrieving the key: how it labels itself, where the key
+/// lives, and whether unlocking needs a passphrase.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceIdentityInfo {
     pub name: String,
+    pub source: KeySource,
     pub passphrase_protected: bool,
 }
 
 /// The secret key material for a device, serialized inside the (optionally
-/// scrypt-wrapped) `identity.toml`: the age private key and the Ed25519 signing
-/// seed. Kept together so both are protected by the same passphrase choice.
+/// scrypt-wrapped) key bundle: the age private key and the Ed25519 signing seed.
+/// Kept together so both are protected by the same passphrase choice.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SecretBundle {
@@ -54,31 +82,83 @@ struct SecretBundle {
     ed25519: Zeroizing<String>,
 }
 
-/// How this device's secret bundle is stored, per its passphrase choice. The
-/// on-disk file carries exactly one of the two forms; this enum makes that
-/// either/or explicit in memory (see [`StoredIdentityWire`]).
-enum KeyMaterial {
-    /// scrypt-wrapped bundle as age ASCII armor, opened with a passphrase. The
-    /// armor is a standalone age file, so recovery is possible with the `age` CLI.
-    Encrypted(Zeroizing<String>),
-    /// plaintext bundle, stored mode 0600 and opened without a passphrase.
-    Plain(Zeroizing<String>),
+/// Where the stored key bytes come from. Fetching one of these yields the bundle
+/// in whichever form it was stored; see [`StoredKey::encrypted`] for which.
+enum KeyLocation {
+    /// Held in `identity.toml` itself.
+    Inline(Zeroizing<String>),
+    /// Held in the OS keychain under this account label.
+    Keyring(String),
+    /// Printed on stdout by `read`, and written by `store` — without which the
+    /// key can be fetched but never replaced.
+    Command {
+        read: KeyCommand,
+        store: Option<KeyCommand>,
+    },
 }
 
-/// This device's stored identity: the label it stores itself under and its key
-/// material. Deserialized from [`StoredIdentityWire`], which enforces that
-/// exactly one key form is present.
-#[derive(Deserialize)]
-#[serde(try_from = "StoredIdentityWire")]
+impl KeyLocation {
+    fn source(&self) -> KeySource {
+        match self {
+            Self::Inline(_) => KeySource::File,
+            Self::Keyring(_) => KeySource::Keyring,
+            Self::Command { .. } => KeySource::Command,
+        }
+    }
+
+    /// Put `material` where this location keeps it.
+    ///
+    /// `Inline` is a no-op: its bytes travel in the identity file the caller is
+    /// about to write, rather than anywhere separate.
+    fn write(&self, material: &Zeroizing<String>) -> Result<()> {
+        match self {
+            Self::Inline(_) => Ok(()),
+            Self::Keyring(account) => keyring::store(account, material),
+            Self::Command {
+                store: Some(store), ..
+            } => key_command::store(store, material.as_bytes()),
+            Self::Command { read, store: None } => Err(EncryptionError::KeySourceReadOnly {
+                command: read.label(),
+            }),
+        }
+    }
+
+    /// This location with `material` swapped in, for the locations that carry it.
+    fn with_material(&self, material: &Zeroizing<String>) -> Self {
+        match self {
+            Self::Inline(_) => Self::Inline(material.clone()),
+            Self::Keyring(account) => Self::Keyring(account.clone()),
+            Self::Command { read, store } => Self::Command {
+                read: read.clone(),
+                store: store.clone(),
+            },
+        }
+    }
+}
+
+/// How this device's key is stored: where the bytes live, and whether they are
+/// scrypt-wrapped. The two are independent — any location holds either form.
+struct StoredKey {
+    location: KeyLocation,
+    encrypted: bool,
+}
+
+/// This device's stored identity: the label it stores itself under and how to get
+/// at its key. Built from [`StoredIdentityWire`], which enforces that exactly one
+/// location is named.
 struct StoredIdentity {
     device_name: String,
-    key: KeyMaterial,
+    key: StoredKey,
 }
 
-/// The on-disk shape of `identity.toml`: `device_name` plus exactly one of the
-/// scrypt-wrapped or plaintext key fields. `encrypted_keys` holds age ASCII armor
-/// so the secret is recoverable with the `age` CLI; [`StoredIdentity`] is the
-/// validated in-memory view.
+/// The on-disk shape of `identity.toml`: `device_name`, exactly one key location,
+/// and — for the locations that don't say so themselves — whether what's stored
+/// there is scrypt-wrapped.
+///
+/// `encrypted_keys` and `plain_keys` are the original inline fields and are kept
+/// exactly as they were, so files written before key locations existed still load
+/// and files written for the inline location still load on older builds. Being
+/// self-describing, they must not be paired with `keys_encrypted`.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredIdentityWire {
@@ -88,32 +168,99 @@ struct StoredIdentityWire {
     encrypted_keys: Option<Zeroizing<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     plain_keys: Option<Zeroizing<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    keyring_account: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    keys_command: Option<KeyCommand>,
+    /// Given the key on stdin whenever it is replaced. Without it `keys_command`
+    /// is read-only, and rotating or re-wrapping the key has nowhere to write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    keys_store_command: Option<KeyCommand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    keys_encrypted: Option<bool>,
 }
 
 impl TryFrom<StoredIdentityWire> for StoredIdentity {
-    type Error = &'static str;
+    type Error = EncryptionError;
 
-    fn try_from(wire: StoredIdentityWire) -> std::result::Result<Self, Self::Error> {
+    fn try_from(wire: StoredIdentityWire) -> Result<Self> {
         if wire.schema_version != IDENTITY_SCHEMA_VERSION {
-            return Err("journal identity file has an unsupported schema version");
+            return Err(EncryptionError::UnsupportedSchema {
+                kind: "device identity file",
+                version: wire.schema_version,
+            });
         }
-        let key = match (wire.encrypted_keys, wire.plain_keys) {
-            (Some(armor), None) => KeyMaterial::Encrypted(armor),
-            (None, Some(plain)) => KeyMaterial::Plain(plain),
-            (Some(_), Some(_)) => {
-                return Err("journal identity file has both encrypted and plaintext key material");
-            }
-            (None, None) => return Err("journal identity file has no key material"),
+
+        // Exactly one location may be named. Collecting the ones that are keeps
+        // this linear as locations are added, and lets the error name them.
+        // `implied` is the format the field says it holds, for the two inline
+        // fields that carry it in their name.
+        let mut present: Vec<(&'static str, KeyLocation, Option<bool>)> = Vec::with_capacity(4);
+        if let Some(armor) = wire.encrypted_keys {
+            present.push(("encrypted_keys", KeyLocation::Inline(armor), Some(true)));
+        }
+        if let Some(plain) = wire.plain_keys {
+            present.push(("plain_keys", KeyLocation::Inline(plain), Some(false)));
+        }
+        if let Some(account) = wire.keyring_account {
+            present.push(("keyring_account", KeyLocation::Keyring(account), None));
+        }
+        if let Some(read) = wire.keys_command {
+            present.push((
+                "keys_command",
+                KeyLocation::Command {
+                    read,
+                    store: wire.keys_store_command,
+                },
+                None,
+            ));
+        }
+
+        if present.len() > 1 {
+            let fields: Vec<&str> = present.iter().map(|(name, _, _)| *name).collect();
+            return Err(EncryptionError::AmbiguousKeyLocation {
+                fields: fields.join(", "),
+            });
+        }
+        let (field, location, implied) = present.pop().ok_or(EncryptionError::NoKeyLocation)?;
+
+        let encrypted = match (implied, wire.keys_encrypted) {
+            (Some(_), Some(_)) => return Err(EncryptionError::RedundantKeysEncrypted { field }),
+            (Some(implied), None) => implied,
+            (None, explicit) => explicit.unwrap_or(false),
         };
+
         Ok(Self {
             device_name: wire.device_name,
-            key,
+            key: StoredKey {
+                location,
+                encrypted,
+            },
         })
     }
 }
 
-/// This device's stored identity label and whether it is passphrase-protected,
-/// without decrypting anything. `None` when no identity file exists here.
+/// This device's key material as it is stored, before any passphrase is applied.
+///
+/// Retrieving it is separate from opening it because the two can need the
+/// terminal at the same time: a `keys_command` may prompt on the TTY, while a
+/// passphrase-protected identity prompts inside the TUI. Fetch first, in cooked
+/// mode; unwrap later, wherever.
+#[derive(Clone)]
+pub struct FetchedKey {
+    material: Zeroizing<String>,
+    encrypted: bool,
+}
+
+impl FetchedKey {
+    pub fn passphrase_protected(&self) -> bool {
+        self.encrypted
+    }
+}
+
+/// This device's stored identity label, where its key lives, and whether it is
+/// passphrase-protected — without retrieving or decrypting anything. `None` when
+/// no identity file exists here.
 pub fn device_identity_info(paths: &KeyPaths) -> Result<Option<DeviceIdentityInfo>> {
     if !paths.identity_file.exists() {
         return Ok(None);
@@ -121,8 +268,29 @@ pub fn device_identity_info(paths: &KeyPaths) -> Result<Option<DeviceIdentityInf
     let stored = read_stored_identity(&paths.identity_file)?;
     Ok(Some(DeviceIdentityInfo {
         name: stored.device_name,
-        passphrase_protected: matches!(stored.key, KeyMaterial::Encrypted(_)),
+        source: stored.key.location.source(),
+        passphrase_protected: stored.key.encrypted,
     }))
+}
+
+/// Retrieve this device's stored key material from wherever it lives.
+///
+/// Never needs a passphrase, and may run a command that wants the terminal — so
+/// callers must invoke this before putting the terminal into raw mode.
+pub fn fetch_key_material(paths: &KeyPaths) -> Result<FetchedKey> {
+    fetch_stored(&read_stored_identity(&paths.identity_file)?.key)
+}
+
+fn fetch_stored(key: &StoredKey) -> Result<FetchedKey> {
+    let material = match &key.location {
+        KeyLocation::Inline(text) => text.clone(),
+        KeyLocation::Keyring(account) => keyring::fetch(account)?,
+        KeyLocation::Command { read, .. } => bytes_to_utf8(key_command::run(read)?.to_vec())?,
+    };
+    Ok(FetchedKey {
+        material,
+        encrypted: key.encrypted,
+    })
 }
 
 /// Load this device's identity so encrypted entries can be read and written.
@@ -132,7 +300,17 @@ pub fn unlock_identity(
     paths: &KeyPaths,
     passphrase: Option<&SecretString>,
 ) -> Result<UnlockedIdentity> {
-    let unlocked = decrypt_identity(paths, passphrase)?;
+    unlock_fetched(paths, &fetch_key_material(paths)?, passphrase)
+}
+
+/// Open key material already retrieved by [`fetch_key_material`], then run the
+/// same validation [`unlock_identity`] does.
+pub fn unlock_fetched(
+    paths: &KeyPaths,
+    fetched: &FetchedKey,
+    passphrase: Option<&SecretString>,
+) -> Result<UnlockedIdentity> {
+    let unlocked = unwrap_key(fetched, passphrase)?;
 
     // Validate via a self round-trip (encrypt to our own public key, decrypt with
     // the identity). Unlike checking against the shared roster, this holds even
@@ -153,6 +331,63 @@ pub fn unlock_identity(
     Ok(unlocked)
 }
 
+/// Unwrap fetched key material into a usable identity: scrypt-decrypt it when it
+/// is stored encrypted, then parse the bundle. One code path for every location.
+fn unwrap_key(fetched: &FetchedKey, passphrase: Option<&SecretString>) -> Result<UnlockedIdentity> {
+    // The decrypted secret bundle lives in this string; zeroize it on drop so it
+    // doesn't linger in freed heap after we parse it into keys.
+    let bundle_toml: Zeroizing<String> = if fetched.encrypted {
+        let passphrase = passphrase.ok_or(EncryptionError::PassphraseRequired)?;
+        let identity = age::scrypt::Identity::new(passphrase.clone());
+        bytes_to_utf8(age::decrypt(&identity, fetched.material.as_bytes())?)?
+    } else {
+        fetched.material.clone()
+    };
+    parse_bundle(&bundle_toml)
+}
+
+fn parse_bundle(bundle_toml: &str) -> Result<UnlockedIdentity> {
+    // A bare age secret key is what a secret manager most often already holds,
+    // and what someone hand-editing the identity file reaches for, so say what's
+    // actually wrong instead of "malformed". Captures nothing: the offending text
+    // is the secret.
+    if bundle_toml.trim_start().starts_with("AGE-SECRET-KEY-") {
+        return Err(EncryptionError::BareAgeKeyNotBundle);
+    }
+    // toml::de::Error's Display echoes the offending input line — here the
+    // decrypted secret bundle — and would retain it unzeroized; report the
+    // plain malformed-identity error instead, like the UTF-8 guard above.
+    let bundle: SecretBundle =
+        toml::from_str(bundle_toml).map_err(|_| EncryptionError::MalformedStoredIdentity)?;
+    if bundle.schema_version != SECRET_BUNDLE_SCHEMA_VERSION {
+        return Err(EncryptionError::UnsupportedSchema {
+            kind: "secret identity bundle",
+            version: bundle.schema_version,
+        });
+    }
+    let identity = x25519::Identity::from_str(bundle.x25519.trim())
+        .map_err(|_| EncryptionError::MalformedStoredIdentity)?;
+    let seed_bytes = Zeroizing::new(hex::decode(bundle.ed25519.trim())?);
+    let seed = <[u8; 32]>::try_from(seed_bytes.as_slice())
+        .map_err(|_| EncryptionError::MalformedStoredIdentity)?;
+    Ok(UnlockedIdentity {
+        identity,
+        signing: SigningKey::from_bytes(&seed),
+    })
+}
+
+/// On invalid UTF-8, `FromUtf8Error` would carry the secret bundle unzeroized
+/// (and expose it via `Debug`); drop those bytes inside a `Zeroizing` and report
+/// a plain malformed-identity error instead.
+fn bytes_to_utf8(bytes: Vec<u8>) -> Result<Zeroizing<String>> {
+    Ok(Zeroizing::new(String::from_utf8(bytes).map_err(
+        |error| {
+            drop(Zeroizing::new(error.into_bytes()));
+            EncryptionError::MalformedStoredIdentity
+        },
+    )?))
+}
+
 /// Reject an empty passphrase before it wraps any key material. An empty string
 /// would silently degrade to plaintext-equivalent scrypt, so both write paths
 /// route through this guard.
@@ -161,6 +396,36 @@ fn reject_empty_passphrase(passphrase: Option<&SecretString>) -> Result<()> {
         return Err(EncryptionError::EmptyPassphrase);
     }
     Ok(())
+}
+
+/// Where this device's key is kept right now, so replacing it can put the new
+/// material back in the same place. A brand-new identity has no location yet and
+/// starts inline.
+fn current_location(paths: &KeyPaths) -> Result<Option<KeyLocation>> {
+    if !paths.identity_file.exists() {
+        return Ok(None);
+    }
+    Ok(Some(
+        read_stored_identity(&paths.identity_file)?.key.location,
+    ))
+}
+
+/// Check that new key material could be written where this device's key is kept,
+/// without writing any.
+///
+/// Callers use this to refuse early: before prompting for a passphrase, and
+/// before a rotation appends the signed roster op it would otherwise have to roll
+/// back. The only location that can't take a write is a `keys_command` with no
+/// matching store command.
+pub fn check_key_is_writable(paths: &KeyPaths) -> Result<()> {
+    match current_location(paths)? {
+        Some(KeyLocation::Command { read, store: None }) => {
+            Err(EncryptionError::KeySourceReadOnly {
+                command: read.label(),
+            })
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Re-wrap this device's stored identity with a different passphrase state:
@@ -173,9 +438,179 @@ pub fn set_identity_passphrase(
     new: Option<&SecretString>,
 ) -> Result<()> {
     reject_empty_passphrase(new)?;
+    // Ahead of the unlock, so a read-only key source is refused before anyone is
+    // asked for a passphrase that was never going to be used.
+    check_key_is_writable(paths)?;
     let stored = read_stored_identity(&paths.identity_file)?;
-    let identity = decrypt_identity(paths, current)?;
+    let identity = unlock_identity(paths, current)?;
     write_stored_identity(paths, &stored.device_name, &identity, new)
+}
+
+/// Where to move this device's key.
+///
+/// Switching location never changes format: what was scrypt-wrapped stays
+/// wrapped, and [`set_identity_passphrase`] remains the only thing that changes
+/// that.
+pub enum KeyTarget {
+    /// Inline in `identity.toml`, mode 0600.
+    File,
+    /// An item in the OS keychain.
+    Keyring,
+    Command {
+        /// Prints the stored key on stdout whenever it is needed.
+        read: KeyCommand,
+        /// Run once, with the key on its stdin, to seed the store. Piping rather
+        /// than passing an argument is the point: argv is world-readable.
+        store: Option<KeyCommand>,
+    },
+}
+
+/// Move this device's key to `target`, keeping its current format.
+///
+/// The new location is written and read back before the old copy is dropped, so
+/// a store that silently didn't take can't leave the device without a key.
+/// `passphrase` is needed only when the identity is passphrase-protected.
+pub fn set_key_location(
+    paths: &KeyPaths,
+    target: &KeyTarget,
+    passphrase: Option<&SecretString>,
+) -> Result<()> {
+    let stored = read_stored_identity(&paths.identity_file)?;
+    let fetched = fetch_stored(&stored.key)?;
+    // Prove we can open what's there now, before moving it anywhere.
+    let current = unwrap_key(&fetched, passphrase)?;
+
+    let moved = match target {
+        KeyTarget::File => KeyLocation::Inline(fetched.material.clone()),
+        KeyTarget::Keyring => {
+            let account = new_keyring_account()?;
+            keyring::store(&account, &fetched.material)?;
+            KeyLocation::Keyring(account)
+        }
+        KeyTarget::Command { read, store } => {
+            if let Some(store) = store {
+                key_command::store(store, fetched.material.as_bytes())?;
+            }
+            // Recorded, not just used once: without it the key could be fetched
+            // but never replaced, so rotating or re-wrapping would have nowhere
+            // to write.
+            KeyLocation::Command {
+                read: read.clone(),
+                store: store.clone(),
+            }
+        }
+    };
+    let moved = StoredKey {
+        location: moved,
+        encrypted: fetched.encrypted,
+    };
+
+    // Read it back from where it now lives and confirm the same key comes out.
+    let readback = unwrap_key(&fetch_stored(&moved)?, passphrase)?;
+    if readback.public_key() != current.public_key()
+        || readback.signing_public() != current.signing_public()
+    {
+        return Err(EncryptionError::KeySourceMismatch);
+    }
+
+    write_identity_file(&paths.identity_file, &wire_for(&stored.device_name, &moved))?;
+
+    // Nothing references the old keychain item now.
+    if let KeyLocation::Keyring(account) = &stored.key.location
+        && !matches!(&moved.location, KeyLocation::Keyring(new) if new == account)
+    {
+        keyring::delete(account);
+    }
+    Ok(())
+}
+
+/// Write a standalone copy of this device's identity to `destination`, mode 0600.
+///
+/// The result is a complete `identity.toml` holding the key in the form it is
+/// stored in — age armor when passphrase-protected, so `age --decrypt` still
+/// opens it — which makes restoring it a matter of copying the file back into a
+/// config directory. Needs no passphrase: the stored form is copied, not opened.
+pub fn export_identity(paths: &KeyPaths, destination: &Path) -> Result<()> {
+    let stored = read_stored_identity(&paths.identity_file)?;
+    let fetched = fetch_stored(&stored.key)?;
+    let inline = StoredKey {
+        location: KeyLocation::Inline(fetched.material.clone()),
+        encrypted: fetched.encrypted,
+    };
+    write_identity_file(destination, &wire_for(&stored.device_name, &inline))
+}
+
+/// A fresh opaque label for this device's keychain item.
+///
+/// Deliberately not derived from the device name: renaming a device only appends
+/// a roster op and leaves the local `device_name` stale, so a derived account
+/// would stop resolving.
+fn new_keyring_account() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|error| EncryptionError::Randomness(error.to_string()))?;
+    Ok(hex::encode(bytes))
+}
+
+/// Forget this device's keychain item, if it had one. Best effort: used when the
+/// identity is being retired anyway.
+pub fn forget_keyring_item(paths: &KeyPaths) {
+    if let Ok(stored) = read_stored_identity(&paths.identity_file)
+        && let KeyLocation::Keyring(account) = &stored.key.location
+    {
+        keyring::delete(account);
+    }
+}
+
+/// Everything needed to put this device's identity back as it was: the exact
+/// identity file, plus the key itself retrieved from wherever it was kept.
+///
+/// Both halves matter for a rollback. Restoring the file alone would leave it
+/// pointing at a keychain item or secret manager entry that a half-finished
+/// rotation had already overwritten with the new key.
+pub struct IdentitySnapshot {
+    wire: Zeroizing<Vec<u8>>,
+    device_name: String,
+    location: KeyLocation,
+    material: Zeroizing<String>,
+    encrypted: bool,
+}
+
+impl IdentitySnapshot {
+    /// A standalone identity file holding the key inline, for the on-disk rescue
+    /// copy a rotation leaves behind. It has to stand on its own: the live file
+    /// may only point at the key, which is no use if the rotation is what broke
+    /// the thing it points at.
+    pub fn portable_bytes(&self) -> Result<Zeroizing<Vec<u8>>> {
+        let inline = StoredKey {
+            location: KeyLocation::Inline(self.material.clone()),
+            encrypted: self.encrypted,
+        };
+        let text = Zeroizing::new(toml::to_string_pretty(&wire_for(
+            &self.device_name,
+            &inline,
+        ))?);
+        Ok(Zeroizing::new(text.as_bytes().to_vec()))
+    }
+}
+
+/// Capture this device's identity before something replaces it.
+pub fn snapshot_identity(paths: &KeyPaths) -> Result<IdentitySnapshot> {
+    let stored = read_stored_identity(&paths.identity_file)?;
+    let fetched = fetch_stored(&stored.key)?;
+    Ok(IdentitySnapshot {
+        wire: Zeroizing::new(fs::read(&paths.identity_file)?),
+        device_name: stored.device_name,
+        location: stored.key.location,
+        material: fetched.material,
+        encrypted: fetched.encrypted,
+    })
+}
+
+/// Put back an identity captured by [`snapshot_identity`]: the key first, into
+/// wherever it was kept, then the file that points at it.
+pub fn restore_identity(paths: &KeyPaths, snapshot: &IdentitySnapshot) -> Result<()> {
+    snapshot.location.write(&snapshot.material)?;
+    atomic_write_private(&paths.identity_file, &snapshot.wire)
 }
 
 /// Read this device's identity file verbatim, for snapshotting before a rotation
@@ -219,6 +654,9 @@ pub(crate) fn create_device_identity(
 /// when a passphrase is given and storing it plaintext (mode 0600) otherwise.
 /// Both the age key and the Ed25519 signing seed are bundled together so the same
 /// passphrase choice protects both.
+///
+/// Refuses when the key currently lives outside the identity file: see
+/// [`reject_external_key_rewrite`].
 pub(crate) fn write_stored_identity(
     paths: &KeyPaths,
     name: &str,
@@ -226,80 +664,110 @@ pub(crate) fn write_stored_identity(
     passphrase: Option<&SecretString>,
 ) -> Result<()> {
     reject_empty_passphrase(passphrase)?;
+    let material = stored_form(identity, passphrase)?;
+    // Put the new material back where this device already keeps its key, rather
+    // than always inline — otherwise re-wrapping or rotating would quietly move
+    // the key out of the keychain or secret manager the user chose. A fresh
+    // identity has no location yet and starts inline.
+    let location = match current_location(paths)? {
+        Some(location) => location.with_material(&material.text),
+        None => KeyLocation::Inline(material.text.clone()),
+    };
+    location.write(&material.text)?;
+    write_identity_file(
+        &paths.identity_file,
+        &wire_for(
+            name,
+            &StoredKey {
+                location,
+                encrypted: material.encrypted,
+            },
+        ),
+    )
+}
+
+/// This device's key bundle in the form it gets stored in: age ASCII armor when a
+/// passphrase is given (a standalone age file, so recovery is possible with the
+/// `age` CLI), cleartext bundle TOML otherwise.
+fn stored_form(
+    identity: &UnlockedIdentity,
+    passphrase: Option<&SecretString>,
+) -> Result<StoredMaterial> {
+    let bundle = bundle_toml(identity)?;
+    match passphrase {
+        Some(passphrase) => Ok(StoredMaterial {
+            text: encrypt_secret(bundle.as_bytes(), passphrase)?,
+            encrypted: true,
+        }),
+        None => Ok(StoredMaterial {
+            text: bundle,
+            encrypted: false,
+        }),
+    }
+}
+
+struct StoredMaterial {
+    text: Zeroizing<String>,
+    encrypted: bool,
+}
+
+fn bundle_toml(identity: &UnlockedIdentity) -> Result<Zeroizing<String>> {
     let bundle = SecretBundle {
         schema_version: SECRET_BUNDLE_SCHEMA_VERSION,
         x25519: Zeroizing::new(identity.identity.to_string().expose_secret().to_string()),
         ed25519: Zeroizing::new(hex::encode(identity.signing.to_bytes())),
     };
-    let bundle_toml = Zeroizing::new(toml::to_string(&bundle)?);
-    let (encrypted_keys, plain_keys) = match passphrase {
-        Some(passphrase) => (
-            Some(encrypt_secret(bundle_toml.as_bytes(), passphrase)?),
-            None,
-        ),
-        None => (None, Some(bundle_toml.clone())),
+    Ok(Zeroizing::new(toml::to_string(&bundle)?))
+}
+
+fn wire_for(name: &str, key: &StoredKey) -> StoredIdentityWire {
+    let (encrypted_keys, plain_keys) = match (&key.location, key.encrypted) {
+        (KeyLocation::Inline(text), true) => (Some(text.clone()), None),
+        (KeyLocation::Inline(text), false) => (None, Some(text.clone())),
+        _ => (None, None),
     };
-    let stored = StoredIdentityWire {
+    StoredIdentityWire {
         schema_version: IDENTITY_SCHEMA_VERSION,
         device_name: name.to_string(),
         encrypted_keys,
         plain_keys,
-    };
-    // The serialized document carries the plaintext key bundle in the
-    // no-passphrase case; zeroize the buffer once it's on disk.
-    let serialized = Zeroizing::new(toml::to_string_pretty(&stored)?);
-    atomic_write_private(&paths.identity_file, serialized.as_bytes())
+        keyring_account: match &key.location {
+            KeyLocation::Keyring(account) => Some(account.clone()),
+            _ => None,
+        },
+        keys_command: match &key.location {
+            KeyLocation::Command { read, .. } => Some(read.clone()),
+            _ => None,
+        },
+        keys_store_command: match &key.location {
+            KeyLocation::Command { store, .. } => store.clone(),
+            _ => None,
+        },
+        // The inline fields say which format they hold, so this stays absent for
+        // them — which is also what keeps inline files readable on older builds.
+        keys_encrypted: match key.location {
+            KeyLocation::Inline(_) => None,
+            _ => Some(key.encrypted),
+        },
+    }
 }
 
-fn decrypt_identity(
-    paths: &KeyPaths,
-    passphrase: Option<&SecretString>,
-) -> Result<UnlockedIdentity> {
-    let stored = read_stored_identity(&paths.identity_file)?;
-    // The decrypted secret bundle lives in this string; zeroize it on drop so it
-    // doesn't linger in freed heap after we parse it into keys.
-    let bundle_toml: Zeroizing<String> = match &stored.key {
-        KeyMaterial::Encrypted(armor) => {
-            let passphrase = passphrase.ok_or(EncryptionError::PassphraseRequired)?;
-            let identity = age::scrypt::Identity::new(passphrase.clone());
-            let plaintext = age::decrypt(&identity, armor.as_bytes())?;
-            // On invalid UTF-8, FromUtf8Error would carry the decrypted secret
-            // bundle unzeroized (and expose it via Debug); drop those bytes inside
-            // a Zeroizing and report a plain malformed-identity error instead.
-            Zeroizing::new(String::from_utf8(plaintext).map_err(|error| {
-                drop(Zeroizing::new(error.into_bytes()));
-                EncryptionError::MalformedStoredIdentity
-            })?)
-        }
-        KeyMaterial::Plain(plain) => plain.clone(),
-    };
-    // toml::de::Error's Display echoes the offending input line — here the
-    // decrypted secret bundle — and would retain it unzeroized; report the
-    // plain malformed-identity error instead, like the UTF-8 guard above.
-    let bundle: SecretBundle =
-        toml::from_str(&bundle_toml).map_err(|_| EncryptionError::MalformedStoredIdentity)?;
-    if bundle.schema_version != SECRET_BUNDLE_SCHEMA_VERSION {
-        return Err(EncryptionError::UnsupportedSchema {
-            kind: "secret identity bundle",
-            version: bundle.schema_version,
-        });
-    }
-    let identity = x25519::Identity::from_str(bundle.x25519.trim())
-        .map_err(|_| EncryptionError::MalformedStoredIdentity)?;
-    let seed_bytes = Zeroizing::new(hex::decode(bundle.ed25519.trim())?);
-    let seed = <[u8; 32]>::try_from(seed_bytes.as_slice())
-        .map_err(|_| EncryptionError::MalformedStoredIdentity)?;
-    Ok(UnlockedIdentity {
-        identity,
-        signing: SigningKey::from_bytes(&seed),
-    })
+fn write_identity_file(path: &Path, wire: &StoredIdentityWire) -> Result<()> {
+    // The serialized document carries the plaintext key bundle in the inline
+    // no-passphrase case; zeroize the buffer once it's on disk.
+    let serialized = Zeroizing::new(toml::to_string_pretty(wire)?);
+    atomic_write_private(path, serialized.as_bytes())
 }
 
 fn read_stored_identity(path: &Path) -> Result<StoredIdentity> {
-    // The raw file carries the plaintext key bundle in the no-passphrase case:
-    // zeroize the buffer, and don't let toml::de::Error echo a line of it.
+    // The raw file carries the plaintext key bundle in the inline no-passphrase
+    // case: zeroize the buffer, and don't let toml::de::Error echo a line of it.
+    // Our own field validation runs after the parse, so it reports accurately
+    // instead of being flattened into a serde error.
     let raw = Zeroizing::new(fs::read_to_string(path)?);
-    toml::from_str(&raw).map_err(|_| EncryptionError::MalformedStoredIdentity)
+    let wire: StoredIdentityWire =
+        toml::from_str(&raw).map_err(|_| EncryptionError::MalformedStoredIdentity)?;
+    StoredIdentity::try_from(wire)
 }
 
 fn encrypt_secret(plaintext: &[u8], passphrase: &SecretString) -> Result<Zeroizing<String>> {

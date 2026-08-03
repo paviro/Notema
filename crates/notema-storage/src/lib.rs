@@ -126,6 +126,10 @@ fn convert_to_srgb(image: &image::DynamicImage, icc: &[u8]) -> Option<image::Dyn
 pub struct JournalStore {
     paths: JournalStorePaths,
     identity: Option<crypto::UnlockedIdentity>,
+    /// Key material retrieved ahead of the unlock, so retrieval and the
+    /// passphrase prompt never both want the terminal. See
+    /// [`JournalStore::prefetch_key_material`].
+    fetched_key: Option<crypto::FetchedKey>,
 }
 
 /// Whether this device can open the store once the unlock phase is done, and why
@@ -194,6 +198,7 @@ impl JournalStore {
         Self {
             paths: JournalStorePaths::new(journal_root, config_dir),
             identity: None,
+            fetched_key: None,
         }
     }
 
@@ -201,6 +206,7 @@ impl JournalStore {
         Ok(Self {
             paths: JournalStorePaths::for_config(config_path, journal_root)?,
             identity: None,
+            fetched_key: None,
         })
     }
 
@@ -593,6 +599,12 @@ impl JournalStore {
         passphrase: Option<&SecretString>,
         mut progress: impl FnMut(usize, usize),
     ) -> AppResult<MigrationSummary> {
+        // Before anything is written. A rotation mints a key that has to land
+        // back wherever this device keeps its key; if that place can't take a
+        // write, we only find out after a signed `add` op and a full
+        // re-encryption pass — putting the store through the whole rollback for
+        // a refusal visible now.
+        crypto::check_key_is_writable(&self.paths.keys)?;
         let old = self.require_reencrypt_identity("rotate")?.clone();
         let old_key = old.public_key();
         let root = self.paths.journal_root.clone();
@@ -601,13 +613,16 @@ impl JournalStore {
         // no-passphrase case); keep the rotation backup zeroized. Use
         // read_optional_file so a transient read error isn't mistaken for "no
         // pins" and then delete the rollback pins on restore.
-        let identity_backup =
-            crypto::Zeroizing::new(crypto::read_identity_file_bytes(&self.paths.keys)?);
+        // Captures the key itself, not just the file: when the key lives in a
+        // keychain or a secret manager, the file alone is a pointer at something
+        // this rotation is about to overwrite.
+        let identity_backup = crypto::snapshot_identity(&self.paths.keys)?;
         // Also snapshot it to disk (0600, config dir — never synced): if the
         // process dies mid-rotation or the rollback's identity restore fails,
         // the in-memory copy is gone and this file is the only pre-rotation key.
+        // Written self-contained for the same reason.
         let identity_backup_path = migrate::file_backup_path(&self.paths.keys.identity_file);
-        crypto::atomic_write_private(&identity_backup_path, &identity_backup)?;
+        crypto::atomic_write_private(&identity_backup_path, &identity_backup.portable_bytes()?)?;
         let trust_backup = read_optional_file(&self.paths.keys.trust_file)?;
         let backup = migrate::backup_store(&root)?;
 
@@ -662,7 +677,7 @@ impl JournalStore {
                     );
                 }
                 if let Err(restore_error) =
-                    crypto::restore_identity_file(&self.paths.keys, &identity_backup)
+                    crypto::restore_identity(&self.paths.keys, &identity_backup)
                 {
                     bail!(
                         "{error}; the store was rolled back, but the pre-rotation identity \
@@ -793,8 +808,57 @@ impl JournalStore {
     /// and `None` for a plaintext one. After this succeeds, the store
     /// transparently handles both plaintext and encrypted entries.
     pub fn unlock(&mut self, passphrase: Option<&SecretString>) -> AppResult<()> {
-        self.identity = Some(crypto::unlock_identity(&self.paths.keys, passphrase)?);
+        self.identity = Some(match self.fetched_key.take() {
+            Some(fetched) => crypto::unlock_fetched(&self.paths.keys, &fetched, passphrase)?,
+            None => crypto::unlock_identity(&self.paths.keys, passphrase)?,
+        });
         Ok(())
+    }
+
+    /// Retrieve this device's stored key material without opening it, so a later
+    /// [`Self::unlock`] needs nothing but the passphrase.
+    ///
+    /// Retrieval can want the terminal — a `keys_command` may run `pinentry`, and
+    /// a keychain may prompt — while a passphrase-protected identity prompts
+    /// inside the TUI. Callers run this before taking the terminal over, so the
+    /// two can never contend for it.
+    pub fn prefetch_key_material(&mut self) -> AppResult<()> {
+        if self.unlock_available() && !self.is_unlocked() {
+            self.fetched_key = Some(crypto::fetch_key_material(&self.paths.keys)?);
+        }
+        Ok(())
+    }
+
+    /// Whether this device's key needs retrieving from somewhere that might
+    /// prompt, so the caller knows to [`Self::prefetch_key_material`] early.
+    pub fn key_is_external(&self) -> AppResult<bool> {
+        Ok(self
+            .this_device()?
+            .is_some_and(|info| info.source != crypto::KeySource::File))
+    }
+
+    /// Move this device's key to another location, keeping its current format.
+    pub fn set_key_location(
+        &self,
+        target: &crypto::KeyTarget,
+        passphrase: Option<&SecretString>,
+    ) -> AppResult<()> {
+        Ok(crypto::set_key_location(
+            &self.paths.keys,
+            target,
+            passphrase,
+        )?)
+    }
+
+    /// Write a standalone copy of this device's identity, for safekeeping.
+    pub fn export_identity(&self, destination: &Path) -> AppResult<()> {
+        Ok(crypto::export_identity(&self.paths.keys, destination)?)
+    }
+
+    /// Check that replacing this device's key would have somewhere to write,
+    /// without writing anything — so callers can refuse before prompting.
+    pub fn check_key_is_writable(&self) -> AppResult<()> {
+        Ok(crypto::check_key_is_writable(&self.paths.keys)?)
     }
 
     pub fn is_unlocked(&self) -> bool {

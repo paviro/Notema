@@ -1,7 +1,66 @@
+use std::fmt;
 use std::path::PathBuf;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, EncryptionError>;
+
+/// Whether a run of text carries something that reads like key material.
+///
+/// Used to keep command output and command lines out of error messages. Not a
+/// security boundary — neither is expected to hold the secret in the first
+/// place — but the obvious shapes are free to catch.
+pub(crate) fn looks_secret(text: &str) -> bool {
+    text.contains("AGE-SECRET-KEY-") || text.contains("-----BEGIN AGE")
+}
+
+/// The tail of a key command's stderr, carried in an error so a failure can say
+/// what the command complained about.
+///
+/// `Display` prints it; `Debug` prints only its size. [`EncryptionError`] derives
+/// `Debug`, so a command that echoed key material to stderr would otherwise leak
+/// it through `{:?}` — the same rule the identity parse guards follow.
+#[derive(Clone, PartialEq, Eq)]
+pub struct CommandStderr(String);
+
+impl CommandStderr {
+    /// Keep the last `limit` bytes (the actual complaint is usually last) and drop
+    /// lines that look like key material. Not a security boundary — stderr is the
+    /// command's own output and isn't expected to carry the secret — but the
+    /// obvious case is free to catch.
+    pub(crate) fn new(raw: &str, limit: usize) -> Self {
+        let tail = if raw.len() <= limit {
+            raw
+        } else {
+            let mut start = raw.len() - limit;
+            while !raw.is_char_boundary(start) {
+                start += 1;
+            }
+            &raw[start..]
+        };
+        let kept: Vec<&str> = tail.lines().filter(|line| !looks_secret(line)).collect();
+        Self(kept.join("\n").trim().to_string())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl fmt::Display for CommandStderr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            write!(f, ": {}", self.0)
+        }
+    }
+}
+
+impl fmt::Debug for CommandStderr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CommandStderr(<{} bytes>)", self.0.len())
+    }
+}
 
 /// A failure in the encryption layer. The first three variants carry state a
 /// caller acts on (prompt for a passphrase, refuse to continue); the domain
@@ -99,6 +158,84 @@ pub enum EncryptionError {
     /// not a valid age key).
     #[error("journal identity key material is malformed")]
     MalformedStoredIdentity,
+
+    /// The identity file names more than one key location, so there is no
+    /// unambiguous key to load. `fields` lists the offending field names.
+    #[error(
+        "journal identity file names more than one key location ({fields}); it must name exactly one"
+    )]
+    AmbiguousKeyLocation { fields: String },
+
+    /// The identity file names no key location at all.
+    #[error(
+        "journal identity file has no key material; expected one of plain_keys, encrypted_keys, keyring_account, keys_command"
+    )]
+    NoKeyLocation,
+
+    /// `keys_encrypted` was set alongside an inline key field. The inline fields
+    /// already say which format they hold, so the pair could contradict itself.
+    #[error(
+        "journal identity file sets keys_encrypted alongside {field}, which already implies the format"
+    )]
+    RedundantKeysEncrypted { field: &'static str },
+
+    /// `keys_command` is present but names no program to run.
+    #[error("keys_command in the journal identity file names no program to run")]
+    EmptyKeyCommand,
+
+    /// The key command could not be started — wrong path, not installed, or not
+    /// executable. Kept distinct from a non-zero exit because it is the most
+    /// common misconfiguration and needs a different fix.
+    #[error("could not run the journal key command '{program}': {detail}")]
+    KeyCommandSpawn { program: String, detail: String },
+
+    /// The key command ran and exited non-zero.
+    #[error("the journal key command '{program}' failed ({status}){stderr}")]
+    KeyCommandFailed {
+        program: String,
+        status: String,
+        stderr: CommandStderr,
+    },
+
+    /// The key command printed more than the secret bundle could plausibly be.
+    #[error(
+        "the journal key command printed more than {limit} bytes; expected the secret key bundle"
+    )]
+    KeyCommandOutputTooLarge { limit: usize },
+
+    /// The stored key material is a bare age secret key rather than the whole
+    /// bundle — the shape a secret manager most often already holds. Carries
+    /// nothing: the offending text is the secret.
+    #[error(
+        "the stored key material is a bare age secret key, but the whole secret bundle is needed (schema_version, x25519, ed25519). Write one with `notema encryption device export-key`"
+    )]
+    BareAgeKeyNotBundle,
+
+    /// A key-location switch read back a different key than this device uses, so
+    /// the local copy was kept rather than stranding the device.
+    #[error(
+        "the new key location returned a different key than this device uses; refusing to switch"
+    )]
+    KeySourceMismatch,
+
+    /// The key is fetched by a command with no matching store command, so it can
+    /// be read but never replaced.
+    #[error(
+        "this device's key is fetched by '{command}', which can read it but not replace it. Re-run `notema encryption device key-source command` with `--store` so new key material has somewhere to go, or bring the key back with `notema encryption device key-source file`"
+    )]
+    KeySourceReadOnly { command: String },
+
+    /// No OS keyring is available on this platform or in this session.
+    #[error("no OS keyring is available here: {detail}")]
+    KeyringUnavailable { detail: String },
+
+    /// The identity file points at a keyring item that isn't there.
+    #[error("the OS keyring has no key for this device (account '{account}')")]
+    KeyringItemMissing { account: String },
+
+    /// The OS keyring refused or failed the request.
+    #[error("the OS keyring request failed: {detail}")]
+    KeyringFailed { detail: String },
 
     /// The config path has no parent directory to derive key locations from.
     #[error("config path has no parent directory")]

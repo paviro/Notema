@@ -364,7 +364,7 @@ fn malformed_plain_secret_bundle_error_does_not_echo_secret() {
     // exercises the bundle parse without scrypt.
     fs::write(
         &paths.identity_file,
-        "schema_version = 1\ndevice_name = \"laptop\"\nplain_keys = \"AGE-SECRET-KEY-MARKER broken [ toml\"\n",
+        "schema_version = 1\ndevice_name = \"laptop\"\nplain_keys = \"x25519 = 'MARKER' broken [ toml\"\n",
     )
     .unwrap();
 
@@ -376,6 +376,29 @@ fn malformed_plain_secret_bundle_error_does_not_echo_secret() {
     assert!(
         !error.to_string().contains("MARKER"),
         "parse error must not echo the secret bundle: {error}"
+    );
+}
+
+#[test]
+fn a_bare_age_key_instead_of_a_bundle_says_so() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
+    // The shape a secret manager already holds, and what someone hand-editing
+    // the file reaches for. It deserves better than "malformed".
+    fs::write(
+        &paths.identity_file,
+        "schema_version = 1\ndevice_name = \"laptop\"\nplain_keys = \"AGE-SECRET-KEY-1QQQQQQMARKER\"\n",
+    )
+    .unwrap();
+
+    let error = unlock_identity(&paths, None)
+        .err()
+        .expect("must not unlock");
+    assert!(matches!(error, EncryptionError::BareAgeKeyNotBundle));
+    assert!(
+        !error.to_string().contains("MARKER"),
+        "the error must not echo the key: {error}"
     );
 }
 
@@ -427,4 +450,420 @@ fn plaintext_len_rejects_non_age_file() {
         encrypted_plaintext_len(&truncated),
         Err(EncryptionError::MalformedAgeFile { .. })
     ));
+}
+
+// -- key command runner -------------------------------------------------------
+
+/// A portable "print this file" command, so these tests don't need `op` or
+/// `pass` installed.
+fn cat_command(path: &Path) -> KeyCommand {
+    if cfg!(windows) {
+        KeyCommand::Argv(vec![
+            "cmd".into(),
+            "/C".into(),
+            "type".into(),
+            path.display().to_string(),
+        ])
+    } else {
+        KeyCommand::Argv(vec!["cat".into(), path.display().to_string()])
+    }
+}
+
+#[test]
+fn key_command_returns_stdout_verbatim() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("bundle.toml");
+    fs::write(&file, b"schema_version = 1\n").unwrap();
+
+    let out = key_command::run(&cat_command(&file)).unwrap();
+    assert_eq!(out.as_slice(), b"schema_version = 1\n");
+}
+
+#[test]
+fn missing_key_command_program_names_the_program() {
+    let command = KeyCommand::Argv(vec!["notema-no-such-program-xyz".into()]);
+    let error = key_command::run(&command).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("notema-no-such-program-xyz"), "{message}");
+    assert!(message.contains("PATH"), "{message}");
+}
+
+#[test]
+fn empty_key_command_is_rejected() {
+    assert!(matches!(
+        key_command::run(&KeyCommand::Argv(vec![])).unwrap_err(),
+        EncryptionError::EmptyKeyCommand
+    ));
+    assert!(matches!(
+        key_command::run(&KeyCommand::Shell("   ".into())).unwrap_err(),
+        EncryptionError::EmptyKeyCommand
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn failing_key_command_surfaces_stderr_without_echoing_key_material() {
+    const MARKER: &str = "AGE-SECRET-KEY-1TESTMARKER";
+    let command = KeyCommand::Shell(format!(
+        "printf '{MARKER}\\nvault is locked\\n' >&2; exit 3"
+    ));
+    let error = key_command::run(&command).unwrap_err();
+
+    let display = error.to_string();
+    let debug = format!("{error:?}");
+    assert!(display.contains("vault is locked"), "{display}");
+    assert!(display.contains("exit status 3"), "{display}");
+    assert!(
+        !display.contains(MARKER),
+        "stderr leaked the key: {display}"
+    );
+    assert!(!debug.contains(MARKER), "Debug leaked the key: {debug}");
+}
+
+#[cfg(unix)]
+#[test]
+fn key_command_output_is_bounded_rather_than_unbounded() {
+    // A single process rather than a shell pipeline, so the kill on overflow
+    // lands on the thing producing the output.
+    let command = KeyCommand::Argv(vec![
+        "head".into(),
+        "-c".into(),
+        "200000".into(),
+        "/dev/zero".into(),
+    ]);
+    assert!(matches!(
+        key_command::run(&command).unwrap_err(),
+        EncryptionError::KeyCommandOutputTooLarge { .. }
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn key_command_never_ending_output_does_not_hang() {
+    // `yes` never stops on its own: reaching the cap has to cut it off rather
+    // than wait for an EOF that isn't coming.
+    let command = KeyCommand::Argv(vec!["yes".into()]);
+    assert!(matches!(
+        key_command::run(&command).unwrap_err(),
+        EncryptionError::KeyCommandOutputTooLarge { .. }
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn key_command_survives_a_chatty_stderr() {
+    // More stderr than a pipe buffer holds: draining it concurrently is what
+    // keeps this from deadlocking.
+    let command = KeyCommand::Shell("head -c 200000 /dev/zero >&2; printf 'ok'".into());
+    let out = key_command::run(&command).unwrap();
+    assert_eq!(out.as_slice(), b"ok");
+}
+
+#[cfg(unix)]
+#[test]
+fn key_command_store_pipes_material_to_stdin() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("stored.toml");
+    let command = KeyCommand::Shell(format!("cat > {}", file.display()));
+
+    key_command::store(&command, b"schema_version = 1\n").unwrap();
+    assert_eq!(fs::read(&file).unwrap(), b"schema_version = 1\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn failing_store_command_reports_its_status() {
+    let error = key_command::store(&KeyCommand::Shell("exit 7".into()), b"x").unwrap_err();
+    assert!(error.to_string().contains("exit status 7"), "{error}");
+}
+
+// -- key locations ------------------------------------------------------------
+
+fn write_wire(paths: &KeyPaths, body: &str) {
+    fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
+    fs::write(&paths.identity_file, body).unwrap();
+}
+
+#[test]
+fn naming_two_key_locations_names_both() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    write_wire(
+        &paths,
+        "schema_version = 1\ndevice_name = \"laptop\"\nplain_keys = \"SECRETMARKER\"\nkeys_command = \"cat /nope\"\n",
+    );
+
+    let error = device_identity_info(&paths).unwrap_err();
+    let message = error.to_string();
+    assert!(matches!(
+        error,
+        EncryptionError::AmbiguousKeyLocation { .. }
+    ));
+    assert!(message.contains("plain_keys"), "{message}");
+    assert!(message.contains("keys_command"), "{message}");
+    // The field names are ours; the values are the secret and must not appear.
+    assert!(!message.contains("SECRETMARKER"), "{message}");
+}
+
+#[test]
+fn naming_no_key_location_says_so() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    write_wire(&paths, "schema_version = 1\ndevice_name = \"laptop\"\n");
+
+    assert!(matches!(
+        device_identity_info(&paths).unwrap_err(),
+        EncryptionError::NoKeyLocation
+    ));
+}
+
+#[test]
+fn keys_encrypted_beside_a_self_describing_field_is_rejected() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    write_wire(
+        &paths,
+        "schema_version = 1\ndevice_name = \"laptop\"\nplain_keys = \"x\"\nkeys_encrypted = true\n",
+    );
+
+    assert!(matches!(
+        device_identity_info(&paths).unwrap_err(),
+        EncryptionError::RedundantKeysEncrypted {
+            field: "plain_keys"
+        }
+    ));
+}
+
+#[test]
+fn an_unsupported_identity_schema_reports_the_version() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    write_wire(
+        &paths,
+        "schema_version = 99\ndevice_name = \"laptop\"\nplain_keys = \"x\"\n",
+    );
+
+    // Previously flattened into "key material is malformed", which read as
+    // corruption rather than a version mismatch.
+    assert!(matches!(
+        device_identity_info(&paths).unwrap_err(),
+        EncryptionError::UnsupportedSchema {
+            kind: "device identity file",
+            version: 99
+        }
+    ));
+}
+
+/// Move a fresh identity's key out to a command-backed file, the way the CLI
+/// does: seed with `--store`, read back with `--read`.
+fn move_to_command(paths: &KeyPaths, bundle: &Path, passphrase: Option<&SecretString>) {
+    let target = KeyTarget::Command {
+        read: cat_command(bundle),
+        store: KeyCommand::Shell(format!("cat > {}", bundle.display())).into(),
+    };
+    set_key_location(paths, &target, passphrase).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_sourced_identity_unlocks_and_round_trips() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+    move_to_command(&paths, &bundle, None);
+
+    // The whole point: the key is no longer in the identity file.
+    let on_disk = fs::read_to_string(&paths.identity_file).unwrap();
+    assert!(!on_disk.contains("AGE-SECRET-KEY-"), "{on_disk}");
+    assert!(on_disk.contains("keys_command"), "{on_disk}");
+
+    let info = device_identity_info(&paths).unwrap().unwrap();
+    assert_eq!(info.source, KeySource::Command);
+    assert!(!info.passphrase_protected);
+
+    let unlocked = unlock_identity(&paths, None).unwrap();
+    assert_eq!(unlocked.public_key(), before);
+    let ciphertext =
+        encrypt_bytes(&paths, &PlaintextBytes::copy_from_slice(b"via command")).unwrap();
+    assert_eq!(
+        decrypt_file_bytes_from(&unlocked, &ciphertext)
+            .unwrap()
+            .as_bytes(),
+        b"via command"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_sourced_identity_keeps_its_passphrase() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.age");
+    let pw = SecretString::from("pw");
+
+    initialize_store_identity(&paths, "laptop", Some(&pw)).unwrap();
+    move_to_command(&paths, &bundle, Some(&pw));
+
+    // Format and location are independent: moving it kept the scrypt wrap, so
+    // what landed outside is armor rather than a bare key.
+    let stored = fs::read_to_string(&bundle).unwrap();
+    assert!(stored.contains("BEGIN AGE ENCRYPTED FILE"), "{stored}");
+
+    // Reported without fetching anything, so the unlock screen still knows to ask.
+    let info = device_identity_info(&paths).unwrap().unwrap();
+    assert!(info.passphrase_protected);
+    assert_eq!(info.source, KeySource::Command);
+
+    assert!(unlock_identity(&paths, None).is_err());
+    assert!(unlock_identity(&paths, Some(&pw)).is_ok());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_passphrase_change_writes_back_through_the_store_command() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+    let pw = SecretString::from("pw");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+    move_to_command(&paths, &bundle, None);
+
+    // There is a store command, so re-wrapping has somewhere to put the result:
+    // it must succeed and leave the key where the user chose to keep it.
+    set_identity_passphrase(&paths, None, Some(&pw)).unwrap();
+
+    let info = device_identity_info(&paths).unwrap().unwrap();
+    assert_eq!(info.source, KeySource::Command);
+    assert!(info.passphrase_protected);
+    assert!(
+        fs::read_to_string(&bundle)
+            .unwrap()
+            .contains("BEGIN AGE ENCRYPTED FILE"),
+        "the re-wrapped key should have gone back through the store command"
+    );
+    assert!(
+        !fs::read_to_string(&paths.identity_file)
+            .unwrap()
+            .contains("AGE-SECRET-KEY-"),
+        "re-wrapping must not quietly pull the key back inline"
+    );
+    assert_eq!(
+        unlock_identity(&paths, Some(&pw)).unwrap().public_key(),
+        before
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_read_only_key_command_refuses_before_touching_anything() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+
+    let recipient = initialize_store_identity(&paths, "laptop", None).unwrap();
+    // No `--store`, so the key can be fetched but never replaced.
+    set_key_location(
+        &paths,
+        &KeyTarget::Command {
+            read: cat_command(&bundle),
+            store: Some(KeyCommand::Shell(format!("cat > {}", bundle.display()))),
+        },
+        None,
+    )
+    .unwrap();
+    let identity_toml = fs::read_to_string(&paths.identity_file).unwrap();
+    fs::write(
+        &paths.identity_file,
+        identity_toml
+            .lines()
+            .filter(|line| !line.starts_with("keys_store_command"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .unwrap();
+    let before = fs::read(&paths.identity_file).unwrap();
+
+    let error = set_identity_passphrase(&paths, None, Some(&SecretString::from("pw"))).unwrap_err();
+    assert!(matches!(error, EncryptionError::KeySourceReadOnly { .. }));
+
+    let identity = unlock_identity(&paths, None).unwrap();
+    assert!(matches!(
+        commit_rotated_identity(&paths, &recipient, &identity, None).unwrap_err(),
+        EncryptionError::KeySourceReadOnly { .. }
+    ));
+
+    assert_eq!(
+        fs::read(&paths.identity_file).unwrap(),
+        before,
+        "a refused rewrite must leave the identity file untouched"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_switch_that_reads_back_a_different_key_is_refused() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let decoy = dir.path().join("decoy.toml");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = fs::read(&paths.identity_file).unwrap();
+
+    // A store command that drops the key on the floor while a read command
+    // serves someone else's: the readback check is what stops this becoming a
+    // device that can never unlock again.
+    let other = paths_in(&dir.path().join("other"));
+    initialize_store_identity(&other, "other", None).unwrap();
+    let other_bundle = fs::read_to_string(&other.identity_file).unwrap();
+    let other_bundle: toml::Value = toml::from_str(&other_bundle).unwrap();
+    fs::write(
+        &decoy,
+        other_bundle.get("plain_keys").unwrap().as_str().unwrap(),
+    )
+    .unwrap();
+
+    let target = KeyTarget::Command {
+        read: cat_command(&decoy),
+        store: KeyCommand::Shell("cat > /dev/null".into()).into(),
+    };
+    assert!(matches!(
+        set_key_location(&paths, &target, None).unwrap_err(),
+        EncryptionError::KeySourceMismatch
+    ));
+    assert_eq!(fs::read(&paths.identity_file).unwrap(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_exported_identity_restores_into_a_fresh_config_dir() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+    let backup = dir.path().join("backup.toml");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+    move_to_command(&paths, &bundle, None);
+
+    // Exporting inlines whatever the key currently is, so the backup stands on
+    // its own even though the live identity points at a command.
+    export_identity(&paths, &backup).unwrap();
+
+    // Restoring is copying the file back — no import command in the middle.
+    let restored = paths_in(&dir.path().join("restored"));
+    fs::create_dir_all(restored.identity_file.parent().unwrap()).unwrap();
+    fs::copy(&backup, &restored.identity_file).unwrap();
+
+    let info = device_identity_info(&restored).unwrap().unwrap();
+    assert_eq!(info.name, "laptop");
+    assert_eq!(info.source, KeySource::File);
+    assert_eq!(
+        unlock_identity(&restored, None).unwrap().public_key(),
+        before
+    );
 }

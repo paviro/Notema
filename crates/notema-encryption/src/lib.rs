@@ -17,6 +17,8 @@ mod cipher;
 mod error;
 mod files;
 mod identity;
+mod key_command;
+mod keyring;
 mod paths;
 mod pending;
 mod recipients;
@@ -34,12 +36,15 @@ pub use cipher::{
     decrypt_file_reader, encrypt_bytes, encrypt_new_entry, encrypt_to_file,
     encrypted_plaintext_len,
 };
-pub use error::{EncryptionError, Result};
+pub use error::{CommandStderr, EncryptionError, Result};
 pub use files::{atomic_write, atomic_write_private, atomic_write_with, sync_parent_dir};
 pub use identity::{
-    DeviceIdentityInfo, UnlockedIdentity, device_identity_info, read_identity_file_bytes,
-    restore_identity_file, set_identity_passphrase, unlock_identity,
+    DeviceIdentityInfo, FetchedKey, IdentitySnapshot, KeySource, KeyTarget, UnlockedIdentity,
+    check_key_is_writable, device_identity_info, export_identity, fetch_key_material,
+    forget_keyring_item, read_identity_file_bytes, restore_identity, restore_identity_file,
+    set_identity_passphrase, set_key_location, snapshot_identity, unlock_fetched, unlock_identity,
 };
+pub use key_command::KeyCommand;
 pub use paths::KeyPaths;
 pub use pending::{
     PendingRequest, read_pending, remove_pending, renew_store_access, request_store_access,
