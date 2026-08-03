@@ -83,6 +83,18 @@ impl DispatchOutcome {
         self.effects.push(effect);
         self
     }
+
+    /// The `redraw` flag for a run-loop site that intentionally drops the outcome's
+    /// effects because its action emits none today. Debug-asserts that invariant so
+    /// a future effect-emitting action trips here instead of silently swallowing it.
+    #[track_caller]
+    pub(crate) fn redraw_without_effects(self) -> bool {
+        debug_assert!(
+            self.effects.is_empty(),
+            "run-loop site dropped dispatch effects that now need executing",
+        );
+        self.redraw
+    }
 }
 
 /// How long the "Fetching weather and air quality…" modal waits before giving up

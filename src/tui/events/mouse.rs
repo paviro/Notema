@@ -69,6 +69,9 @@ pub(crate) fn handle_mouse(
     view: &ViewState,
 ) -> AppResult<DispatchOutcome> {
     let area = super::terminal_area(terminal)?;
+    // The one sanctioned `nav` write outside dispatch: double-click detection must
+    // advance on every physical click, including ones that resolve to no action
+    // (dispatch never sees the raw click coordinates this needs).
     let double_click = mouse.kind == MouseEventKind::Down(MouseButton::Left)
         && app.nav.register_left_click(mouse.column, mouse.row);
     let Some(action) = mouse_to_action(app, mouse, area, view, double_click) else {

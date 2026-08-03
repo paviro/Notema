@@ -450,17 +450,15 @@ fn run_loop(
     loop {
         let changed = watcher.poll();
         let journal_watch_failed = match changed.failure {
-            Some(error) => {
-                events::dispatch_action(
-                    terminal,
-                    &mut app,
-                    events::Action::Background(events::BackgroundAction::WatcherUnavailable {
-                        target: events::WatchTarget::Journal,
-                        error,
-                    }),
-                )?
-                .redraw
-            }
+            Some(error) => events::dispatch_action(
+                terminal,
+                &mut app,
+                events::Action::Background(events::BackgroundAction::WatcherUnavailable {
+                    target: events::WatchTarget::Journal,
+                    error,
+                }),
+            )?
+            .redraw_without_effects(),
             None => false,
         };
         if !changed.paths.is_empty() {
@@ -472,7 +470,8 @@ fn run_loop(
                 terminal,
                 &mut app,
                 events::Action::Background(events::BackgroundAction::WatcherLostTrack),
-            )?;
+            )?
+            .redraw_without_effects();
         }
         if reassert_mouse_capture_at.is_some_and(|at| Instant::now() >= at) {
             reassert_mouse_capture_at = None;
@@ -484,7 +483,7 @@ fn run_loop(
             &mut app,
             events::Action::Background(events::BackgroundAction::PollImages),
         )?
-        .redraw;
+        .redraw_without_effects();
         // A finished geocode lookup updates the open location dialog or writes back
         // a backfilled address; either repaints, and the outcome may dispatch the
         // next paced reverse lookup, so execute its effects.
@@ -509,7 +508,7 @@ fn run_loop(
             &mut app,
             events::Action::Background(events::BackgroundAction::PollLibraryReload),
         )?
-        .redraw;
+        .redraw_without_effects();
         let poll_timeout = scheduler::poll_timeout(
             &app,
             terminal.size()?.width,
@@ -536,7 +535,8 @@ fn run_loop(
                     terminal,
                     &mut app,
                     events::Action::SetHover(crate::tui::state::HoverTarget::None),
-                )?;
+                )?
+                .redraw_without_effects();
                 // No global Ctrl+C quit: `q` quits the app, and the editor forwards
                 // Ctrl+C to the textarea as copy.
                 let outcome = events::handle_key(terminal, &mut app, key)?;
@@ -617,7 +617,7 @@ fn run_loop(
             &mut app,
             events::Action::Background(events::BackgroundAction::PollTimers),
         )?
-        .redraw;
+        .redraw_without_effects();
         let redraw = redraw || timers_changed;
 
         // Debounce watcher-driven reloads: each change pushes the deadline out and
@@ -630,7 +630,8 @@ fn run_loop(
                 terminal,
                 &mut app,
                 events::Action::Background(events::BackgroundAction::LibraryPathsChanged(paths)),
-            )?;
+            )?
+            .redraw_without_effects();
             true
         } else {
             false
@@ -641,17 +642,15 @@ fn run_loop(
         // selected). A broken edit keeps the current theme and says so.
         let theme_changes = theme_watcher.poll();
         let theme_watch_failed = match theme_changes.failure {
-            Some(error) => {
-                events::dispatch_action(
-                    terminal,
-                    &mut app,
-                    events::Action::Background(events::BackgroundAction::WatcherUnavailable {
-                        target: events::WatchTarget::Theme,
-                        error,
-                    }),
-                )?
-                .redraw
-            }
+            Some(error) => events::dispatch_action(
+                terminal,
+                &mut app,
+                events::Action::Background(events::BackgroundAction::WatcherUnavailable {
+                    target: events::WatchTarget::Theme,
+                    error,
+                }),
+            )?
+            .redraw_without_effects(),
             None => false,
         };
         let active_theme = app.effective_theme_name();
@@ -673,7 +672,8 @@ fn run_loop(
                 terminal,
                 &mut app,
                 events::Action::Background(events::BackgroundAction::ReloadTheme(name)),
-            )?;
+            )?
+            .redraw_without_effects();
             true
         } else {
             false
@@ -690,7 +690,8 @@ fn run_loop(
                 terminal,
                 &mut app,
                 events::Action::Background(events::BackgroundAction::CommitSearch),
-            )?;
+            )?
+            .redraw_without_effects();
             true
         } else {
             false
