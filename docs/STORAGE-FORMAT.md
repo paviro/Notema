@@ -281,13 +281,61 @@ and private keys that never leave the device.
 
   `keys_command` may be paired with `keys_store_command`, which is given the key
   on stdin whenever it changes. Without it the key can be read but never
-  replaced, and rotating or re-wrapping refuses.
+  replaced, and rotating or re-wrapping refuses. A `keys_store_command` with no
+  `keys_command` is rejected rather than ignored.
 
   The two inline fields say which format they hold. The other two need
   `keys_encrypted = true|false` alongside, so the app knows whether to ask for a
-  passphrase without having to fetch the key first. `keyring_account` and
-  `keys_command` need notema 2026.8 or newer; older versions report the file as
-  malformed.
+  passphrase without having to fetch the key first. A version of notema that
+  predates key locations reports a file using `keyring_account` or `keys_command`
+  as malformed, since it does not know those fields.
+
+  Inline, no passphrase — note the nested `schema_version`, which versions the
+  key bundle rather than the file around it:
+
+  ```toml
+  schema_version = 1
+  device_name = "laptop"
+  plain_keys = """
+  schema_version = 1
+  x25519 = "AGE-SECRET-KEY-1QQPQZ…"
+  ed25519 = "3f9c1d0a…"
+  """
+  ```
+
+  Inline, passphrase-protected:
+
+  ```toml
+  schema_version = 1
+  device_name = "laptop"
+  encrypted_keys = """
+  -----BEGIN AGE ENCRYPTED FILE-----
+  YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHNjcnlwdCBu…
+  -----END AGE ENCRYPTED FILE-----
+  """
+  ```
+
+  In the OS keychain — the account is a random opaque label, not derived from
+  `device_name`, which would go stale on a rename:
+
+  ```toml
+  schema_version = 1
+  device_name = "laptop"
+  keyring_account = "9f3c1a0b7e2d4f5a8c6b1d0e3a7f2c94"
+  keys_encrypted = false
+  ```
+
+  Fetched by a command. **These are shell lines, executed every time the key is
+  needed** — a writable `identity.toml` is code execution as its owner, which is
+  why the file is mode 0600. Use the array form to skip the shell:
+
+  ```toml
+  schema_version = 1
+  device_name = "laptop"
+  keys_command = "op read op://Private/notema/identity"
+  keys_store_command = "op document create --title notema/identity"
+  keys_encrypted = true
+  ```
 - `devices-trust.toml` — local trust pins (genesis + last-seen head hash).
 
 Decrypting entries by hand with the `age` CLI is covered in

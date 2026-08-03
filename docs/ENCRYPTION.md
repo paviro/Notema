@@ -47,7 +47,7 @@ prompt.
 > of the journal. If you lose every trusted device's key, encrypted entries are
 > unrecoverable.
 > ```bash
-> notema encryption device export-key ~/notema-key-backup.toml
+> notema encryption key export ~/notema-key-backup.toml
 > ```
 > That writes a standalone copy, mode 0600, still passphrase-protected if the key
 > is. Restoring it is copying the file back into a config directory as
@@ -115,14 +115,17 @@ is anchored by the out-of-band fingerprint check above.
 ## Manage devices
 
 ```bash
-notema encryption device list                 # trusted devices + pending requests
-notema encryption device rename OLD NEW        # relabel a device (no re-encryption)
-notema encryption device revoke <name>         # revoke a device and re-encrypt without it
-notema encryption device rotate                # replace this device's key, retire the old one
-notema encryption device passphrase            # add / change this device's key passphrase
-notema encryption device passphrase --remove   # store the key unprotected
-notema encryption device key-source            # show where this device's key is kept
-notema encryption device export-key <path>     # write a standalone copy, for safekeeping
+notema encryption status                     # is it on, where's my key, who can read
+
+notema encryption device list                # trusted devices + pending requests
+notema encryption device rename OLD NEW      # relabel a device (no re-encryption)
+notema encryption device revoke <name>       # revoke a device and re-encrypt without it
+
+notema encryption key status                 # where this device's key is kept
+notema encryption key rotate                 # replace this device's key, retire the old one
+notema encryption key passphrase             # add / change this device's key passphrase
+notema encryption key passphrase --remove    # store the key unprotected
+notema encryption key export <path>          # write a standalone copy, for safekeeping
 ```
 
 Revocation is **forward-only**: re-encryption excludes the revoked device from
@@ -140,22 +143,33 @@ reading the now-plaintext journal.
 ## Where your key lives
 
 Two independent choices. **Format** — cleartext, or wrapped with a passphrase
-(`device passphrase`). **Location** — where the bytes sit. Every location holds
+(`key passphrase`). **Location** — where the bytes sit. Every location holds
 either format, and moving the key never changes its format.
 
 ```bash
-notema encryption device key-source file       # inline in identity.toml, mode 0600
-notema encryption device key-source keyring    # the OS keychain
-notema encryption device key-source command --read '<cmd>' [--store '<cmd>']
+notema encryption key source file            # inline in identity.toml, mode 0600
+notema encryption key source keyring         # the OS keychain
+notema encryption key source command --read '<cmd>' [--store '<cmd>']
 ```
 
-New identities default to the keychain where one is reachable — macOS Keychain,
-Windows Credential Manager, or the Secret Service on Linux and the BSDs —
-because it keeps the key out of a file that backups and sync tools will happily
-copy. `encryption enable` asks, and falls through to the identity file without
-asking where there is no keychain: Android, the iSH build, and a headless Linux
-session with no D-Bus. Existing devices are left alone; move one over with
-`key-source keyring` when you want to.
+`encryption enable` and `device enroll` ask where to put a new key, and suggest
+the keychain — macOS Keychain, Windows Credential Manager, or the Secret Service
+on Linux and the BSDs — because it keeps the key out of a file that backups and
+sync tools will happily copy. They fall through to the identity file without
+asking where there is no keychain to reach: Android, the iSH build, a headless
+Linux session with no D-Bus.
+
+Without a terminal to ask on — a script, a container, a provisioning run — the
+key stays in the identity file. That is the portable answer: a keychain chosen on
+your behalf may be unreachable in the session that has to open the key. Pass
+`--key-source keyring` to ask for it deliberately.
+
+If the keychain turns out to be unreachable after all, `enable` says so and
+leaves the key in the identity file rather than failing: by that point the
+journal is encrypted and working, and the key is safe where it is.
+
+Existing devices are left alone; move one over with `key source keyring` when you
+want to.
 
 > [!NOTE]
 > On macOS the keychain grants access to the exact binary that created the item,
@@ -166,22 +180,37 @@ session with no D-Bus. Existing devices are left alone; move one over with
 `--read` prints the key on stdout whenever it's needed. `--store` takes it on
 stdin whenever it changes — piping rather than passing an argument keeps the key
 out of `ps`. Both are recorded, and both are needed for a complete setup:
-without `--store` the key can be fetched but never replaced, so `device rotate`
-and `device passphrase` have nowhere to write.
+without `--store` the key can be fetched but never replaced, so `key rotate`
+and `key passphrase` have nowhere to write.
 
 Before it drops the old copy, notema writes the key to its new home, reads it
 back, and checks the same key comes out. A store command that quietly did nothing
-can't leave you locked out.
+can't leave you locked out. If that check fails, the copy it just wrote to the
+keychain is removed again, so a failed move leaves nothing behind.
+
+> [!WARNING]
+> A `--read`/`--store` command is a shell line recorded in `identity.toml` and run
+> every time the key is needed. Anyone who can write that file can run code as
+> you. It is mode 0600 in your config directory, which is the protection — but if
+> you sync your dotfiles, note that `identity.toml` stops being inert data the
+> moment a fetch command is recorded in it, and treat a restored or copied-in
+> identity file as you would any other executable content.
+
+Moving a key *out* of a fetch command doesn't delete it from the secret manager —
+that store is yours, not notema's, so it says what to clean up rather than
+reaching into it. A key moved out of the OS keychain *is* removed, since notema
+put it there.
 
 Retrieval happens before the app takes over the terminal, so a command that
-prompts — Touch ID, a GPG pin, a hardware token — works normally. `notema log
-"…"` never retrieves the key at all: writing an entry needs only the public
-roster.
+prompts — Touch ID, a GPG pin, a hardware token — works normally. It happens
+once: a passphrase you then mistype is retried against the key already in hand,
+never by fetching again from inside the TUI. `notema log "…"` never retrieves the
+key at all: writing an entry needs only the public roster.
 
 ### Recipes
 
 The command is a shell line, so anything that prints the bundle works. For the
-macOS Keychain and the Secret Service, use `key-source keyring` instead — it
+macOS Keychain and the Secret Service, use `key source keyring` instead — it
 talks to them directly.
 
 | store | `--read` | `--store` |
@@ -191,10 +220,22 @@ talks to them directly.
 | HashiCorp Vault | `vault kv get -field=identity secret/notema` | `vault kv put secret/notema identity=-` |
 | a mounted secret | `cat /run/secrets/notema-identity` | `cat > /run/secrets/notema-identity` |
 
-`device rotate` and `device passphrase` mint new key material and write it back
+`key rotate` and `key passphrase` mint new key material and write it back
 to wherever the key is kept, so they work the same in every location — provided
 there's a way to write. A `--read` without a `--store` is the one case that
 can't, and it refuses up front rather than part-way through a rotation.
+
+> [!NOTE]
+> While a rotation is in flight, notema keeps a self-contained rescue copy of the
+> old key in your config directory — with the key inlined, since a pointer at a
+> keychain item the rotation is about to overwrite would rescue nothing. It is
+> deleted when the rotation finishes either way. A machine that dies mid-rotation
+> leaves that copy on disk; it is mode 0600, and unprotected if your key is.
+
+Creating a keychain-backed key also puts it in `identity.toml` first and moves it
+after, so the move can verify the keychain hands it back before the local copy
+goes away. The file is replaced, not shredded, so on most filesystems the
+original blocks survive until they're reused.
 
 ## Disable encryption
 
@@ -215,7 +256,7 @@ Notema to read your journal.
 
 If the key isn't inline — `identity.toml` has `keyring_account` or `keys_command`
 instead of `plain_keys`/`encrypted_keys` — get it out first, either with
-`notema encryption device export-key backup.toml` (which inlines it) or by
+`notema encryption key export backup.toml` (which inlines it) or by
 running the `keys_command` yourself. Then, from the inline form:
 
 - *No passphrase* — copy the `x25519` value from the `plain_keys` block into a
