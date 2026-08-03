@@ -11,39 +11,36 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Delete a journal by moving its whole directory into the trash in a single
+/// rename, so its entries, their assets, and any files the app does not
+/// recognize are all preserved and recoverable — never `remove_dir_all`d
+/// (STORAGE-FORMAT). A pre-existing trash entry of the same name is
+/// disambiguated rather than overwritten.
 pub(crate) fn delete_journal(
     root: &Path,
     journal_name: &str,
     journal_path: &Path,
-    entries: &[(PathBuf, bool)],
 ) -> AppResult<()> {
-    let has_any_with_body = entries.iter().any(|(_, has_body)| *has_body);
-
-    if !has_any_with_body {
-        fs::remove_dir_all(journal_path)?;
-        return Ok(());
+    let destination = unique_trash_journal_path(root, journal_name);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
     }
-
-    let has_any_without_body = entries.iter().any(|(_, has_body)| !*has_body);
-    let trash_journal_path = root.join(".trash").join(journal_name);
-
-    if !has_any_without_body && !trash_journal_path.exists() {
-        if let Some(parent) = trash_journal_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::rename(journal_path, &trash_journal_path)?;
-    } else {
-        for (path, has_body) in entries {
-            if *has_body {
-                move_entry_to_trash(root, path)?;
-            } else if path.exists() {
-                fs::remove_file(path)?;
-            }
-        }
-        fs::remove_dir_all(journal_path)?;
-    }
-
+    fs::rename(journal_path, &destination)?;
     Ok(())
+}
+
+/// A free path under `.trash/` for `journal_name`, adding a numeric suffix when
+/// a prior deletion (whole-journal or per-entry) already parked something there.
+fn unique_trash_journal_path(root: &Path, journal_name: &str) -> PathBuf {
+    let trash = root.join(".trash");
+    let base = trash.join(journal_name);
+    if !base.exists() {
+        return base;
+    }
+    (1..)
+        .map(|suffix| trash.join(format!("{journal_name}-{suffix}")))
+        .find(|candidate| !candidate.exists())
+        .expect("an unbounded range always yields a free trash path")
 }
 
 /// The result of an edit-via-editor session, so callers can tell a real edit
@@ -229,9 +226,16 @@ fn render_edited_content(
             }
             // A body-only edit can preserve malformed front matter byte-for-byte.
             // Capture fields such as writing time cannot be updated safely here.
+            // Match the source's line ending so a CRLF file doesn't gain a lone
+            // `\r` where the reassembled `+++` delimiters meet the body.
+            let newline = if front_matter.contains("\r\n") {
+                "\r\n"
+            } else {
+                "\n"
+            };
+            let body = body.trim_start_matches(['\n', '\r']);
             return Ok(format!(
-                "+++\n{front_matter}\n+++\n\n{}",
-                body.trim_start_matches('\n')
+                "+++{newline}{front_matter}{newline}+++{newline}{newline}{body}"
             ));
         }
     };

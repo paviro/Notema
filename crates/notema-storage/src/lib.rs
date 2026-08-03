@@ -62,7 +62,11 @@ pub fn decode_image_with_orientation(
         .with_guessed_format()?
         .into_decoder()?;
     let icc_profile = decoder.icc_profile().ok().flatten();
-    let orientation = decoder.orientation()?;
+    // Best-effort, like the ICC read above: a malformed EXIF orientation tag
+    // shouldn't fail the whole decode — fall back to the image as stored.
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
     let mut image = image::DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
 
@@ -88,6 +92,25 @@ fn convert_to_srgb(image: &image::DynamicImage, icc: &[u8]) -> Option<image::Dyn
     use moxcms::{ColorProfile, Layout, TransformOptions};
     let source = ColorProfile::new_from_slice(icc).ok()?;
     let srgb = ColorProfile::new_srgb();
+    // Keep the alpha channel: a wide-gamut RGBA source (e.g. a macOS P3
+    // screenshot with transparency) would otherwise lose it to `to_rgb8`.
+    if image.color().has_alpha() {
+        let transform = source
+            .create_transform_8bit(
+                Layout::Rgba,
+                &srgb,
+                Layout::Rgba,
+                TransformOptions::default(),
+            )
+            .ok()?;
+        let rgba = image.to_rgba8();
+        let (width, height) = (rgba.width(), rgba.height());
+        let mut out = vec![0u8; rgba.as_raw().len()];
+        transform.transform(rgba.as_raw(), &mut out).ok()?;
+        return Some(image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
+            width, height, out,
+        )?));
+    }
     let transform = source
         .create_transform_8bit(Layout::Rgb, &srgb, Layout::Rgb, TransformOptions::default())
         .ok()?;
@@ -1063,18 +1086,8 @@ impl JournalStore {
         storage::EntryCodec::new(self.paths.keys.clone(), self.identity.as_ref())
     }
 
-    pub fn delete_journal(
-        &self,
-        journal_name: &str,
-        journal_path: &Path,
-        entries: &[(PathBuf, bool)],
-    ) -> AppResult<()> {
-        storage::delete_journal(
-            &self.paths.journal_root,
-            journal_name,
-            journal_path,
-            entries,
-        )
+    pub fn delete_journal(&self, journal_name: &str, journal_path: &Path) -> AppResult<()> {
+        storage::delete_journal(&self.paths.journal_root, journal_name, journal_path)
     }
 
     pub fn move_entry_to_trash(&self, entry_path: &Path) -> AppResult<PathBuf> {

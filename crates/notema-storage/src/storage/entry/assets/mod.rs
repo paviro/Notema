@@ -336,8 +336,12 @@ struct IngestContext<'a> {
 }
 
 /// Placeholder substituted for an image that could not be ingested when
-/// `replace_offline` is set.
-const OFFLINE_IMAGE_PLACEHOLDER: &str = "[Offline Image]";
+/// `replace_offline` is set. Keeps the source URL as the link target so the
+/// reference isn't lost — the reader shows a labelled link instead of a dead
+/// embed.
+fn offline_image_placeholder(source: &str) -> String {
+    format!("[Offline Image]({source})")
+}
 
 /// Rewrite a body line by line, ingesting external image references. Code
 /// fences are passed through untouched.
@@ -393,7 +397,9 @@ fn rewrite_markdown_images(line: &str, ctx: &mut IngestContext<'_>) -> String {
         if is_external_target(target, ctx.dir_name) {
             match store_source(target, image.alt(rest), ctx) {
                 Some(link) => out.push_str(&link),
-                None if ctx.replace_offline => out.push_str(OFFLINE_IMAGE_PLACEHOLDER),
+                None if ctx.replace_offline => {
+                    out.push_str(&offline_image_placeholder(target));
+                }
                 None => out.push_str(&rest[image.start..image.end]),
             }
         } else {
@@ -433,7 +439,9 @@ fn rewrite_bare_line(line: &str, ctx: &mut IngestContext<'_>) -> Option<String> 
     if looks_like_image_source(&source) {
         return match store_source(&source, "", ctx) {
             Some(link) => Some(format!("{indent}{link}")),
-            None if ctx.replace_offline => Some(format!("{indent}{OFFLINE_IMAGE_PLACEHOLDER}")),
+            None if ctx.replace_offline => {
+                Some(format!("{indent}{}", offline_image_placeholder(&source)))
+            }
             None => None,
         };
     }
@@ -744,7 +752,34 @@ fn referenced_asset_files(body: &str, dir_name: &str) -> HashSet<String> {
         }
         rest = &rest[link.end..];
     }
+    collect_pathlike_references(body, dir_name, &mut files);
     files
+}
+
+/// Also honour references the canonical markdown passes above miss — reference-
+/// style definitions (`[id]: <dir>/<file>`) and raw HTML (`<img src="<dir>/<file>">`)
+/// — by scanning for any `<dir_name>/<file>` token. Conservative on purpose: it
+/// only ever keeps files, so a hand-written link never gets its asset deleted.
+fn collect_pathlike_references(body: &str, dir_name: &str, files: &mut HashSet<String>) {
+    let needle = format!("{dir_name}/");
+    let mut search = body;
+    while let Some(pos) = search.find(&needle) {
+        let after = &search[pos + needle.len()..];
+        let end = after
+            .find(|c: char| {
+                c.is_whitespace()
+                    || matches!(
+                        c,
+                        '"' | '\'' | '(' | ')' | '[' | ']' | '<' | '>' | '`' | '/' | '?' | '#'
+                    )
+            })
+            .unwrap_or(after.len());
+        let file = &after[..end];
+        if !file.is_empty() && file != "." && file != ".." {
+            files.insert(file.to_string());
+        }
+        search = &after[end..];
+    }
 }
 
 /// A canonical asset reference (image or attachment) inside an entry's own asset
@@ -1415,6 +1450,27 @@ mod tests {
         assert!(changed.is_none());
         assert_eq!(report.removed, 0);
         assert!(assets.join("zz.png").exists());
+    }
+
+    #[test]
+    fn keeps_reference_style_and_html_linked_assets() {
+        let dir = tempdir().unwrap();
+        let entry = entry_path(dir.path());
+        let assets = entry_assets_dir(&entry).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+        fs::write(assets.join("ref.png"), png_bytes()).unwrap();
+        fs::write(assets.join("html.png"), png_bytes()).unwrap();
+
+        // Neither form is a canonical inline embed, but both point at stored
+        // assets and must survive the sweep.
+        let body = "![alt][a]\n\n[a]: 2026-07-05T14-30-00-abc123.assets/ref.png\n\n\
+             <img src=\"2026-07-05T14-30-00-abc123.assets/html.png\">";
+        let (changed, report) = ingest_and_cleanup(&entry, body, None, true).unwrap();
+
+        assert!(changed.is_none());
+        assert_eq!(report.removed, 0, "hand-written links are not orphaned");
+        assert!(assets.join("ref.png").exists());
+        assert!(assets.join("html.png").exists());
     }
 
     #[test]

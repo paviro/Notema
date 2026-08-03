@@ -249,6 +249,48 @@ fn save_entry_edit_preserves_unparseable_front_matter() {
     assert!(written.contains("new body"), "body updated");
 }
 
+/// The byte-preserving branch must keep the source's CRLF line endings rather
+/// than splicing lone LF delimiters into an otherwise-CRLF file.
+#[test]
+fn save_entry_edit_preserves_crlf_line_endings_for_unparseable_front_matter() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("2026-07-06T10-00-00.md");
+    let original = "+++\r\nschema_version = 1\r\ntags = [unterminated\r\n+++\r\n\r\nold body\r\n";
+    fs::write(&path, original).unwrap();
+    let metadata = Metadata::default();
+
+    save_entry_edit(
+        &EntryCodec::plain(),
+        &path,
+        EntryEdit {
+            body: "new body\r\n",
+            metadata: &metadata,
+            original_metadata: &metadata,
+            writing_seconds: Some(12),
+            remove_if_empty: true,
+            extra_fields: &[],
+        },
+        EntryAssetOptions::default(),
+    )
+    .unwrap();
+
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(
+        written.contains("tags = [unterminated"),
+        "metadata preserved"
+    );
+    assert!(written.contains("new body"), "body updated");
+    let bytes = written.as_bytes();
+    let bare_lf = written
+        .char_indices()
+        .any(|(i, c)| c == '\n' && (i == 0 || bytes[i - 1] != b'\r'));
+    assert!(
+        !bare_lf,
+        "no lone LF injected into a CRLF file: {written:?}"
+    );
+    assert!(written.starts_with("+++\r\n"), "CRLF delimiter preserved");
+}
+
 #[test]
 fn entry_id_and_journal_come_from_path_not_front_matter() {
     let dir = tempdir().unwrap();
@@ -674,6 +716,59 @@ fn delete_moves_entry_to_journal_trash() {
     );
     assert!(trash.exists());
     assert!(!path.exists());
+}
+
+#[test]
+fn delete_journal_trashes_the_whole_directory_including_unrecognized_files() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let journal = root.join("work");
+    let day = journal.join("2026").join("07").join("01");
+    fs::create_dir_all(&day).unwrap();
+    fs::write(
+        day.join("2026-07-01T10-00-00-abc12.md"),
+        "+++\nschema_version = 1\n+++\n\nbody\n",
+    )
+    .unwrap();
+    // A file the app doesn't manage must survive the deletion.
+    fs::write(journal.join("NOTES.txt"), "hand-written").unwrap();
+
+    delete_journal(root, "work", &journal).unwrap();
+
+    assert!(!journal.exists(), "the journal directory is moved out");
+    let trashed = root.join(".trash").join("work");
+    assert!(
+        trashed.join("NOTES.txt").exists(),
+        "unrecognized file preserved rather than deleted"
+    );
+    assert!(
+        trashed
+            .join("2026")
+            .join("07")
+            .join("01")
+            .join("2026-07-01T10-00-00-abc12.md")
+            .exists(),
+        "entry preserved in trash"
+    );
+}
+
+#[test]
+fn delete_journal_disambiguates_an_occupied_trash_slot() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    // A prior deletion already parked `work` in the trash.
+    fs::create_dir_all(root.join(".trash").join("work")).unwrap();
+    let journal = root.join("work");
+    fs::create_dir_all(&journal).unwrap();
+    fs::write(journal.join("keep.txt"), "second copy").unwrap();
+
+    delete_journal(root, "work", &journal).unwrap();
+
+    assert!(!journal.exists());
+    assert!(
+        root.join(".trash").join("work-1").join("keep.txt").exists(),
+        "the second deletion lands beside the first, not over it"
+    );
 }
 
 #[test]

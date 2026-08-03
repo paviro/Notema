@@ -461,23 +461,10 @@ pub(super) fn delete_selected_journal(app: &mut AppModel) -> AppResult<Option<St
         anyhow::bail!("selected journal changed on disk; refresh and try again");
     }
 
-    let fresh_entries = app.services.store.read_entries(
-        app.services
-            .store
-            .collect_entry_paths()?
-            .into_iter()
-            .filter(|entry| entry.journal == journal_name)
-            .collect(),
-    )?;
-    let entries: Vec<(PathBuf, bool)> = fresh_entries
-        .iter()
-        .map(|e| (e.path.clone(), !e.body.trim().is_empty()))
-        .collect();
-
     let display = notema_storage::journal_display_name(&journal_name).to_string();
     app.services
         .store
-        .delete_journal(&journal_name, &journal_path, &entries)?;
+        .delete_journal(&journal_name, &journal_path)?;
     app.toast(ToastVariant::Success, format!("Deleted journal {display}"));
     Ok(Some(journal_name))
 }
