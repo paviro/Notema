@@ -49,6 +49,9 @@ use std::{fs, path::Path};
 /// confused with any other Ed25519 signature the app might make over other data.
 const DOMAIN: &[u8] = b"notema.roster.v1";
 
+const ROSTER_SCHEMA_VERSION: u32 = 1;
+const TRUST_PINS_SCHEMA_VERSION: u32 = 1;
+
 /// The kind of a roster operation. Serializes to the lowercase variant name, and
 /// its [`OpKind::as_bytes`] feeds the signed op bytes — so the wire strings must
 /// stay `genesis`/`add`/`revoke`/`rename` for existing rosters to keep verifying.
@@ -336,7 +339,7 @@ pub(crate) fn read_ops(path: &Path) -> Result<Vec<RosterOp>> {
     }
     let text = fs::read_to_string(path)?;
     let file = toml::from_str::<RosterFile>(&text)?;
-    if file.schema_version != 1 {
+    if file.schema_version != ROSTER_SCHEMA_VERSION {
         return Err(EncryptionError::UnsupportedSchema {
             kind: "device roster",
             version: file.schema_version,
@@ -350,7 +353,7 @@ fn write_ops(path: &Path, ops: &[RosterOp]) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
     let document = RosterFileRef {
-        schema_version: 1,
+        schema_version: ROSTER_SCHEMA_VERSION,
         operations: ops,
     };
     let body = format!("{DEVICES_HEADER}\n{}", toml::to_string_pretty(&document)?);
@@ -374,7 +377,7 @@ pub(crate) fn read_pins(path: &Path) -> Result<TrustPins> {
         return Ok(TrustPins::default());
     }
     let parsed: PinsFile = toml::from_str(&fs::read_to_string(path)?)?;
-    if parsed.schema_version != 1 {
+    if parsed.schema_version != TRUST_PINS_SCHEMA_VERSION {
         return Err(EncryptionError::UnsupportedSchema {
             kind: "device trust pins",
             version: parsed.schema_version,
@@ -388,7 +391,7 @@ pub(crate) fn read_pins(path: &Path) -> Result<TrustPins> {
 
 pub(crate) fn write_pins(path: &Path, genesis_hash: &str, head_hash: &str) -> Result<()> {
     let document = PinsFile {
-        schema_version: 1,
+        schema_version: TRUST_PINS_SCHEMA_VERSION,
         genesis_hash: Some(genesis_hash.to_string()),
         head_hash: Some(head_hash.to_string()),
     };

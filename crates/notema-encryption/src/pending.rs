@@ -6,6 +6,8 @@ use age::secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::fs;
 
+const PENDING_SCHEMA_VERSION: u32 = 1;
+
 /// A join request waiting to be approved: the requesting device's [`Recipient`]
 /// and the stable `id` derived from its key (the `pending-<id>.toml` file name).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +98,7 @@ pub fn read_pending(paths: &KeyPaths) -> Result<Vec<PendingRequest>> {
         let Ok(parsed) = toml::from_str::<PendingFile>(&text) else {
             continue;
         };
-        if parsed.schema_version != 1 {
+        if parsed.schema_version != PENDING_SCHEMA_VERSION {
             continue;
         }
         // Skip a request whose self-signature doesn't check out: it was corrupted
@@ -134,7 +136,7 @@ fn write_pending(
     fs::create_dir_all(&paths.age_dir)?;
     let sig = sign_bytes(&identity.signing, &pending_signing_bytes(recipient)?);
     let document = PendingFileRef {
-        schema_version: 1,
+        schema_version: PENDING_SCHEMA_VERSION,
         recipient,
         sig: &sig,
     };

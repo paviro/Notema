@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::{fs, path::Path, str::FromStr};
 use zeroize::Zeroizing;
 
+const IDENTITY_SCHEMA_VERSION: u32 = 1;
+const SECRET_BUNDLE_SCHEMA_VERSION: u32 = 1;
+
 /// This device's decrypted keypair: the age identity that reads encrypted
 /// entries and the Ed25519 signing key that authorizes roster ops.
 #[derive(Clone)]
@@ -91,7 +94,7 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
     type Error = &'static str;
 
     fn try_from(wire: StoredIdentityWire) -> std::result::Result<Self, Self::Error> {
-        if wire.schema_version != 1 {
+        if wire.schema_version != IDENTITY_SCHEMA_VERSION {
             return Err("journal identity file has an unsupported schema version");
         }
         let key = match (wire.encrypted_keys, wire.plain_keys) {
@@ -224,7 +227,7 @@ pub(crate) fn write_stored_identity(
 ) -> Result<()> {
     reject_empty_passphrase(passphrase)?;
     let bundle = SecretBundle {
-        schema_version: 1,
+        schema_version: SECRET_BUNDLE_SCHEMA_VERSION,
         x25519: Zeroizing::new(identity.identity.to_string().expose_secret().to_string()),
         ed25519: Zeroizing::new(hex::encode(identity.signing.to_bytes())),
     };
@@ -237,7 +240,7 @@ pub(crate) fn write_stored_identity(
         None => (None, Some(bundle_toml.clone())),
     };
     let stored = StoredIdentityWire {
-        schema_version: 1,
+        schema_version: IDENTITY_SCHEMA_VERSION,
         device_name: name.to_string(),
         encrypted_keys,
         plain_keys,
@@ -275,7 +278,7 @@ fn decrypt_identity(
     // plain malformed-identity error instead, like the UTF-8 guard above.
     let bundle: SecretBundle =
         toml::from_str(&bundle_toml).map_err(|_| EncryptionError::MalformedStoredIdentity)?;
-    if bundle.schema_version != 1 {
+    if bundle.schema_version != SECRET_BUNDLE_SCHEMA_VERSION {
         return Err(EncryptionError::UnsupportedSchema {
             kind: "secret identity bundle",
             version: bundle.schema_version,
