@@ -1260,7 +1260,7 @@ fn run_notema(config_dir: &Path, args: &[&str]) -> std::process::Output {
 
 /// An encrypted store with one entry and a passphrase-less key.
 ///
-/// `--key-source file` is explicit rather than relying on the default: these
+/// `--key-store file` is explicit rather than relying on the default: these
 /// tests run the real binary, so `notema-encryption` is built without
 /// `cfg(test)` and its keyring stub is not in play. Any test that reached the
 /// keychain would write to the developer's own login keychain and leave the item
@@ -1280,7 +1280,7 @@ fn encrypted_store_with_an_entry(dir: &Path) -> std::path::PathBuf {
                 "--name",
                 "laptop",
                 "--no-passphrase",
-                "--key-source",
+                "--key-store",
                 "file",
             ]
         )
@@ -1293,7 +1293,7 @@ fn encrypted_store_with_an_entry(dir: &Path) -> std::path::PathBuf {
 
 #[cfg(unix)]
 #[test]
-fn key_source_command_takes_the_key_out_of_the_identity_file() {
+fn key_store_command_takes_the_key_out_of_the_identity_file() {
     let dir = tempdir().unwrap();
     let identity = encrypted_store_with_an_entry(dir.path());
     let vault = dir.path().join("vault.toml");
@@ -1303,11 +1303,11 @@ fn key_source_command_takes_the_key_out_of_the_identity_file() {
         &[
             "encryption",
             "key",
-            "source",
+            "store",
             "command",
             "--read",
             &format!("cat {}", vault.display()),
-            "--store",
+            "--write",
             &format!("cat > {}", vault.display()),
         ],
     );
@@ -1343,11 +1343,11 @@ fn rotate_writes_the_new_key_back_through_the_store_command() {
         &[
             "encryption",
             "key",
-            "source",
+            "store",
             "command",
             "--read",
             &format!("cat {}", vault.display()),
-            "--store",
+            "--write",
             &format!("cat > {}", vault.display()),
         ],
     );
@@ -1387,11 +1387,11 @@ fn rotate_refuses_a_key_command_that_cannot_write() {
         &[
             "encryption",
             "key",
-            "source",
+            "store",
             "command",
             "--read",
             &format!("cat {}", vault.display()),
-            "--store",
+            "--write",
             &format!("cat > {}", vault.display()),
         ],
     );
@@ -1414,7 +1414,7 @@ fn rotate_refuses_a_key_command_that_cannot_write() {
         let output = run_notema(dir.path(), &args);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success(), "{args:?} should have refused");
-        assert!(stderr.contains("--store"), "{stderr}");
+        assert!(stderr.contains("--write"), "{stderr}");
     }
     assert_eq!(
         fs::read(&identity).unwrap(),
@@ -1434,17 +1434,17 @@ fn a_broken_key_command_is_reported_as_such_not_as_corruption() {
         &[
             "encryption",
             "key",
-            "source",
+            "store",
             "command",
             "--read",
             &format!("cat {}", vault.display()),
-            "--store",
+            "--write",
             &format!("cat > {}", vault.display()),
         ],
     );
     fs::remove_file(&vault).unwrap();
 
-    let output = run_notema(dir.path(), &["encryption", "key", "source", "file"]);
+    let output = run_notema(dir.path(), &["encryption", "key", "store", "file"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
     // Naming the command and its complaint is the difference between "fix your
@@ -1521,7 +1521,7 @@ fn a_non_interactive_enable_keeps_the_key_in_the_identity_file() {
     fs::create_dir_all(root.join("diary")).unwrap();
     write_config(&dir.path().join("config.toml"), &root, Some("diary"));
 
-    // No --key-source: the default is what is under test.
+    // No --key-store: the default is what is under test.
     let output = run_notema(
         dir.path(),
         &[
@@ -1578,17 +1578,17 @@ fn status_reports_encryption_state_key_location_and_roster() {
     assert!(stdout.contains("(this device)"), "{stdout}");
 }
 
-/// `--read` and `--store` describe a fetch command, so naming them for a
+/// `--read` and `--write` describe a fetch command, so naming them for a
 /// location that does not fetch is a mistake worth reporting rather than
 /// silently dropping.
 #[test]
-fn key_source_rejects_fetch_flags_that_do_not_apply() {
+fn key_store_rejects_fetch_flags_that_do_not_apply() {
     let dir = tempdir().unwrap();
     encrypted_store_with_an_entry(dir.path());
 
     let output = run_notema(
         dir.path(),
-        &["encryption", "key", "source", "file", "--read", "cat /x"],
+        &["encryption", "key", "store", "file", "--read", "cat /x"],
     );
     assert!(!output.status.success(), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);

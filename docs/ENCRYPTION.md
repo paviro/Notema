@@ -146,9 +146,9 @@ Two independent choices. **Format** — cleartext, or wrapped with a passphrase
 either format, and moving the key never changes its format.
 
 ```bash
-notema encryption key source file            # inline in identity.toml, mode 0600
-notema encryption key source keyring         # the OS keychain
-notema encryption key source command --read '<cmd>' [--store '<cmd>']
+notema encryption key store file             # inline in identity.toml, mode 0600
+notema encryption key store keyring          # the OS keychain
+notema encryption key store command --read '<cmd>' [--write '<cmd>']
 ```
 
 `encryption enable` and `device enroll` ask where to put a new key, and suggest
@@ -161,13 +161,13 @@ Linux session with no D-Bus.
 Without a terminal to ask on — a script, a container, a provisioning run — the
 key stays in the identity file. That is the portable answer: a keychain chosen on
 your behalf may be unreachable in the session that has to open the key. Pass
-`--key-source keyring` to ask for it deliberately.
+`--key-store keyring` to ask for it deliberately.
 
 If the keychain turns out to be unreachable after all, `enable` says so and
 leaves the key in the identity file rather than failing: by that point the
 journal is encrypted and working, and the key is safe where it is.
 
-Existing devices are left alone; move one over with `key source keyring` when you
+Existing devices are left alone; move one over with `key store keyring` when you
 want to.
 
 > [!NOTE]
@@ -176,10 +176,10 @@ want to.
 > yourself is unsigned and has no stable identity, so macOS re-asks after every
 > rebuild.
 
-`--read` prints the key on stdout whenever it's needed. `--store` takes it on
+`--read` prints the key on stdout whenever it's needed. `--write` takes it on
 stdin whenever it changes — piping rather than passing an argument keeps the key
 out of `ps`. Both are recorded, and both are needed for a complete setup:
-without `--store` the key can be fetched but never replaced, so `key rotate`
+without `--write` the key can be fetched but never replaced, so `key rotate`
 and `key passphrase` have nowhere to write.
 
 Before it drops the old copy, notema writes the key to its new home, reads it
@@ -188,7 +188,7 @@ can't leave you locked out. If that check fails, the copy it just wrote to the
 keychain is removed again, so a failed move leaves nothing behind.
 
 > [!WARNING]
-> A `--read`/`--store` command is a shell line recorded in `identity.toml` and run
+> A `--read`/`--write` command is a shell line recorded in `identity.toml` and run
 > every time the key is needed. Anyone who can write that file can run code as
 > you. It is mode 0600 in your config directory, which is the protection — but if
 > you sync your dotfiles, note that `identity.toml` stops being inert data the
@@ -209,10 +209,10 @@ key at all: writing an entry needs only the public roster.
 ### Recipes
 
 The command is a shell line, so anything that prints the bundle works. For the
-macOS Keychain and the Secret Service, use `key source keyring` instead — it
+macOS Keychain and the Secret Service, use `key store keyring` instead — it
 talks to them directly.
 
-| store | `--read` | `--store` |
+| store | `--read` | `--write` |
 | --- | --- | --- |
 | 1Password | `op read op://Private/notema/identity` | `op document create --title notema/identity` |
 | pass | `pass show notema/identity` | `pass insert -m notema/identity` |
@@ -221,7 +221,7 @@ talks to them directly.
 
 `key rotate` and `key passphrase` mint new key material and write it back
 to wherever the key is kept, so they work the same in every location — provided
-there's a way to write. A `--read` without a `--store` is the one case that
+there's a way to write. A `--read` without a `--write` is the one case that
 can't, and it refuses up front rather than part-way through a rotation.
 
 > [!NOTE]

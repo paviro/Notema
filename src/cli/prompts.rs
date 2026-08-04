@@ -120,7 +120,7 @@ pub(crate) fn prompt_unlock_passphrase() -> AppResult<SecretString> {
 /// Without a terminal it answers the identity file, the portable choice. A
 /// script or provisioning run cannot see a prompt, and a keychain it silently
 /// picked may be unreachable in the session that has to open the key; callers
-/// pass `--key-source` to ask for the keychain deliberately.
+/// pass `--key-store` to ask for the keychain deliberately.
 pub(crate) fn prompt_keyring_choice(keyring_available: bool) -> AppResult<bool> {
     if !keyring_available || !io::stdin().is_terminal() {
         return Ok(false);

@@ -221,19 +221,14 @@ pub enum EncryptionError {
     /// The key is fetched by a command with no matching store command, so it can
     /// be read but never replaced.
     #[error(
-        "this device's key is fetched by '{command}', which can read it but not replace it. Re-run `notema encryption key source command` with `--store` so new key material has somewhere to go, or bring the key back with `notema encryption key source file`"
+        "this device's key is fetched by '{command}', which can read it but not replace it. Re-run `notema encryption key store command` with `--write` so new key material has somewhere to go, or bring the key back with `notema encryption key store file`"
     )]
     KeySourceReadOnly { command: String },
 
-    /// The identity file is not valid TOML, or does not have the shape of an
-    /// identity file.
+    /// The identity file is not valid TOML, or lacks the shape of one.
     ///
-    /// Deliberately says nothing about *what* is on the line: the file may hold
-    /// key material, and a parse that failed proves nothing about where. Distinct
-    /// from [`Self::MalformedStoredIdentity`], which is about key material that
-    /// was read successfully and then turned out not to be a key — this one is
-    /// about the file around it, and is what a hand-edited `keys_command` or a
-    /// truncated sync produces.
+    /// Names the line but never its contents: the file may hold key material,
+    /// and a failed parse proves nothing about where.
     #[error(
         "{} is not a readable identity file (parse failed at line {line}). If you edited it by hand, check that line; otherwise restore it from a backup",
         path.display()
@@ -250,9 +245,8 @@ pub enum EncryptionError {
     #[error("no OS keyring is available here: {detail}")]
     KeyringUnavailable { detail: String },
 
-    /// A keyring is there but refused the request, typically because it is
-    /// locked. Distinct from [`Self::KeyringUnavailable`]: the key is still
-    /// where it should be, and unlocking the keychain is all that is needed.
+    /// A keyring that is reachable but refused, typically because it is locked.
+    /// Unlike [`Self::KeyringUnavailable`], the key is still where it belongs.
     #[error("the OS keyring is locked or refused access: {detail}. Unlock it and try again")]
     KeyringLocked { detail: String },
 

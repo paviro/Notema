@@ -31,7 +31,7 @@ pub(crate) fn cli_progress(unit: &'static str) -> impl FnMut(usize, usize) {
 }
 
 /// Whether a newly minted key goes to the OS keychain: an explicit
-/// `--key-source` wins, otherwise ask (and, with no terminal to ask on, keep it
+/// `--key-store` wins, otherwise ask (and, with no terminal to ask on, keep it
 /// in the identity file).
 pub(crate) fn resolve_key_source(explicit: Option<bool>) -> AppResult<bool> {
     match explicit {
@@ -43,31 +43,26 @@ pub(crate) fn resolve_key_source(explicit: Option<bool>) -> AppResult<bool> {
 /// Move a freshly minted key into the OS keychain, reporting a failure without
 /// failing the command.
 ///
-/// The key is minted inline and then moved, so the move can verify the keychain
-/// hands the key back before the local copy goes away — a keychain-first path
-/// could not. If the keychain turns out to be unreachable the caller is already
-/// in a complete, working state: the identity exists and its key is safely in
-/// the identity file. Erroring here would report failure for a journal that is
-/// fine, and no availability probe is reliable enough to rule the case out in
-/// advance.
+/// Minted inline then moved, so the move can verify the keychain hands the key
+/// back. An unreachable keychain still leaves a working store and a usable key,
+/// and no probe rules that case out in advance.
 pub(crate) fn move_key_to_keyring(store: &JournalStore, passphrase: Option<&SecretString>) {
     if let Err(error) = store.set_key_location(&notema_encryption::KeyTarget::Keyring, passphrase) {
         println!(
             "Could not move this device's key to the keychain: {error}\nIt is in {} instead; move it later with `{}`.",
             store.identity_path().display(),
-            crate::KEY_SOURCE_KEYRING_CMD,
+            crate::KEY_STORE_KEYRING_CMD,
         );
     }
 }
 
-/// Tell the user what to back up. Which artifact that is depends on where the
-/// key ended up: naming the identity file for a key that only points at the
-/// keychain would hand someone a backup that cannot decrypt anything.
+/// Tell the user what to back up. Naming the identity file for a key that only
+/// points at the keychain would hand them a backup that decrypts nothing.
 pub(crate) fn print_backup_advice(store: &JournalStore) -> AppResult<()> {
     match store.this_device()? {
         Some(info) if info.source != notema_encryption::KeySource::File => println!(
-            "This device's key is kept in {}. Back it up with `{} <path>`; without it encrypted journal files cannot be decrypted.",
-            info.source.label(),
+            "This device's key is {}. Back it up with `{} <path>`; without it encrypted journal files cannot be decrypted.",
+            info.source.whereabouts(),
             crate::EXPORT_KEY_CMD,
         ),
         _ => println!(

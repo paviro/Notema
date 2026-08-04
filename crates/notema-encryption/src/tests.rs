@@ -399,7 +399,7 @@ fn a_store_command_without_a_fetch_command_is_refused() {
     fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
     // Parses cleanly and names exactly one location, so nothing else would
     // catch it: the store command would be dropped on read and erased from the
-    // file on the next write, quietly making a writable key source read-only.
+    // file on the next write, quietly making a writable key store read-only.
     fs::write(
         &paths.identity_file,
         "schema_version = 1\ndevice_name = \"laptop\"\n\
@@ -713,7 +713,7 @@ fn an_unsupported_identity_schema_reports_the_version() {
 }
 
 /// Move a fresh identity's key out to a command-backed file, the way the CLI
-/// does: seed with `--store`, read back with `--read`.
+/// does: seed with `--write`, read back with `--read`.
 fn move_to_command(paths: &KeyPaths, bundle: &Path, passphrase: Option<&SecretString>) {
     let target = KeyTarget::Command {
         read: cat_command(bundle),
@@ -824,7 +824,7 @@ fn a_read_only_key_command_refuses_before_touching_anything() {
     let bundle = dir.path().join("bundle.toml");
 
     let recipient = initialize_store_identity(&paths, "laptop", None).unwrap();
-    // No `--store`, so the key can be fetched but never replaced.
+    // No write command, so the key can be fetched but never replaced.
     set_key_location(
         &paths,
         &KeyTarget::Command {
