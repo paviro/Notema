@@ -1,14 +1,14 @@
-use crate::files::atomic_write_private;
+use crate::files::{PrivateFileExposure, atomic_write_private};
 use crate::key_command::KeyCommand;
 use crate::signing::{generate_signing_key, signing_public};
 use crate::{
-    EncryptionError, KeyPaths, Recipient, Result, cipher, key_command, keyring, recipients,
+    EncryptionError, KeyPaths, Recipient, Result, cipher, files, key_command, keyring, recipients,
 };
 use age::secrecy::{ExposeSecret, SecretString};
 use age::x25519;
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path, str::FromStr};
+use std::{fs, io::Read, path::Path, str::FromStr};
 use zeroize::Zeroizing;
 
 const IDENTITY_SCHEMA_VERSION: u32 = 1;
@@ -69,6 +69,14 @@ pub struct DeviceIdentityInfo {
     pub name: String,
     pub store: KeyStore,
     pub passphrase_protected: bool,
+    /// For a command-backed key, the fetch command as recorded — no permission
+    /// check can tell an identity file you wrote from one that arrived with your
+    /// dotfiles, so the line is shown rather than only obeyed.
+    pub fetch_command: Option<String>,
+    /// Set when the identity file's permissions let someone other than its owner
+    /// reach it. Reported here; refused where it matters, in
+    /// [`fetch_key_material`] and the rest of the read path.
+    pub exposure: Option<PrivateFileExposure>,
 }
 
 /// The secret key material for a device, serialized inside the (optionally
@@ -149,6 +157,9 @@ struct StoredKey {
 struct StoredIdentity {
     device_name: String,
     key: StoredKey,
+    /// How exposed the file this was read from is — `None` when only its owner
+    /// can reach it, and always `None` off Unix.
+    exposure: Option<PrivateFileExposure>,
 }
 
 /// The on-disk shape of `identity.toml`: `device_name`, exactly one key location,
@@ -178,10 +189,11 @@ struct StoredIdentityWire {
     keys_encrypted: Option<bool>,
 }
 
-impl TryFrom<StoredIdentityWire> for StoredIdentity {
-    type Error = EncryptionError;
-
-    fn try_from(wire: StoredIdentityWire) -> Result<Self> {
+impl StoredIdentity {
+    /// Build from the on-disk shape, enforcing that exactly one key location is
+    /// named. `exposure` is how far the file it came from has drifted from
+    /// owner-only.
+    fn from_wire(wire: StoredIdentityWire, exposure: Option<PrivateFileExposure>) -> Result<Self> {
         if wire.schema_version != IDENTITY_SCHEMA_VERSION {
             return Err(EncryptionError::UnsupportedSchema {
                 kind: "device identity file",
@@ -240,6 +252,7 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
                 location,
                 encrypted,
             },
+            exposure,
         })
     }
 }
@@ -268,11 +281,18 @@ pub fn device_identity_info(paths: &KeyPaths) -> Result<Option<DeviceIdentityInf
     if !paths.identity_file.exists() {
         return Ok(None);
     }
-    let stored = read_stored_identity(&paths.identity_file)?;
+    // Inspect, not read: this is the report that says a file is too loose to run
+    // a command out of, so it must not be refused for being one.
+    let stored = inspect_stored_identity(&paths.identity_file)?;
     Ok(Some(DeviceIdentityInfo {
         name: stored.device_name,
         store: stored.key.location.store(),
         passphrase_protected: stored.key.encrypted,
+        fetch_command: match &stored.key.location {
+            KeyLocation::Command { read, .. } => Some(read.display_line()),
+            _ => None,
+        },
+        exposure: stored.exposure,
     }))
 }
 
@@ -800,18 +820,54 @@ fn write_identity_file(path: &Path, wire: &StoredIdentityWire) -> Result<()> {
     atomic_write_private(path, serialized.as_bytes())
 }
 
-fn read_stored_identity(path: &Path) -> Result<StoredIdentity> {
+/// Read the identity file only to describe it, carrying the permission verdict
+/// rather than failing on it: the file worth reporting on is exactly the one too
+/// loose to run a command out of, so this must not be the call that refuses.
+fn inspect_stored_identity(path: &Path) -> Result<StoredIdentity> {
+    let (mut file, exposure) = files::open_private(path)?;
     // The raw file carries the plaintext key bundle in the inline no-passphrase
     // case: zeroize the buffer, and don't let toml::de::Error echo a line of it.
     // Our own field validation runs after the parse, so it reports accurately
     // instead of being flattened into a serde error.
-    let raw = Zeroizing::new(fs::read_to_string(path)?);
+    // Sized up front so it is allocated once — a string that grew by realloc
+    // leaves copies `Zeroizing` cannot reach. Read through the handle that was
+    // judged, so nothing can be swapped in between.
+    let hint = usize::try_from(file.metadata()?.len()).unwrap_or(0);
+    let mut raw = Zeroizing::new(String::with_capacity(hint.saturating_add(1)));
+    file.read_to_string(&mut raw)?;
+
     let wire: StoredIdentityWire =
         toml::from_str(&raw).map_err(|error| EncryptionError::UnparsableIdentityFile {
             path: path.to_path_buf(),
             line: error_line(&raw, &error),
         })?;
-    StoredIdentity::try_from(wire)
+    StoredIdentity::from_wire(wire, exposure)
+}
+
+/// Read it for an operation that may end up running a command it names, refusing
+/// when the file's permissions leave that choice open to someone else.
+///
+/// Everything that fetches, stores or rewrites the key comes through here; only
+/// [`device_identity_info`] does not, because describing a file is not running
+/// what it says.
+fn read_stored_identity(path: &Path) -> Result<StoredIdentity> {
+    let stored = inspect_stored_identity(path)?;
+    // Only a key command is arbitrary code. Refusing an inline or keychain key
+    // would lock the user out over a bit they can fix, while doing nothing about
+    // a key already readable.
+    match (&stored.key.location, stored.exposure) {
+        (
+            KeyLocation::Command { .. },
+            Some(
+                exposure @ (PrivateFileExposure::ForeignOwner { .. }
+                | PrivateFileExposure::Writable { .. }),
+            ),
+        ) => Err(EncryptionError::UnsafeIdentityFile {
+            path: path.to_path_buf(),
+            exposure,
+        }),
+        _ => Ok(stored),
+    }
 }
 
 /// The 1-based line a parse error points at.

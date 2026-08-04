@@ -1,3 +1,4 @@
+use crate::files::PrivateFileExposure;
 use std::fmt;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -198,6 +199,22 @@ pub enum EncryptionError {
         "the journal key command printed more than {limit} bytes; expected the secret key bundle"
     )]
     KeyCommandOutputTooLarge { limit: usize },
+
+    /// The identity file names a key command, but its permissions leave the
+    /// choice of what runs open to someone other than its owner.
+    ///
+    /// Refused rather than repaired: tightening the mode would not undo a
+    /// command already swapped in, and would erase the only sign that one could
+    /// have been.
+    #[error(
+        "{} names a key command this device runs to fetch its key, but it {exposure} — which means what runs is not only yours to choose. Check that the keys_command and keys_store_command lines in that file are still the ones you wrote, then {}",
+        .path.display(),
+        .exposure.remedy(.path)
+    )]
+    UnsafeIdentityFile {
+        path: PathBuf,
+        exposure: PrivateFileExposure,
+    },
 
     /// The stored key material is a bare age secret key rather than the whole
     /// bundle — the shape a secret manager most often already holds. Carries

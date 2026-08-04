@@ -60,6 +60,27 @@ impl KeyCommand {
         }
     }
 
+    /// The command as recorded, for showing someone what this device runs.
+    ///
+    /// Redacted like [`label`](Self::label) but not cut short, and with the
+    /// vector form joined in full: a line to be checked has to be whole.
+    pub fn display_line(&self) -> String {
+        let full = match self {
+            Self::Shell(line) => line.trim().to_string(),
+            Self::Argv(argv) => argv.join(" "),
+        };
+        full.split_whitespace()
+            .map(|word| {
+                if crate::error::looks_secret(word) {
+                    "<redacted>"
+                } else {
+                    word
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     fn build(&self) -> Result<Command> {
         match self {
             Self::Shell(line) if line.trim().is_empty() => Err(EncryptionError::EmptyKeyCommand),

@@ -1443,6 +1443,60 @@ fn a_broken_key_command_is_reported_as_such_not_as_corruption() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_world_writable_identity_file_blocks_the_key_command_and_status_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    let identity = encrypted_store_with_an_entry(dir.path());
+    let vault = move_key_to_a_command_store(dir.path());
+    fs::set_permissions(&identity, fs::Permissions::from_mode(0o666)).unwrap();
+
+    // Status reports rather than fails: this is the only place a user finds out,
+    // and it prints the command so an identity file that arrived from elsewhere
+    // is visible rather than silently obeyed.
+    let output = run_notema(dir.path(), &["encryption", "status"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{output:?}");
+    assert!(stdout.contains("0666"), "{stdout}");
+    assert!(stdout.contains("chmod 600"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("cat {}", vault.display())),
+        "{stdout}"
+    );
+
+    // Anything that needs the key refuses. `log` would not do: writing an entry
+    // needs only the public roster, so it never fetches.
+    let output = run_notema(
+        dir.path(),
+        &[
+            "encryption",
+            "key",
+            "export",
+            dir.path().join("backup.toml").to_str().unwrap(),
+            "-y",
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(stderr.contains(&identity.display().to_string()), "{stderr}");
+
+    // And it is only the mode standing in the way.
+    fs::set_permissions(&identity, fs::Permissions::from_mode(0o600)).unwrap();
+    let output = run_notema(
+        dir.path(),
+        &[
+            "encryption",
+            "key",
+            "export",
+            dir.path().join("backup.toml").to_str().unwrap(),
+            "-y",
+        ],
+    );
+    assert!(output.status.success(), "{output:?}");
+}
+
 #[test]
 fn an_exported_key_restores_into_a_fresh_config_dir() {
     let dir = tempdir().unwrap();

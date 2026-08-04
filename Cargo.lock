@@ -2531,6 +2531,7 @@ dependencies = [
  "hex",
  "keyring",
  "notema-timing",
+ "rustix 1.1.4",
  "serde",
  "sha2 0.11.0",
  "tempfile",

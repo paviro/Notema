@@ -19,6 +19,12 @@ thiserror.workspace = true
 toml.workspace = true
 zeroize.workspace = true
 
+# `geteuid`, for checking that the identity file is still ours before running a
+# key command out of it. `std::os::unix` gives a file's owner but no way to ask
+# which one we are.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["process"] }
+
 [dev-dependencies]
 tempfile.workspace = true
 

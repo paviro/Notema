@@ -640,6 +640,11 @@ fn failing_store_command_reports_its_status() {
 fn write_wire(paths: &KeyPaths, body: &str) {
     fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
     fs::write(&paths.identity_file, body).unwrap();
+    // Explicit, so these fixtures don't inherit the runner's umask: under 002 a
+    // fresh write lands at 0664, which is exactly what the key-command guard
+    // refuses.
+    #[cfg(unix)]
+    chmod(&paths.identity_file, 0o600);
 }
 
 #[test]
@@ -925,6 +930,269 @@ fn an_exported_identity_restores_into_a_fresh_config_dir() {
         unlock_identity(&restored, None).unwrap().public_key(),
         before
     );
+}
+
+// -- identity file permissions ------------------------------------------------
+
+#[cfg(unix)]
+fn chmod(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// The error from a call that yields key material on success, which has no
+/// `Debug` for `unwrap_err` to print.
+#[cfg(unix)]
+fn refusal<T>(result: Result<T>) -> EncryptionError {
+    match result {
+        Err(error) => error,
+        Ok(_) => panic!("expected the call to be refused"),
+    }
+}
+
+/// A read command that leaves a trace when it runs, so a test can prove it
+/// didn't. Prints the bundle either way, so the only reason to fail is the guard.
+#[cfg(unix)]
+fn cat_command_touching(witness: &Path, bundle: &Path) -> KeyCommand {
+    KeyCommand::Shell(format!(
+        "touch {}; cat {}",
+        witness.display(),
+        bundle.display()
+    ))
+}
+
+#[cfg(unix)]
+#[test]
+fn a_writable_identity_file_will_not_run_its_key_command() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+    let witness = dir.path().join("it-ran");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    set_key_store(
+        &paths,
+        &KeyTarget::Command {
+            read: cat_command_touching(&witness, &bundle),
+            write: KeyCommand::Shell(format!("cat > {}", bundle.display())).into(),
+        },
+        None,
+    )
+    .unwrap();
+    // Seeding the store ran the read command once to verify the round trip.
+    fs::remove_file(&witness).unwrap();
+
+    chmod(&paths.identity_file, 0o666);
+
+    let error = refusal(unlock_identity(&paths, None));
+    assert!(matches!(
+        error,
+        EncryptionError::UnsafeIdentityFile {
+            exposure: PrivateFileExposure::Writable { mode: 0o666 },
+            ..
+        }
+    ));
+    let message = error.to_string();
+    assert!(message.contains("0666"), "{message}");
+    assert!(message.contains("chmod 600"), "{message}");
+    assert!(
+        message.contains(&paths.identity_file.display().to_string()),
+        "{message}"
+    );
+
+    // The point of a guard rather than a complaint: nothing ran.
+    assert!(!witness.exists(), "the key command ran before the check");
+
+    // Every other door into the same command is shut too.
+    for error in [
+        set_identity_passphrase(&paths, None, Some(&SecretString::from("new"))).unwrap_err(),
+        export_identity(&paths, &dir.path().join("backup.toml")).unwrap_err(),
+        refusal(snapshot_identity(&paths)),
+        check_key_is_writable(&paths).unwrap_err(),
+    ] {
+        assert!(
+            matches!(error, EncryptionError::UnsafeIdentityFile { .. }),
+            "{error}"
+        );
+    }
+    assert!(!witness.exists(), "the key command ran before the check");
+}
+
+#[cfg(unix)]
+#[test]
+fn every_foreign_write_bit_is_refused_and_no_other_bit_is() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+    move_to_command(&paths, &bundle, None);
+
+    for mode in [0o666, 0o622, 0o620, 0o602] {
+        chmod(&paths.identity_file, mode);
+        match unlock_identity(&paths, None) {
+            Err(EncryptionError::UnsafeIdentityFile {
+                exposure: PrivateFileExposure::Writable { mode: reported },
+                ..
+            }) => assert_eq!(reported, mode),
+            other => panic!("mode {mode:o} should be refused, got {:?}", other.err()),
+        }
+    }
+    // Readable is not writable: someone who can see the command cannot choose it.
+    for mode in [0o600, 0o640, 0o604, 0o644] {
+        chmod(&paths.identity_file, mode);
+        assert_eq!(
+            unlock_identity(&paths, None).unwrap().public_key(),
+            before,
+            "mode {mode:o} should still open"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inline_key_still_opens_from_a_loosely_permissioned_file() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+
+    chmod(&paths.identity_file, 0o666);
+    assert_eq!(unlock_identity(&paths, None).unwrap().public_key(), before);
+
+    let info = device_identity_info(&paths).unwrap().unwrap();
+    assert_eq!(
+        info.exposure,
+        Some(PrivateFileExposure::Writable { mode: 0o666 })
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_readable_inline_key_is_reported_but_not_refused() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+    chmod(&paths.identity_file, 0o644);
+
+    assert_eq!(unlock_identity(&paths, None).unwrap().public_key(), before);
+    assert_eq!(
+        device_identity_info(&paths).unwrap().unwrap().exposure,
+        Some(PrivateFileExposure::Readable { mode: 0o644 })
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_identity_file_is_judged_by_what_it_points_at() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    move_to_command(&paths, &bundle, None);
+
+    // Move the real file aside and leave a symlink where the identity belongs.
+    // A symlink's own mode is 0777 and says nothing; only the target's counts.
+    let elsewhere = dir.path().join("elsewhere.toml");
+    fs::rename(&paths.identity_file, &elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, &paths.identity_file).unwrap();
+    assert!(unlock_identity(&paths, None).is_ok());
+
+    chmod(&elsewhere, 0o666);
+    assert!(matches!(
+        refusal(unlock_identity(&paths, None)),
+        EncryptionError::UnsafeIdentityFile { .. }
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fresh_command_backed_identity_reports_no_exposure() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    move_to_command(&paths, &bundle, None);
+
+    // Guards against a check that always fires: what notema writes itself passes.
+    assert_eq!(
+        device_identity_info(&paths).unwrap().unwrap().exposure,
+        None
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn status_reports_a_loose_identity_file_instead_of_failing() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    move_to_command(&paths, &bundle, None);
+    chmod(&paths.identity_file, 0o666);
+
+    // Describing a file is not running what it says, so this must still answer.
+    let info = device_identity_info(&paths).unwrap().unwrap();
+    assert_eq!(
+        info.exposure,
+        Some(PrivateFileExposure::Writable { mode: 0o666 })
+    );
+    assert!(
+        info.fetch_command.as_deref().unwrap().contains("cat"),
+        "{info:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn open_private_reads_the_mode_off_the_handle() {
+    let dir = tempdir().unwrap();
+    let file = dir.path().join("private");
+    fs::write(&file, b"x").unwrap();
+
+    for (mode, expected) in [
+        (0o600, None),
+        (0o640, Some(PrivateFileExposure::Readable { mode: 0o640 })),
+        (0o604, Some(PrivateFileExposure::Readable { mode: 0o604 })),
+        (0o660, Some(PrivateFileExposure::Writable { mode: 0o660 })),
+        (0o602, Some(PrivateFileExposure::Writable { mode: 0o602 })),
+    ] {
+        chmod(&file, mode);
+        assert_eq!(crate::files::open_private(&file).unwrap().1, expected);
+    }
+}
+
+#[test]
+fn a_foreign_owner_says_how_to_take_the_file_back() {
+    // The integration path needs another uid, so only the wording is testable
+    // here; `open_private` produces this variant from a real `fstat`.
+    let exposure = PrivateFileExposure::ForeignOwner { uid: 501 };
+    assert!(exposure.to_string().contains("uid 501"));
+    let remedy = exposure.remedy(Path::new("/tmp/identity.toml"));
+    assert!(remedy.contains("chown"), "{remedy}");
+    assert!(remedy.contains("chmod 600"), "{remedy}");
+}
+
+#[test]
+fn a_displayed_key_command_is_redacted_but_not_truncated() {
+    const MARKER: &str = "AGE-SECRET-KEY-1TESTMARKER";
+    let command = KeyCommand::Shell(format!(
+        "some-very-long-secret-manager-invocation --identity {MARKER} --and-more-flags-besides"
+    ));
+
+    let shown = command.display_line();
+    assert!(!shown.contains(MARKER), "{shown}");
+    assert!(shown.contains("<redacted>"), "{shown}");
+    // An error abbreviates; a report does not.
+    assert!(!shown.contains('…'), "{shown}");
+    assert!(shown.len() > command.label().len());
 }
 
 // -- OS keyring ---------------------------------------------------------------
