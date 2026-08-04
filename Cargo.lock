@@ -2418,7 +2418,7 @@ dependencies = [
 
 [[package]]
 name = "notema"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2472,7 +2472,7 @@ dependencies = [
 
 [[package]]
 name = "notema-analytics"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "jiff",
  "notema-domain",
@@ -2480,7 +2480,7 @@ dependencies = [
 
 [[package]]
 name = "notema-context"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "async-io",
  "chrono",
@@ -2499,7 +2499,7 @@ dependencies = [
 
 [[package]]
 name = "notema-domain"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "jiff",
  "serde",
@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "notema-encryption"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "age",
  "ed25519-dalek",
@@ -2526,7 +2526,7 @@ dependencies = [
 
 [[package]]
 name = "notema-fuse"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "anyhow",
  "cc",
@@ -2540,7 +2540,7 @@ dependencies = [
 
 [[package]]
 name = "notema-http"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "thiserror 2.0.19",
  "ureq",
@@ -2548,7 +2548,7 @@ dependencies = [
 
 [[package]]
 name = "notema-import"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "anyhow",
  "jiff",
@@ -2563,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "notema-locate"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "objc2",
  "objc2-core-location",
@@ -2572,7 +2572,7 @@ dependencies = [
 
 [[package]]
 name = "notema-seed"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2585,7 +2585,7 @@ dependencies = [
 
 [[package]]
 name = "notema-storage"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "anyhow",
  "getrandom 0.4.3",
@@ -2621,7 +2621,7 @@ dependencies = [
 
 [[package]]
 name = "notema-timing"
-version = "2026.7.8"
+version = "2026.8.0"
 dependencies = [
  "rustix 1.1.4",
 ]
