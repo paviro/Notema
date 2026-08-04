@@ -42,7 +42,7 @@ indicatif = "0.18.4"
 # no keychain get none of it. See crates/notema-encryption/src/keyring.rs.
 keyring = { version = "3", default-features = false }
 libc = "0.2"
-moxcms = "0.8"
+moxcms = "0.9"
 notify = "8.2.0"
 open = "5"
 objc2 = "0.6"
