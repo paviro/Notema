@@ -238,6 +238,15 @@ pub enum EncryptionError {
     #[error("the new key store returned a different key than this device uses; refusing to switch")]
     KeyStoreMismatch,
 
+    /// The key store took a write and then returned something else, so it never
+    /// kept the key. Caught before the caller drops whatever other copy exists —
+    /// a store command that exits 0 without reading all of its input looks like
+    /// success from the outside.
+    #[error(
+        "the key store did not keep what was written to it, so this device's key is not there; nothing has been dropped, but check the store command or keychain item before retrying"
+    )]
+    KeyStoreWriteLost,
+
     /// The key is fetched by a command with no matching store command, so it can
     /// be read but never replaced.
     #[error(
