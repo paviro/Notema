@@ -112,6 +112,15 @@ codegen-units = 1
 # Unwinding preserves FUSE error containment and terminal restoration.
 panic = "unwind"
 
+# Release code shape with symbols, for `samply record` (see docs/DEVELOPMENT.md).
+# Inherits release so the profile measures what ships, not a debug build.
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+# Emit a .dSYM bundle so samply symbolicates without keeping the object files.
+split-debuginfo = "packed"
+
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 unreachable_pub = "warn"

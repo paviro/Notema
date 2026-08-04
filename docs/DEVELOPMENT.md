@@ -206,3 +206,48 @@ Reading it:
 - **`cache mtime precision:`** (level 2) counts how many stamps carry a
   sub-second mtime. A count of zero means the filesystem resolves mtime no finer
   than a second, which limits what the cache can tell apart.
+
+## Profiling with samply
+
+`NOTEMA_TIMING` attributes a slow launch to a phase; the benchmarks time a hot
+path end to end. A sampling profiler is for the question they can't answer:
+*within* a phase or a bench line, where do the cycles actually go?
+[samply](https://github.com/mstange/samply) records a run and opens it in the
+Firefox Profiler. Install it with `cargo install samply` (macOS needs no Xcode).
+
+Traces are recorded against the **`profiling`** profile — release code shape
+(`inherits = "release"`) plus debug symbols and a `.dSYM`, so the flamegraph
+reflects what ships. `scripts/profile.sh` wires the pieces together:
+
+```bash
+scripts/profile.sh seed       # once: a reproducible 25k throwaway corpus in /tmp/notema-prof
+scripts/profile.sh startup    # non-TUI launch cost (config/store/roster/encrypt) via `notema log`
+scripts/profile.sh benches    # render/search/filter/pickers/reload/editor (tui bench)
+scripts/profile.sh scan       # library load: walk + parse + preview + haystack (storage scan bench)
+scripts/profile.sh analytics  # cadence/mood/correlation aggregation
+scripts/profile.sh all        # every non-interactive target
+scripts/profile.sh tui        # launch the real TUI to drive by hand; press q to write the trace
+```
+
+Each writes `target/profiling/prof-<target>.json.gz`. Open one interactively
+with `samply load target/profiling/prof-bench.json.gz`, or summarize it
+headlessly (no browser) with the bundled parser, which symbolicates against the
+`.dSYM` via `atos`:
+
+```bash
+scripts/prof-top.py target/profiling/prof-bench.json.gz --filter notema
+```
+
+Two properties of the recording model shape how to read a trace:
+
+- **samply writes the trace only when its child exits cleanly.** The
+  non-interactive targets run a bench or `notema log`, which exit on their own.
+  The TUI exits on `q`, so a live trace needs a human at the keyboard — `all`
+  omits it. The `bench` targets drive the same render/search/filter/editor code
+  through the `bench` feature, which is how the project exercises those paths
+  without a terminal, so reach for them first.
+- **Bench traces include the bench's own setup.** `app_with_corpus` writes each
+  corpus to a tempdir, so `read_entry`/`atomic_write` and kernel `File::open`
+  frames dominate self-time. That is scaffolding, not the interactive path: read
+  the wall-clock bench line for the magnitude and the profiler for *where inside*
+  the in-memory work (render, filter, editor) the cycles land.
