@@ -16,7 +16,9 @@ use crossterm::{
     execute,
 };
 use notema_encryption::{KeyStore, SecretString};
-use notema_storage::{CachedLibrary, JournalStore, LibraryDiscovery, StoreAccess};
+use notema_storage::{
+    CachedLibrary, DisabledElsewhere, JournalStore, LibraryDiscovery, RetiredKey, StoreAccess,
+};
 use notema_timing as timing;
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
 use std::collections::VecDeque;
@@ -117,14 +119,14 @@ fn run_after_unlock(
     mut store: JournalStore,
     mut discovery: Option<LibraryDiscovery>,
     startup: &theme::StartupTheme,
-    encryption_disabled: bool,
+    encryption_disabled: Option<DisabledElsewhere>,
 ) -> AppResult<()> {
     // If this device just fell back to plaintext (its key and pins retired by an
     // encryption *disable* on another device), tell the user: the change is
     // silent and consequential.
-    if encryption_disabled {
+    if let Some(disabled) = encryption_disabled {
         discovery = None;
-        run_disable_notice(terminal, &startup.theme)?;
+        run_disable_notice(terminal, &startup.theme, disabled.retired_key)?;
     }
 
     if store.unlock_available() {
@@ -299,8 +301,11 @@ fn run_pending_notice(
 fn run_disable_notice(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     theme: &theme::Theme,
+    retired_key: Option<RetiredKey>,
 ) -> AppResult<()> {
-    wait_for_dismiss(terminal, |frame| render::draw_disable_notice(theme, frame))
+    wait_for_dismiss(terminal, |frame| {
+        render::draw_disable_notice(theme, frame, retired_key)
+    })
 }
 
 /// Outcome of a single key press on the unlock screen.

@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use notema_encryption::PendingRequest;
+use notema_storage::RetiredKey;
 
 use crate::tui::entry_rows::wrap_text;
 use crate::tui::theme::Theme;
@@ -112,10 +113,10 @@ pub(crate) fn draw_pending_request(
 pub(crate) enum AccessNotice {
     /// A join request is queued — waiting for another device to approve it.
     AwaitingApproval,
-    /// No usable key, so the user must enroll. `retired_key` is true when this
-    /// launch just renamed a now-dead (revoked) key aside, false for a device
+    /// No usable key, so the user must enroll. `retired_key` is set when this
+    /// launch just renamed a now-dead (revoked) key aside, `None` for a device
     /// that was never enrolled and so never had one.
-    NeedsEnroll { retired_key: bool },
+    NeedsEnroll { retired_key: Option<RetiredKey> },
 }
 
 /// Draw the full-screen notice a device sees when it can't decrypt this encrypted
@@ -171,11 +172,21 @@ pub(crate) fn draw_pending_notice(
     };
     let mut lines = wrapped(&intro);
     // Only when a real key was just retired — a never-enrolled device had none.
-    if matches!(notice, AccessNotice::NeedsEnroll { retired_key: true }) {
+    // A copy that could not be read is a pointer, not a spare, so it must not be
+    // called recoverable.
+    if let AccessNotice::NeedsEnroll {
+        retired_key: Some(retired),
+    } = notice
+    {
         lines.push(Line::from(""));
-        lines.extend(wrapped(
-            "This device's old key has been retired (renamed aside, recoverable).",
-        ));
+        lines.extend(wrapped(match retired {
+            RetiredKey::Recoverable => {
+                "This device's old key has been retired (renamed aside, recoverable)."
+            }
+            RetiredKey::PointerOnly => {
+                "This device's old key has been retired (renamed aside), but it was kept outside the identity file and could not be read, so the renamed copy only points at where it was. Keep whatever holds the key if you may need to read old encrypted backups."
+            }
+        }));
     }
     lines.push(Line::from(""));
     lines.extend(wrapped(&instruction));
@@ -205,7 +216,11 @@ pub(crate) fn draw_pending_notice(
 /// Draw the full-screen notice shown when encryption was disabled on another
 /// device: this device fell back to plaintext and retired its key and trust pins
 /// (renamed aside, not deleted). Dismissed on any key.
-pub(crate) fn draw_disable_notice(theme: &Theme, frame: &mut Frame<'_>) {
+pub(crate) fn draw_disable_notice(
+    theme: &Theme,
+    frame: &mut Frame<'_>,
+    retired_key: Option<RetiredKey>,
+) {
     let area = super::draw_modal_frame(theme, frame, "Notema", "", "any key to continue");
     if area.height == 0 || area.width == 0 {
         return;
@@ -219,9 +234,21 @@ pub(crate) fn draw_disable_notice(theme: &Theme, frame: &mut Frame<'_>) {
     // text wraps to. Wrapping it here (rather than hand-splitting) lets the box
     // size to the real line count, so the dismiss hint is never pushed off-screen.
     let text_width = container_width.saturating_sub(6) as usize;
-    let body = "This journal is now plaintext. This device's encryption key and trust pins \
-        have been retired — renamed aside next to the config, not deleted, so they can be \
-        recovered if this was unexpected.";
+    // A key this device could not read leaves a renamed file that only points at
+    // where it was, so promising recovery there would be wrong.
+    let body = match retired_key {
+        Some(RetiredKey::PointerOnly) => {
+            "This journal is now plaintext. This device's trust pins have been retired — renamed \
+            aside next to the config, not deleted. Its encryption key was kept outside the identity \
+            file and could not be read, so the renamed copy only points at where it was; keep \
+            whatever holds the key if you may need to read old encrypted backups."
+        }
+        _ => {
+            "This journal is now plaintext. This device's encryption key and trust pins \
+            have been retired — renamed aside next to the config, not deleted, so they can be \
+            recovered if this was unexpected."
+        }
+    };
 
     let mut lines = vec![
         Line::from(Span::styled(

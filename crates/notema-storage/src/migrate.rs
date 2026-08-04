@@ -32,10 +32,23 @@ pub struct DecryptSummary {
 
 /// The outcome of renaming `identity.toml` aside: the recoverable copy, plus
 /// whatever the caller has to tell the user about the key that was in it.
-struct RetiredIdentity {
-    path: PathBuf,
-    left_in_command_store: bool,
-    warnings: Vec<String>,
+///
+/// Both extra fields are the difference between a copy that holds the key and
+/// one that merely points at it, so a caller that reports only `path` tells the
+/// user the retirement was recoverable when it may not have been.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RetiredIdentity {
+    pub path: PathBuf,
+    pub left_in_command_store: bool,
+    pub warnings: Vec<String>,
+}
+
+impl RetiredIdentity {
+    /// Whether the renamed file holds the key itself, rather than pointing at a
+    /// store this device could not read.
+    pub(crate) fn holds_the_key(&self) -> bool {
+        self.warnings.is_empty()
+    }
 }
 
 /// The local files a device retires when it notices encryption was disabled on
@@ -43,7 +56,7 @@ struct RetiredIdentity {
 /// renamed aside rather than deleted. Returned by [`reconcile_disabled_encryption`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DisabledElsewhereCleanup {
-    pub disabled_identity_file: Option<PathBuf>,
+    pub disabled_identity: Option<RetiredIdentity>,
     pub disabled_trust_file: Option<PathBuf>,
 }
 
@@ -130,7 +143,7 @@ pub(crate) fn decrypt_store(
     // failure here must not roll the (fully decrypted) root back.
     clear_age_dir(&paths.keys)?;
     let disabled_trust_file = disable_trust_file(&paths.keys)?;
-    let retired = disable_identity_file(&paths.keys)?;
+    let retired = disable_identity_file(&paths.keys, store.fetched_key())?;
     // The decrypt completed, so this snapshot is a deliberate keep, not a crash
     // leftover: move it out of the `*.backup-*` namespace the startup warning
     // covers. On a failed rename the old name stays — merely over-warned.
@@ -179,13 +192,13 @@ pub(crate) fn reconcile_disabled_encryption(
         return Ok(None);
     }
     let disabled_trust_file = disable_trust_file(paths)?;
-    let disabled_identity_file = if paths.identity_file.exists() {
-        Some(disable_identity_file(paths)?.path)
+    let disabled_identity = if paths.identity_file.exists() {
+        Some(disable_identity_file(paths, store.fetched_key())?)
     } else {
         None
     };
     Ok(Some(DisabledElsewhereCleanup {
-        disabled_identity_file,
+        disabled_identity,
         disabled_trust_file,
     }))
 }
@@ -195,14 +208,14 @@ pub(crate) fn reconcile_disabled_encryption(
 /// `identity.toml` is renamed aside (recoverable), letting a fresh `enroll`
 /// request access without the user deleting the file by hand. The roster trust
 /// pins are deliberately kept — the genesis is unchanged, so they still guard a
-/// re-enroll against a swapped or rolled-back roster. Returns the renamed path,
+/// re-enroll against a swapped or rolled-back roster. Returns what was retired,
 /// or `None` when no identity exists here.
-pub(crate) fn retire_revoked_identity(store: &JournalStore) -> AppResult<Option<PathBuf>> {
+pub(crate) fn retire_revoked_identity(store: &JournalStore) -> AppResult<Option<RetiredIdentity>> {
     let paths = &store.paths().keys;
     if !paths.identity_file.exists() {
         return Ok(None);
     }
-    Ok(Some(disable_identity_file(paths)?.path))
+    Ok(Some(disable_identity_file(paths, store.fetched_key())?))
 }
 
 /// Tear down the synced key folder when encryption is disabled: drop the signed
@@ -706,19 +719,35 @@ fn copy_dir_all(source: &Path, target: &Path) -> AppResult<()> {
 
 /// Retire this device's private key when encryption is turned off: rename
 /// `identity.toml` aside as `identity.disabled-<timestamp>.toml` — a recoverable
-/// copy, not a delete. Returns the new path.
-fn disable_identity_file(paths: &KeyPaths) -> AppResult<RetiredIdentity> {
+/// copy, not a delete.
+///
+/// Never retrieves the key. Two of the three callers run where a `keys_command`
+/// prompt could not be answered — inside the TUI's raw mode, and on any CLI
+/// subcommand including a scripted one — so `key` carries material the caller
+/// already holds, and `None` means the retired copy can only be a pointer.
+fn disable_identity_file(
+    paths: &KeyPaths,
+    key: Option<&crypto::FetchedKey>,
+) -> AppResult<RetiredIdentity> {
     // A key kept in the keychain or a secret manager would leave the retired
     // copy pointing at something nothing references any more, so inline it
     // first: this rename is meant to be recoverable, not a delete.
-    let snapshot = crypto::snapshot_identity(paths);
+    let snapshot = key
+        .map(|key| crypto::snapshot_identity_from(paths, key))
+        .transpose()?;
+    // Only worth saying when there was something elsewhere to miss; an inline
+    // key travels in the renamed file itself.
+    let pointer_only = snapshot.is_none()
+        && crypto::device_identity_info(paths)
+            .is_ok_and(|info| info.is_some_and(|info| info.store != crypto::KeyStore::File));
+
     let mut retired = RetiredIdentity {
         path: rename_aside(&paths.identity_file, "identity", "toml")?,
         left_in_command_store: false,
         warnings: Vec::new(),
     };
     match snapshot {
-        Ok(snapshot) if snapshot.is_external() => {
+        Some(snapshot) if snapshot.is_external() => {
             crypto::atomic_write_private(&retired.path, &snapshot.portable_bytes()?)?;
             // Only once the recoverable copy is on disk. A keychain item is ours
             // to delete; a secret manager's copy is the user's, so it is named
@@ -726,13 +755,14 @@ fn disable_identity_file(paths: &KeyPaths) -> AppResult<RetiredIdentity> {
             snapshot.forget_stored_key();
             retired.left_in_command_store = snapshot.store() == crypto::KeyStore::Command;
         }
-        Ok(_) => {}
+        Some(_) => {}
         // Not a reason to refuse the disable, but the retired copy is then only
         // a pointer at a key this device can no longer reach.
-        Err(error) => retired.warnings.push(format!(
-            "could not read this device's key ({error}), so {} only points at where it was kept rather than holding it",
+        None if pointer_only => retired.warnings.push(format!(
+            "this device's key was kept outside the identity file, so {} only points at where it was rather than holding it. Keep whatever holds the key if you may need to read old encrypted backups",
             retired.path.display()
         )),
+        None => {}
     }
     Ok(retired)
 }

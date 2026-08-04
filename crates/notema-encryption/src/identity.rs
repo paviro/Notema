@@ -677,14 +677,25 @@ impl IdentitySnapshot {
 }
 
 /// Capture this device's identity before something replaces it.
+///
+/// Retrieves the key, so the same terminal rule as [`fetch_key_material`]
+/// applies. Callers that already hold the material want
+/// [`snapshot_identity_from`], which never retrieves anything.
 pub fn snapshot_identity(paths: &KeyPaths) -> Result<IdentitySnapshot> {
+    snapshot_identity_from(paths, &fetch_key_material(paths)?)
+}
+
+/// Capture this device's identity using key material the caller already has.
+///
+/// Reads the identity file but never the key store, so this is safe where a
+/// `keys_command` prompt could not be answered.
+pub fn snapshot_identity_from(paths: &KeyPaths, fetched: &FetchedKey) -> Result<IdentitySnapshot> {
     let stored = read_stored_identity(&paths.identity_file)?;
-    let fetched = fetch_stored(&stored.key)?;
     Ok(IdentitySnapshot {
         wire: Zeroizing::new(fs::read(&paths.identity_file)?),
         device_name: stored.device_name,
         location: stored.key.location,
-        material: fetched.material,
+        material: fetched.material.clone(),
         encrypted: fetched.encrypted,
     })
 }
