@@ -39,18 +39,12 @@ workspace = true
 # zbus — pure Rust, unlike the sync one, which needs the libdbus C library and
 # would not cross-compile to those targets.
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { workspace = true, features = ["apple-native"] }
+keyring = { workspace = true, features = ["v1", "apple-native-keyring-store"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { workspace = true, features = ["windows-native"] }
+keyring = { workspace = true, features = ["v1", "windows-native-keyring-store"] }
 
+# This store rides zbus 5, matching the Linux side of notema-context, so both
+# trees share one zbus.
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
-keyring = { workspace = true, features = [
-    "async-secret-service",
-    "crypto-rust",
-    # zbus would otherwise pull in tokio. async-io matches the executor the Linux
-    # side of notema-context uses, though not its zbus version: secret-service
-    # pins zbus 4 and notema-context is on 5, so both trees build until `keyring`
-    # 4 (which moves to zbus 5) lands.
-    "async-io",
-] }
+keyring = { workspace = true, features = ["v1", "zbus-secret-service-keyring-store"] }
