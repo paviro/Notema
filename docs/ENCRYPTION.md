@@ -121,7 +121,6 @@ notema encryption device list                # trusted devices + pending request
 notema encryption device rename OLD NEW      # relabel a device (no re-encryption)
 notema encryption device revoke <name>       # revoke a device and re-encrypt without it
 
-notema encryption key status                 # where this device's key is kept
 notema encryption key rotate                 # replace this device's key, retire the old one
 notema encryption key passphrase             # add / change this device's key passphrase
 notema encryption key passphrase --remove    # store the key unprotected

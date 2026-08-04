@@ -133,10 +133,11 @@ enum DeviceCommand {
 /// This device's key. Two independent choices live here: its *format* (whether a
 /// passphrase protects it) and its *location* (which store holds the bytes).
 /// Every location holds either format.
+///
+/// All verbs: `encryption status` reports where the key is and how it is
+/// protected, so a read-only command here would only repeat it.
 #[derive(Debug, Subcommand)]
 enum KeyCommand {
-    /// Show where this device's key is kept and whether a passphrase protects it
-    Status,
     /// Change where this device's key is kept
     Source(KeySourceArgs),
     /// Add, remove, or change this device's key passphrase
@@ -385,7 +386,6 @@ fn handle_device_command(cli: &Cli, command: &DeviceCommand) -> AppResult<()> {
 
 fn handle_key_command(cli: &Cli, command: &KeyCommand) -> AppResult<()> {
     match command {
-        KeyCommand::Status => key_status_command(cli),
         KeyCommand::Source(args) => key_source_command(cli, args),
         KeyCommand::Passphrase(args) => device_passphrase_command(cli, args),
         KeyCommand::Rotate => device_rotate_command(cli),
@@ -418,15 +418,13 @@ fn print_key_location(info: &notema_encryption::DeviceIdentityInfo) {
     );
 }
 
-fn key_status_command(cli: &Cli) -> AppResult<()> {
-    let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
-    print_key_location(&this_device_or_bail(&store)?);
-    Ok(())
-}
-
 /// The one place that answers "what is my encryption state" — whether it is on,
-/// who can read the journal, and where this device's key sits. Split across
-/// `device list` and `key show` otherwise.
+/// where this device's key sits, and who can read the journal.
+///
+/// Reports rather than fails. A roster that will not verify is a fact about the
+/// state, so it belongs in the output; bailing would abandon a report that was
+/// already half printed, and withhold the local half — the part that is still
+/// true and still knowable — from the one person who needs it.
 fn encryption_status_command(cli: &Cli) -> AppResult<()> {
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     if !store.encryption_enabled() {
@@ -443,7 +441,14 @@ fn encryption_status_command(cli: &Cli) -> AppResult<()> {
         ),
     }
     println!();
-    print_device_roster(&store)
+    if let Err(error) = print_device_roster(&store) {
+        println!("Device roster: cannot be read — {error}");
+        println!(
+            "Entries already on this device stay readable. Approving or revoking a device is blocked until the roster in {} is restored from a device that has a good copy.",
+            store.device_roster_path().display()
+        );
+    }
+    Ok(())
 }
 
 fn key_source_command(cli: &Cli, args: &KeySourceArgs) -> AppResult<()> {
@@ -767,6 +772,10 @@ fn device_list_command(cli: &Cli) -> AppResult<()> {
 
 /// The roster and any pending requests. Shared by `device list` and the roster
 /// half of `encryption status`.
+///
+/// Every fallible read happens before the first line is printed, so a caller
+/// that reports the error instead of propagating it can't end up contradicting
+/// output this already produced.
 fn print_device_roster(store: &JournalStore) -> AppResult<()> {
     let recipients = store.recipients()?;
     if recipients.is_empty() {
@@ -775,6 +784,7 @@ fn print_device_roster(store: &JournalStore) -> AppResult<()> {
     }
 
     let this_device = store.this_device()?;
+    let pending = store.pending_requests()?;
     println!("Recipients:");
     for recipient in &recipients {
         let marker = if this_device
@@ -789,7 +799,6 @@ fn print_device_roster(store: &JournalStore) -> AppResult<()> {
         println!("      fingerprint: {}", recipient.fingerprint());
     }
 
-    let pending = store.pending_requests()?;
     if !pending.is_empty() {
         println!("\nPending approval (run `{}`):", crate::APPROVE_CMD);
         println!("Confirm each fingerprint out-of-band before approving.");
