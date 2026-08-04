@@ -1496,7 +1496,7 @@ fn an_exported_key_restores_into_a_fresh_config_dir() {
     );
     fs::copy(&backup, restored.join("identity.toml")).unwrap();
 
-    let output = run_notema(&restored, &["encryption", "key", "status"]);
+    let output = run_notema(&restored, &["encryption", "status"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "{:?}", output);
     assert!(stdout.contains("identity file"), "{stdout}");
@@ -1593,4 +1593,40 @@ fn key_source_rejects_fetch_flags_that_do_not_apply() {
     assert!(!output.status.success(), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("only apply to `command`"), "{stderr}");
+}
+
+/// A roster that will not verify is part of the encryption state, so `status`
+/// reports it instead of abandoning the report. The local half — that encryption
+/// is on, and where this device's key is — stays knowable and is exactly what
+/// someone in this situation needs.
+#[test]
+fn status_reports_an_unverifiable_roster_instead_of_failing() {
+    let dir = tempdir().unwrap();
+    encrypted_store_with_an_entry(dir.path());
+
+    let roster = dir
+        .path()
+        .join("journals")
+        .join(".age")
+        .join("devices.toml");
+    let tampered = fs::read_to_string(&roster)
+        .unwrap()
+        .replacen("laptop", "swapped", 1);
+    fs::write(&roster, tampered).unwrap();
+
+    let output = run_notema(dir.path(), &["encryption", "status"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "status should report, not fail: {output:?}"
+    );
+    assert!(stdout.contains("Encryption is on"), "{stdout}");
+    assert!(stdout.contains("identity file"), "{stdout}");
+    assert!(stdout.contains("Device roster: cannot be read"), "{stdout}");
+    // Naming the recipients would contradict the line above: they are exactly
+    // what could not be verified.
+    assert!(
+        !stdout.contains("Recipients:"),
+        "an unverifiable roster must not be listed as though it were trusted: {stdout}"
+    );
 }
