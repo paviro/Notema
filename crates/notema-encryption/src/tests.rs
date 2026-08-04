@@ -88,6 +88,46 @@ fn initialize_store_identity_refuses_an_existing_roster() {
 }
 
 #[test]
+fn a_second_identity_is_refused_rather_than_written_over_the_first() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = fs::read(&paths.identity_file).unwrap();
+
+    // The roster guard does not cover this: a restored identity file can sit in
+    // a config dir whose journal folder has not synced its roster yet.
+    fs::remove_file(&paths.devices_file).unwrap();
+    assert!(matches!(
+        initialize_store_identity(&paths, "laptop", None).unwrap_err(),
+        EncryptionError::IdentityExists { .. }
+    ));
+    assert!(matches!(
+        request_store_access(&paths, "laptop", None).unwrap_err(),
+        EncryptionError::IdentityExists { .. }
+    ));
+    assert_eq!(fs::read(&paths.identity_file).unwrap(), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn minting_over_a_command_backed_identity_leaves_its_key_store_alone() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    move_to_command(&paths, &bundle, None);
+    let kept = fs::read(&bundle).unwrap();
+    fs::remove_file(&paths.devices_file).unwrap();
+
+    // Minting writes through to whatever the identity file names, so a refusal
+    // that came after the write would already have destroyed the key.
+    assert!(initialize_store_identity(&paths, "laptop", None).is_err());
+    assert_eq!(fs::read(&bundle).unwrap(), kept);
+}
+
+#[test]
 fn plaintext_identity_unlocks_without_a_passphrase() {
     let dir = tempdir().unwrap();
     let paths = paths_in(dir.path());

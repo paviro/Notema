@@ -188,6 +188,16 @@ fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
 
     if should_offer_encryption(&store)? {
         offer_encryption(&mut stdout, &store)?;
+    } else if !store.encryption_enabled() && store.unlock_available() {
+        // A key with no roster to match it, usually a restored identity waiting
+        // for the journal folder to sync. Minting over it would destroy it.
+        writeln!(
+            stdout,
+            "Using existing journal at {}. This device already has a key at {}, but the journal has no device roster yet; let the folder finish syncing, then run `{}`.",
+            store.root().display(),
+            store.identity_path().display(),
+            crate::ENROLL_CMD
+        )?;
     } else if !store.encryption_enabled() {
         // An existing plaintext journal is registered as-is; encryption stays a
         // deliberate later step rather than a first-run prompt.
@@ -349,11 +359,15 @@ impl<'a, W: Write> SetupCacheProgress<'a, W> {
     }
 }
 
-/// First-run offers to enable encryption only for a brand-new, empty root — never
-/// for a journal that already has entries or is already encrypted. Those are just
-/// registered; encryption is managed with the `notema encryption …` commands.
+/// First-run offers to enable encryption only for a brand-new, empty root that
+/// has no device key yet — never for a journal that already has entries, is
+/// already encrypted, or holds a key a restore put there ahead of the roster
+/// syncing. Those are just registered; encryption is managed with the
+/// `notema encryption …` commands.
 fn should_offer_encryption(store: &JournalStore) -> AppResult<bool> {
-    Ok(!store.encryption_enabled() && store.list_journals()?.is_empty())
+    Ok(!store.encryption_enabled()
+        && !store.unlock_available()
+        && store.list_journals()?.is_empty())
 }
 
 /// Prompt to enable encryption on a fresh store and, if accepted, generate this

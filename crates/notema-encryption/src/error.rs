@@ -85,6 +85,15 @@ pub enum EncryptionError {
     #[error("device roster already exists; use request_store_access to join instead")]
     RosterExists,
 
+    /// A device key already exists here, so a new one can't be minted over it.
+    /// Overwriting is unrecoverable: the file may be the only pointer at a
+    /// keyring item or store command, which minting would overwrite in turn.
+    #[error(
+        "a device key already exists at {}; minting another would overwrite it",
+        .path.display()
+    )]
+    IdentityExists { path: PathBuf },
+
     /// An operation needed at least one recipient but the roster is empty.
     #[error("journal encryption recipients file is empty")]
     NoRecipients,
