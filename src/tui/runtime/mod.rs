@@ -48,12 +48,9 @@ pub(crate) fn run(
     // OSC to the normal screen, and load warnings should print readably.
     let startup = theme::load_startup(&config_path, &config.ui);
 
-    // Also before raw mode, and in this order. Reconciling first means a store
-    // whose encryption was disabled elsewhere retires its key without us first
-    // prompting for one we're about to throw away. Retrieving the key can then
-    // run a command that wants the TTY (`op`, `pinentry`) — while a
-    // passphrase-protected identity prompts inside the TUI, so the two must
-    // never both be able to own the terminal.
+    // Also before raw mode, and in this order: reconciling first retires the key
+    // of a store disabled elsewhere, rather than prefetching one about to be
+    // thrown away.
     let encryption_disabled = store.reconcile_disabled_encryption()?;
     store.prefetch_key_material()?;
 
@@ -122,10 +119,9 @@ fn run_after_unlock(
     startup: &theme::StartupTheme,
     encryption_disabled: bool,
 ) -> AppResult<()> {
-    // An encryption *disable* performed on another device was reconciled before
-    // the terminal was taken over; if this device just fell back to plaintext
-    // (its key and pins retired), tell the user, since the change is silent and
-    // consequential.
+    // If this device just fell back to plaintext (its key and pins retired by an
+    // encryption *disable* on another device), tell the user: the change is
+    // silent and consequential.
     if encryption_disabled {
         discovery = None;
         run_disable_notice(terminal, &startup.theme)?;

@@ -701,8 +701,8 @@ fn an_unsupported_identity_schema_reports_the_version() {
         "schema_version = 99\ndevice_name = \"laptop\"\nplain_keys = \"x\"\n",
     );
 
-    // Previously flattened into "key material is malformed", which read as
-    // corruption rather than a version mismatch.
+    // A version mismatch, not corruption — "key material is malformed" would
+    // send the user looking for a backup they don't need.
     assert!(matches!(
         device_identity_info(&paths).unwrap_err(),
         EncryptionError::UnsupportedSchema {
@@ -824,7 +824,8 @@ fn a_read_only_key_command_refuses_before_touching_anything() {
     let bundle = dir.path().join("bundle.toml");
 
     let recipient = initialize_store_identity(&paths, "laptop", None).unwrap();
-    // No write command, so the key can be fetched but never replaced.
+    // Seeded through a write command, which is then stripped below to leave a
+    // key that can be fetched but never replaced.
     set_key_store(
         &paths,
         &KeyTarget::Command {
@@ -993,5 +994,142 @@ fn a_missing_keyring_item_says_so_rather_than_looking_corrupt() {
     assert!(
         matches!(error, EncryptionError::KeyringItemMissing { .. }),
         "{error}"
+    );
+}
+
+/// The material a fresh, passphrase-less identity keeps inline, so a test can
+/// recognise the same key somewhere else.
+fn inline_material(paths: &KeyPaths) -> String {
+    let file = fs::read_to_string(&paths.identity_file).unwrap();
+    let parsed: toml::Value = toml::from_str(&file).unwrap();
+    parsed
+        .get("plain_keys")
+        .and_then(toml::Value::as_str)
+        .expect("a fresh identity keeps its key inline")
+        .to_string()
+}
+
+fn keyring_account(paths: &KeyPaths) -> String {
+    let file = fs::read_to_string(&paths.identity_file).unwrap();
+    let parsed: toml::Value = toml::from_str(&file).unwrap();
+    parsed
+        .get("keyring_account")
+        .and_then(toml::Value::as_str)
+        .expect("the file should point at a keychain item")
+        .to_string()
+}
+
+#[test]
+fn an_unknown_field_names_the_line_it_is_actually_on() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
+    // A top-level key starts at column 0, so its span sits exactly on a line
+    // boundary — where counting the lines *before* the offset reports the one
+    // above.
+    fs::write(
+        &paths.identity_file,
+        "schema_version = 1\ndevice_name = \"laptop\"\nplain_keys = \"x\"\nnot_a_field = 1\n",
+    )
+    .unwrap();
+
+    let error = unlock_identity(&paths, None)
+        .err()
+        .expect("an unknown field must not unlock");
+    assert!(
+        matches!(error, EncryptionError::UnparsableIdentityFile { line, .. } if line == 4),
+        "expected line 4, got {error:?}"
+    );
+}
+
+#[test]
+fn a_key_location_that_does_not_say_its_format_is_refused() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    fs::create_dir_all(paths.identity_file.parent().unwrap()).unwrap();
+    // Guessing would read armor as a cleartext bundle and report corruption.
+    fs::write(
+        &paths.identity_file,
+        "schema_version = 1\ndevice_name = \"laptop\"\nkeyring_account = \"whatever\"\n",
+    )
+    .unwrap();
+
+    let error = unlock_identity(&paths, None)
+        .err()
+        .expect("an unstated format must not unlock");
+    assert!(
+        matches!(error, EncryptionError::MissingKeyFormat { .. }),
+        "{error}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_keyring_move_that_cannot_be_recorded_takes_its_item_back_out() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let material = inline_material(&paths);
+    let before = fs::read(&paths.identity_file).unwrap();
+
+    // The item is minted before the identity file names it, so a file write that
+    // fails here is exactly what would strand it.
+    let config_dir = paths.identity_file.parent().unwrap().to_path_buf();
+    let mode = fs::metadata(&config_dir).unwrap().permissions();
+    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o500)).unwrap();
+    let result = set_key_store(&paths, &KeyTarget::Keyring, None);
+    fs::set_permissions(&config_dir, mode).unwrap();
+
+    assert!(result.is_err(), "the move should not have been recorded");
+    assert!(
+        !crate::keyring::holds(&material),
+        "a move nothing points at must not leave the key in the keychain"
+    );
+    assert_eq!(fs::read(&paths.identity_file).unwrap(), before);
+}
+
+#[test]
+fn restoring_a_snapshot_puts_an_external_key_back_where_it_was() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    set_key_store(&paths, &KeyTarget::Keyring, None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+
+    let snapshot = snapshot_identity(&paths).unwrap();
+
+    // Stand in for a rotation that got as far as replacing the key: the item the
+    // file points at now holds a different one, so restoring the file alone
+    // would restore a pointer at the wrong key.
+    let other = paths_in(&dir.path().join("other"));
+    initialize_store_identity(&other, "other", None).unwrap();
+    crate::keyring::store(&keyring_account(&paths), &inline_material(&other)).unwrap();
+    assert_ne!(unlock_identity(&paths, None).unwrap().public_key(), before);
+
+    restore_identity(&paths, &snapshot).unwrap();
+    assert_eq!(unlock_identity(&paths, None).unwrap().public_key(), before);
+}
+
+#[test]
+fn forgetting_a_snapshot_key_removes_the_keychain_item() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    set_key_store(&paths, &KeyTarget::Keyring, None).unwrap();
+    let account = keyring_account(&paths);
+
+    let snapshot = snapshot_identity(&paths).unwrap();
+    assert!(snapshot.is_external());
+    assert_eq!(snapshot.store(), KeyStore::Keyring);
+
+    snapshot.forget_stored_key();
+    assert!(
+        matches!(
+            crate::keyring::fetch(&account),
+            Err(EncryptionError::KeyringItemMissing { .. })
+        ),
+        "the retired item should be gone"
     );
 }

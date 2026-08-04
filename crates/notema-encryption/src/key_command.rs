@@ -1,9 +1,8 @@
 //! Fetching this device's stored key from an external command.
 //!
 //! The command's stdout is the key material, so nothing here may let it reach an
-//! unzeroized buffer: `Command::output()` is unusable because it grows a `Vec`
-//! by realloc (leaving copies in freed heap) and hands it back inside a struct
-//! that derives `Debug` and prints stdout.
+//! unzeroized buffer — which rules out `Command::output()`, whose `Vec` grows by
+//! realloc and lands in a `Debug` struct.
 
 use crate::{CommandStderr, EncryptionError, Result};
 use serde::{Deserialize, Serialize};
@@ -23,9 +22,8 @@ const MAX_STDERR: usize = 4 * 1024;
 /// How a key command is spelled in `identity.toml`: a single line run through the
 /// platform shell, or an explicit argv vector run with no shell at all.
 ///
-/// The string form is the ergonomic one and what the documented recipes use, so
-/// pipes work. The vector form is the escape hatch for anyone who would rather
-/// not involve a shell.
+/// The string form is what the documented recipes use, so pipes work; the vector
+/// form avoids the shell entirely.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum KeyCommand {
@@ -120,10 +118,9 @@ pub(crate) fn run(command: &KeyCommand) -> Result<Zeroizing<Vec<u8>>> {
         let drain = scope.spawn(move || drain_tail(&mut stderr, MAX_STDERR));
         let filled = fill(&mut stdout, buffer.as_mut_slice());
         // `fill` stops at the cap, so a command still producing output would
-        // block on a full pipe — and never close stderr, leaving the drain
-        // above unable to finish. Kill it: its output is already more than we
-        // will accept. Closing our end first gives a well-behaved command the
-        // chance to exit on EPIPE instead.
+        // block on a full pipe and never close stderr, leaving the drain above
+        // unable to finish. Close our end first so a well-behaved command can
+        // exit on EPIPE, then kill what's left.
         drop(stdout);
         if matches!(filled, Ok(read) if read > MAX_STDOUT) {
             let _ = child.kill();
@@ -139,14 +136,9 @@ pub(crate) fn run(command: &KeyCommand) -> Result<Zeroizing<Vec<u8>>> {
     }
     if !status.success() {
         // Whatever partial secret reached the buffer dies with it.
-        return Err(EncryptionError::KeyCommandFailed {
-            program: command.label(),
-            status: describe(&status),
-            stderr: CommandStderr::new(&stderr_tail, MAX_STDERR),
-        });
+        return Err(failed(command, &status, &stderr_tail));
     }
-    // `truncate` never reallocates, so the dropped tail stays inside the same
-    // allocation and is wiped along with it.
+    // Keeps the allocation, so the dropped tail is wiped along with it.
     buffer.truncate(filled);
     Ok(buffer)
 }
@@ -168,8 +160,8 @@ pub(crate) fn store(command: &KeyCommand, material: &[u8]) -> Result<()> {
     let mut stdout = child.stdout.take().expect("stdout piped above");
     let mut stderr = child.stderr.take().expect("stderr piped above");
 
-    // Three pipes, three threads: writing while a full output buffer blocks the
-    // child, or draining stdout to EOF before stderr, each deadlock.
+    // Each pipe needs its own reader: writing while a full output buffer blocks
+    // the child, or draining stdout to EOF before stderr, each deadlock.
     let (written, stderr_tail) = std::thread::scope(|scope| {
         let ignore_stdout = scope.spawn(move || drain_tail(&mut stdout, 0));
         let drain = scope.spawn(move || drain_tail(&mut stderr, MAX_STDERR));
@@ -185,11 +177,7 @@ pub(crate) fn store(command: &KeyCommand, material: &[u8]) -> Result<()> {
     // A command that exits early makes our write fail with a broken pipe, so the
     // exit status is the honest diagnosis and goes first.
     if !status.success() {
-        return Err(EncryptionError::KeyCommandFailed {
-            program: command.label(),
-            status: describe(&status),
-            stderr: CommandStderr::new(&stderr_tail, MAX_STDERR),
-        });
+        return Err(failed(command, &status, &stderr_tail));
     }
     match written {
         // A command that succeeded without reading all of its input still got
@@ -201,6 +189,14 @@ pub(crate) fn store(command: &KeyCommand, material: &[u8]) -> Result<()> {
             })
         }
         _ => Ok(()),
+    }
+}
+
+fn failed(command: &KeyCommand, status: &ExitStatus, stderr_tail: &str) -> EncryptionError {
+    EncryptionError::KeyCommandFailed {
+        program: command.label(),
+        status: describe(status),
+        stderr: CommandStderr::new(stderr_tail),
     }
 }
 

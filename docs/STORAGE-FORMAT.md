@@ -270,7 +270,8 @@ and private keys that never leave the device.
 - `identity.toml` — this device's `device_name` plus where to find its private
   keys. Format and location are independent: the key bundle (`x25519`, the age
   secret, and `ed25519`, the signing seed) is either cleartext or age armor, and
-  it sits in one of three places. Exactly one location field is present:
+  it sits in one of three places — inline, the keychain, or behind a command.
+  Exactly one location field is present:
 
   | field | where the bundle lives |
   | --- | --- |
@@ -284,9 +285,10 @@ and private keys that never leave the device.
   replaced, and rotating or re-wrapping refuses. A `keys_store_command` with no
   `keys_command` is rejected rather than ignored.
 
-  The two inline fields say which format they hold. The other two need
+  The two inline fields say which format they hold. The other two require
   `keys_encrypted = true|false` alongside, so the app knows whether to ask for a
-  passphrase without having to fetch the key first. A version of notema that
+  passphrase without having to fetch the key first; a file that omits it is
+  rejected rather than assumed either way. A version of notema that
   predates key locations reports a file using `keyring_account` or `keys_command`
   as malformed, since it does not know those fields.
 

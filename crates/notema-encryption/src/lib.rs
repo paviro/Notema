@@ -51,7 +51,7 @@ pub use key_command::KeyCommand;
 pub fn keyring_available() -> bool {
     keyring::is_available()
 }
-pub use paths::KeyPaths;
+pub use paths::{IDENTITY_FILE_NAME, KeyPaths};
 pub use pending::{
     PendingRequest, read_pending, remove_pending, renew_store_access, request_store_access,
 };

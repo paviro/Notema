@@ -125,6 +125,8 @@ notema encryption key rotate                 # replace this device's key, retire
 notema encryption key passphrase             # add / change this device's key passphrase
 notema encryption key passphrase --remove    # store the key unprotected
 notema encryption key export <path>          # write a standalone copy, for safekeeping
+                                             #   <path> may be a directory, taking `identity.toml`
+                                             #   refuses an existing file unless you pass --force
 ```
 
 Revocation is **forward-only**: re-encryption excludes the revoked device from
@@ -184,8 +186,9 @@ and `key passphrase` have nowhere to write.
 
 Before it drops the old copy, notema writes the key to its new home, reads it
 back, and checks the same key comes out. A store command that quietly did nothing
-can't leave you locked out. If that check fails, the copy it just wrote to the
-keychain is removed again, so a failed move leaves nothing behind.
+can't leave you locked out. If that check fails, a copy written to the keychain is
+removed again; a copy a `--write` command already stored is yours to clear, since
+that store isn't notema's to reach into.
 
 > [!WARNING]
 > A `--read`/`--write` command is a shell line recorded in `identity.toml` and run
@@ -245,11 +248,19 @@ notema encryption disable            # decrypts every entry and turns encryption
 Destructive encryption operations prompt for confirmation; pass `-y`/`--yes` to
 skip the prompt in scripts.
 
+`identity.toml` is renamed aside as `identity.disabled-<timestamp>.toml` rather
+than deleted. A key kept outside the file is written into that copy first, so it
+stands on its own instead of pointing at somewhere the key no longer is. The
+keychain item is then removed, since notema put it there; a copy held by a
+`--write` command stays where it is and is named in the output for you to clear.
+If the key can't be fetched at all, disabling still goes ahead — the retired copy
+is then only a pointer, and says so.
+
 ## Recovery without the app
 
 Encrypted entries decrypt with the standard [`age`](https://age-encryption.org)
-tool and the age secret key from `identity.toml`, so you're never locked into
-Notema to read your journal.
+tool and this device's age secret key, so you're never locked into Notema to read
+your journal.
 
 **1. Get the age secret key** (`AGE-SECRET-KEY-1…`).
 

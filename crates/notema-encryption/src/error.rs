@@ -23,21 +23,10 @@ pub(crate) fn looks_secret(text: &str) -> bool {
 pub struct CommandStderr(String);
 
 impl CommandStderr {
-    /// Keep the last `limit` bytes (the actual complaint is usually last) and drop
-    /// lines that look like key material. Not a security boundary — stderr is the
-    /// command's own output and isn't expected to carry the secret — but the
-    /// obvious case is free to catch.
-    pub(crate) fn new(raw: &str, limit: usize) -> Self {
-        let tail = if raw.len() <= limit {
-            raw
-        } else {
-            let mut start = raw.len() - limit;
-            while !raw.is_char_boundary(start) {
-                start += 1;
-            }
-            &raw[start..]
-        };
-        let kept: Vec<&str> = tail.lines().filter(|line| !looks_secret(line)).collect();
+    /// Drop lines that look like key material. `raw` arrives already bounded by
+    /// the rolling window the drain reads through.
+    pub(crate) fn new(raw: &str) -> Self {
+        let kept: Vec<&str> = raw.lines().filter(|line| !looks_secret(line)).collect();
         Self(kept.join("\n").trim().to_string())
     }
 
@@ -179,6 +168,13 @@ pub enum EncryptionError {
     )]
     RedundantKeysEncrypted { field: &'static str },
 
+    /// A key location that doesn't say which format it holds was written without
+    /// `keys_encrypted`, so nothing says whether to ask for a passphrase.
+    #[error(
+        "journal identity file sets {field} without keys_encrypted, so nothing says whether the stored key is passphrase-protected; add `keys_encrypted = true` for age armor or `keys_encrypted = false` for a cleartext bundle"
+    )]
+    MissingKeyFormat { field: &'static str },
+
     /// `keys_command` is present but names no program to run.
     #[error("keys_command in the journal identity file names no program to run")]
     EmptyKeyCommand,
@@ -213,9 +209,7 @@ pub enum EncryptionError {
 
     /// A key-location switch read back a different key than this device uses, so
     /// the local copy was kept rather than stranding the device.
-    #[error(
-        "the new key location returned a different key than this device uses; refusing to switch"
-    )]
+    #[error("the new key store returned a different key than this device uses; refusing to switch")]
     KeyStoreMismatch,
 
     /// The key is fetched by a command with no matching store command, so it can
@@ -224,6 +218,14 @@ pub enum EncryptionError {
         "this device's key is fetched by '{command}', which can read it but not replace it. Re-run `notema encryption key store command` with `--write` so new key material has somewhere to go, or bring the key back with `notema encryption key store file`"
     )]
     KeyStoreReadOnly { command: String },
+
+    /// Replacing this device's key failed, and putting the previous one back
+    /// failed too — so the key store and the identity file may now disagree
+    /// about whether what's stored is passphrase-wrapped.
+    #[error(
+        "could not replace this device's key ({original}), and restoring the previous one also failed ({rollback}); the identity file and the key store may now disagree about its format"
+    )]
+    IdentityRollbackFailed { original: String, rollback: String },
 
     /// The identity file is not valid TOML, or lacks the shape of one.
     ///

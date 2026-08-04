@@ -1,9 +1,9 @@
 //! This device's key in the OS keychain.
 //!
 //! The account is an opaque label stored in `identity.toml`; the service is
-//! constant. Not every platform has a keychain — Android, the iSH build and the
-//! embedded Linux artifacts have none — so each entry point falls back to saying
-//! so and pointing at `keys_command`.
+//! constant. Not every platform has a keychain, and a Linux build that has the
+//! backend may still find no D-Bus session behind it, so each entry point falls
+//! back to saying so and pointing at `keys_command`.
 //!
 //! Unlike the command path, the bytes pass through `keyring`'s own buffers on
 //! the way here, which we can't zeroize. What we receive is wrapped immediately;
@@ -35,6 +35,14 @@ pub(crate) fn delete(account: &str) {
     platform::delete(account);
 }
 
+/// Whether any item holds this material. Lets a test assert on a move that
+/// minted an account it never got to record, without knowing the account —
+/// and without counting, which other tests running alongside would disturb.
+#[cfg(test)]
+pub(crate) fn holds(material: &str) -> bool {
+    platform::holds(material)
+}
+
 #[cfg(all(
     not(test),
     any(
@@ -56,9 +64,9 @@ mod platform {
     const PROBE_ACCOUNT: &str = "availability-probe";
 
     pub(super) fn is_available() -> bool {
-        // `Entry::new` defers OS contact until a get or set, so it answers
-        // `Ok` with no keychain behind it. A miss returns before any unlock or
-        // ACL check, so this cannot raise a dialog.
+        // A read, because `Entry::new` defers OS contact and would answer `Ok`
+        // with no keychain behind it. A miss returns before any unlock or ACL
+        // check, so this cannot raise a dialog.
         match keyring::Entry::new(SERVICE, PROBE_ACCOUNT).and_then(|entry| entry.get_secret()) {
             Ok(_) => true,
             Err(keyring::Error::NoEntry) => true,
@@ -73,14 +81,7 @@ mod platform {
         let secret = entry(account)?
             .get_secret()
             .map_err(|error| missing_or(error, account))?;
-        // The same guard every other fetch path uses: a FromUtf8Error would
-        // carry the key unzeroized and expose it via Debug.
-        Ok(Zeroizing::new(String::from_utf8(secret).map_err(
-            |error| {
-                drop(Zeroizing::new(error.into_bytes()));
-                EncryptionError::MalformedStoredIdentity
-            },
-        )?))
+        crate::identity::bytes_to_utf8(secret)
     }
 
     pub(super) fn store(account: &str, material: &str) -> Result<()> {
@@ -170,9 +171,8 @@ mod platform {
 }
 
 /// An in-memory stand-in, so the tests can exercise everything built on top of a
-/// keychain without touching the developer's real one — and so they pass in CI,
-/// which has none. It deliberately does not cover the platform backends above;
-/// those are only exercised on a machine that has a keychain.
+/// keychain without touching a real one. The platform backends above are covered
+/// separately by `notema-storage`'s `keyring_backend` tests.
 #[cfg(test)]
 mod platform {
     use crate::{EncryptionError, Result};
@@ -210,5 +210,13 @@ mod platform {
 
     pub(super) fn delete(account: &str) {
         items().lock().expect("keyring test store").remove(account);
+    }
+
+    pub(super) fn holds(material: &str) -> bool {
+        items()
+            .lock()
+            .expect("keyring test store")
+            .values()
+            .any(|held| held == material)
     }
 }

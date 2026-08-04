@@ -193,8 +193,9 @@ fn interactive_setup(config_path: &Path) -> AppResult<(Config, JournalStore)> {
         // deliberate later step rather than a first-run prompt.
         writeln!(
             stdout,
-            "Using existing journal at {}. Encryption is off; run `notema encryption enable` to turn it on.",
-            store.root().display()
+            "Using existing journal at {}. Encryption is off; run `{}` to turn it on.",
+            store.root().display(),
+            crate::ENABLE_CMD
         )?;
     }
 

@@ -120,10 +120,10 @@ jobs:
       - run: cargo doc --workspace --no-deps --locked
 
   # The keychain-backed key path is covered elsewhere by an in-memory double, so
-  # the platform backends and the `keyring::Error` mapping are otherwise never
-  # executed. A developer's machine is the wrong place to run this — it would
-  # write to their login keychain — so it happens here, against a throwaway
-  # gnome-keyring in a session bus that exists only for this job.
+  # no real backend is otherwise executed. A developer's machine is the wrong
+  # place to run this — it would write to their login keychain — so it happens
+  # here, against a throwaway gnome-keyring in a session bus that exists only for
+  # this job. Linux only: the macOS and Windows backends stay unexercised.
   keyring:
     name: Linux (real keychain)
     runs-on: ubuntu-latest
@@ -135,7 +135,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: 1.96.0
-      - run: sudo apt-get update && sudo apt-get install --yes gnome-keyring dbus-x11 libsecret-1-0
+      - run: sudo apt-get update && sudo apt-get install --yes gnome-keyring dbus-bin
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -147,8 +147,9 @@ jobs:
           NOTEMA_TEST_REAL_KEYRING: "1"
         run: |
           dbus-run-session -- bash -c '
+            set -euo pipefail
             echo -n "ci" | gnome-keyring-daemon --unlock --components=secrets
-            cargo test -p notema-storage --test keyring_backend --locked -- --test-threads=1
+            cargo test -p notema-storage --test keyring_backend --locked -- --ignored --test-threads=1
           '
 
   macos:

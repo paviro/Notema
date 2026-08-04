@@ -51,8 +51,7 @@ pub enum KeyStore {
 }
 
 impl KeyStore {
-    /// Where this store keeps the key, as a predicate completing "this
-    /// device's key is …". A clause, not a name: a command is not a place.
+    /// Completes the sentence "this device's key is …".
     pub fn whereabouts(self) -> &'static str {
         match self {
             Self::File => "kept in the identity file",
@@ -156,10 +155,8 @@ struct StoredIdentity {
 /// and — for the locations that don't say so themselves — whether what's stored
 /// there is scrypt-wrapped.
 ///
-/// `encrypted_keys` and `plain_keys` are the original inline fields and are kept
-/// exactly as they were, so files written before key locations existed still load
-/// and files written for the inline location still load on older builds. Being
-/// self-describing, they must not be paired with `keys_encrypted`.
+/// `encrypted_keys` and `plain_keys` are self-describing, so they must not be
+/// paired with `keys_encrypted`.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredIdentityWire {
@@ -192,10 +189,8 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
             });
         }
 
-        // Exactly one location may be named. Collecting the ones that are keeps
-        // this linear as locations are added, and lets the error name them.
-        // `implied` is the format the field says it holds, for the two inline
-        // fields that carry it in their name.
+        // Exactly one location may be named; collecting them lets the error name
+        // the offenders. `implied` is the format a field's own name states.
         let mut present: Vec<(&'static str, KeyLocation, Option<bool>)> = Vec::with_capacity(4);
         if let Some(armor) = wire.encrypted_keys {
             present.push(("encrypted_keys", KeyLocation::Inline(armor), Some(true)));
@@ -233,7 +228,10 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
         let encrypted = match (implied, wire.keys_encrypted) {
             (Some(_), Some(_)) => return Err(EncryptionError::RedundantKeysEncrypted { field }),
             (Some(implied), None) => implied,
-            (None, explicit) => explicit.unwrap_or(false),
+            (None, Some(explicit)) => explicit,
+            // Defaulting would guess, and a wrong guess reads as corruption:
+            // armor parsed as a bundle is "malformed key material".
+            (None, None) => return Err(EncryptionError::MissingKeyFormat { field }),
         };
 
         Ok(Self {
@@ -250,8 +248,7 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
 ///
 /// Retrieving it is separate from opening it because the two can need the
 /// terminal at the same time: a `keys_command` may prompt on the TTY, while a
-/// passphrase-protected identity prompts inside the TUI. Fetch first, in cooked
-/// mode; unwrap later, wherever.
+/// passphrase-protected identity prompts inside the TUI.
 #[derive(Clone)]
 pub struct FetchedKey {
     material: Zeroizing<String>,
@@ -338,7 +335,7 @@ pub fn unlock_fetched(
 }
 
 /// Unwrap fetched key material into a usable identity: scrypt-decrypt it when it
-/// is stored encrypted, then parse the bundle. One code path for every location.
+/// is stored encrypted, then parse the bundle.
 fn unwrap_key(fetched: &FetchedKey, passphrase: Option<&SecretString>) -> Result<UnlockedIdentity> {
     // The decrypted secret bundle lives in this string; zeroize it on drop so it
     // doesn't linger in freed heap after we parse it into keys.
@@ -385,7 +382,7 @@ fn parse_bundle(bundle_toml: &str) -> Result<UnlockedIdentity> {
 /// On invalid UTF-8, `FromUtf8Error` would carry the secret bundle unzeroized
 /// (and expose it via `Debug`); drop those bytes inside a `Zeroizing` and report
 /// a plain malformed-identity error instead.
-fn bytes_to_utf8(bytes: Vec<u8>) -> Result<Zeroizing<String>> {
+pub(crate) fn bytes_to_utf8(bytes: Vec<u8>) -> Result<Zeroizing<String>> {
     Ok(Zeroizing::new(String::from_utf8(bytes).map_err(
         |error| {
             drop(Zeroizing::new(error.into_bytes()));
@@ -419,10 +416,9 @@ fn current_location(paths: &KeyPaths) -> Result<Option<KeyLocation>> {
 /// Check that new key material could be written where this device's key is kept,
 /// without writing any.
 ///
-/// Callers use this to refuse early: before prompting for a passphrase, and
-/// before a rotation appends the signed roster op it would otherwise have to roll
-/// back. The only location that can't take a write is a `keys_command` with no
-/// matching store command.
+/// For refusing early: before a passphrase prompt, and before a rotation appends
+/// the roster op it would otherwise have to roll back. Only a `keys_command` with
+/// no store command can't take a write.
 pub fn check_key_is_writable(paths: &KeyPaths) -> Result<()> {
     match current_location(paths)? {
         Some(KeyLocation::Command { read, write: None }) => {
@@ -448,8 +444,36 @@ pub fn set_identity_passphrase(
     // asked for a passphrase that was never going to be used.
     check_key_is_writable(paths)?;
     let stored = read_stored_identity(&paths.identity_file)?;
-    let identity = unlock_identity(paths, current)?;
-    write_stored_identity(paths, &stored.device_name, &identity, new)
+    let fetched = fetch_stored(&stored.key)?;
+    let identity = unlock_fetched(paths, &fetched, current)?;
+
+    // An external store takes the re-wrapped key before the identity file
+    // records its new format, so a failure between the two would leave the file
+    // describing the old one and the key unopenable. Inline has no such gap: the
+    // file is the only thing written, and it is written atomically.
+    let before = if matches!(stored.key.location, KeyLocation::Inline(_)) {
+        None
+    } else {
+        Some(IdentitySnapshot {
+            wire: Zeroizing::new(fs::read(&paths.identity_file)?),
+            device_name: stored.device_name.clone(),
+            location: stored.key.location,
+            material: fetched.material.clone(),
+            encrypted: fetched.encrypted,
+        })
+    };
+
+    let written = write_stored_identity(paths, &stored.device_name, &identity, new);
+    match (written, before) {
+        (Err(original), Some(before)) => Err(match restore_identity(paths, &before) {
+            Ok(()) => original,
+            Err(rollback) => EncryptionError::IdentityRollbackFailed {
+                original: original.to_string(),
+                rollback: rollback.to_string(),
+            },
+        }),
+        (written, _) => written,
+    }
 }
 
 /// Which store to move this device's key to.
@@ -497,9 +521,6 @@ pub fn set_key_store(
             if let Some(write) = write {
                 key_command::store(write, fetched.material.as_bytes())?;
             }
-            // Recorded, not just used once: without it the key could be fetched
-            // but never replaced, so rotating or re-wrapping would have nowhere
-            // to write.
             KeyLocation::Command {
                 read: read.clone(),
                 write: write.clone(),
@@ -604,6 +625,11 @@ impl IdentitySnapshot {
         !matches!(self.location, KeyLocation::Inline(_))
     }
 
+    /// Which store held the key when this snapshot was taken.
+    pub fn store(&self) -> KeyStore {
+        self.location.store()
+    }
+
     /// Drop the stored copy this snapshot came from, once the snapshot itself
     /// has been written somewhere self-contained. Best effort: a keychain we
     /// can't reach is not a reason to fail the retirement that called this.
@@ -676,8 +702,8 @@ pub(crate) fn create_device_identity(
 /// Both the age key and the Ed25519 signing seed are bundled together so the same
 /// passphrase choice protects both.
 ///
-/// Refuses when the key currently lives outside the identity file: see
-/// [`reject_external_key_rewrite`].
+/// The material goes back to whichever store already holds this device's key; a
+/// brand-new identity has none yet and starts inline.
 pub(crate) fn write_stored_identity(
     paths: &KeyPaths,
     name: &str,
@@ -686,10 +712,6 @@ pub(crate) fn write_stored_identity(
 ) -> Result<()> {
     reject_empty_passphrase(passphrase)?;
     let material = stored_form(identity, passphrase)?;
-    // Put the new material back where this device already keeps its key, rather
-    // than always inline — otherwise re-wrapping or rotating would quietly move
-    // the key out of the keychain or secret manager the user chose. A fresh
-    // identity has no location yet and starts inline.
     let location = match current_location(paths)? {
         Some(location) => location.with_material(&material.text),
         None => KeyLocation::Inline(material.text.clone()),
@@ -742,35 +764,33 @@ fn bundle_toml(identity: &UnlockedIdentity) -> Result<Zeroizing<String>> {
 }
 
 fn wire_for(name: &str, key: &StoredKey) -> StoredIdentityWire {
-    let (encrypted_keys, plain_keys) = match (&key.location, key.encrypted) {
-        (KeyLocation::Inline(text), true) => (Some(text.clone()), None),
-        (KeyLocation::Inline(text), false) => (None, Some(text.clone())),
-        _ => (None, None),
-    };
-    StoredIdentityWire {
+    // One match, so "exactly one of these fields is set" holds by construction.
+    // The inline fields say which format they hold, so `keys_encrypted` is
+    // theirs to leave absent.
+    let mut wire = StoredIdentityWire {
         schema_version: IDENTITY_SCHEMA_VERSION,
         device_name: name.to_string(),
-        encrypted_keys,
-        plain_keys,
-        keyring_account: match &key.location {
-            KeyLocation::Keyring(account) => Some(account.clone()),
-            _ => None,
-        },
-        keys_command: match &key.location {
-            KeyLocation::Command { read, .. } => Some(read.clone()),
-            _ => None,
-        },
-        keys_store_command: match &key.location {
-            KeyLocation::Command { write, .. } => write.clone(),
-            _ => None,
-        },
-        // The inline fields say which format they hold, so this stays absent for
-        // them — which is also what keeps inline files readable on older builds.
-        keys_encrypted: match key.location {
-            KeyLocation::Inline(_) => None,
-            _ => Some(key.encrypted),
-        },
+        encrypted_keys: None,
+        plain_keys: None,
+        keyring_account: None,
+        keys_command: None,
+        keys_store_command: None,
+        keys_encrypted: None,
+    };
+    match &key.location {
+        KeyLocation::Inline(text) if key.encrypted => wire.encrypted_keys = Some(text.clone()),
+        KeyLocation::Inline(text) => wire.plain_keys = Some(text.clone()),
+        KeyLocation::Keyring(account) => {
+            wire.keyring_account = Some(account.clone());
+            wire.keys_encrypted = Some(key.encrypted);
+        }
+        KeyLocation::Command { read, write } => {
+            wire.keys_command = Some(read.clone());
+            wire.keys_store_command = write.clone();
+            wire.keys_encrypted = Some(key.encrypted);
+        }
     }
+    wire
 }
 
 fn write_identity_file(path: &Path, wire: &StoredIdentityWire) -> Result<()> {
@@ -800,7 +820,15 @@ fn read_stored_identity(path: &Path) -> Result<StoredIdentity> {
 /// key, so it is never passed on. The span is only an offset.
 fn error_line(raw: &str, error: &toml::de::Error) -> usize {
     error.span().map_or(1, |span| {
-        raw[..span.start.min(raw.len())].lines().count().max(1)
+        // Counting newlines rather than `lines()`: an offset sitting exactly at a
+        // line start — where an unknown-key span points — belongs to the line it
+        // begins, not the one before. Bytes, so a span landing mid-character
+        // cannot panic on a slice boundary.
+        raw.as_bytes()[..span.start.min(raw.len())]
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count()
+            + 1
     })
 }
 

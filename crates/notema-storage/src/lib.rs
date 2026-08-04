@@ -599,11 +599,8 @@ impl JournalStore {
         passphrase: Option<&SecretString>,
         mut progress: impl FnMut(usize, usize),
     ) -> AppResult<MigrationSummary> {
-        // Before anything is written. A rotation mints a key that has to land
-        // back wherever this device keeps its key; if that place can't take a
-        // write, we only find out after a signed `add` op and a full
-        // re-encryption pass — putting the store through the whole rollback for
-        // a refusal visible now.
+        // Before the signed `add` op and the re-encryption pass a refusal here
+        // would otherwise have to roll back.
         crypto::check_key_is_writable(&self.paths.keys)?;
         let old = self.require_reencrypt_identity("rotate")?.clone();
         let old_key = old.public_key();
@@ -613,14 +610,12 @@ impl JournalStore {
         // no-passphrase case); keep the rotation backup zeroized. Use
         // read_optional_file so a transient read error isn't mistaken for "no
         // pins" and then delete the rollback pins on restore.
-        // Captures the key itself, not just the file: when the key lives in a
-        // keychain or a secret manager, the file alone is a pointer at something
-        // this rotation is about to overwrite.
+        // The key itself, not just the file: for an external store the file
+        // alone is a pointer at something this rotation is about to overwrite.
         let identity_backup = crypto::snapshot_identity(&self.paths.keys)?;
         // Also snapshot it to disk (0600, config dir — never synced): if the
         // process dies mid-rotation or the rollback's identity restore fails,
         // the in-memory copy is gone and this file is the only pre-rotation key.
-        // Written self-contained for the same reason.
         let identity_backup_path = migrate::file_backup_path(&self.paths.keys.identity_file);
         crypto::atomic_write_private(&identity_backup_path, &identity_backup.portable_bytes()?)?;
         let trust_backup = read_optional_file(&self.paths.keys.trust_file)?;
