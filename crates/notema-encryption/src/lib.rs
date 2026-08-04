@@ -39,10 +39,10 @@ pub use cipher::{
 pub use error::{CommandStderr, EncryptionError, Result};
 pub use files::{atomic_write, atomic_write_private, atomic_write_with, sync_parent_dir};
 pub use identity::{
-    DeviceIdentityInfo, FetchedKey, IdentitySnapshot, KeySource, KeyTarget, UnlockedIdentity,
+    DeviceIdentityInfo, FetchedKey, IdentitySnapshot, KeyStore, KeyTarget, UnlockedIdentity,
     check_key_is_writable, device_identity_info, export_identity, fetch_key_material,
     read_identity_file_bytes, restore_identity, restore_identity_file, set_identity_passphrase,
-    set_key_location, snapshot_identity, unlock_fetched, unlock_identity,
+    set_key_store, snapshot_identity, unlock_fetched, unlock_identity,
 };
 pub use key_command::KeyCommand;
 

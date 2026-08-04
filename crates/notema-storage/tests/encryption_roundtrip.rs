@@ -1158,14 +1158,14 @@ fn a_wrong_passphrase_keeps_the_prefetched_key() {
     // The fetch command appends a line every time it runs, so the count is the
     // number of retrievals.
     store
-        .set_key_location(
+        .set_key_store(
             &notema_encryption::KeyTarget::Command {
                 read: notema_encryption::KeyCommand::Shell(format!(
                     "echo run >> {}; cat {}",
                     fetch_log.display(),
                     vault.display()
                 )),
-                store: notema_encryption::KeyCommand::Shell(format!("cat > {}", vault.display()))
+                write: notema_encryption::KeyCommand::Shell(format!("cat > {}", vault.display()))
                     .into(),
             },
             Some(&pw("correct")),
@@ -1218,10 +1218,10 @@ fn disabling_encryption_inlines_an_external_key_before_retiring_it() {
     // in-memory keyring double is not in play and a keyring source would reach
     // the developer's own login keychain.
     store
-        .set_key_location(
+        .set_key_store(
             &notema_encryption::KeyTarget::Command {
                 read: notema_encryption::KeyCommand::Shell(format!("cat {}", vault.display())),
-                store: notema_encryption::KeyCommand::Shell(format!("cat > {}", vault.display()))
+                write: notema_encryption::KeyCommand::Shell(format!("cat > {}", vault.display()))
                     .into(),
             },
             None,

@@ -717,9 +717,9 @@ fn an_unsupported_identity_schema_reports_the_version() {
 fn move_to_command(paths: &KeyPaths, bundle: &Path, passphrase: Option<&SecretString>) {
     let target = KeyTarget::Command {
         read: cat_command(bundle),
-        store: KeyCommand::Shell(format!("cat > {}", bundle.display())).into(),
+        write: KeyCommand::Shell(format!("cat > {}", bundle.display())).into(),
     };
-    set_key_location(paths, &target, passphrase).unwrap();
+    set_key_store(paths, &target, passphrase).unwrap();
 }
 
 #[cfg(unix)]
@@ -739,7 +739,7 @@ fn a_command_sourced_identity_unlocks_and_round_trips() {
     assert!(on_disk.contains("keys_command"), "{on_disk}");
 
     let info = device_identity_info(&paths).unwrap().unwrap();
-    assert_eq!(info.source, KeySource::Command);
+    assert_eq!(info.store, KeyStore::Command);
     assert!(!info.passphrase_protected);
 
     let unlocked = unlock_identity(&paths, None).unwrap();
@@ -773,7 +773,7 @@ fn a_command_sourced_identity_keeps_its_passphrase() {
     // Reported without fetching anything, so the unlock screen still knows to ask.
     let info = device_identity_info(&paths).unwrap().unwrap();
     assert!(info.passphrase_protected);
-    assert_eq!(info.source, KeySource::Command);
+    assert_eq!(info.store, KeyStore::Command);
 
     assert!(unlock_identity(&paths, None).is_err());
     assert!(unlock_identity(&paths, Some(&pw)).is_ok());
@@ -796,7 +796,7 @@ fn a_passphrase_change_writes_back_through_the_store_command() {
     set_identity_passphrase(&paths, None, Some(&pw)).unwrap();
 
     let info = device_identity_info(&paths).unwrap().unwrap();
-    assert_eq!(info.source, KeySource::Command);
+    assert_eq!(info.store, KeyStore::Command);
     assert!(info.passphrase_protected);
     assert!(
         fs::read_to_string(&bundle)
@@ -825,11 +825,11 @@ fn a_read_only_key_command_refuses_before_touching_anything() {
 
     let recipient = initialize_store_identity(&paths, "laptop", None).unwrap();
     // No write command, so the key can be fetched but never replaced.
-    set_key_location(
+    set_key_store(
         &paths,
         &KeyTarget::Command {
             read: cat_command(&bundle),
-            store: Some(KeyCommand::Shell(format!("cat > {}", bundle.display()))),
+            write: Some(KeyCommand::Shell(format!("cat > {}", bundle.display()))),
         },
         None,
     )
@@ -847,12 +847,12 @@ fn a_read_only_key_command_refuses_before_touching_anything() {
     let before = fs::read(&paths.identity_file).unwrap();
 
     let error = set_identity_passphrase(&paths, None, Some(&SecretString::from("pw"))).unwrap_err();
-    assert!(matches!(error, EncryptionError::KeySourceReadOnly { .. }));
+    assert!(matches!(error, EncryptionError::KeyStoreReadOnly { .. }));
 
     let identity = unlock_identity(&paths, None).unwrap();
     assert!(matches!(
         commit_rotated_identity(&paths, &recipient, &identity, None).unwrap_err(),
-        EncryptionError::KeySourceReadOnly { .. }
+        EncryptionError::KeyStoreReadOnly { .. }
     ));
 
     assert_eq!(
@@ -887,11 +887,11 @@ fn a_switch_that_reads_back_a_different_key_is_refused() {
 
     let target = KeyTarget::Command {
         read: cat_command(&decoy),
-        store: KeyCommand::Shell("cat > /dev/null".into()).into(),
+        write: KeyCommand::Shell("cat > /dev/null".into()).into(),
     };
     assert!(matches!(
-        set_key_location(&paths, &target, None).unwrap_err(),
-        EncryptionError::KeySourceMismatch
+        set_key_store(&paths, &target, None).unwrap_err(),
+        EncryptionError::KeyStoreMismatch
     ));
     assert_eq!(fs::read(&paths.identity_file).unwrap(), before);
 }
@@ -919,7 +919,7 @@ fn an_exported_identity_restores_into_a_fresh_config_dir() {
 
     let info = device_identity_info(&restored).unwrap().unwrap();
     assert_eq!(info.name, "laptop");
-    assert_eq!(info.source, KeySource::File);
+    assert_eq!(info.store, KeyStore::File);
     assert_eq!(
         unlock_identity(&restored, None).unwrap().public_key(),
         before
@@ -935,14 +935,14 @@ fn a_keyring_identity_round_trips_and_leaves_no_key_in_the_file() {
 
     initialize_store_identity(&paths, "laptop", None).unwrap();
     let before = unlock_identity(&paths, None).unwrap().public_key();
-    set_key_location(&paths, &KeyTarget::Keyring, None).unwrap();
+    set_key_store(&paths, &KeyTarget::Keyring, None).unwrap();
 
     let on_disk = fs::read_to_string(&paths.identity_file).unwrap();
     assert!(!on_disk.contains("AGE-SECRET-KEY-"), "{on_disk}");
     assert!(on_disk.contains("keyring_account"), "{on_disk}");
 
     let info = device_identity_info(&paths).unwrap().unwrap();
-    assert_eq!(info.source, KeySource::Keyring);
+    assert_eq!(info.store, KeyStore::Keyring);
     assert_eq!(unlock_identity(&paths, None).unwrap().public_key(), before);
 }
 
@@ -954,14 +954,14 @@ fn a_keyring_identity_can_be_re_wrapped_with_a_passphrase() {
 
     initialize_store_identity(&paths, "laptop", None).unwrap();
     let before = unlock_identity(&paths, None).unwrap().public_key();
-    set_key_location(&paths, &KeyTarget::Keyring, None).unwrap();
+    set_key_store(&paths, &KeyTarget::Keyring, None).unwrap();
 
     // The keychain is writable, so this must work rather than refuse — and the
     // re-wrapped key belongs back in the keychain, not inline.
     set_identity_passphrase(&paths, None, Some(&pw)).unwrap();
 
     let info = device_identity_info(&paths).unwrap().unwrap();
-    assert_eq!(info.source, KeySource::Keyring);
+    assert_eq!(info.store, KeyStore::Keyring);
     assert!(info.passphrase_protected);
     assert!(
         !fs::read_to_string(&paths.identity_file)

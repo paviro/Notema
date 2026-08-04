@@ -12,7 +12,7 @@
 //! that would hang the suite. CI runs it on Linux against a throwaway
 //! `gnome-keyring` inside `dbus-run-session`.
 
-use notema_encryption::{KeySource, KeyTarget};
+use notema_encryption::{KeyStore, KeyTarget};
 use notema_storage::JournalStore;
 
 fn enabled() -> bool {
@@ -43,7 +43,7 @@ fn a_real_keychain_round_trips_and_cleans_up_after_itself() {
     store.unlock(None).unwrap();
     let recipient = store.public_recipient().unwrap();
 
-    store.set_key_location(&KeyTarget::Keyring, None).unwrap();
+    store.set_key_store(&KeyTarget::Keyring, None).unwrap();
 
     let identity_file = dir.path().join("identity.toml");
     let pointer = std::fs::read_to_string(&identity_file).unwrap();
@@ -56,8 +56,8 @@ fn a_real_keychain_round_trips_and_cleans_up_after_itself() {
         "the file should point at the keychain item: {pointer}"
     );
     assert_eq!(
-        store.this_device().unwrap().unwrap().source,
-        KeySource::Keyring
+        store.this_device().unwrap().unwrap().store,
+        KeyStore::Keyring
     );
 
     // A fresh store proves the key really comes back out of the keychain rather
@@ -69,10 +69,10 @@ fn a_real_keychain_round_trips_and_cleans_up_after_itself() {
     assert_eq!(reopened.public_recipient().unwrap(), recipient);
 
     // Moving back out removes the item, so the test leaves no litter behind.
-    reopened.set_key_location(&KeyTarget::File, None).unwrap();
+    reopened.set_key_store(&KeyTarget::File, None).unwrap();
     assert_eq!(
-        reopened.this_device().unwrap().unwrap().source,
-        KeySource::File
+        reopened.this_device().unwrap().unwrap().store,
+        KeyStore::File
     );
     assert!(
         std::fs::read_to_string(&identity_file)
@@ -97,7 +97,7 @@ fn a_missing_keychain_item_reads_as_missing_not_malformed() {
     store.ensure().unwrap();
     store.initialize_encryption("laptop", None).unwrap();
     store.unlock(None).unwrap();
-    store.set_key_location(&KeyTarget::Keyring, None).unwrap();
+    store.set_key_store(&KeyTarget::Keyring, None).unwrap();
 
     // Point the file at an account nothing ever stored.
     let identity_file = dir.path().join("identity.toml");
@@ -134,5 +134,5 @@ fn a_missing_keychain_item_reads_as_missing_not_malformed() {
     std::fs::write(&identity_file, &pointer).unwrap();
     let cleanup = JournalStore::new(dir.path().join("journals"), dir.path());
     cleanup.ensure().unwrap();
-    cleanup.set_key_location(&KeyTarget::File, None).unwrap();
+    cleanup.set_key_store(&KeyTarget::File, None).unwrap();
 }

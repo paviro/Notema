@@ -406,19 +406,19 @@ fn this_device_or_bail(store: &JournalStore) -> AppResult<notema_encryption::Dev
 /// A key with no passphrase is only unprotected in the identity file; a keychain
 /// or secret manager guards what it holds on its own.
 fn print_key_location(info: &notema_encryption::DeviceIdentityInfo) {
-    use notema_encryption::KeySource;
+    use notema_encryption::KeyStore;
 
-    println!("This device's key is {}.", info.source.whereabouts());
+    println!("This device's key is {}.", info.store.whereabouts());
     if info.passphrase_protected {
         println!("It is protected by a passphrase.");
         return;
     }
     println!(
         "No passphrase, so it opens automatically. {}.",
-        match info.source {
-            KeySource::File => "Only the file's permissions protect it",
-            KeySource::Keyring => "The keychain protects it",
-            KeySource::Command => "Whatever it is fetched from is all that protects it",
+        match info.store {
+            KeyStore::File => "Only the file's permissions protect it",
+            KeyStore::Keyring => "The keychain protects it",
+            KeyStore::Command => "Whatever it is fetched from is all that protects it",
         }
     );
 }
@@ -469,7 +469,7 @@ fn key_store_command(cli: &Cli, args: &KeyStoreArgs) -> AppResult<()> {
         KeyStoreChoice::Keyring => KeyTarget::Keyring,
         KeyStoreChoice::Command => KeyTarget::Command {
             read: notema_encryption::KeyCommand::Shell(args.read.clone().unwrap_or_default()),
-            store: args.write.clone().map(notema_encryption::KeyCommand::Shell),
+            write: args.write.clone().map(notema_encryption::KeyCommand::Shell),
         },
     };
 
@@ -479,19 +479,19 @@ fn key_store_command(cli: &Cli, args: &KeyStoreArgs) -> AppResult<()> {
         .passphrase_protected
         .then(prompts::prompt_unlock_passphrase)
         .transpose()?;
-    let leaving = info.source;
-    store.set_key_location(&target, passphrase.as_ref())?;
+    let leaving = info.store;
+    store.set_key_store(&target, passphrase.as_ref())?;
 
     let now = this_device_or_bail(&store)?;
-    println!("This device's key is now {}.", now.source.whereabouts());
-    if now.source == notema_encryption::KeySource::Command && args.write.is_none() {
+    println!("This device's key is now {}.", now.store.whereabouts());
+    if now.store == notema_encryption::KeyStore::Command && args.write.is_none() {
         println!(
             "Without `--write` this is read-only: `notema encryption key rotate` and `notema encryption key passphrase` will have nowhere to write the new key."
         );
     }
     // A keychain item is ours and already gone; a secret manager is the user's
     // to clear, so the copy left there has to be named.
-    if leaving == notema_encryption::KeySource::Command {
+    if leaving == notema_encryption::KeyStore::Command {
         println!(
             "The old copy is still wherever the previous fetch command read it from; remove it there if you no longer want it."
         );

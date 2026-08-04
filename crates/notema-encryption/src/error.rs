@@ -216,14 +216,14 @@ pub enum EncryptionError {
     #[error(
         "the new key location returned a different key than this device uses; refusing to switch"
     )]
-    KeySourceMismatch,
+    KeyStoreMismatch,
 
     /// The key is fetched by a command with no matching store command, so it can
     /// be read but never replaced.
     #[error(
         "this device's key is fetched by '{command}', which can read it but not replace it. Re-run `notema encryption key store command` with `--write` so new key material has somewhere to go, or bring the key back with `notema encryption key store file`"
     )]
-    KeySourceReadOnly { command: String },
+    KeyStoreReadOnly { command: String },
 
     /// The identity file is not valid TOML, or lacks the shape of one.
     ///
