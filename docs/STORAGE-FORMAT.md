@@ -329,7 +329,10 @@ and private keys that never leave the device.
 
   Fetched by a command. **These are shell lines, executed every time the key is
   needed** — a writable `identity.toml` is code execution as its owner, which is
-  why the file is mode 0600. Use the array form to skip the shell:
+  why the file is mode 0600 and why, on Unix, notema refuses to run one out of a
+  file that is group- or world-writable or owned by someone else (see
+  [`docs/ENCRYPTION.md`](ENCRYPTION.md#where-your-key-lives)). Use the array form
+  to skip the shell:
 
   ```toml
   schema_version = 1

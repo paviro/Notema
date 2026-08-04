@@ -13,9 +13,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use notema_encryption::{KeyTarget, PendingRequest, SecretString};
 use notema_storage::JournalStore;
 use notema_timing as timing;
-#[cfg(feature = "fuse")]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
@@ -408,22 +406,61 @@ fn this_device_or_bail(store: &JournalStore) -> AppResult<notema_encryption::Dev
 ///
 /// A key with no passphrase is only unprotected in the identity file; a keychain
 /// or secret manager guards what it holds on its own.
-fn print_key_location(info: &notema_encryption::DeviceIdentityInfo) {
+fn print_key_location(info: &notema_encryption::DeviceIdentityInfo, identity: &Path) {
     use notema_encryption::KeyStore;
 
     println!("This device's key is {}.", info.store.whereabouts());
+    if let Some(command) = &info.fetch_command {
+        println!("It runs: {command}");
+    }
     if info.passphrase_protected {
         println!("It is protected by a passphrase.");
-        return;
+    } else {
+        println!(
+            "No passphrase, so it opens automatically. {}.",
+            match info.store {
+                KeyStore::File => "Only the file's permissions protect it",
+                KeyStore::Keyring => "The keychain protects it",
+                KeyStore::Command => "Whatever it is fetched from is all that protects it",
+            }
+        );
     }
-    println!(
-        "No passphrase, so it opens automatically. {}.",
-        match info.store {
-            KeyStore::File => "Only the file's permissions protect it",
-            KeyStore::Keyring => "The keychain protects it",
-            KeyStore::Command => "Whatever it is fetched from is all that protects it",
-        }
+    if let Some(exposure) = info.exposure {
+        print_identity_exposure(info, identity, exposure);
+    }
+}
+
+/// What a loosely permissioned identity file costs, which depends on whether it
+/// holds a command someone else can choose or a key someone else can read.
+fn print_identity_exposure(
+    info: &notema_encryption::DeviceIdentityInfo,
+    identity: &Path,
+    exposure: notema_encryption::PrivateFileExposure,
+) {
+    use notema_encryption::{KeyStore, PrivateFileExposure};
+
+    let runnable = matches!(
+        exposure,
+        PrivateFileExposure::ForeignOwner { .. } | PrivateFileExposure::Writable { .. }
     );
+    println!();
+    println!("Warning: {} {exposure}.", identity.display());
+    match info.store {
+        KeyStore::Command if runnable => println!(
+            "Anyone who can rewrite it chooses what this device runs, so notema refuses to run the command above until that is fixed. Check it is still the one you wrote, then {}.",
+            exposure.remedy(identity)
+        ),
+        KeyStore::File if info.passphrase_protected => println!(
+            "Your passphrase-wrapped key is in that file, so others can take it away to guess at. {}.",
+            exposure.remedy(identity)
+        ),
+        KeyStore::File => println!(
+            "Your key is in that file in the clear, so others can read the journal. Move it somewhere safer with `{}`, or {}.",
+            crate::KEY_STORE_KEYRING_CMD,
+            exposure.remedy(identity)
+        ),
+        _ => println!("{}.", exposure.remedy(identity)),
+    }
 }
 
 /// Whether encryption is on, where this device's key sits, and who can read the
@@ -440,7 +477,7 @@ fn encryption_status_command(cli: &Cli) -> AppResult<()> {
     }
     println!("Encryption is on for {}.", store.root().display());
     match store.this_device()? {
-        Some(info) => print_key_location(&info),
+        Some(info) => print_key_location(&info, store.identity_path()),
         None => println!(
             "This device has no key yet; run `{}` to request access.",
             crate::ENROLL_CMD

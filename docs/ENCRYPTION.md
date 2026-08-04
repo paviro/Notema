@@ -193,10 +193,28 @@ that store isn't notema's to reach into.
 > [!WARNING]
 > A `--read`/`--write` command is a shell line recorded in `identity.toml` and run
 > every time the key is needed. Anyone who can write that file can run code as
-> you. It is mode 0600 in your config directory, which is the protection — but if
-> you sync your dotfiles, note that `identity.toml` stops being inert data the
-> moment a fetch command is recorded in it, and treat a restored or copied-in
-> identity file as you would any other executable content.
+> you, so notema checks the file before it runs one: on Unix it refuses when the
+> file is group- or world-writable, or when someone else owns it. The owner and
+> mode are read off the open file rather than the path, so a file swapped in after
+> the check, or a symlink pointing somewhere lax, is caught too.
+>
+> It refuses rather than repairs. Tightening the mode would not undo a command
+> already swapped in, and would erase the only sign that one could have been — so
+> it says to check the recorded lines first, then `chmod 600`. Inline and keychain
+> keys are unaffected: a lax mode there is a confidentiality problem, not code
+> execution, and locking you out of your own journal over a bit you can fix would
+> protect nothing. `encryption status` reports the same verdict without failing.
+>
+> The check stops other users on the machine. It cannot stop an identity file you
+> brought in yourself — a restored backup or synced dotfiles arrive owned by you
+> at mode 0600 and look exactly right. `identity.toml` stops being inert data the
+> moment a fetch command is recorded in it, so `encryption status` prints the
+> command it would run; read that before you trust a copied-in identity file, and
+> otherwise treat one as you would any other executable content.
+>
+> None of this applies on Windows, where the file inherits its directory's ACL —
+> under `%APPDATA%`, already just you, SYSTEM and Administrators. Tightening or
+> checking it needs Win32 calls no maintained Rust crate wraps safely.
 
 Moving a key *out* of a fetch command doesn't delete it from the secret manager —
 that store is yours, not notema's, so it says what to clean up rather than
