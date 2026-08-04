@@ -47,7 +47,7 @@ pub(crate) fn resolve_key_source(explicit: Option<bool>) -> AppResult<bool> {
 /// back. An unreachable keychain still leaves a working store and a usable key,
 /// and no probe rules that case out in advance.
 pub(crate) fn move_key_to_keyring(store: &JournalStore, passphrase: Option<&SecretString>) {
-    if let Err(error) = store.set_key_location(&notema_encryption::KeyTarget::Keyring, passphrase) {
+    if let Err(error) = store.set_key_store(&notema_encryption::KeyTarget::Keyring, passphrase) {
         println!(
             "Could not move this device's key to the keychain: {error}\nIt is in {} instead; move it later with `{}`.",
             store.identity_path().display(),
@@ -60,9 +60,9 @@ pub(crate) fn move_key_to_keyring(store: &JournalStore, passphrase: Option<&Secr
 /// points at the keychain would hand them a backup that decrypts nothing.
 pub(crate) fn print_backup_advice(store: &JournalStore) -> AppResult<()> {
     match store.this_device()? {
-        Some(info) if info.source != notema_encryption::KeySource::File => println!(
+        Some(info) if info.store != notema_encryption::KeyStore::File => println!(
             "This device's key is {}. Back it up with `{} <path>`; without it encrypted journal files cannot be decrypted.",
-            info.source.whereabouts(),
+            info.store.whereabouts(),
             crate::EXPORT_KEY_CMD,
         ),
         _ => println!(

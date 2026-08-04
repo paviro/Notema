@@ -15,7 +15,7 @@ use crossterm::{
     },
     execute,
 };
-use notema_encryption::{KeySource, SecretString};
+use notema_encryption::{KeyStore, SecretString};
 use notema_storage::{CachedLibrary, JournalStore, LibraryDiscovery, StoreAccess};
 use notema_timing as timing;
 use ratatui::{Frame, Terminal, backend::CrosstermBackend};
@@ -92,7 +92,7 @@ pub(crate) fn run_compose(
     // keychain is left in because it answers silently once access is granted.
     let key_prompts = store
         .this_device()?
-        .is_some_and(|info| info.source == KeySource::Command);
+        .is_some_and(|info| info.store == KeyStore::Command);
     if store.unlock_available() && !key_prompts && !store.identity_needs_passphrase()? {
         store.unlock(None)?;
     }

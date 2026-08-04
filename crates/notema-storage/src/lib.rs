@@ -834,16 +834,12 @@ impl JournalStore {
     }
 
     /// Move this device's key to another location, keeping its current format.
-    pub fn set_key_location(
+    pub fn set_key_store(
         &self,
         target: &crypto::KeyTarget,
         passphrase: Option<&SecretString>,
     ) -> AppResult<()> {
-        Ok(crypto::set_key_location(
-            &self.paths.keys,
-            target,
-            passphrase,
-        )?)
+        Ok(crypto::set_key_store(&self.paths.keys, target, passphrase)?)
     }
 
     /// Write a standalone copy of this device's identity, for safekeeping.

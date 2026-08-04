@@ -38,10 +38,10 @@ impl UnlockedIdentity {
     }
 }
 
-/// Where this device's key is kept. Independent of whether it is
-/// passphrase-encrypted: every source holds either form.
+/// Which store keeps this device's key. Independent of whether it is
+/// passphrase-encrypted: every store holds either form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeySource {
+pub enum KeyStore {
     /// Inline in `identity.toml`, mode 0600.
     File,
     /// An item in the OS keychain.
@@ -50,8 +50,8 @@ pub enum KeySource {
     Command,
 }
 
-impl KeySource {
-    /// Where this source keeps the key, as a predicate completing "this
+impl KeyStore {
+    /// Where this store keeps the key, as a predicate completing "this
     /// device's key is …". A clause, not a name: a command is not a place.
     pub fn whereabouts(self) -> &'static str {
         match self {
@@ -68,7 +68,7 @@ impl KeySource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceIdentityInfo {
     pub name: String,
-    pub source: KeySource,
+    pub store: KeyStore,
     pub passphrase_protected: bool,
 }
 
@@ -90,20 +90,20 @@ enum KeyLocation {
     Inline(Zeroizing<String>),
     /// Held in the OS keychain under this account label.
     Keyring(String),
-    /// Printed on stdout by `read`, and written by `store` — without which the
+    /// Printed on stdout by `read`, and written by `write` — without which the
     /// key can be fetched but never replaced.
     Command {
         read: KeyCommand,
-        store: Option<KeyCommand>,
+        write: Option<KeyCommand>,
     },
 }
 
 impl KeyLocation {
-    fn source(&self) -> KeySource {
+    fn store(&self) -> KeyStore {
         match self {
-            Self::Inline(_) => KeySource::File,
-            Self::Keyring(_) => KeySource::Keyring,
-            Self::Command { .. } => KeySource::Command,
+            Self::Inline(_) => KeyStore::File,
+            Self::Keyring(_) => KeyStore::Keyring,
+            Self::Command { .. } => KeyStore::Command,
         }
     }
 
@@ -116,9 +116,9 @@ impl KeyLocation {
             Self::Inline(_) => Ok(()),
             Self::Keyring(account) => keyring::store(account, material),
             Self::Command {
-                store: Some(store), ..
-            } => key_command::store(store, material.as_bytes()),
-            Self::Command { read, store: None } => Err(EncryptionError::KeySourceReadOnly {
+                write: Some(write), ..
+            } => key_command::store(write, material.as_bytes()),
+            Self::Command { read, write: None } => Err(EncryptionError::KeyStoreReadOnly {
                 command: read.label(),
             }),
         }
@@ -129,9 +129,9 @@ impl KeyLocation {
         match self {
             Self::Inline(_) => Self::Inline(material.clone()),
             Self::Keyring(account) => Self::Keyring(account.clone()),
-            Self::Command { read, store } => Self::Command {
+            Self::Command { read, write } => Self::Command {
                 read: read.clone(),
-                store: store.clone(),
+                write: write.clone(),
             },
         }
     }
@@ -212,7 +212,7 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
                 "keys_command",
                 KeyLocation::Command {
                     read,
-                    store: store_command,
+                    write: store_command,
                 },
                 None,
             ));
@@ -274,7 +274,7 @@ pub fn device_identity_info(paths: &KeyPaths) -> Result<Option<DeviceIdentityInf
     let stored = read_stored_identity(&paths.identity_file)?;
     Ok(Some(DeviceIdentityInfo {
         name: stored.device_name,
-        source: stored.key.location.source(),
+        store: stored.key.location.store(),
         passphrase_protected: stored.key.encrypted,
     }))
 }
@@ -425,8 +425,8 @@ fn current_location(paths: &KeyPaths) -> Result<Option<KeyLocation>> {
 /// matching store command.
 pub fn check_key_is_writable(paths: &KeyPaths) -> Result<()> {
     match current_location(paths)? {
-        Some(KeyLocation::Command { read, store: None }) => {
-            Err(EncryptionError::KeySourceReadOnly {
+        Some(KeyLocation::Command { read, write: None }) => {
+            Err(EncryptionError::KeyStoreReadOnly {
                 command: read.label(),
             })
         }
@@ -452,9 +452,9 @@ pub fn set_identity_passphrase(
     write_stored_identity(paths, &stored.device_name, &identity, new)
 }
 
-/// Where to move this device's key.
+/// Which store to move this device's key to.
 ///
-/// Switching location never changes format: what was scrypt-wrapped stays
+/// Switching store never changes format: what was scrypt-wrapped stays
 /// wrapped, and [`set_identity_passphrase`] remains the only thing that changes
 /// that.
 pub enum KeyTarget {
@@ -465,9 +465,9 @@ pub enum KeyTarget {
     Command {
         /// Prints the stored key on stdout whenever it is needed.
         read: KeyCommand,
-        /// Run once, with the key on its stdin, to seed the store. Piping rather
-        /// than passing an argument is the point: argv is world-readable.
-        store: Option<KeyCommand>,
+        /// Given the key on its stdin whenever it changes. Piping rather than
+        /// passing an argument is the point: argv is world-readable.
+        write: Option<KeyCommand>,
     },
 }
 
@@ -476,7 +476,7 @@ pub enum KeyTarget {
 /// The new location is written and read back before the old copy is dropped, so
 /// a store that silently didn't take can't leave the device without a key.
 /// `passphrase` is needed only when the identity is passphrase-protected.
-pub fn set_key_location(
+pub fn set_key_store(
     paths: &KeyPaths,
     target: &KeyTarget,
     passphrase: Option<&SecretString>,
@@ -493,16 +493,16 @@ pub fn set_key_location(
             keyring::store(&account, &fetched.material)?;
             KeyLocation::Keyring(account)
         }
-        KeyTarget::Command { read, store } => {
-            if let Some(store) = store {
-                key_command::store(store, fetched.material.as_bytes())?;
+        KeyTarget::Command { read, write } => {
+            if let Some(write) = write {
+                key_command::store(write, fetched.material.as_bytes())?;
             }
             // Recorded, not just used once: without it the key could be fetched
             // but never replaced, so rotating or re-wrapping would have nowhere
             // to write.
             KeyLocation::Command {
                 read: read.clone(),
-                store: store.clone(),
+                write: write.clone(),
             }
         }
     };
@@ -519,7 +519,7 @@ pub fn set_key_location(
         if readback.public_key() != current.public_key()
             || readback.signing_public() != current.signing_public()
         {
-            return Err(EncryptionError::KeySourceMismatch);
+            return Err(EncryptionError::KeyStoreMismatch);
         }
         write_identity_file(&paths.identity_file, &wire_for(&stored.device_name, &moved))
     })();
@@ -761,7 +761,7 @@ fn wire_for(name: &str, key: &StoredKey) -> StoredIdentityWire {
             _ => None,
         },
         keys_store_command: match &key.location {
-            KeyLocation::Command { store, .. } => store.clone(),
+            KeyLocation::Command { write, .. } => write.clone(),
             _ => None,
         },
         // The inline fields say which format they hold, so this stays absent for
