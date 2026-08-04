@@ -703,6 +703,13 @@ pub(crate) fn create_device_identity(
     if name.trim().is_empty() {
         return Err(EncryptionError::EmptyDeviceName);
     }
+    // The file may be the only pointer at a keyring item or store command, and
+    // `write_stored_identity` writes through to whatever it names.
+    if paths.has_identity() {
+        return Err(EncryptionError::IdentityExists {
+            path: paths.identity_file.clone(),
+        });
+    }
 
     let identity = UnlockedIdentity {
         identity: x25519::Identity::generate(),
