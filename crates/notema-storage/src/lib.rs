@@ -142,12 +142,32 @@ pub enum StoreAccess {
     /// This device's join request is still queued; it keeps its identity while
     /// waiting for another device to approve it.
     AwaitingApproval { device_name: String },
-    /// This device has no usable key. `retired_key` is true when a now-dead
+    /// This device has no usable key. `retired_key` is set when a now-dead
     /// (revoked) key was just renamed aside during this call.
     NeedsEnroll {
         device_name: String,
-        retired_key: bool,
+        retired_key: Option<RetiredKey>,
     },
+}
+
+/// What this device retired after noticing encryption was disabled elsewhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisabledElsewhere {
+    /// `None` when this device held no key to retire.
+    pub retired_key: Option<RetiredKey>,
+    /// See [`MigrationSummary::warnings`].
+    pub warnings: Vec<String>,
+}
+
+/// What a key retirement actually left behind, which decides whether the user
+/// can be told the renamed file is enough to get the key back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetiredKey {
+    /// The renamed file holds the key itself.
+    Recoverable,
+    /// The key was kept outside the identity file and could not be read while
+    /// retiring it, so the renamed file only points at where it was.
+    PointerOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,12 +264,28 @@ impl JournalStore {
     /// Pick up an encryption *disable* performed on another device: when the
     /// synced roster is gone but this device still holds the key and pins it used
     /// while encrypted, retire them locally (renamed aside, recoverable) and fall
-    /// back to plaintext. Returns `true` when it just did so, so the caller can
-    /// tell the user. A no-op (`false`) on a store still encrypted, never
-    /// encrypted here, or with encrypted entries still to sync. Call once per open,
-    /// right after [`ensure`](Self::ensure).
-    pub fn reconcile_disabled_encryption(&self) -> AppResult<bool> {
-        Ok(migrate::reconcile_disabled_encryption(self)?.is_some())
+    /// back to plaintext. Returns what it retired, so the caller can tell the
+    /// user — including when the retired copy only points at a key store this
+    /// device could not read, which the caller must not describe as recoverable.
+    /// `None` on a store still encrypted, never encrypted here, or with
+    /// encrypted entries still to sync. Call once per open, right after
+    /// [`ensure`](Self::ensure).
+    pub fn reconcile_disabled_encryption(&self) -> AppResult<Option<DisabledElsewhere>> {
+        let Some(cleanup) = migrate::reconcile_disabled_encryption(self)? else {
+            return Ok(None);
+        };
+        Ok(Some(DisabledElsewhere {
+            retired_key: cleanup.disabled_identity.as_ref().map(|retired| {
+                match retired.holds_the_key() {
+                    true => RetiredKey::Recoverable,
+                    false => RetiredKey::PointerOnly,
+                }
+            }),
+            warnings: cleanup
+                .disabled_identity
+                .map(|retired| retired.warnings)
+                .unwrap_or_default(),
+        }))
     }
 
     /// Leftover `*.backup-*` siblings of the journal root or identity file —
@@ -500,7 +536,15 @@ impl JournalStore {
             Some(own_key) => crypto::revoked_recipient_keys(&self.paths.keys)?.contains(&own_key),
             None => false,
         };
-        let retired_key = revoked && migrate::retire_revoked_identity(self)?.is_some();
+        let retired_key = match revoked {
+            true => migrate::retire_revoked_identity(self)?.map(|retired| {
+                match retired.holds_the_key() {
+                    true => RetiredKey::Recoverable,
+                    false => RetiredKey::PointerOnly,
+                }
+            }),
+            false => None,
+        };
         Ok(StoreAccess::NeedsEnroll {
             device_name,
             retired_key,
@@ -802,16 +846,27 @@ impl JournalStore {
     /// and written. Pass `Some(passphrase)` for a passphrase-protected identity
     /// and `None` for a plaintext one. After this succeeds, the store
     /// transparently handles both plaintext and encrypted entries.
-    /// The prefetch is released only once an unlock succeeds: the TUI retries
-    /// from inside raw mode, where a `keys_command` prompt cannot be answered.
+    /// The retrieved material is kept afterwards, not just across a failed
+    /// attempt: retiring this device's key later needs it, and the paths that do
+    /// so run where a `keys_command` prompt could not be answered. It is the
+    /// still-wrapped stored form, alongside the opened identity this already
+    /// holds, so it adds nothing the store was not keeping already.
     pub fn unlock(&mut self, passphrase: Option<&SecretString>) -> AppResult<()> {
-        let identity = match self.fetched_key.as_ref() {
-            Some(fetched) => crypto::unlock_fetched(&self.paths.keys, fetched, passphrase)?,
-            None => crypto::unlock_identity(&self.paths.keys, passphrase)?,
+        let fetched = match self.fetched_key.take() {
+            Some(fetched) => fetched,
+            None => crypto::fetch_key_material(&self.paths.keys)?,
         };
-        self.fetched_key = None;
-        self.identity = Some(identity);
+        let identity = crypto::unlock_fetched(&self.paths.keys, &fetched, passphrase);
+        self.fetched_key = Some(fetched);
+        self.identity = Some(identity?);
         Ok(())
+    }
+
+    /// This device's stored key material, once retrieved. Lets the key-retiring
+    /// paths write a self-contained copy without going back to a key store that
+    /// may want a terminal they cannot give it.
+    pub(crate) fn fetched_key(&self) -> Option<&crypto::FetchedKey> {
+        self.fetched_key.as_ref()
     }
 
     /// Retrieve this device's stored key material without opening it, so a later

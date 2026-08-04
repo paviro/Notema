@@ -439,7 +439,7 @@ fn other_device_picks_up_a_remote_disable_and_retires_its_key() {
     // with no encrypted entries left, so it retires its own key and pins.
     let phone = JournalStore::new(&journals, dir.path().join("phone"));
     phone.ensure().unwrap();
-    assert!(phone.reconcile_disabled_encryption().unwrap());
+    assert!(phone.reconcile_disabled_encryption().unwrap().is_some());
 
     assert!(!phone_identity.exists(), "phone identity should be retired");
     assert!(!phone_trust.exists(), "phone trust pins should be retired");
@@ -510,7 +510,7 @@ fn revoked_device_retires_its_identity_but_keeps_trust_pins() {
     phone.unlock(None).unwrap();
     match phone.resolve_access().unwrap() {
         notema_storage::StoreAccess::NeedsEnroll { retired_key, .. } => {
-            assert!(retired_key, "a revoked key must be retired");
+            assert!(retired_key.is_some(), "a revoked key must be retired");
         }
         _ => panic!("phone should need enrollment"),
     }
@@ -570,7 +570,10 @@ fn unsynced_request_keeps_identity() {
     let key_material = std::fs::read(&phone_identity).unwrap();
     match phone.resolve_access().unwrap() {
         notema_storage::StoreAccess::NeedsEnroll { retired_key, .. } => {
-            assert!(!retired_key, "no revocation evidence — key must be kept");
+            assert!(
+                retired_key.is_none(),
+                "no revocation evidence — key must be kept"
+            );
         }
         _ => panic!("phone should need enrollment"),
     }
@@ -654,7 +657,7 @@ fn revoked_device_resolve_access_retires_its_key() {
     phone.unlock(None).unwrap();
     match phone.resolve_access().unwrap() {
         notema_storage::StoreAccess::NeedsEnroll { retired_key, .. } => {
-            assert!(retired_key, "revoked key should be retired");
+            assert!(retired_key.is_some(), "revoked key should be retired");
         }
         _ => panic!("phone should need enrollment"),
     }
@@ -681,7 +684,7 @@ fn remote_disable_reconcile_holds_off_while_entries_are_still_encrypted() {
     let trust = dir.path().join("laptop").join("devices-trust.toml");
     assert!(trust.exists());
 
-    assert!(!laptop.reconcile_disabled_encryption().unwrap());
+    assert!(laptop.reconcile_disabled_encryption().unwrap().is_none());
 
     assert!(
         identity.exists(),
@@ -1256,4 +1259,128 @@ fn disabling_encryption_inlines_an_external_key_before_retiring_it() {
     let mut restored = JournalStore::new(dir.path().join("journals"), &fresh);
     restored.ensure().unwrap();
     restored.unlock(None).unwrap();
+}
+
+/// Point this device's key at `bundle`, fetched by a command that also appends a
+/// line to `log` every time it runs — so a test can tell whether a code path
+/// went back to the key store.
+#[cfg(unix)]
+fn move_key_to_logged_command(
+    store: &JournalStore,
+    bundle: &std::path::Path,
+    log: &std::path::Path,
+) {
+    store
+        .set_key_store(
+            &notema_encryption::KeyTarget::Command {
+                read: notema_encryption::KeyCommand::Shell(format!(
+                    "echo read >> {}; cat {}",
+                    log.display(),
+                    bundle.display()
+                )),
+                write: Some(notema_encryption::KeyCommand::Shell(format!(
+                    "cat > {}",
+                    bundle.display()
+                ))),
+            },
+            None,
+        )
+        .unwrap();
+}
+
+#[cfg(unix)]
+fn times_read(log: &std::path::Path) -> usize {
+    std::fs::read_to_string(log).map_or(0, |text| text.lines().count())
+}
+
+#[cfg(unix)]
+#[test]
+fn retiring_a_revoked_command_backed_key_does_not_go_back_to_the_key_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let journals = dir.path().join("journals");
+    let bundle = dir.path().join("bundle.toml");
+    let log = dir.path().join("reads.log");
+
+    let mut laptop = JournalStore::new(&journals, dir.path().join("laptop"));
+    laptop.ensure().unwrap();
+    laptop.initialize_encryption("laptop", None).unwrap();
+    laptop.unlock(None).unwrap();
+    laptop.create_journal("diary").unwrap();
+    create_entry(&laptop, "diary", "shared body");
+
+    let phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    phone.request_access("phone", None).unwrap();
+    let pending = laptop.pending_requests().unwrap();
+    laptop.approve_pending(&pending[0], |_, _| {}).unwrap();
+    move_key_to_logged_command(&phone, &bundle, &log);
+    laptop.revoke_recipient("phone", |_, _| {}).unwrap();
+
+    let mut phone = JournalStore::new(&journals, dir.path().join("phone"));
+    phone.ensure().unwrap();
+    let before_unlock = times_read(&log);
+    phone.unlock(None).unwrap();
+    // The unlock is the one legitimate fetch: it happens before the TUI takes
+    // the terminal. Anything after it would run the command from inside raw
+    // mode, where its prompt could not be answered.
+    let after_unlock = times_read(&log);
+    assert_eq!(
+        after_unlock - before_unlock,
+        1,
+        "unlock should fetch exactly once"
+    );
+
+    match phone.resolve_access().unwrap() {
+        notema_storage::StoreAccess::NeedsEnroll { retired_key, .. } => {
+            // Retained from the unlock, so the retired copy still holds the key.
+            assert_eq!(retired_key, Some(notema_storage::RetiredKey::Recoverable));
+        }
+        _ => panic!("phone should need enrollment"),
+    }
+    assert_eq!(
+        times_read(&log),
+        after_unlock,
+        "retiring the key must not run the fetch command again"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn reconciling_a_remote_disable_reports_a_key_it_could_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let journals = dir.path().join("journals");
+    let bundle = dir.path().join("bundle.toml");
+    let log = dir.path().join("reads.log");
+
+    let mut laptop = JournalStore::new(&journals, dir.path().join("laptop"));
+    laptop.ensure().unwrap();
+    laptop.initialize_encryption("laptop", None).unwrap();
+    laptop.unlock(None).unwrap();
+    laptop.create_journal("diary").unwrap();
+    move_key_to_logged_command(&laptop, &bundle, &log);
+
+    // Encryption turned off elsewhere: the roster is gone and no encrypted
+    // entries remain, so the next open reconciles.
+    std::fs::remove_file(journals.join(".age").join("devices.toml")).unwrap();
+
+    // A fresh, never-unlocked store — the shape of any CLI subcommand, which
+    // must not spawn the key command to retire a key.
+    let laptop = JournalStore::new(&journals, dir.path().join("laptop"));
+    let before = times_read(&log);
+    let disabled = laptop.reconcile_disabled_encryption().unwrap().unwrap();
+
+    assert_eq!(
+        times_read(&log),
+        before,
+        "reconciling must not run the fetch command"
+    );
+    // Nothing was read, so the renamed copy points at the bundle rather than
+    // holding it — and the user has to be told, or they will delete it.
+    assert_eq!(
+        disabled.retired_key,
+        Some(notema_storage::RetiredKey::PointerOnly)
+    );
+    let warning = disabled.warnings.join(" ");
+    assert!(warning.contains("only points at where it was"), "{warning}");
+    assert!(!dir.path().join("laptop").join("identity.toml").exists());
 }

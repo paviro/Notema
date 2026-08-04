@@ -90,7 +90,7 @@ fn pending_notice_shows_the_enroll_command_in_flat_chrome() {
     let text = render_pending_notice_text_with_theme(
         &flat_theme(),
         "phone",
-        &AccessNotice::NeedsEnroll { retired_key: false },
+        &AccessNotice::NeedsEnroll { retired_key: None },
     );
     assert!(text.contains("Not authorized"));
     assert!(text.contains(crate::ENROLL_CMD));
@@ -110,7 +110,7 @@ fn pending_notice_shows_the_approve_command_in_flat_chrome() {
 #[test]
 fn disable_notice_shows_the_enable_hint_in_flat_chrome() {
     let theme = flat_theme();
-    let backend = render_backend(72, 20, |frame| draw_disable_notice(&theme, frame));
+    let backend = render_backend(72, 20, |frame| draw_disable_notice(&theme, frame, None));
     let text: String = backend
         .buffer()
         .content()

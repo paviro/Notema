@@ -65,10 +65,13 @@ pub(crate) fn load_existing(path_override: Option<&Path>) -> AppResult<Startup> 
     timing::mark("startup:config-load");
     let store = ish::prepare_store(&config_path, &config.journal_root(&config_path), false)?.store;
     timing::mark("startup:prepare-store");
-    if store.reconcile_disabled_encryption()? {
+    if let Some(disabled) = store.reconcile_disabled_encryption()? {
         eprintln!(
             "Note: encryption was disabled on another device; retired this device's key and trust pins."
         );
+        for warning in &disabled.warnings {
+            eprintln!("Warning: {warning}");
+        }
     }
     for backup in store.stale_backups()? {
         eprintln!(
