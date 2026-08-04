@@ -863,6 +863,33 @@ fn a_passphrase_change_writes_back_through_the_store_command() {
 
 #[cfg(unix)]
 #[test]
+fn a_store_command_that_keeps_nothing_fails_the_passphrase_change() {
+    let dir = tempdir().unwrap();
+    let paths = paths_in(dir.path());
+    let bundle = dir.path().join("bundle.toml");
+    let pw = SecretString::from("pw");
+
+    initialize_store_identity(&paths, "laptop", None).unwrap();
+    let before = unlock_identity(&paths, None).unwrap().public_key();
+    move_to_command(&paths, &bundle, None);
+
+    // Exits 0 without consuming stdin — indistinguishable from a successful
+    // store until the key is read back.
+    let stored = fs::read_to_string(&paths.identity_file)
+        .unwrap()
+        .replace(&format!("cat > {}", bundle.display()), "true");
+    write_wire(&paths, &stored);
+
+    assert!(matches!(
+        set_identity_passphrase(&paths, None, Some(&pw)).unwrap_err(),
+        EncryptionError::KeyStoreWriteLost
+    ));
+    // Refused before anything was dropped, so the old key still opens.
+    assert_eq!(unlock_identity(&paths, None).unwrap().public_key(), before);
+}
+
+#[cfg(unix)]
+#[test]
 fn a_read_only_key_command_refuses_before_touching_anything() {
     let dir = tempdir().unwrap();
     let paths = paths_in(dir.path());

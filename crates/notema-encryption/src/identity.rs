@@ -114,20 +114,41 @@ impl KeyLocation {
         }
     }
 
-    /// Put `material` where this location keeps it.
+    /// Put `material` where this location keeps it, then read it back and
+    /// confirm the store returned what it was given.
     ///
     /// `Inline` is a no-op: its bytes travel in the identity file the caller is
     /// about to write, rather than anywhere separate.
+    ///
+    /// The read-back is what separates a store that kept the key from one that
+    /// only looked like it did — a command that exits 0 without consuming its
+    /// stdin is indistinguishable from success otherwise, and callers go on to
+    /// drop the copy it was replacing.
     fn write(&self, material: &Zeroizing<String>) -> Result<()> {
         match self {
-            Self::Inline(_) => Ok(()),
-            Self::Keyring(account) => keyring::store(account, material),
+            Self::Inline(_) => return Ok(()),
+            Self::Keyring(account) => keyring::store(account, material)?,
             Self::Command {
                 write: Some(write), ..
-            } => key_command::store(write, material.as_bytes()),
-            Self::Command { read, write: None } => Err(EncryptionError::KeyStoreReadOnly {
-                command: read.label(),
-            }),
+            } => key_command::store(write, material.as_bytes())?,
+            Self::Command { read, write: None } => {
+                return Err(EncryptionError::KeyStoreReadOnly {
+                    command: read.label(),
+                });
+            }
+        }
+        if self.fetch()? != *material {
+            return Err(EncryptionError::KeyStoreWriteLost);
+        }
+        Ok(())
+    }
+
+    /// Retrieve the key material this location holds, in its stored form.
+    fn fetch(&self) -> Result<Zeroizing<String>> {
+        match self {
+            Self::Inline(text) => Ok(text.clone()),
+            Self::Keyring(account) => keyring::fetch(account),
+            Self::Command { read, .. } => bytes_to_utf8(key_command::run(read)?.to_vec()),
         }
     }
 
@@ -305,13 +326,8 @@ pub fn fetch_key_material(paths: &KeyPaths) -> Result<FetchedKey> {
 }
 
 fn fetch_stored(key: &StoredKey) -> Result<FetchedKey> {
-    let material = match &key.location {
-        KeyLocation::Inline(text) => text.clone(),
-        KeyLocation::Keyring(account) => keyring::fetch(account)?,
-        KeyLocation::Command { read, .. } => bytes_to_utf8(key_command::run(read)?.to_vec())?,
-    };
     Ok(FetchedKey {
-        material,
+        material: key.location.fetch()?,
         encrypted: key.encrypted,
     })
 }
