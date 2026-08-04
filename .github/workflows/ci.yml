@@ -119,13 +119,11 @@ jobs:
       - run: cargo test --workspace --locked
       - run: cargo doc --workspace --no-deps --locked
 
-  # The keychain-backed key path is covered elsewhere by an in-memory double, so
-  # no real backend is otherwise executed. A developer's machine is the wrong
-  # place to run this — it would write to their login keychain — so it happens
-  # here, against a throwaway gnome-keyring in a session bus that exists only for
-  # this job. Linux only: the macOS and Windows backends stay unexercised.
+  # The only place the platform keyring tests run: they are `#[ignore]`d and
+  # gated on NOTEMA_TEST_REAL_KEYRING, for the reasons in keyring_backend.rs.
+  # The macOS and Windows backends stay unexercised.
   keyring:
-    name: Linux (real keychain)
+    name: Linux (gnome-keyring)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
