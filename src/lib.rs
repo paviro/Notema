@@ -49,4 +49,4 @@ pub(crate) const EXPORT_KEY_CMD: &str = "notema encryption key export";
 
 /// The command that moves this device's key into the OS keychain, offered when
 /// an automatic move could not complete.
-pub(crate) const KEY_SOURCE_KEYRING_CMD: &str = "notema encryption key source keyring";
+pub(crate) const KEY_STORE_KEYRING_CMD: &str = "notema encryption key store keyring";

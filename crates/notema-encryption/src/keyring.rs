@@ -52,21 +52,18 @@ mod platform {
     /// directory's bundle identifier.
     const SERVICE: &str = "de.paviro.notema";
 
-    /// The account the probe reads. Never written, so the read is expected to
-    /// miss; a miss is the answer we want.
+    /// Never written, so the probe read is expected to miss.
     const PROBE_ACCOUNT: &str = "availability-probe";
 
     pub(super) fn is_available() -> bool {
-        // `Entry::new` only assembles a struct — every backend defers contact
-        // until a get or set — so it answers `Ok` even with no keychain behind
-        // it. Reading decides it for real. The item is never written, so the
-        // read misses before any unlock or ACL check and cannot raise a dialog.
+        // `Entry::new` defers OS contact until a get or set, so it answers
+        // `Ok` with no keychain behind it. A miss returns before any unlock or
+        // ACL check, so this cannot raise a dialog.
         match keyring::Entry::new(SERVICE, PROBE_ACCOUNT).and_then(|entry| entry.get_secret()) {
             Ok(_) => true,
             Err(keyring::Error::NoEntry) => true,
-            // Locked still means a keychain is there, and storing into it
-            // prompts to unlock. Refusing the option here would be worse than
-            // offering it: callers treat a failed move as recoverable.
+            // A keychain is still there, and storing into it prompts to
+            // unlock. Callers treat a failed move as recoverable.
             Err(keyring::Error::NoStorageAccess(_)) => true,
             Err(_) => false,
         }
@@ -120,15 +117,13 @@ mod platform {
                 drop(Zeroizing::new(bytes));
                 EncryptionError::MalformedStoredIdentity
             }
-            // A keychain that said no — `keyring` documents this as the store
-            // being unreachable "because of access rules in the platform; for
-            // example, it might be that the credential store is locked", and
-            // its Secret Service backend routes Locked/NoResult/Prompt here.
+            // `keyring` documents this as the store refusing, typically
+            // locked; its Secret Service backend routes Locked/Prompt here.
             keyring::Error::NoStorageAccess(detail) => EncryptionError::KeyringLocked {
                 detail: detail.to_string(),
             },
-            // No reachable keychain: a failed D-Bus connect lands here, so this
-            // is the arm that should point at the escape hatch.
+            // A failed D-Bus connect lands here, so this arm names the
+            // escape hatch.
             keyring::Error::PlatformFailure(detail) => EncryptionError::KeyringUnavailable {
                 detail: detail.to_string(),
             },

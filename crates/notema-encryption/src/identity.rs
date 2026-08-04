@@ -51,12 +51,13 @@ pub enum KeySource {
 }
 
 impl KeySource {
-    /// How to name this source in a message aimed at the user.
-    pub fn label(self) -> &'static str {
+    /// Where this source keeps the key, as a predicate completing "this
+    /// device's key is …". A clause, not a name: a command is not a place.
+    pub fn whereabouts(self) -> &'static str {
         match self {
-            Self::File => "the identity file",
-            Self::Keyring => "the OS keychain",
-            Self::Command => "an external command",
+            Self::File => "kept in the identity file",
+            Self::Keyring => "kept in the OS keychain",
+            Self::Command => "fetched by an external command",
         }
     }
 }
@@ -216,9 +217,8 @@ impl TryFrom<StoredIdentityWire> for StoredIdentity {
                 None,
             ));
         } else if store_command.is_some() {
-            // Only meaningful as the write half of `keys_command`. On its own it
-            // would be dropped here and erased from the file by the next write,
-            // silently turning a writable key source into a read-only one.
+            // Only meaningful as the write half of `keys_command`; alone it
+            // would be dropped here and erased by the next write.
             return Err(EncryptionError::OrphanedStoreCommand);
         }
 
@@ -444,7 +444,7 @@ pub fn set_identity_passphrase(
     new: Option<&SecretString>,
 ) -> Result<()> {
     reject_empty_passphrase(new)?;
-    // Ahead of the unlock, so a read-only key source is refused before anyone is
+    // Ahead of the unlock, so a read-only key store is refused before anyone is
     // asked for a passphrase that was never going to be used.
     check_key_is_writable(paths)?;
     let stored = read_stored_identity(&paths.identity_file)?;
@@ -512,9 +512,8 @@ pub fn set_key_location(
     };
 
     // Read it back from where it now lives and confirm the same key comes out.
-    // Everything from here until the identity file names the new location can
-    // leave a copy of the key somewhere nothing points at, so each failure
-    // unwinds the write it just made.
+    // Until the identity file names the new location, a failure would leave
+    // the key somewhere nothing points at.
     let verified = (|| {
         let readback = unwrap_key(&fetch_stored(&moved)?, passphrase)?;
         if readback.public_key() != current.public_key()
@@ -525,9 +524,7 @@ pub fn set_key_location(
         write_identity_file(&paths.identity_file, &wire_for(&stored.device_name, &moved))
     })();
     if let Err(error) = verified {
-        // A keychain item we minted moments ago and never recorded. Leaving it
-        // would strand a full copy of the key in the OS keychain under an
-        // account nothing references and nothing will ever clean up.
+        // Minted above and never recorded, so nothing else would collect it.
         if let KeyLocation::Keyring(account) = &moved.location {
             keyring::delete(account);
         }
@@ -797,13 +794,10 @@ fn read_stored_identity(path: &Path) -> Result<StoredIdentity> {
     StoredIdentity::try_from(wire)
 }
 
-/// The 1-based line a parse error points at, for a message that can say *where*
-/// without saying *what*.
+/// The 1-based line a parse error points at.
 ///
-/// `toml::de::Error`'s own `Display` quotes the offending source line, so it can
-/// never be passed on: that line may be the key, and it is a failed parse, so
-/// nothing about the file's shape can be trusted to rule that out. The span is
-/// just an offset, which is safe.
+/// `toml::de::Error`'s `Display` quotes the offending line, which may be the
+/// key, so it is never passed on. The span is only an offset.
 fn error_line(raw: &str, error: &toml::de::Error) -> usize {
     error.span().map_or(1, |span| {
         raw[..span.start.min(raw.len())].lines().count().max(1)

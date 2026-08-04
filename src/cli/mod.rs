@@ -130,16 +130,14 @@ enum DeviceCommand {
     Reject(RequestSelectionArgs),
 }
 
-/// This device's key. Two independent choices live here: its *format* (whether a
-/// passphrase protects it) and its *location* (which store holds the bytes).
-/// Every location holds either format.
+/// This device's key: its *format* (whether a passphrase protects it) and its
+/// *store* (which one holds the bytes). Every store holds either format.
 ///
-/// All verbs: `encryption status` reports where the key is and how it is
-/// protected, so a read-only command here would only repeat it.
+/// All verbs; `encryption status` does the reporting.
 #[derive(Debug, Subcommand)]
 enum KeyCommand {
     /// Change where this device's key is kept
-    Source(KeySourceArgs),
+    Store(KeyStoreArgs),
     /// Add, remove, or change this device's key passphrase
     Passphrase(PassphraseArgs),
     /// Replace this device's key and re-encrypt, retiring the old key
@@ -151,7 +149,7 @@ enum KeyCommand {
 /// Where a device's key is kept. Independent of whether it is
 /// passphrase-protected: every location holds either form.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum KeySourceChoice {
+enum KeyStoreChoice {
     /// Inline in `identity.toml`, readable only by you
     File,
     /// An item in the operating system's keychain
@@ -161,10 +159,10 @@ enum KeySourceChoice {
 }
 
 #[derive(Debug, Args)]
-struct KeySourceArgs {
+struct KeyStoreArgs {
     /// Where to keep the key
     #[arg(value_name = "LOCATION")]
-    location: KeySourceChoice,
+    location: KeyStoreChoice,
 
     /// Command that prints the key on stdout. Required for `command`.
     #[arg(long, value_name = "COMMAND", required_if_eq("location", "command"))]
@@ -174,7 +172,7 @@ struct KeySourceArgs {
     /// `--read`; without it the key can be fetched but never replaced, so
     /// `rotate` and `passphrase` have nowhere to write.
     #[arg(long, value_name = "COMMAND", requires = "read")]
-    store: Option<String>,
+    write: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -220,14 +218,14 @@ struct NewIdentityArgs {
     /// Where to keep the new key. Omit to be asked interactively; without a
     /// terminal to ask on, the key stays in the identity file.
     #[arg(long, value_name = "LOCATION")]
-    key_source: Option<NewKeySource>,
+    key_store: Option<NewKeyStore>,
 }
 
 /// Where a *newly minted* key can go. `command` is absent deliberately: it needs
-/// a fetch command to be named, which `notema encryption key source command`
+/// a fetch command to be named, which `notema encryption key store command`
 /// exists to do once the key is there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum NewKeySource {
+enum NewKeyStore {
     /// Inline in `identity.toml`, readable only by you
     File,
     /// An item in the operating system's keychain
@@ -345,8 +343,7 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
                 &store,
                 args.name.as_deref(),
                 args.no_passphrase,
-                args.key_source
-                    .map(|source| source == NewKeySource::Keyring),
+                args.key_store.map(|store| store == NewKeyStore::Keyring),
             )
         }
         EncryptionCommand::Disable(args) => {
@@ -386,7 +383,7 @@ fn handle_device_command(cli: &Cli, command: &DeviceCommand) -> AppResult<()> {
 
 fn handle_key_command(cli: &Cli, command: &KeyCommand) -> AppResult<()> {
     match command {
-        KeyCommand::Source(args) => key_source_command(cli, args),
+        KeyCommand::Store(args) => key_store_command(cli, args),
         KeyCommand::Passphrase(args) => device_passphrase_command(cli, args),
         KeyCommand::Rotate => device_rotate_command(cli),
         KeyCommand::Export(args) => key_export_command(cli, args),
@@ -404,27 +401,33 @@ fn this_device_or_bail(store: &JournalStore) -> AppResult<notema_encryption::Dev
     }
 }
 
-/// Where this device's key lives and how it is protected, printed the same way
-/// wherever it is asked for.
+/// Where this device's key lives and how it is protected.
+///
+/// A key with no passphrase is only unprotected in the identity file; a keychain
+/// or secret manager guards what it holds on its own.
 fn print_key_location(info: &notema_encryption::DeviceIdentityInfo) {
-    println!("This device's key is kept in {}.", info.source.label());
+    use notema_encryption::KeySource;
+
+    println!("This device's key is {}.", info.source.whereabouts());
+    if info.passphrase_protected {
+        println!("It is protected by a passphrase.");
+        return;
+    }
     println!(
-        "It is {}.",
-        if info.passphrase_protected {
-            "protected by a passphrase"
-        } else {
-            "stored unprotected, so it opens automatically"
+        "No passphrase, so it opens automatically. {}.",
+        match info.source {
+            KeySource::File => "Only the file's permissions protect it",
+            KeySource::Keyring => "The keychain protects it",
+            KeySource::Command => "Whatever it is fetched from is all that protects it",
         }
     );
 }
 
-/// The one place that answers "what is my encryption state" — whether it is on,
-/// where this device's key sits, and who can read the journal.
+/// Whether encryption is on, where this device's key sits, and who can read the
+/// journal.
 ///
-/// Reports rather than fails. A roster that will not verify is a fact about the
-/// state, so it belongs in the output; bailing would abandon a report that was
-/// already half printed, and withhold the local half — the part that is still
-/// true and still knowable — from the one person who needs it.
+/// Reports rather than fails: a roster that will not verify is part of the
+/// state, and the local half stays knowable.
 fn encryption_status_command(cli: &Cli) -> AppResult<()> {
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     if !store.encryption_enabled() {
@@ -451,23 +454,22 @@ fn encryption_status_command(cli: &Cli) -> AppResult<()> {
     Ok(())
 }
 
-fn key_source_command(cli: &Cli, args: &KeySourceArgs) -> AppResult<()> {
-    // Checked before anything is loaded: clap requires `--read` for `command`,
-    // but the reverse is not expressible there, and the flags are meaningless
-    // anywhere else. Silently ignoring them would hide a mistyped invocation.
-    if args.location != KeySourceChoice::Command && args.read.is_some() {
-        bail!("`--read` and `--store` describe a fetch command, so they only apply to `command`");
+fn key_store_command(cli: &Cli, args: &KeyStoreArgs) -> AppResult<()> {
+    // clap requires `--read` for `command`, but not the reverse. Checked before
+    // anything loads so a mistyped invocation fails as an argument error.
+    if args.location != KeyStoreChoice::Command && args.read.is_some() {
+        bail!("`--read` and `--write` describe a fetch command, so they only apply to `command`");
     }
 
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     let info = this_device_or_bail(&store)?;
 
     let target = match args.location {
-        KeySourceChoice::File => KeyTarget::File,
-        KeySourceChoice::Keyring => KeyTarget::Keyring,
-        KeySourceChoice::Command => KeyTarget::Command {
+        KeyStoreChoice::File => KeyTarget::File,
+        KeyStoreChoice::Keyring => KeyTarget::Keyring,
+        KeyStoreChoice::Command => KeyTarget::Command {
             read: notema_encryption::KeyCommand::Shell(args.read.clone().unwrap_or_default()),
-            store: args.store.clone().map(notema_encryption::KeyCommand::Shell),
+            store: args.write.clone().map(notema_encryption::KeyCommand::Shell),
         },
     };
 
@@ -481,15 +483,14 @@ fn key_source_command(cli: &Cli, args: &KeySourceArgs) -> AppResult<()> {
     store.set_key_location(&target, passphrase.as_ref())?;
 
     let now = this_device_or_bail(&store)?;
-    println!("This device's key is now kept in {}.", now.source.label());
-    if now.source == notema_encryption::KeySource::Command && args.store.is_none() {
+    println!("This device's key is now {}.", now.source.whereabouts());
+    if now.source == notema_encryption::KeySource::Command && args.write.is_none() {
         println!(
-            "Without `--store` this is read-only: `notema encryption key rotate` and `notema encryption key passphrase` will have nowhere to write the new key."
+            "Without `--write` this is read-only: `notema encryption key rotate` and `notema encryption key passphrase` will have nowhere to write the new key."
         );
     }
-    // The keychain item is ours to clean up, so it already is. A secret manager
-    // is the user's, and deleting from it uninvited would be worse than leaving
-    // a copy behind — but a copy they don't know about is worse still.
+    // A keychain item is ours and already gone; a secret manager is the user's
+    // to clear, so the copy left there has to be named.
     if leaving == notema_encryption::KeySource::Command {
         println!(
             "The old copy is still wherever the previous fetch command read it from; remove it there if you no longer want it."
@@ -740,7 +741,7 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
     // Asked before the key exists, answered after it does — enroll mints an
     // identity just as `enable` does, so it offers the same choice.
     let use_keyring =
-        encryption::resolve_key_source(args.key_source.map(|src| src == NewKeySource::Keyring))?;
+        encryption::resolve_key_source(args.key_store.map(|store| store == NewKeyStore::Keyring))?;
 
     // Joining a store that already exists (its recipients synced here): drop a
     // request for a device that can decrypt to approve.
@@ -773,9 +774,8 @@ fn device_list_command(cli: &Cli) -> AppResult<()> {
 /// The roster and any pending requests. Shared by `device list` and the roster
 /// half of `encryption status`.
 ///
-/// Every fallible read happens before the first line is printed, so a caller
-/// that reports the error instead of propagating it can't end up contradicting
-/// output this already produced.
+/// Every fallible read runs before the first line prints, so a caller that
+/// reports the error instead of propagating it cannot contradict itself.
 fn print_device_roster(store: &JournalStore) -> AppResult<()> {
     let recipients = store.recipients()?;
     if recipients.is_empty() {

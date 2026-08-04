@@ -807,10 +807,8 @@ impl JournalStore {
     /// and written. Pass `Some(passphrase)` for a passphrase-protected identity
     /// and `None` for a plaintext one. After this succeeds, the store
     /// transparently handles both plaintext and encrypted entries.
-    /// The prefetch is released only once an unlock succeeds. A wrong passphrase
-    /// must leave it in place: the retry would otherwise re-fetch, and the TUI
-    /// retries from inside raw mode, where a `keys_command` prompt cannot reach
-    /// the user.
+    /// The prefetch is released only once an unlock succeeds: the TUI retries
+    /// from inside raw mode, where a `keys_command` prompt cannot be answered.
     pub fn unlock(&mut self, passphrase: Option<&SecretString>) -> AppResult<()> {
         let identity = match self.fetched_key.as_ref() {
             Some(fetched) => crypto::unlock_fetched(&self.paths.keys, fetched, passphrase)?,

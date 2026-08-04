@@ -168,11 +168,8 @@ pub(crate) fn store(command: &KeyCommand, material: &[u8]) -> Result<()> {
     let mut stdout = child.stdout.take().expect("stdout piped above");
     let mut stderr = child.stderr.take().expect("stderr piped above");
 
-    // Three pipes, three threads. A command that prints more than a pipe buffer
-    // before reading all of its input would deadlock against our write, and
-    // draining stdout to EOF before starting on stderr would deadlock against a
-    // command that fills the stderr buffer while holding stdout open. Neither
-    // stream can be made to wait on the other.
+    // Three pipes, three threads: writing while a full output buffer blocks the
+    // child, or draining stdout to EOF before stderr, each deadlock.
     let (written, stderr_tail) = std::thread::scope(|scope| {
         let ignore_stdout = scope.spawn(move || drain_tail(&mut stdout, 0));
         let drain = scope.spawn(move || drain_tail(&mut stderr, MAX_STDERR));
