@@ -23,6 +23,19 @@ pub struct DecryptSummary {
     pub backup_path: Option<PathBuf>,
     pub disabled_identity_file: PathBuf,
     pub disabled_trust_file: Option<PathBuf>,
+    /// The retired key had been fetched by a command, so a copy remains in
+    /// whatever that command read from — the user's to remove, not ours.
+    pub key_left_in_command_store: bool,
+    /// See [`MigrationSummary::warnings`].
+    pub warnings: Vec<String>,
+}
+
+/// The outcome of renaming `identity.toml` aside: the recoverable copy, plus
+/// whatever the caller has to tell the user about the key that was in it.
+struct RetiredIdentity {
+    path: PathBuf,
+    left_in_command_store: bool,
+    warnings: Vec<String>,
 }
 
 /// The local files a device retires when it notices encryption was disabled on
@@ -117,7 +130,7 @@ pub(crate) fn decrypt_store(
     // failure here must not roll the (fully decrypted) root back.
     clear_age_dir(&paths.keys)?;
     let disabled_trust_file = disable_trust_file(&paths.keys)?;
-    let disabled_identity_file = disable_identity_file(&paths.keys)?;
+    let retired = disable_identity_file(&paths.keys)?;
     // The decrypt completed, so this snapshot is a deliberate keep, not a crash
     // leftover: move it out of the `*.backup-*` namespace the startup warning
     // covers. On a failed rename the old name stays — merely over-warned.
@@ -132,8 +145,10 @@ pub(crate) fn decrypt_store(
     Ok(DecryptSummary {
         migrated_files,
         backup_path: Some(backup),
-        disabled_identity_file,
+        disabled_identity_file: retired.path,
         disabled_trust_file,
+        key_left_in_command_store: retired.left_in_command_store,
+        warnings: retired.warnings,
     })
 }
 
@@ -165,7 +180,7 @@ pub(crate) fn reconcile_disabled_encryption(
     }
     let disabled_trust_file = disable_trust_file(paths)?;
     let disabled_identity_file = if paths.identity_file.exists() {
-        Some(disable_identity_file(paths)?)
+        Some(disable_identity_file(paths)?.path)
     } else {
         None
     };
@@ -187,7 +202,7 @@ pub(crate) fn retire_revoked_identity(store: &JournalStore) -> AppResult<Option<
     if !paths.identity_file.exists() {
         return Ok(None);
     }
-    Ok(Some(disable_identity_file(paths)?))
+    Ok(Some(disable_identity_file(paths)?.path))
 }
 
 /// Tear down the synced key folder when encryption is disabled: drop the signed
@@ -692,19 +707,34 @@ fn copy_dir_all(source: &Path, target: &Path) -> AppResult<()> {
 /// Retire this device's private key when encryption is turned off: rename
 /// `identity.toml` aside as `identity.disabled-<timestamp>.toml` — a recoverable
 /// copy, not a delete. Returns the new path.
-fn disable_identity_file(paths: &KeyPaths) -> AppResult<PathBuf> {
+fn disable_identity_file(paths: &KeyPaths) -> AppResult<RetiredIdentity> {
     // A key kept in the keychain or a secret manager would leave the retired
     // copy pointing at something nothing references any more, so inline it
-    // first: this rename is meant to be recoverable, not a delete. Best effort —
-    // a key we can no longer fetch shouldn't block turning encryption off.
-    let snapshot = crypto::snapshot_identity(paths).ok();
-    let aside = rename_aside(&paths.identity_file, "identity", "toml")?;
-    if let Some(snapshot) = snapshot.filter(crypto::IdentitySnapshot::is_external) {
-        crypto::atomic_write_private(&aside, &snapshot.portable_bytes()?)?;
-        // Only once the recoverable copy is on disk.
-        snapshot.forget_stored_key();
+    // first: this rename is meant to be recoverable, not a delete.
+    let snapshot = crypto::snapshot_identity(paths);
+    let mut retired = RetiredIdentity {
+        path: rename_aside(&paths.identity_file, "identity", "toml")?,
+        left_in_command_store: false,
+        warnings: Vec::new(),
+    };
+    match snapshot {
+        Ok(snapshot) if snapshot.is_external() => {
+            crypto::atomic_write_private(&retired.path, &snapshot.portable_bytes()?)?;
+            // Only once the recoverable copy is on disk. A keychain item is ours
+            // to delete; a secret manager's copy is the user's, so it is named
+            // rather than reached into.
+            snapshot.forget_stored_key();
+            retired.left_in_command_store = snapshot.store() == crypto::KeyStore::Command;
+        }
+        Ok(_) => {}
+        // Not a reason to refuse the disable, but the retired copy is then only
+        // a pointer at a key this device can no longer reach.
+        Err(error) => retired.warnings.push(format!(
+            "could not read this device's key ({error}), so {} only points at where it was kept rather than holding it",
+            retired.path.display()
+        )),
     }
-    Ok(aside)
+    Ok(retired)
 }
 
 /// Retire this device's roster trust pins the same way as its key, renaming

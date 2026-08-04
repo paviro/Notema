@@ -20,6 +20,10 @@ pub struct KeyPaths {
     pub trust_file: PathBuf,
 }
 
+/// What this device's identity file is called inside a config directory. Also
+/// the name an exported copy takes, so it can be dropped straight back in.
+pub const IDENTITY_FILE_NAME: &str = "identity.toml";
+
 impl KeyPaths {
     /// Derive the key locations from the journal root and the config directory.
     pub fn new(journal_root: impl AsRef<Path>, config_dir: impl AsRef<Path>) -> Self {
@@ -27,7 +31,7 @@ impl KeyPaths {
         let config_dir = config_dir.as_ref();
         Self {
             devices_file: age_dir.join("devices.toml"),
-            identity_file: config_dir.join("identity.toml"),
+            identity_file: config_dir.join(IDENTITY_FILE_NAME),
             trust_file: config_dir.join("devices-trust.toml"),
             age_dir,
         }

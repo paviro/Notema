@@ -50,3 +50,10 @@ pub(crate) const EXPORT_KEY_CMD: &str = "notema encryption key export";
 /// The command that moves this device's key into the OS keychain, offered when
 /// an automatic move could not complete.
 pub(crate) const KEY_STORE_KEYRING_CMD: &str = "notema encryption key store keyring";
+
+/// The command that turns encryption on, pointed at from every surface that
+/// notices a journal doesn't have it yet.
+pub(crate) const ENABLE_CMD: &str = "notema encryption enable";
+
+/// The command that shows the roster and any pending join requests.
+pub(crate) const DEVICE_LIST_CMD: &str = "notema encryption device list";

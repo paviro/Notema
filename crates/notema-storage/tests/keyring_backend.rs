@@ -5,18 +5,52 @@
 //! on top but leaves the platform backends themselves — and the mapping from
 //! `keyring::Error` onto ours — completely uncovered.
 //!
-//! Opt in with `NOTEMA_TEST_REAL_KEYRING=1`. It is off by default because it
-//! writes to whichever keychain the running user has: on a developer's machine
-//! that is their login keychain, and on macOS an unsigned test binary has no
-//! stable code identity, so reading back what it just wrote raises a GUI prompt
-//! that would hang the suite. CI runs it on Linux against a throwaway
-//! `gnome-keyring` inside `dbus-run-session`.
+//! These are `#[ignore]`d and additionally need `NOTEMA_TEST_REAL_KEYRING=1`,
+//! because they write to whichever keychain the running user has: on a
+//! developer's machine that is their login keychain, and on macOS an unsigned
+//! test binary has no stable code identity, so reading back what it just wrote
+//! raises a GUI prompt that would hang the suite. CI runs them on Linux against
+//! a throwaway `gnome-keyring` inside `dbus-run-session`.
 
 use notema_encryption::{KeyStore, KeyTarget};
 use notema_storage::JournalStore;
+use std::path::PathBuf;
 
-fn enabled() -> bool {
-    std::env::var("NOTEMA_TEST_REAL_KEYRING").is_ok_and(|value| value == "1")
+/// Refuse rather than skip. `#[ignore]` already means nothing runs these unless
+/// something asked for them by name, so a missing opt-in is a misconfigured
+/// runner — and a runner that silently stopped setting it would otherwise report
+/// a green keychain job having tested nothing.
+fn require_opt_in() {
+    assert!(
+        std::env::var("NOTEMA_TEST_REAL_KEYRING").is_ok_and(|value| value == "1"),
+        "set NOTEMA_TEST_REAL_KEYRING=1 to confirm you meant to write to this machine's keychain"
+    );
+}
+
+/// Puts the key back in the identity file however the test ends. Without this a
+/// failed assertion strands a real keychain item under a random hex account that
+/// nothing afterwards can name.
+struct KeychainCleanup {
+    config_dir: PathBuf,
+    pointer: String,
+}
+
+impl Drop for KeychainCleanup {
+    fn drop(&mut self) {
+        let identity_file = self.config_dir.join("identity.toml");
+        // The key is already inline, so the test's own move-out ran and took the
+        // item with it.
+        if std::fs::read_to_string(&identity_file)
+            .is_ok_and(|current| current.contains("AGE-SECRET-KEY-"))
+        {
+            return;
+        }
+        let _ = std::fs::write(&identity_file, &self.pointer);
+        let store = JournalStore::new(self.config_dir.join("journals"), &self.config_dir);
+        if store.ensure().is_ok() {
+            let _ = store.set_key_store(&KeyTarget::File, None);
+        }
+    }
 }
 
 /// A full round trip through the real backend: store, read back, and clean up.
@@ -25,12 +59,9 @@ fn enabled() -> bool {
 /// module, so it covers the path a user actually takes — including the readback
 /// verification that has to fetch from the keychain to succeed.
 #[test]
+#[ignore = "writes to this machine's real OS keychain; run with --ignored"]
 fn a_real_keychain_round_trips_and_cleans_up_after_itself() {
-    if !enabled() {
-        eprintln!("skipping: set NOTEMA_TEST_REAL_KEYRING=1 to run against a real keychain");
-        return;
-    }
-
+    require_opt_in();
     assert!(
         notema_encryption::keyring_available(),
         "no keychain reachable, so there is nothing to test against"
@@ -47,6 +78,10 @@ fn a_real_keychain_round_trips_and_cleans_up_after_itself() {
 
     let identity_file = dir.path().join("identity.toml");
     let pointer = std::fs::read_to_string(&identity_file).unwrap();
+    let _cleanup = KeychainCleanup {
+        config_dir: dir.path().to_path_buf(),
+        pointer: pointer.clone(),
+    };
     assert!(
         !pointer.contains("AGE-SECRET-KEY-"),
         "the key should have left the file: {pointer}"
@@ -86,12 +121,9 @@ fn a_real_keychain_round_trips_and_cleans_up_after_itself() {
 /// corruption — the difference between "restore your backup" and "unlock your
 /// keychain", which is the whole point of the error mapping.
 #[test]
+#[ignore = "writes to this machine's real OS keychain; run with --ignored"]
 fn a_missing_keychain_item_reads_as_missing_not_malformed() {
-    if !enabled() {
-        eprintln!("skipping: set NOTEMA_TEST_REAL_KEYRING=1 to run against a real keychain");
-        return;
-    }
-
+    require_opt_in();
     let dir = tempfile::tempdir().unwrap();
     let mut store = JournalStore::new(dir.path().join("journals"), dir.path());
     store.ensure().unwrap();
@@ -102,6 +134,10 @@ fn a_missing_keychain_item_reads_as_missing_not_malformed() {
     // Point the file at an account nothing ever stored.
     let identity_file = dir.path().join("identity.toml");
     let pointer = std::fs::read_to_string(&identity_file).unwrap();
+    let _cleanup = KeychainCleanup {
+        config_dir: dir.path().to_path_buf(),
+        pointer: pointer.clone(),
+    };
     let repointed: String = pointer
         .lines()
         .map(|line| {
@@ -129,10 +165,5 @@ fn a_missing_keychain_item_reads_as_missing_not_malformed() {
         !message.contains("malformed"),
         "a missing item is not corruption: {message}"
     );
-
-    // Clean up the item the first move created.
-    std::fs::write(&identity_file, &pointer).unwrap();
-    let cleanup = JournalStore::new(dir.path().join("journals"), dir.path());
-    cleanup.ensure().unwrap();
-    cleanup.set_key_store(&KeyTarget::File, None).unwrap();
+    // `_cleanup` removes the item the first move created.
 }

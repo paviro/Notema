@@ -25,12 +25,13 @@ tempfile.workspace = true
 [lints]
 workspace = true
 
-# The OS keychain backends, one per platform so the targets without a keychain
-# (Android/Termux, the iSH build, and the embedded Linux artifacts) pull in none
-# of it and fall back to `keys_command`. Linux/BSD use the async Secret Service
-# backend because it speaks D-Bus through zbus — pure Rust, unlike the sync one,
-# which needs the libdbus C library and would not cross-compile to musl, i686,
-# armv7 or riscv64.
+# The OS keychain backends, one per platform. Targets outside these cfgs
+# (Android/Termux) pull in none of it and fall back to `keys_command`; the musl,
+# i686, armv7 and riscv64 artifacts are all `target_os = "linux"`, so they do
+# build the Secret Service backend and fall back at runtime when no D-Bus
+# session answers. That backend is the async one because it speaks D-Bus through
+# zbus — pure Rust, unlike the sync one, which needs the libdbus C library and
+# would not cross-compile to those targets.
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { workspace = true, features = ["apple-native"] }
 
@@ -41,7 +42,9 @@ keyring = { workspace = true, features = ["windows-native"] }
 keyring = { workspace = true, features = [
     "async-secret-service",
     "crypto-rust",
-    # zbus would otherwise pull in tokio; async-io is the executor the Linux
-    # side of notema-context already uses.
+    # zbus would otherwise pull in tokio. async-io matches the executor the Linux
+    # side of notema-context uses, though not its zbus version: secret-service
+    # pins zbus 4 and notema-context is on 5, so both trees build until `keyring`
+    # 4 (which moves to zbus 5) lands.
     "async-io",
 ] }

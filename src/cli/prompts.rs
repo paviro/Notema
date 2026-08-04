@@ -31,6 +31,30 @@ pub(crate) fn is_yes(input: &str) -> bool {
     matches!(input.trim(), "y" | "Y" | "yes" | "YES" | "Yes")
 }
 
+/// Interpret an interactive `[Y/n]` answer, defaulting to yes.
+pub(crate) fn is_not_no(input: &str) -> bool {
+    !matches!(input.trim(), "n" | "N" | "no" | "NO" | "No")
+}
+
+/// Pose a `[Y/n]` choice: a question, one line per option, then the prompt.
+/// Defaults to yes, so anything but an explicit no is taken as one.
+fn prompt_default_yes(
+    stdout: &mut impl Write,
+    question: &str,
+    options: [&str; 2],
+    prompt: &str,
+) -> AppResult<bool> {
+    writeln!(stdout, "{question}")?;
+    for option in options {
+        writeln!(stdout, "  {option}")?;
+    }
+    write!(stdout, "{prompt} [Y/n]: ")?;
+    stdout.flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(is_not_no(&input))
+}
+
 /// Resolve the device name and optional passphrase for a *new* identity,
 /// reusing the first-run prompts. `name` skips the name prompt; `no_passphrase`
 /// stores the key unprotected, otherwise the passphrase is chosen interactively.
@@ -70,24 +94,16 @@ pub(crate) fn prompt_device_name(stdout: &mut impl Write) -> AppResult<String> {
 /// Ask whether to protect the key with a passphrase, returning the passphrase to
 /// use (`None` = store the key unprotected). Defaults to yes.
 pub(crate) fn prompt_passphrase_choice(stdout: &mut impl Write) -> AppResult<Option<SecretString>> {
-    writeln!(stdout, "Protect the key with a passphrase?")?;
-    writeln!(
+    let use_passphrase = prompt_default_yes(
         stdout,
-        "  Yes — key is encrypted at rest; you enter the passphrase to unlock (best for laptops)."
+        "Protect the key with a passphrase?",
+        [
+            "Yes — key is encrypted at rest; you enter the passphrase to unlock (best for laptops).",
+            "No  — key opens automatically; relies on this device's own security (phones with full-disk encryption, etc.).",
+        ],
+        "Use a passphrase?",
     )?;
-    writeln!(
-        stdout,
-        "  No  — key opens automatically; relies on this device's own security (phones with full-disk encryption, etc.)."
-    )?;
-    write!(stdout, "Use a passphrase? [Y/n]: ")?;
-    stdout.flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    if matches!(input.trim(), "n" | "N" | "no" | "NO" | "No") {
-        Ok(None)
-    } else {
-        Ok(Some(prompt_new_passphrase()?))
-    }
+    use_passphrase.then(prompt_new_passphrase).transpose()
 }
 
 /// Prompt for a new passphrase twice, rejecting an empty entry or a mismatch.
@@ -110,34 +126,23 @@ pub(crate) fn prompt_unlock_passphrase() -> AppResult<SecretString> {
     )?))
 }
 
-/// Ask where to keep this device's key, when the keychain is an option at all.
+/// Ask whether to keep this device's key in the OS keychain, defaulting to yes.
 ///
-/// Returns `true` for the keychain. Interactively it defaults to that: it keeps
-/// the key out of a file that backups and sync tools will happily copy. Falls
-/// through to the identity file without asking when there is no keychain to
-/// reach — Android, iSH, a headless Linux session with no D-Bus.
-///
-/// Without a terminal it answers the identity file, the portable choice. A
-/// script or provisioning run cannot see a prompt, and a keychain it silently
-/// picked may be unreachable in the session that has to open the key; callers
-/// pass `--key-store` to ask for the keychain deliberately.
+/// Answers no without asking when there is no keychain to reach, and when there
+/// is no terminal to ask on: a keychain picked on a script's behalf may be
+/// unreachable in the session that has to open the key, so `--key-store` is how
+/// that is asked for deliberately.
 pub(crate) fn prompt_keyring_choice(keyring_available: bool) -> AppResult<bool> {
     if !keyring_available || !io::stdin().is_terminal() {
         return Ok(false);
     }
-    let mut stdout = io::stdout();
-    writeln!(stdout, "Where should this device's key be kept?")?;
-    writeln!(
-        stdout,
-        "  Keychain — held by the operating system, so no copy sits in a file backups can pick up."
-    )?;
-    writeln!(
-        stdout,
-        "  File     — inside identity.toml, readable only by you. Works everywhere, including over SSH."
-    )?;
-    write!(stdout, "Use the keychain? [Y/n]: ")?;
-    stdout.flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(!matches!(input.trim(), "n" | "N" | "no" | "NO" | "No"))
+    prompt_default_yes(
+        &mut io::stdout(),
+        "Where should this device's key be kept?",
+        [
+            "Keychain — held by the operating system, so no copy sits in a file backups can pick up.",
+            "File     — inside identity.toml, readable only by you. Works everywhere, including over SSH.",
+        ],
+        "Use the keychain?",
+    )
 }

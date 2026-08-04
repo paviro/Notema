@@ -1,6 +1,6 @@
 use crate::AppResult;
 
-use super::prompts;
+use super::{NewKeyStore, prompts};
 use anyhow::bail;
 use indicatif::{ProgressBar, ProgressStyle};
 use notema_encryption::SecretString;
@@ -30,30 +30,41 @@ pub(crate) fn cli_progress(unit: &'static str) -> impl FnMut(usize, usize) {
     }
 }
 
-/// Whether a newly minted key goes to the OS keychain: an explicit
-/// `--key-store` wins, otherwise ask (and, with no terminal to ask on, keep it
-/// in the identity file).
-pub(crate) fn resolve_key_source(explicit: Option<bool>) -> AppResult<bool> {
+/// Where a newly minted key goes: an explicit `--key-store` wins, otherwise ask
+/// (and, with no terminal to ask on, keep it in the identity file).
+pub(crate) fn resolve_key_store(explicit: Option<NewKeyStore>) -> AppResult<NewKeyStore> {
     match explicit {
-        Some(want_keyring) => Ok(want_keyring),
-        None => prompts::prompt_keyring_choice(notema_encryption::keyring_available()),
+        Some(store) => Ok(store),
+        None if prompts::prompt_keyring_choice(notema_encryption::keyring_available())? => {
+            Ok(NewKeyStore::Keyring)
+        }
+        None => Ok(NewKeyStore::File),
     }
 }
 
-/// Move a freshly minted key into the OS keychain, reporting a failure without
-/// failing the command.
+/// Move a freshly minted key into the OS keychain.
 ///
 /// Minted inline then moved, so the move can verify the keychain hands the key
-/// back. An unreachable keychain still leaves a working store and a usable key,
-/// and no probe rules that case out in advance.
-pub(crate) fn move_key_to_keyring(store: &JournalStore, passphrase: Option<&SecretString>) {
-    if let Err(error) = store.set_key_store(&notema_encryption::KeyTarget::Keyring, passphrase) {
-        println!(
-            "Could not move this device's key to the keychain: {error}\nIt is in {} instead; move it later with `{}`.",
-            store.identity_path().display(),
-            crate::KEY_STORE_KEYRING_CMD,
-        );
+/// back. `requested` is whether the user named the keychain themselves: an
+/// instruction that cannot be carried out fails the command, while a prompted or
+/// defaulted choice falls back to the identity file.
+pub(crate) fn move_key_to_keyring(
+    store: &JournalStore,
+    passphrase: Option<&SecretString>,
+    requested: bool,
+) -> AppResult<()> {
+    let Err(error) = store.set_key_store(&notema_encryption::KeyTarget::Keyring, passphrase) else {
+        return Ok(());
+    };
+    if requested {
+        return Err(error);
     }
+    eprintln!(
+        "Could not move this device's key to the keychain: {error}\nIt is in {} instead; move it later with `{}`.",
+        store.identity_path().display(),
+        crate::KEY_STORE_KEYRING_CMD,
+    );
+    Ok(())
 }
 
 /// Tell the user what to back up. Naming the identity file for a key that only
@@ -77,7 +88,7 @@ pub(crate) fn encrypt_store(
     store: &JournalStore,
     device_name: Option<&str>,
     no_passphrase: bool,
-    key_source: Option<bool>,
+    key_store: Option<NewKeyStore>,
 ) -> AppResult<()> {
     let (recipient, warnings, minted_without_passphrase) = if store.encryption_enabled() {
         if !store.unlock_available() {
@@ -107,10 +118,10 @@ pub(crate) fn encrypt_store(
         }
         println!("No journal encryption identity configured; generating an age identity.");
         let (name, passphrase) = prompts::resolve_new_identity_options(device_name, no_passphrase)?;
-        let use_keyring = resolve_key_source(key_source)?;
+        let target = resolve_key_store(key_store)?;
         let summary = store.enable_encryption(&name, passphrase.as_ref(), cli_progress("files"))?;
-        if use_keyring {
-            move_key_to_keyring(store, passphrase.as_ref());
+        if target == NewKeyStore::Keyring {
+            move_key_to_keyring(store, passphrase.as_ref(), key_store.is_some())?;
         }
         (summary.recipient, summary.warnings, passphrase.is_none())
     };
@@ -140,5 +151,11 @@ pub(crate) fn decrypt_store(store: JournalStore) -> AppResult<()> {
     if let Some(trust) = summary.disabled_trust_file {
         println!("Retired device trust pins to {}", trust.display());
     }
+    if summary.key_left_in_command_store {
+        println!(
+            "The key is also still wherever the fetch command read it from; remove it there if you no longer want it."
+        );
+    }
+    super::print_warnings(&summary.warnings);
     Ok(())
 }

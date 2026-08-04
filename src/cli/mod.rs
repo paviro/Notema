@@ -101,9 +101,8 @@ enum EncryptionCommand {
     },
 }
 
-/// The roster: which devices may read this journal. Everything here is about
-/// *other* devices, or about this one's place among them. This device's own key
-/// is [`KeyCommand`].
+/// The roster: which devices may read this journal. This device's own key is
+/// [`KeyCommand`].
 #[derive(Debug, Subcommand)]
 enum DeviceCommand {
     /// Request access for this device to an already-encrypted journal (approve it from an existing device)
@@ -132,8 +131,7 @@ enum DeviceCommand {
 
 /// This device's key: its *format* (whether a passphrase protects it) and its
 /// *store* (which one holds the bytes). Every store holds either format.
-///
-/// All verbs; `encryption status` does the reporting.
+/// Reporting lives in `encryption status`.
 #[derive(Debug, Subcommand)]
 enum KeyCommand {
     /// Change where this device's key is kept
@@ -177,9 +175,14 @@ struct KeyStoreArgs {
 
 #[derive(Debug, Args)]
 struct ExportKeyArgs {
-    /// File to write the copy to
+    /// File to write the copy to, or a directory to write `identity.toml` into
     #[arg(value_name = "PATH")]
     path: PathBuf,
+
+    /// Overwrite the destination if it already exists
+    #[arg(long)]
+    force: bool,
+
     #[command(flatten)]
     confirm: ConfirmArgs,
 }
@@ -343,7 +346,7 @@ fn handle_encryption_command(cli: &Cli, command: &EncryptionCommand) -> AppResul
                 &store,
                 args.name.as_deref(),
                 args.no_passphrase,
-                args.key_store.map(|store| store == NewKeyStore::Keyring),
+                args.key_store,
             )
         }
         EncryptionCommand::Disable(args) => {
@@ -432,7 +435,7 @@ fn encryption_status_command(cli: &Cli) -> AppResult<()> {
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     if !store.encryption_enabled() {
         println!("Encryption is off for this journal.");
-        println!("Turn it on with `notema encryption enable`.");
+        println!("Turn it on with `{}`.", crate::ENABLE_CMD);
         return Ok(());
     }
     println!("Encryption is on for {}.", store.root().display());
@@ -455,8 +458,7 @@ fn encryption_status_command(cli: &Cli) -> AppResult<()> {
 }
 
 fn key_store_command(cli: &Cli, args: &KeyStoreArgs) -> AppResult<()> {
-    // clap requires `--read` for `command`, but not the reverse. Checked before
-    // anything loads so a mistyped invocation fails as an argument error.
+    // clap requires `--read` for `command`, but not the reverse.
     if args.location != KeyStoreChoice::Command && args.read.is_some() {
         bail!("`--read` and `--write` describe a fetch command, so they only apply to `command`");
     }
@@ -473,8 +475,7 @@ fn key_store_command(cli: &Cli, args: &KeyStoreArgs) -> AppResult<()> {
         },
     };
 
-    // Only to open what is stored now — moving it never changes the format, so
-    // a passphrase-protected key stays that way wherever it lands.
+    // Only to open what is stored now; moving never changes the format.
     let passphrase = info
         .passphrase_protected
         .then(prompts::prompt_unlock_passphrase)
@@ -503,20 +504,40 @@ fn key_export_command(cli: &Cli, args: &ExportKeyArgs) -> AppResult<()> {
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     let info = this_device_or_bail(&store)?;
 
-    // Unprotected key material is about to be written somewhere the user chose,
-    // so say plainly what is going in the file before it goes there.
-    let warning = if info.passphrase_protected {
-        "Write a copy of this device's key, still protected by its passphrase?"
+    // A directory names where, not what to call it: the copy is a drop-in
+    // identity file.
+    let destination = if args.path.is_dir() {
+        args.path.join(notema_encryption::IDENTITY_FILE_NAME)
     } else {
-        "Write a copy of this device's key? It is unprotected — anyone with the file can read this journal."
+        args.path.clone()
     };
-    if !prompts::confirm(warning, args.confirm.yes)? {
+    // The write is a rename over the destination, so without this an existing
+    // file is gone with nothing to recover it from.
+    if destination.exists() && !args.force {
+        bail!(
+            "{} already exists; pick another path or pass --force to overwrite it",
+            destination.display()
+        );
+    }
+
+    let warning = if info.passphrase_protected {
+        format!(
+            "Write a copy of this device's key, still protected by its passphrase, to {}?",
+            destination.display()
+        )
+    } else {
+        format!(
+            "Write a copy of this device's key to {}? It is unprotected — anyone with the file can read this journal.",
+            destination.display()
+        )
+    };
+    if !prompts::confirm(&warning, args.confirm.yes)? {
         println!("Aborted.");
         return Ok(());
     }
 
-    store.export_identity(&args.path)?;
-    println!("Wrote this device's key to {}.", args.path.display());
+    store.export_identity(&destination)?;
+    println!("Wrote this device's key to {}.", destination.display());
     println!(
         "To restore it, copy the file back into a config directory as `identity.toml`. Keep it somewhere safe."
     );
@@ -590,7 +611,8 @@ fn mount_command(cli: &Cli, mountpoint: Option<&Path>) -> AppResult<()> {
     if !store.encryption_enabled() {
         bail!(
             "`notema mount` is only for encrypted journals; this journal is not encrypted. \
-             Enable encryption with `notema encryption enable`, or open the files directly."
+             Enable encryption with `{}`, or open the files directly.",
+            crate::ENABLE_CMD
         );
     }
     // Unlock before creating the mount point, so a wrong passphrase leaves no
@@ -678,13 +700,11 @@ fn device_passphrase_command(cli: &Cli, args: &PassphraseArgs) -> AppResult<()> 
 }
 
 fn device_rotate_command(cli: &Cli) -> AppResult<()> {
-    {
-        // Ahead of the unlock prompt, and well ahead of the roster op and
-        // re-encryption pass that a rotation would otherwise have to roll back.
-        let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
-        store.check_key_is_writable()?;
-    }
-    let (mut store, passphrase) = open_unlocked_store_with_passphrase(cli)?;
+    let startup::Startup { mut store, .. } = startup::load_existing(cli.config.as_deref())?;
+    // Ahead of the unlock prompt, and well ahead of the roster op and
+    // re-encryption pass that a rotation would otherwise have to roll back.
+    store.check_key_is_writable()?;
+    let passphrase = unlock_identity(&mut store)?;
     let summary = store.rotate_identity(passphrase.as_ref(), encryption::cli_progress("files"))?;
     println!(
         "Rotated this device's key and re-encrypted {} file(s).",
@@ -699,7 +719,8 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
     let startup::Startup { store, .. } = startup::load_existing(cli.config.as_deref())?;
     if !store.encryption_enabled() {
         bail!(
-            "this journal is not encrypted yet; run `notema encryption enable` to turn it on for this device"
+            "this journal is not encrypted yet; run `{}` to turn it on for this device",
+            crate::ENABLE_CMD
         );
     }
     if store.unlock_available() {
@@ -718,52 +739,50 @@ fn device_enroll_command(cli: &Cli, args: &NewIdentityArgs) -> AppResult<()> {
         if store.self_request_pending()? {
             bail!(
                 "this device is already waiting for approval as '{name}'.\n\
-                 Run `notema encryption device list` to see the request, or approve it \
-                 from a device that can already read this journal."
+                 Run `{}` to see the request, or approve it \
+                 from a device that can already read this journal.",
+                crate::DEVICE_LIST_CMD
             );
         }
         let recipient = store.renew_access_request()?;
         println!("Requested access again as '{name}' with this device's existing key.");
-        println!("  {}", recipient.encryption_key);
-        println!(
-            "Fingerprint (read this out to confirm it on the approving device):\n  {}",
-            recipient.fingerprint()
-        );
-        println!(
-            "On a device that can already read this journal, approve it — this request\nappears in `notema encryption device list` and a modal at launch — then run there:"
-        );
-        println!("  {} {name}", crate::APPROVE_CMD);
+        print_access_request(&recipient, &name);
         return Ok(());
     }
 
     let (name, passphrase) =
         prompts::resolve_new_identity_options(args.name.as_deref(), args.no_passphrase)?;
-    // Asked before the key exists, answered after it does — enroll mints an
-    // identity just as `enable` does, so it offers the same choice.
-    let use_keyring =
-        encryption::resolve_key_source(args.key_store.map(|store| store == NewKeyStore::Keyring))?;
+    // Asked before the key exists, applied after it does.
+    let target = encryption::resolve_key_store(args.key_store)?;
 
     // Joining a store that already exists (its recipients synced here): drop a
     // request for a device that can decrypt to approve.
     let recipient = store.request_access(&name, passphrase.as_ref())?;
-    if use_keyring {
-        encryption::move_key_to_keyring(&store, passphrase.as_ref());
+    if target == NewKeyStore::Keyring {
+        encryption::move_key_to_keyring(&store, passphrase.as_ref(), args.key_store.is_some())?;
     }
     println!("Requested access as '{name}'. Your public recipient (safe to share):");
+    print_access_request(&recipient, &name);
+    encryption::print_backup_advice(&store)?;
+    if passphrase.is_none() {
+        println!("This key has no passphrase — keep this device and its backups secure.");
+    }
+    Ok(())
+}
+
+/// What a pending device shows after asking to join: the key to compare, and
+/// where to go to approve it. Shared by a first request and a renewed one.
+fn print_access_request(recipient: &notema_encryption::Recipient, name: &str) {
     println!("  {}", recipient.encryption_key);
     println!(
         "Fingerprint (read this out to confirm it on the approving device):\n  {}",
         recipient.fingerprint()
     );
     println!(
-        "On a device that can already read this journal, approve it — this request\nappears in `notema encryption device list` and a modal at launch — then run there:"
+        "On a device that can already read this journal, approve it — this request\nappears in `{}` and a modal at launch — then run there:",
+        crate::DEVICE_LIST_CMD
     );
     println!("  {} {name}", crate::APPROVE_CMD);
-    encryption::print_backup_advice(&store)?;
-    if passphrase.is_none() {
-        println!("This key has no passphrase — keep this device and its backups secure.");
-    }
-    Ok(())
 }
 
 fn device_list_command(cli: &Cli) -> AppResult<()> {
@@ -825,7 +844,10 @@ fn device_revoke_command(cli: &Cli, name: &str, skip_confirm: bool) -> AppResult
         .iter()
         .any(|recipient| recipient.name == name)
     {
-        bail!("no device named '{name}'; run `notema encryption device list` to see the roster");
+        bail!(
+            "no device named '{name}'; run `{}` to see the roster",
+            crate::DEVICE_LIST_CMD
+        );
     }
     require_unlock_available(&store)?;
     if !prompts::confirm(

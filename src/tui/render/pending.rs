@@ -238,7 +238,7 @@ pub(crate) fn draw_disable_notice(theme: &Theme, frame: &mut Frame<'_>) {
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::raw("To turn encryption back on, run "),
-        Span::styled("notema encryption enable", dim),
+        Span::styled(crate::ENABLE_CMD, dim),
         Span::raw("."),
     ]));
 
