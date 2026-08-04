@@ -89,7 +89,7 @@ tree-sitter-swift = "0.7"
 tree-sitter-toml-ng = "0.7"
 tree-sitter-typescript = "0.23"
 tree-sitter-yaml = "0.7"
-tzf-rs = { version = "0.4", default-features = false }
+tzf-rs = { version = "1", default-features = false, features = ["bundled"] }
 unicode-width = "0.2"
 ureq = { version = "3", default-features = false }
 zbus = "5"
