@@ -2466,6 +2466,8 @@ dependencies = [
  "tree-sitter-toml-ng",
  "tree-sitter-typescript",
  "tree-sitter-yaml",
+ "unicode-linebreak",
+ "unicode-segmentation",
  "unicode-width",
  "zeroize",
 ]
@@ -2610,11 +2612,12 @@ dependencies = [
 [[package]]
 name = "notema-textarea"
 version = "0.9.2"
-source = "git+https://github.com/paviro/notema-textarea?rev=cbf1b84#cbf1b8448599c981a398975c8bc4581286f019e8"
+source = "git+https://github.com/paviro/notema-textarea?rev=2449a7e8b91cc083a9d9bb91b1e1d33375fbcd9e#2449a7e8b91cc083a9d9bb91b1e1d33375fbcd9e"
 dependencies = [
  "ratatui-core",
  "ratatui-crossterm",
  "ratatui-widgets",
+ "unicode-linebreak",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -4829,6 +4832,12 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-linebreak"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
 
 [[package]]
 name = "unicode-segmentation"

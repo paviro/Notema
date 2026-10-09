@@ -885,6 +885,51 @@ mod wrap_tests {
     }
 
     #[test]
+    fn unicode_links_keep_cell_ranges_after_wrapping_and_prefixes() {
+        let rendered = render_text_chunk(
+            &Theme::terminal_default(),
+            "> [👩🏽‍💻🇩🇪](https://example.com)",
+            4,
+            false,
+            None,
+            false,
+            None,
+        );
+        assert_eq!(rendered.links.len(), 2);
+        for hit in &rendered.links {
+            assert_eq!((hit.start, hit.end), (2, 4));
+            assert_eq!(hit.group, rendered.links[0].group);
+            assert_eq!(rendered.lines[hit.line].width(), 4);
+        }
+    }
+
+    #[test]
+    fn unicode_code_wraps_keep_graphemes_and_indentation() {
+        let rows = render_lines("```\n 👩🏽‍💻🇩🇪\n```", 5);
+        let rail = Theme::terminal_default()
+            .glyphs()
+            .markdown
+            .code_rail
+            .clone();
+        let body: Vec<_> = rows
+            .iter()
+            .map(text)
+            .filter(|row| row.starts_with(&rail))
+            .collect();
+        assert_eq!(body, [format!("{rail} 👩🏽‍💻"), format!("{rail}🇩🇪")]);
+    }
+
+    #[test]
+    fn unicode_table_columns_stay_aligned() {
+        let rows = render_lines("| Emoji | Value |\n| --- | ---: |\n| 👩🏽‍💻🇩🇪 | ❤️ |", 18);
+        let table: Vec<_> = rows.iter().filter(|row| !text(row).is_empty()).collect();
+        let width = table[0].width();
+        assert!(width <= 18);
+        assert!(table.iter().all(|row| row.width() == width));
+        assert!(table.iter().any(|row| text(row).contains("👩🏽‍💻")));
+    }
+
+    #[test]
     fn wraps_at_words_instead_of_the_panel_edge() {
         let wrapped = wrap_line(Line::from("alpha beta"), 7);
 
