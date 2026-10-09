@@ -185,9 +185,9 @@ impl EntryEditor {
         {
             return None;
         }
-        let screen_row = self.textarea.scroll_offset() as usize + (row - rect.y) as usize;
+        let screen_row = self.textarea.scroll_offset().0 as usize + (row - rect.y) as usize;
         let screen_col = (col - rect.x) as usize;
-        let DataCursor(line, column) = self.textarea.cursor_at_screen(screen_row, screen_col);
+        let DataCursor(line, column) = self.textarea.screen_to_data(screen_row, screen_col);
         Some((line as u16, column as u16))
     }
 
@@ -197,7 +197,7 @@ impl EntryEditor {
     pub(crate) fn scroll_lines(&mut self, delta: i16) {
         let height = self.text_rect.height as usize;
         let max_top = self.textarea.screen_line_count().saturating_sub(height) as i64;
-        let cur = self.textarea.scroll_offset() as i64;
+        let cur = self.textarea.scroll_offset().0 as i64;
         let target = (cur + delta as i64).clamp(0, max_top);
         if target != cur {
             self.textarea.scroll(((target - cur) as i16, 0));
@@ -267,6 +267,41 @@ fn new_textarea(body: &str, placeholder: Option<&str>) -> TextArea<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::{buffer::Buffer, widgets::Widget as _};
+    use ratatui_textarea::CursorMove;
+
+    #[test]
+    fn padded_editor_clicks_follow_wrapping_scrolling_and_resize() {
+        let body = "e\u{301}日👩🏽‍💻\tend\nsecond line\nlast";
+        let mut editor = EntryEditor::for_new("work".to_string());
+        editor.textarea.insert_str(body);
+        editor.textarea.set_top_padding(2);
+        for rect in [Rect::new(4, 3, 12, 6), Rect::new(4, 3, 5, 3)] {
+            editor.text_rect = rect;
+            editor.textarea.layout_for(rect);
+            editor.textarea.move_cursor(CursorMove::Top);
+            editor.textarea.render(rect, &mut Buffer::empty(rect));
+            assert_eq!(editor.text_pos_at(rect.x, rect.y), Some((0, 0)));
+            assert_eq!(
+                editor.text_pos_at(rect.x + 2, rect.y + editor.textarea.top_padding()),
+                Some((0, 2))
+            );
+            assert_eq!(editor.text_pos_at(rect.x - 1, rect.y), None);
+            assert_eq!(editor.text_pos_at(rect.x, rect.bottom()), None);
+
+            editor.textarea.move_cursor(CursorMove::Bottom);
+            editor.textarea.move_cursor(CursorMove::End);
+            editor.textarea.render(rect, &mut Buffer::empty(rect));
+            let screen = editor.textarea.screen_cursor();
+            let y = rect.y + screen.row as u16 + editor.textarea.top_padding()
+                - editor.textarea.scroll_offset().0;
+            assert_eq!(
+                editor.text_pos_at(rect.x + screen.col as u16, y),
+                Some((2, 4))
+            );
+            assert_eq!(editor.text(), body);
+        }
+    }
 
     /// A false positive here means the editor keeps painting a stale highlight,
     /// so the in-place comparison has to agree with `lines.join("\n")` exactly.

@@ -175,24 +175,24 @@ impl TextInput {
     /// stranding at the right edge as an overflowing query is edited down.
     pub(crate) fn visible_cursor_col(&self, width: u16) -> u16 {
         let col = (self.textarea.screen_cursor().col as u16)
-            .saturating_sub(self.textarea.horizontal_scroll_offset());
+            .saturating_sub(self.textarea.scroll_offset().1);
         col.min(width.saturating_sub(1))
     }
 
     /// The content column a click `col` cells into the field lands on.
     ///
-    /// `col` arrives relative to the field's rect, but `cursor_at_screen` takes an
+    /// `col` arrives relative to the field's rect, but `screen_to_data` takes an
     /// absolute content column — so the horizontal scroll has to be *added*, the
     /// inverse of what [`Self::visible_cursor_col`] subtracts on the way out.
     /// Without it every click on a query wider than the field lands on the wrong
     /// character.
     fn content_col(&self, col: u16) -> usize {
-        col.saturating_add(self.textarea.horizontal_scroll_offset()) as usize
+        col.saturating_add(self.textarea.scroll_offset().1) as usize
     }
 
     /// Jump the caret to a click `col` cells into the field.
     fn jump_to_col(&mut self, col: u16) {
-        let cursor = self.textarea.cursor_at_screen(0, self.content_col(col));
+        let cursor = self.textarea.screen_to_data(0, self.content_col(col));
         self.textarea
             .move_cursor(CursorMove::Jump(cursor.0 as u16, cursor.1 as u16));
     }
@@ -211,7 +211,7 @@ impl TextInput {
     /// the reversed-block caret sits on a selected char rather than highlighting
     /// the boundary cell after the word.
     pub(crate) fn select_word_at(&mut self, col: u16) {
-        let column = self.textarea.cursor_at_screen(0, self.content_col(col)).1;
+        let column = self.textarea.screen_to_data(0, self.content_col(col)).1;
         let Some((start, end)) = word_bounds(&self.textarea.lines()[0], column) else {
             self.jump_to_col(col);
             return;
@@ -232,7 +232,7 @@ impl TextInput {
     /// case where you cannot see what you are selecting.
     pub(crate) fn drag_mouse_selection(&mut self, col: u16, overshoot: i16) {
         let target = (self.content_col(col) as isize + overshoot as isize).max(0) as usize;
-        let cursor = self.textarea.cursor_at_screen(0, target);
+        let cursor = self.textarea.screen_to_data(0, target);
         self.textarea
             .move_cursor(CursorMove::Jump(cursor.0 as u16, cursor.1 as u16));
     }
@@ -571,7 +571,7 @@ mod tests {
         terminal
             .draw(|frame| input.render_in(&theme, frame, rect, true, false))
             .unwrap();
-        let scroll = input.horizontal_scroll_offset();
+        let scroll = input.scroll_offset().1;
         assert!(scroll > 0, "the field scrolled");
 
         // Clicking the leftmost cell lands on the leftmost *visible* char.
@@ -581,6 +581,35 @@ mod tests {
         // …and a double-click there selects the word it is actually on.
         input.select_word_at(0);
         assert_eq!(input.cursor().1, 0, "one alphanumeric run, selected whole");
+    }
+
+    #[test]
+    fn deleting_an_overflowing_field_restores_its_text_and_native_cursor() {
+        let theme = crate::tui::theme::Theme::terminal_default();
+        let mut input = TextInput::from("abcdefghijklmnop");
+        let rect = Rect::new(2, 1, 6, 1);
+        let backend = ratatui::backend::TestBackend::new(12, 3);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| input.render_in(&theme, frame, rect, true, false))
+            .unwrap();
+        assert!(input.scroll_offset().1 > 0);
+        for _ in 0..13 {
+            input.input(key(KeyCode::Backspace));
+            terminal
+                .draw(|frame| input.render_in(&theme, frame, rect, true, false))
+                .unwrap();
+        }
+        assert_eq!(input.as_str(), "abc");
+        assert_eq!(input.scroll_offset().1, 0);
+        assert_eq!(input.visible_cursor_col(rect.width), 3);
+        assert_eq!(terminal.backend().buffer()[(rect.x, rect.y)].symbol(), "a");
+        assert_eq!(
+            terminal.get_cursor_position().unwrap(),
+            (rect.x + 3, rect.y).into()
+        );
+        input.begin_mouse_selection(1);
+        assert_eq!(input.cursor().1, 1);
     }
 
     /// Dragging a selection past the field's edge has to keep going, or the one
@@ -602,7 +631,7 @@ mod tests {
         // there is somewhere to the right to drag toward.
         input.set_cursor_byte(0);
         render(&mut input);
-        assert_eq!(input.horizontal_scroll_offset(), 0);
+        assert_eq!(input.scroll_offset().1, 0);
 
         // Select from the field's left edge, then drag off its right edge.
         input.begin_mouse_selection(0);
@@ -618,9 +647,9 @@ mod tests {
 
         // …and the render that follows scrolls to keep the caret visible, so the
         // next drag at the same pointer position reaches further still.
-        let scrolled_from = input.horizontal_scroll_offset();
+        let scrolled_from = input.scroll_offset().1;
         render(&mut input);
-        assert!(input.horizontal_scroll_offset() > scrolled_from, "followed");
+        assert!(input.scroll_offset().1 > scrolled_from, "followed");
         input.drag_mouse_selection(rect.width - 1, 3);
         assert!(input.cursor().1 > at_edge + 3);
 

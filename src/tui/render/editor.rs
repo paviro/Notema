@@ -95,7 +95,7 @@ pub(crate) fn draw_entry_editor(
     // maps directly. Valid only after render.
     if !selecting && matches!(editor.prompt, EditorPrompt::None) {
         let sc = editor.textarea.screen_cursor();
-        let scroll = editor.textarea.scroll_offset() as usize;
+        let scroll = editor.textarea.scroll_offset().0 as usize;
         let row = sc.row + editor.textarea.top_padding() as usize;
         if let Some(rel) = row.checked_sub(scroll) {
             let x = text_rect.x + sc.col as u16;
@@ -114,7 +114,7 @@ pub(crate) fn draw_entry_editor(
         area,
         editor.textarea.screen_line_count(),
         text_rect.height,
-        editor.textarea.scroll_offset() as usize,
+        editor.textarea.scroll_offset().0 as usize,
         // The editor is always the active surface while shown.
         true,
     );
