@@ -228,7 +228,7 @@ pub(crate) fn highlight(theme: &Theme, language: &str, code: &str) -> Option<Vec
         let configuration = configs.get(&key)?;
         let mut highlighter = Highlighter::new();
         let events = highlighter
-            .highlight(configuration, code.as_bytes(), None, |_| None)
+            .highlight(configuration, code.as_bytes(), None, None, |_| None)
             .ok()?;
 
         let syntax = theme.syntax();
@@ -531,6 +531,26 @@ mod tests {
         // `1.5` reads as a string: sequel guards `@float`/`@number` with Lua
         // patterns (`%d`), which tree-sitter's regex `#match?` never satisfies.
         assert_eq!(category_at("sql", query, "1.5"), Some(Category::Str));
+    }
+
+    #[test]
+    fn unicode_highlighting_preserves_utf8_text_and_line_boundaries() {
+        let code = "let café = \"東京 🦀\";\n// naïve";
+        let lines = highlight(&test_theme(), "rust", code).unwrap();
+        let rendered = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(rendered, code);
+        assert!(lines[0].spans.iter().any(|span| {
+            span.content.contains("東京 🦀") && category_of(span.style) == Some(Category::Str)
+        }));
     }
 
     #[test]

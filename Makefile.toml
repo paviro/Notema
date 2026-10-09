@@ -24,7 +24,7 @@ CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABIHF_LINKER = "arm-unknown-linux-gnueabihf-g
 CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "x86_64-w64-mingw32-gcc"
 # The aarch64 FreeBSD slice is Tier 3 (no rustup std); this nightly must match
 # the pin in .github/workflows/release.yml.
-FREEBSD_NIGHTLY = "nightly-2026-07-15"
+FREEBSD_NIGHTLY = "nightly-2026-10-08"
 
 # Android / Termux targets
 [tasks.build-termux]
@@ -123,8 +123,8 @@ args = ["build", "--release", "--target", "i686-unknown-linux-musl"]
 description = "Build the i586-baseline 32-bit x86 musl artifact"
 script = '''
 set -eu
-OPENSSL_VERSION="3.5.7"
-OPENSSL_SHA256="a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8"
+OPENSSL_VERSION="3.5.9"
+OPENSSL_SHA256="603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
 I586_DIR="$PWD/target/i586-musl"
 ARCHIVE="$I586_DIR/sources/openssl-$OPENSSL_VERSION.tar.gz"
 SOURCE="$I586_DIR/sources/openssl-$OPENSSL_VERSION"

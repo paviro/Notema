@@ -108,13 +108,13 @@ fn main() {
                 panic!(
                     "cargo-about failed, so the third-party license report cannot be \
                      generated and the release build is incomplete. Details: {details}\n\
-                     Install/update it with `cargo install cargo-about --locked`, or set \
+                     Install/update it with `cargo install cargo-about --features cli --locked`, or set \
                      NOTEMA_SKIP_LICENSE_GENERATION=1 to knowingly build without the report."
                 );
             }
             println!(
                 "cargo:warning=cargo-about failed; `notema licenses` will list no \
-                 dependencies. Install it with `cargo install cargo-about`. Details: {details}"
+                 dependencies. Install it with `cargo install cargo-about --features cli`. Details: {details}"
             );
             write_gzipped(&output_path, b"[]");
             return;
@@ -124,13 +124,13 @@ fn main() {
                 panic!(
                     "cargo-about not found ({err}), so the third-party license report \
                      cannot be generated and the release build is incomplete.\n\
-                     Install it with `cargo install cargo-about --locked`, or set \
+                     Install it with `cargo install cargo-about --features cli --locked`, or set \
                      NOTEMA_SKIP_LICENSE_GENERATION=1 to knowingly build without the report."
                 );
             }
             println!(
                 "cargo:warning=cargo-about not found ({err}); `notema licenses` will list \
-                 no dependencies. Install it with `cargo install cargo-about`."
+                 no dependencies. Install it with `cargo install cargo-about --features cli`."
             );
             write_gzipped(&output_path, b"[]");
             return;

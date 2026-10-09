@@ -319,10 +319,7 @@ mod tests {
         assert_eq!(state.buffer, ["first", "second"]);
         assert!(!end_defer(&mut state));
         assert!(end_defer(&mut state));
-        assert_eq!(
-            state.buffer.drain(..).collect::<Vec<_>>(),
-            ["first", "second"]
-        );
+        assert_eq!(std::mem::take(&mut state.buffer), ["first", "second"]);
     }
 
     #[test]

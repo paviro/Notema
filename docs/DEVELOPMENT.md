@@ -2,7 +2,7 @@
 
 ## Setup
 
-Needs the toolchain pinned in `rust-toolchain.toml` (Rust 1.96, with `clippy`
+Needs the toolchain pinned in `rust-toolchain.toml` (Rust 1.99, with `clippy`
 and `rustfmt`). `rustup` installs it automatically on first `cargo` invocation
 in the repo.
 

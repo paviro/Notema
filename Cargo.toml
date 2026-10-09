@@ -18,7 +18,7 @@ version = "2026.8.0"
 edition = "2024"
 license = "EUPL-1.2"
 authors = ["Paul-Vincent Roll <notema@paviro.de>"]
-rust-version = "1.96.0"
+rust-version = "1.99.0"
 publish = false
 
 [workspace.dependencies]
@@ -28,7 +28,7 @@ async-io = "2"
 cc = "1"
 clap = { version = "4", features = ["derive", "env"] }
 crossterm = "0.29"
-dirs = "6"
+dirs = "7"
 ed25519-dalek = { version = "3", features = ["zeroize"] }
 flate2 = "1"
 futures-lite = "2"
@@ -71,11 +71,11 @@ tempfile = "3"
 terminal-colorsaurus = "1.0.3"
 thiserror = "2"
 toml = "1.1"
-tree-sitter = "0.26"
+tree-sitter = "0.27.1"
 tree-sitter-bash = "0.25"
 tree-sitter-css = "0.25"
 tree-sitter-diff = "0.1"
-tree-sitter-highlight = "0.26"
+tree-sitter-highlight = "0.27.1"
 tree-sitter-html = "0.23"
 tree-sitter-javascript = "0.25"
 tree-sitter-json = "0.24"
@@ -86,7 +86,7 @@ tree-sitter-swift = "0.7"
 tree-sitter-toml-ng = "0.7"
 tree-sitter-typescript = "0.23"
 tree-sitter-yaml = "0.7"
-tzf-rs = { version = "1", default-features = false, features = ["bundled"] }
+tzf-rs = { version = "2.1.2", default-features = false, features = ["bundled"] }
 unicode-linebreak = "0.1.5"
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2"
@@ -201,9 +201,6 @@ tls-native = ["notema-context/tls-native", "notema-storage/tls-native"]
 # Off by default: the standard build has no FUSE dependency and runs everywhere.
 # Enable for the dedicated macOS/Linux "-fuse" release artifacts (see Makefile.toml).
 fuse = ["dep:notema-fuse"]
-# Use exact timezone boundaries for location-derived timezones (~+12 MB binary)
-# instead of the default coarse tile lookup. See notema-context/src/timezone.rs.
-exact-timezone = ["notema-context/exact-timezone"]
 # Exposes the `bench` module (private TUI hot paths) for benches/. Dev-only.
 bench = []
 

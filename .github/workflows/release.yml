@@ -156,23 +156,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: 1.96.0
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
       - uses: taiki-e/setup-cross-toolchain-action@12b7ad4acfa95a1476779d6c06699b96ec1691f8 # v1
         if: ${{ !matrix.zigbuild }}
         with:
           target: ${{ matrix.target }}
-      # Current stable Zig, tested by cargo-zigbuild in its own CI.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         if: ${{ matrix.zigbuild }}
         with:
-          version: 0.16.0
+          version: 0.17.0
           cache-key: ${{ matrix.target }}
-      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: ${{ matrix.zigbuild && 'cargo-about@0.9.1,cargo-zigbuild@0.23.0' || 'cargo-about@0.9.1' }}
+          tool: ${{ matrix.zigbuild && 'cargo-about@0.9.2,cargo-zigbuild@0.23.4' || 'cargo-about@0.9.2' }}
       # The glibc_floor suffix pins the glibc floor; the binary still lands in
       # target/<target>/release like a plain cargo build.
       - if: ${{ matrix.zigbuild }}
@@ -233,7 +232,7 @@ jobs:
         run: |
           install -d dist
           (cd "target/${{ matrix.target }}/release" && zip - notema) > "dist/${{ matrix.platform }}.zip"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: dist/${{ matrix.platform }}.zip
           if-no-files-found: error
@@ -267,13 +266,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: 1.96.0
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
-      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: cargo-about@0.9.1
+          tool: cargo-about@0.9.2
       - run: cargo build --release -p notema --locked --target ${{ matrix.target }} --features fuse
       # Capture readelf output first so a readelf failure fails the step; piped
       # into grep, only grep's exit status would count.
@@ -294,7 +293,7 @@ jobs:
         run: |
           install -d dist
           (cd "target/${{ matrix.target }}/release" && zip - notema) > "dist/${{ matrix.platform }}.zip"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: dist/${{ matrix.platform }}.zip
           if-no-files-found: error
@@ -315,9 +314,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: 1.96.0
+          toolchain: 1.99.0
           targets: i586-unknown-linux-musl
       # Installs an i686 musl cross toolchain (for i586, which links with the
       # i686 musl gcc). The action names it i686-linux-musl-*; the Makefile task
@@ -342,9 +341,9 @@ jobs:
           # name for the x86_64 *host* linker (used by build scripts); on this
           # runner the host toolchain is plain gcc, so bridge that name too.
           sudo ln -sf "$(command -v gcc)" /usr/local/bin/x86_64-unknown-linux-gnu-gcc
-      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: cargo-make@0.37.24,cargo-about@0.9.1
+          tool: cargo-make@0.37.24,cargo-about@0.9.2
       # setup-cross-toolchain-action sets CARGO_BUILD_TARGET to i686-musl; the
       # i586 task passes its own --target, so drop it to avoid any conflict.
       - name: Build i586
@@ -370,7 +369,7 @@ jobs:
       - name: Smoke test
         run: target/i586-musl/i586-unknown-linux-musl/release/notema --version
       - run: cargo make package-i586-musl
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: release/linux-musl-i586.zip
           if-no-files-found: error
@@ -389,9 +388,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: 1.96.0
+          toolchain: 1.99.0
           targets: aarch64-linux-android
       - name: Configure Android NDK compiler
         run: |
@@ -401,9 +400,9 @@ jobs:
             echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android24-clang"
             echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar"
           } >> "$GITHUB_ENV"
-      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: cargo-about@0.9.1
+          tool: cargo-about@0.9.2
       - run: cargo build --release -p notema --target aarch64-linux-android --locked
       - name: Verify Android ABI and API floor
         run: |
@@ -424,7 +423,7 @@ jobs:
         run: |
           install -d dist
           (cd target/aarch64-linux-android/release && zip - notema) > dist/android-aarch64-termux.zip
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: dist/android-aarch64-termux.zip
           if-no-files-found: error
@@ -434,7 +433,7 @@ jobs:
   # FreeBSD, cross-compiled with cargo-zigbuild: zig ships the FreeBSD 14+
   # libc stubs and headers, so no BSD host is needed to build. aarch64 is a
   # Tier 3 target with no rustup std, so that slice builds std from source on
-  # a pinned nightly; bumping the pin is a deliberate act like the 1.96.0 pin.
+  # a pinned nightly; bumping the pin is a deliberate act like the 1.99.0 pin.
   freebsd:
     name: FreeBSD ${{ matrix.platform }}
     needs: preflight
@@ -451,11 +450,11 @@ jobs:
         include:
           - target: x86_64-unknown-freebsd
             platform: freebsd-x86_64
-            toolchain: 1.96.0
+            toolchain: 1.99.0
             machine: Advanced Micro Devices X86-64
           - target: aarch64-unknown-freebsd
             platform: freebsd-aarch64
-            toolchain: nightly-2026-07-15
+            toolchain: nightly-2026-10-08
             build_std: true
             machine: AArch64
     steps:
@@ -463,19 +462,18 @@ jobs:
         with:
           persist-credentials: false
       # Tier 3 has no rustup target to add; build-std needs rust-src instead.
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: ${{ matrix.toolchain }}
           targets: ${{ matrix.build_std && '' || matrix.target }}
           components: ${{ matrix.build_std && 'rust-src' || '' }}
-      # Current stable Zig, tested by cargo-zigbuild in its own CI.
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.16.0
+          version: 0.17.0
           cache-key: ${{ matrix.target }}
-      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: cargo-about@0.9.1,cargo-zigbuild@0.23.0
+          tool: cargo-about@0.9.2,cargo-zigbuild@0.23.4
       - if: ${{ !matrix.build_std }}
         run: cargo zigbuild --release -p notema --locked --target ${{ matrix.target }}
       # std comes from the nightly's vendored sources; the workspace Cargo.lock
@@ -510,7 +508,7 @@ jobs:
         run: |
           install -d dist
           (cd "target/${{ matrix.target }}/release" && zip - notema) > "dist/${{ matrix.platform }}.zip"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: dist/${{ matrix.platform }}.zip
           if-no-files-found: error
@@ -542,13 +540,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: 1.96.0
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
-      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: cargo-about@0.9.1
+          tool: cargo-about@0.9.2
       - run: cargo build --release -p notema --target ${{ matrix.target }} --locked
       # Each slice is built natively on its own architecture's runner.
       - name: Smoke test
@@ -558,7 +556,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path target/${{ matrix.target }}/release/notema.exe -DestinationPath dist/${{ matrix.platform }}.zip
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: dist/${{ matrix.platform }}.zip
           if-no-files-found: error
@@ -589,12 +587,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: 1.96.0
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
       - name: Import Developer ID certificate
-        uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
+        uses: apple-actions/import-codesign-certs@77ba2a2a8f5cfc8c405ebf3159f767c323e238f9 # v7.1.0
         with:
           p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
           p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
@@ -614,9 +612,9 @@ jobs:
           TEAM_ID="$(printf '%s' "$APPLE_DEVELOPER_ID" | sed -n 's/.*(\(.*\)).*/\1/p')"
           xcrun notarytool store-credentials notema-notary \
               --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" >/dev/null
-      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: cargo-make@0.37.24,cargo-about@0.9.1
+          tool: cargo-make@0.37.24,cargo-about@0.9.2
       - run: cargo make ${{ matrix.task }}
       - name: Verify minimum macOS version
         env:
@@ -646,7 +644,7 @@ jobs:
       - name: Remove credentials
         if: always()
         run: rm -f ./.env
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: release/${{ matrix.platform }}.zip
           if-no-files-found: error
@@ -677,14 +675,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: 1.96.0
+          toolchain: 1.99.0
           targets: ${{ matrix.target }}
       - run: brew install pkg-config
       - run: brew install --cask fuse-t
       - name: Import Developer ID certificate
-        uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
+        uses: apple-actions/import-codesign-certs@77ba2a2a8f5cfc8c405ebf3159f767c323e238f9 # v7.1.0
         with:
           p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
           p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
@@ -704,9 +702,9 @@ jobs:
           TEAM_ID="$(printf '%s' "$APPLE_DEVELOPER_ID" | sed -n 's/.*(\(.*\)).*/\1/p')"
           xcrun notarytool store-credentials notema-notary \
               --apple-id "$APPLE_USERNAME" --password "$APPLE_PASSWORD" --team-id "$TEAM_ID" >/dev/null
-      - uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
-          tool: cargo-make@0.37.24,cargo-about@0.9.1
+          tool: cargo-make@0.37.24,cargo-about@0.9.2
       - run: cargo make ${{ matrix.task }}
       # FUSE builds land in target/fuse (CARGO_TARGET_DIR in Makefile.toml).
       - name: Verify minimum macOS version
@@ -737,7 +735,7 @@ jobs:
       - name: Remove credentials
         if: always()
         run: rm -f ./.env
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: release/${{ matrix.platform }}.zip
           if-no-files-found: error
@@ -758,7 +756,7 @@ jobs:
     # Only real tag pushes publish; workflow_dispatch stops after building.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: assets
           merge-multiple: true

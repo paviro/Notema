@@ -121,7 +121,7 @@ fn pick_extreme<'a>(
     let want = |delta: f32| if positive { delta > 0.0 } else { delta < 0.0 };
     let mut candidates: Vec<&Correlation> = correlates
         .filter(|correlate| {
-            correlate.count >= MIN_CORRELATION_COUNT && correlate.mood_delta.is_some_and(&want)
+            correlate.count >= MIN_CORRELATION_COUNT && correlate.mood_delta.is_some_and(want)
         })
         .collect();
     // The extreme is the max lift or the min (most negative) drain; both stay

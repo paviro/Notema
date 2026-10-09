@@ -63,7 +63,7 @@ report; set `NOTEMA_SKIP_LICENSE_GENERATION=1` to build one without it anyway.
 Install it with:
 
 ```bash
-cargo install cargo-about --locked
+cargo install cargo-about --features cli --locked
 ```
 
 Cross-compilation targets live in `Makefile.toml`, driven by
@@ -105,7 +105,7 @@ builds std from source (`-Z build-std`) on the nightly pinned as
 `FREEBSD_NIGHTLY` in `Makefile.toml` (keep it in sync with release.yml):
 
 ```bash
-rustup toolchain install nightly-2026-07-15 --component rust-src
+rustup toolchain install nightly-2026-10-08 --component rust-src
 ```
 
 Install the linkers — every Linux toolchain the tap provides for our targets,
@@ -142,7 +142,7 @@ rustup target add \
   x86_64-pc-windows-gnu
 ```
 
-`build-i586-musl` requires Rust 1.96 or newer, Perl, `curl`, `make`, a SHA-256
+`build-i586-musl` requires Rust 1.99 or newer, Perl, `curl`, `make`, a SHA-256
 tool (`sha256sum` or `shasum`), and the i686 musl cross toolchain above. It uses
 Rust's prebuilt `i586-unknown-linux-musl` standard library and builds a pinned,
 checksum-verified static OpenSSL without assembly. The resulting binary does not
@@ -195,11 +195,7 @@ than the machine's (so travelling without changing `TZ` doesn't skew its local
 time, date, or sunrise/sunset). The coordinate-to-timezone lookup is offline and
 picks the zone from an embedded boundary dataset.
 
-The default build uses a small tile-based lookup that adds ~2 MB to the binary
-and is only inaccurate within a few kilometres of a zone border. The
-`exact-timezone` feature swaps in exact polygon boundaries — correct everywhere,
-at the cost of ~13 MB more binary:
-
-```bash
-cargo build --release --features exact-timezone
-```
+The lookup queries an embedded ~4 MB dataset without expanding its polygons
+into memory. It uses precomputed tiles where possible and polygon lookup near
+boundaries. The bundled polygons are simplified, so locations very close to a
+timezone border can still resolve to the neighbouring zone.

@@ -10,17 +10,8 @@ use jiff::Zoned;
 use jiff::tz::TimeZone;
 use notema_domain::Coordinates;
 
-// The offline coordinate->zone finder. Its dataset is embedded in the binary; the
-// `exact-timezone` feature swaps the small tile-based finder for exact polygons
-// (see Cargo.toml). Only the type named here is referenced, so the other finder's
-// embedded data is dropped by dead-code elimination and never bloats the binary.
-#[cfg(feature = "exact-timezone")]
-type TzFinder = tzf_rs::DefaultFinder;
-#[cfg(not(feature = "exact-timezone"))]
-type TzFinder = tzf_rs::FuzzyFinder;
-
-// Building a finder parses the embedded dataset, so keep one for the process.
-static FINDER: LazyLock<TzFinder> = LazyLock::new(TzFinder::new);
+// Query the embedded data in place without expanding its polygons into memory.
+static FINDER: LazyLock<tzf_rs::EmbeddedFinder> = LazyLock::new(tzf_rs::EmbeddedFinder::new);
 
 /// The IANA zone the offline finder places `coordinates` in, if any. tzf-rs takes
 /// longitude before latitude, and returns `""` for a point it can't place (open
@@ -59,8 +50,32 @@ mod tests {
 
     #[test]
     fn finds_the_zone_for_a_land_point() {
-        // Central Tokyo, well inside Japan — stable across both finders.
+        // Central Tokyo, well inside Japan.
         assert_eq!(finder_zone(coords(35.68, 139.767)), Some(tz("Asia/Tokyo")));
+    }
+
+    #[test]
+    fn resolves_locations_near_timezone_borders() {
+        assert_eq!(
+            finder_zone(coords(22.5180, 114.0617)),
+            Some(tz("Asia/Shanghai"))
+        );
+        assert_eq!(
+            finder_zone(coords(22.3173, 114.1594)),
+            Some(tz("Asia/Hong_Kong"))
+        );
+        assert_eq!(
+            finder_zone(coords(41.903_699_636_969_634, 12.452_899_553_691_935)),
+            Some(tz("Europe/Vatican"))
+        );
+    }
+
+    #[test]
+    fn resolves_an_ocean_location_without_geocoder_metadata() {
+        assert_eq!(
+            resolve_zone(coords(38.3530, -73.7729), None),
+            Some(tz("Etc/GMT+5"))
+        );
     }
 
     #[test]

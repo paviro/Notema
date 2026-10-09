@@ -24,10 +24,6 @@ tzf-rs.workspace = true
 default = []
 tls-ring = ["notema-http/tls-ring"]
 tls-native = ["notema-http/tls-native"]
-# Swap the offline coordinate->timezone finder from the small tile-based
-# `FuzzyFinder` (default, ~2 MB, coarse only within a few km of a zone border)
-# to the exact polygon `DefaultFinder` (~14 MB). See src/timezone.rs.
-exact-timezone = []
 
 # Device location ("grab current GPS") providers, one per platform so no crate is
 # pulled in where it isn't used. See src/device_location/. macOS has no crate dep:

@@ -201,17 +201,19 @@ fn draw_title_box(
     // it matches the flat cards below; bordered mode keeps the drawn box. The text
     // sits on the middle row: with a border the two border rows plus one leading
     // blank line centre it; without one, pad up to the vertical centre directly.
-    let block;
-    let pad_top;
-    if flat_chrome(theme) {
-        block = Block::new().style(Style::default().bg(theme.raised_bg()));
-        pad_top = area.height.saturating_sub(1) as usize / 2;
+    let (block, pad_top) = if flat_chrome(theme) {
+        (
+            Block::new().style(Style::default().bg(theme.raised_bg())),
+            area.height.saturating_sub(1) as usize / 2,
+        )
     } else {
-        block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(theme.card_border());
-        pad_top = 1;
-    }
+        (
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.card_border()),
+            1,
+        )
+    };
     let lines = std::iter::repeat_n(Line::default(), pad_top)
         .chain(std::iter::once(Line::from(spans)))
         .collect::<Vec<_>>();
